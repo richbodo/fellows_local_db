@@ -120,16 +120,18 @@ def find_image(slug: str) -> Path | None:
         p = images_dir / f"{base}{ext}"
         if p.is_file():
             return p
-    # Fallback: match a file whose stem normalizes to the slug (e.g. "Aaron Bird.jpg" -> aaron_bird)
-    base_normalized = re.sub(r"[^a-z0-9]+", "_", base.lower()).strip("_")
-    if not base_normalized:
+    # Fallback: compare alphanumeric-only to handle mismatched underscores/hyphens
+    # e.g. slug "shannon_o_leary_joy" matches file "shannon_oleary_joy.jpg"
+    base_alpha = re.sub(r"[^a-z0-9]", "", base.lower())
+    if not base_alpha:
         return None
     for p in images_dir.iterdir():
         if not p.is_file():
             continue
-        stem = p.stem
-        stem_normalized = re.sub(r"[^a-z0-9]+", "_", stem.lower()).strip("_")
-        if stem_normalized == base_normalized and p.suffix.lower() in (".jpg", ".jpeg", ".png"):
+        if p.suffix.lower() not in (".jpg", ".jpeg", ".png"):
+            continue
+        stem_alpha = re.sub(r"[^a-z0-9]", "", p.stem.lower())
+        if stem_alpha == base_alpha:
             return p
     return None
 

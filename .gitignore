@@ -1,5 +1,6 @@
 # Build output
 app/fellows.db
+app/fellows.db.backup.*
 
 # Python
 __pycache__/

@@ -9,13 +9,16 @@ Run from repo root: python build/import_json_to_sqlite.py
 
 import json
 import re
+import shutil
 import sqlite3
+import sys
 import unicodedata
+from datetime import date
 from pathlib import Path
 
 # Paths relative to repo root (where script is run from)
 REPO_ROOT = Path(__file__).resolve().parent.parent
-JSON_PATH = REPO_ROOT / "final_fellows_set" / "ehf_fellow_profiles_deduped.json"
+JSON_PATH = Path(sys.argv[1]) if len(sys.argv) > 1 else REPO_ROOT / "final_fellows_set" / "ehf_fellow_profiles_deduped.json"
 DB_PATH = REPO_ROOT / "app" / "fellows.db"
 
 # Columns we store explicitly for display/search; rest go into extra_json
@@ -108,6 +111,12 @@ def build_row(record: dict) -> tuple:
 def main():
     REPO_ROOT.mkdir(exist_ok=True)
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    # Back up existing DB before overwriting
+    if DB_PATH.exists():
+        backup_name = f"fellows.db.backup.{date.today().isoformat()}"
+        shutil.copy2(DB_PATH, DB_PATH.parent / backup_name)
+        print(f"Backed up existing DB to app/{backup_name}")
 
     if not JSON_PATH.exists():
         raise SystemExit(f"JSON not found: {JSON_PATH}")
