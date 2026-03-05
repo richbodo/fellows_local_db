@@ -1,0 +1,272 @@
+/* EHF Fellows directory – layout and reference-style detail */
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.hidden {
+  display: none;
+}
+
+/* Side-by-side: directory (left) + detail (right) so detail is always visible */
+#app-wrap {
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+  margin-top: 0.5rem;
+  min-height: 60vh;
+}
+
+#directory {
+  flex: 0 0 220px;
+  max-height: 75vh;
+  overflow-y: auto;
+  padding-right: 0.5rem;
+}
+
+#directory ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+/* Directory links: blue and underlined so they look clickable */
+#directory a {
+  display: block;
+  padding: 0.25em 0;
+  color: #0066cc;
+  text-decoration: underline;
+}
+
+#directory a:hover {
+  color: #004499;
+}
+
+/* Detail panel: always visible, scrollable */
+.detail {
+  flex: 1;
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid #ccc;
+  background: #fff;
+  overflow-y: auto;
+  max-height: 75vh;
+}
+
+.detail .placeholder {
+  color: #666;
+}
+
+/* Two-column detail layout (reference: Internal Directory Profile) */
+.detail-grid {
+  display: grid;
+  grid-template-columns: 48% 1fr;
+  grid-template-rows: auto auto;
+  gap: 0 1.5rem;
+  align-items: start;
+}
+
+.detail-column {
+  display: block;
+  box-sizing: border-box;
+}
+
+.detail-left-top {
+  grid-column: 1;
+  grid-row: 1;
+  padding-right: 0.5rem;
+}
+
+.detail-right-top {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 280px;
+}
+
+.detail-left-rest {
+  grid-column: 1;
+  grid-row: 2;
+  padding-right: 0.5rem;
+}
+
+.detail-right-rest {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 280px;
+}
+
+/* Legacy two-column (kept for any non-grid use) */
+.detail-column.detail-left {
+  width: 48%;
+  padding-right: 1rem;
+}
+
+.detail-column.detail-right {
+  width: 50%;
+  min-width: 280px;
+}
+
+@media (max-width: 700px) {
+  #app-wrap {
+    flex-direction: column;
+  }
+  #directory {
+    max-height: 40vh;
+    flex: none;
+    width: 100%;
+  }
+  .detail-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto auto;
+  }
+  .detail-left-top { grid-column: 1; grid-row: 1; }
+  .detail-right-top { grid-column: 1; grid-row: 2; }
+  .detail-left-rest { grid-column: 1; grid-row: 3; }
+  .detail-right-rest { grid-column: 1; grid-row: 4; }
+  .detail-column.detail-left,
+  .detail-column.detail-right {
+    width: 100%;
+    display: block;
+  }
+}
+
+/* Detail page title (above two columns) */
+.detail-page-title {
+  margin: 0 0 1rem 0;
+  padding-bottom: 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  border-bottom: 1px solid #ccc;
+  width: 100%;
+}
+
+/* Section headers: purple (primary) vs grey (secondary) like reference */
+.detail-section {
+  margin: 1rem 0;
+}
+
+.detail-section-title {
+  margin: 0 0 0.5rem 0;
+  padding: 0.35em 0.5em;
+  background: #4a2c6a;
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.detail-section-title--secondary {
+  background: #e8e8e8;
+  color: #333;
+}
+
+.detail-section-body {
+  padding-left: 0;
+}
+
+/* Work section: subheaders stacked, no text to the right when empty; single blank line between subheaders */
+.work-block {
+  margin-top: 1em;
+  margin-bottom: 1em;
+}
+
+.work-block:first-child {
+  margin-top: 0.5em;
+}
+
+.work-block:last-child {
+  margin-bottom: 0;
+}
+
+.work-subheader {
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin: 0 0 0.25em 0;
+  padding: 0.35em 0.5em;
+  background: #f0f0f0;
+}
+
+.work-value {
+  margin-top: 0.25em;
+  font-size: 0.9rem;
+}
+
+/* Single blank line below section header when there is no body content */
+.detail-section-body--empty {
+  min-height: 1em;
+}
+
+/* Table-like rows: label (grey) | value (white) */
+.detail-section-body table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0 0.5em;
+  font-size: 0.9rem;
+}
+
+.detail-section-body .field-label {
+  background: #f0f0f0;
+  padding: 0.35em 0.5em;
+  font-weight: 600;
+  vertical-align: top;
+  width: 40%;
+}
+
+.detail-section-body .field-value {
+  padding: 0.35em 0.5em;
+  background: #fff;
+}
+
+/* This Profile Last Updated date: same font/size as How to Connect / Geography data, italic */
+.profile-updated-date {
+  font-size: 0.9rem;
+  font-style: italic;
+}
+
+.detail-name {
+  margin: 0 0 0.25em 0;
+  font-size: 1.5rem;
+}
+
+.detail-demographics {
+  margin: 0 0 0.75em 0;
+  font-size: 0.9rem;
+  color: #444;
+}
+
+.detail-tagline {
+  margin: 0.5rem 0 1rem 0;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  font-style: italic;
+}
+
+.profile-image-wrap {
+  margin-bottom: 0.75rem;
+}
+
+.detail img.profile-image {
+  max-width: 200px;
+  width: 200px;
+  height: 200px;
+  object-fit: cover;
+  display: block;
+}
+
+.detail .field {
+  margin: 0.35em 0;
+  font-size: 0.9rem;
+}
+
+.detail .field-label {
+  font-weight: 600;
+  margin-right: 0.35em;
+}
+
+/* All links in detail: blue and underlined (like reference) */
+.detail a {
+  color: #0066cc;
+  text-decoration: underline;
+}
+
+.detail a:hover {
+  color: #004499;
+}

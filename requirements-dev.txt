@@ -1,0 +1,6 @@
+# Test runner for M1 and later e2e (Playwright)
+pytest>=7.0.0
+
+# Playwright for e2e (run: playwright install to install browsers)
+playwright>=1.40.0
+pytest-playwright>=0.4.0
