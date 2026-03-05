@@ -9,6 +9,8 @@ issue_json: $3
 
 ## Instructions
 
+For all variables that you were not passed, use an empty string in their place.  We will replace those later if needed.
+
 - IMPORTANT: You're writing a plan to implement a net new feature based on the `Feature` that will add value to the application.
 - IMPORTANT: The `Feature` describes the feature that will be implemented but remember we're not implementing a new feature, we're creating the plan that will be used to implement the feature based on the `Plan Format` below.
 - Create the plan in the `specs/` directory with filename: `issue-{issue_number}-adw-{adw_id}-sdlc_planner-{descriptive-name}.md`
@@ -98,18 +100,14 @@ Execute every command to validate the feature works correctly with zero regressi
 
 <list commands you'll use to validate with 100% confidence the feature is implemented correctly with zero regressions. every command must execute without errors so be specific about what you want to run to validate the feature works as expected. Include commands to test the feature end-to-end.>
 
-<If you created an E2E test, include the following validation step: `Read .claude/commands/test_e2e.md`, then read and execute your new E2E `.claude/commands/e2e/test_<descriptive_name>.md` test file to validate this functionality works.>
-
-- `cd app/server && uv run pytest` - Run server tests to validate the feature works with zero regressions
-- `cd app/client && bun tsc --noEmit` - Run frontend tests to validate the feature works with zero regressions
-- `cd app/client && bun run build` - Run frontend build to validate the feature works with zero regressions
-
 ## Notes
 <optionally list any additional notes, future considerations, or context that are relevant to the feature that will be helpful to the developer>
 ```
 
 ## Feature
-Extract the feature details from the `issue_json` variable (parse the JSON and use the title and body fields).
+If available, extract the feature details from the `issue_json` variable (parse the JSON and use the title and body fields).
+
+If there is no data in issue_json list the feature details as you see them.
 
 ## Report
 - Summarize the work you've just done in a concise bullet point list.

@@ -95,6 +95,9 @@ def search_fellows(conn, q: str) -> list:
     if not (q or q.strip()):
         return []
     q = q.strip()
+    # Guard against excessively long or pathological search strings
+    if len(q) > 200:
+        q = q[:200]
     cur = conn.execute(
         """
         SELECT f.* FROM fellows f
@@ -244,6 +247,7 @@ class Handler(BaseHTTPRequestHandler):
             ".html": "text/html; charset=utf-8",
             ".js": "application/javascript; charset=utf-8",
             ".css": "text/css; charset=utf-8",
+            ".webmanifest": "application/manifest+json; charset=utf-8",
             ".ico": "image/x-icon",
             ".png": "image/png",
             ".jpg": "image/jpeg",

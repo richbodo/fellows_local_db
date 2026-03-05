@@ -7,8 +7,18 @@
   var list = [];
   var loadingEl = document.getElementById('loading');
   var appWrapEl = document.getElementById('app-wrap');
+  var connectionBannerEl = document.getElementById('connection-banner');
   var directoryEl = document.getElementById('directory');
+  var directoryListEl = document.getElementById('directory-list') || directoryEl;
+  var searchInputEl = document.getElementById('search-input');
+  var searchStatusEl = document.getElementById('search-status');
+  var searchDebounceId = null;
+  var nlSearchContainerEl = document.getElementById('nl-search-container');
+  var nlSearchInputEl = document.getElementById('nl-search-input');
+  var nlSearchButtonEl = document.getElementById('nl-search-button');
+  var nlSearchStatusEl = document.getElementById('nl-search-status');
   var detailEl = document.getElementById('detail');
+  var fullFellowsCache = null;
 
   function showLoading(show) {
     loadingEl.classList.toggle('hidden', !show);
@@ -18,9 +28,9 @@
     if (appWrapEl) appWrapEl.classList.toggle('hidden', !show);
   }
 
-  function renderDirectory() {
+  function renderDirectoryList(items) {
     var ul = document.createElement('ul');
-    list.forEach(function (f) {
+    items.forEach(function (f) {
       var li = document.createElement('li');
       var a = document.createElement('a');
       a.href = '#/fellow/' + encodeURIComponent(f.slug || '');
@@ -29,10 +39,28 @@
       li.appendChild(a);
       ul.appendChild(li);
     });
-    directoryEl.innerHTML = '';
-    directoryEl.appendChild(ul);
+    directoryListEl.innerHTML = '';
+    directoryListEl.appendChild(ul);
+  }
+
+  function renderDirectory() {
+    if (!list.length) {
+      directoryListEl.innerHTML = '<p class="placeholder">No fellows loaded.</p>';
+      return;
+    }
+    renderDirectoryList(list);
     showLoading(false);
     showApp(true);
+  }
+
+  function setSearchStatus(msg) {
+    if (!searchStatusEl) return;
+    searchStatusEl.textContent = msg || '';
+  }
+
+  function setNlSearchStatus(msg) {
+    if (!nlSearchStatusEl) return;
+    nlSearchStatusEl.textContent = msg || '';
   }
 
   function section(title, body, secondary) {
@@ -127,7 +155,30 @@
     rightRest += sectionAlways("How I'm looking to support the NZ ecosystem", fellow.how_im_looking_to_support_the_nz_ecosystem ? escapeHtml(fellow.how_im_looking_to_support_the_nz_ecosystem) : '', true);
     rightRest += sectionAlways('Key Networks', fellow.key_networks ? escapeHtml(fellow.key_networks) : '', true);
 
+    // Build prev/next navigation arrows
+    var navHtml = '';
+    if (fellow.slug && list.length) {
+      var idx = -1;
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].slug === fellow.slug) { idx = i; break; }
+      }
+      if (idx !== -1) {
+        var prevSlug = idx > 0 ? list[idx - 1].slug : null;
+        var nextSlug = idx < list.length - 1 ? list[idx + 1].slug : null;
+        var prevClass = 'fellow-nav-arrow fellow-nav-arrow--prev' + (prevSlug ? '' : ' fellow-nav-arrow--hidden');
+        var nextClass = 'fellow-nav-arrow fellow-nav-arrow--next' + (nextSlug ? '' : ' fellow-nav-arrow--hidden');
+        var prevHref = prevSlug ? '#/fellow/' + encodeURIComponent(prevSlug) : '#';
+        var nextHref = nextSlug ? '#/fellow/' + encodeURIComponent(nextSlug) : '#';
+        navHtml = '<nav class="fellow-nav">' +
+          '<a class="' + prevClass + '" href="' + prevHref + '" aria-label="Previous fellow">&larr;</a>' +
+          '<a class="' + nextClass + '" href="' + nextHref + '" aria-label="Next fellow">&rarr;</a>' +
+          '<span class="fellow-nav-hint">or use arrow keys</span>' +
+          '</nav>';
+      }
+    }
+
     var html = '<header class="detail-page-title">' + escapeHtml(DETAIL_PAGE_TITLE) + '</header>' +
+      navHtml +
       '<div class="detail-grid">' +
       '<div class="detail-column detail-left-top">' + leftTop + '</div>' +
       '<div class="detail-column detail-right-top">' + rightTop + '</div>' +
@@ -209,6 +260,8 @@
         .then(function (r) { return r.json(); })
         .then(function (full) {
           if (Array.isArray(full)) {
+            fullFellowsCache = full;
+            saveFullFellowsToIndexedDB(full);
             full.forEach(function (f) {
               if (f.slug) fellowsBySlug.set(f.slug, f);
               if (f.record_id) fellowsBySlug.set(f.record_id, f);
@@ -223,4 +276,313 @@
     });
 
   window.addEventListener('hashchange', updateDetailFromHash);
+
+  window.addEventListener('keydown', function (e) {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.key === 'ArrowLeft') {
+      var prev = detailEl.querySelector('.fellow-nav-arrow--prev:not(.fellow-nav-arrow--hidden)');
+      if (prev) { e.preventDefault(); prev.click(); }
+    } else if (e.key === 'ArrowRight') {
+      var next = detailEl.querySelector('.fellow-nav-arrow--next:not(.fellow-nav-arrow--hidden)');
+      if (next) { e.preventDefault(); next.click(); }
+    }
+  });
+
+  function runSearch(q) {
+    if (!q) {
+      setSearchStatus('');
+      renderDirectory();
+      return;
+    }
+    if (!navigator.onLine) {
+      setSearchStatus('Offline search (cached data)…');
+      runLocalSearch(q);
+      return;
+    }
+    setSearchStatus('Searching…');
+    var url = '/api/search?q=' + encodeURIComponent(q);
+    fetch(url)
+      .then(function (r) {
+        if (!r.ok) return [];
+        return r.json();
+      })
+      .then(function (results) {
+        if (!Array.isArray(results)) {
+          results = [];
+        }
+        results.forEach(function (f) {
+          if (f && f.slug) {
+            fellowsBySlug.set(f.slug, f);
+          }
+          if (f && f.record_id) {
+            fellowsBySlug.set(f.record_id, f);
+          }
+        });
+        if (!results.length) {
+          directoryListEl.innerHTML = '<p class="placeholder">No fellows match that search.</p>';
+          setSearchStatus('');
+        } else {
+          renderDirectoryList(results);
+          setSearchStatus(results.length + ' result' + (results.length === 1 ? '' : 's') + ' found');
+        }
+      })
+      .catch(function () {
+        setSearchStatus('Network search failed. Trying cached data…');
+        runLocalSearch(q);
+      });
+  }
+
+  function runLocalSearch(q) {
+    loadFullFellows().then(function (fellows) {
+      if (!Array.isArray(fellows) || !fellows.length) {
+        directoryListEl.innerHTML = '<p class="placeholder">No cached data available for offline search.</p>';
+        setSearchStatus('');
+        return;
+      }
+      var results = filterFellowsLocally(fellows, q);
+      results.forEach(function (f) {
+        if (f && f.slug) {
+          fellowsBySlug.set(f.slug, f);
+        }
+        if (f && f.record_id) {
+          fellowsBySlug.set(f.record_id, f);
+        }
+      });
+      if (!results.length) {
+        directoryListEl.innerHTML = '<p class="placeholder">No fellows match that search in cached data.</p>';
+        setSearchStatus('');
+      } else {
+        renderDirectoryList(results);
+        setSearchStatus(results.length + ' offline result' + (results.length === 1 ? '' : 's') + ' found');
+      }
+    }).catch(function () {
+      directoryListEl.innerHTML = '<p class="placeholder">Offline search failed.</p>';
+      setSearchStatus('');
+    });
+  }
+
+  function filterFellowsLocally(fellows, q) {
+    var query = (q || '').toLowerCase();
+    if (!query) return fellows.slice();
+    var tokens = query.split(/\s+/).filter(Boolean);
+    return fellows.filter(function (f) {
+      var parts = [
+        f.name,
+        f.bio_tagline,
+        f.cohort,
+        f.fellow_type,
+        f.search_tags,
+        f.currently_based_in,
+        f.global_regions_currently_based_in
+      ];
+      var haystack = parts
+        .map(function (v) {
+          return v == null ? '' : String(v).toLowerCase();
+        })
+        .join(' ');
+      for (var i = 0; i < tokens.length; i++) {
+        if (haystack.indexOf(tokens[i]) === -1) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }
+
+  function saveFullFellowsToIndexedDB(fellows) {
+    if (!window.indexedDB || !Array.isArray(fellows)) return;
+    var request = window.indexedDB.open('fellows-local-db', 1);
+    request.onupgradeneeded = function (event) {
+      var db = event.target.result;
+      if (!db.objectStoreNames.contains('meta')) {
+        db.createObjectStore('meta', { keyPath: 'id' });
+      }
+    };
+    request.onsuccess = function (event) {
+      var db = event.target.result;
+      var tx = db.transaction('meta', 'readwrite');
+      var store = tx.objectStore('meta');
+      store.put({ id: 'allFellows', data: fellows });
+      tx.oncomplete = function () {
+        db.close();
+      };
+    };
+    request.onerror = function () {
+      // Ignore IndexedDB errors; app still works without offline cache.
+    };
+  }
+
+  function loadFullFellows() {
+    if (fullFellowsCache && Array.isArray(fullFellowsCache)) {
+      return Promise.resolve(fullFellowsCache);
+    }
+    if (!window.indexedDB) {
+      return Promise.resolve([]);
+    }
+    return new Promise(function (resolve, reject) {
+      var request = window.indexedDB.open('fellows-local-db', 1);
+      request.onupgradeneeded = function (event) {
+        var db = event.target.result;
+        if (!db.objectStoreNames.contains('meta')) {
+          db.createObjectStore('meta', { keyPath: 'id' });
+        }
+      };
+      request.onsuccess = function (event) {
+        var db = event.target.result;
+        var tx = db.transaction('meta', 'readonly');
+        var store = tx.objectStore('meta');
+        var getReq = store.get('allFellows');
+        getReq.onsuccess = function () {
+          var record = getReq.result;
+          var data = record && Array.isArray(record.data) ? record.data : [];
+          fullFellowsCache = data;
+          resolve(data);
+        };
+        getReq.onerror = function () {
+          resolve([]);
+        };
+        tx.oncomplete = function () {
+          db.close();
+        };
+      };
+      request.onerror = function () {
+        resolve([]);
+      };
+    });
+  }
+
+  function handleSearchInput() {
+    if (!searchInputEl) return;
+    var raw = searchInputEl.value || '';
+    var q = raw.trim();
+    runSearch(q);
+  }
+
+  if (searchInputEl) {
+    searchInputEl.addEventListener('input', function () {
+      if (searchDebounceId) {
+        clearTimeout(searchDebounceId);
+      }
+      searchDebounceId = setTimeout(function () {
+        handleSearchInput();
+      }, 250);
+    });
+  }
+
+  function hasWindowAI() {
+    return typeof window !== 'undefined' && window.ai;
+  }
+
+  function handleNlSearchClick() {
+    if (!nlSearchInputEl) return;
+    var query = (nlSearchInputEl.value || '').trim();
+    if (!query) {
+      setNlSearchStatus('Enter a question to search.');
+      return;
+    }
+    if (!hasWindowAI()) {
+      setNlSearchStatus('window.ai is not available in this browser.');
+      return;
+    }
+    setNlSearchStatus('Asking model…');
+    var prompt =
+      'You help search a fellows directory stored in a SQLite FTS5 table named fellows_fts. ' +
+      'Indexed columns include: name, bio_tagline, cohort, fellow_type, search_tags, key_links, ' +
+      'currently_based_in, global_regions_currently_based_in. ' +
+      'The user will describe who they are looking for in natural language. ' +
+      'Your job is to translate this into a SINGLE MATCH string for SQLite FTS5 over those columns. ' +
+      'Prefer combining short keywords with AND and OR. Do NOT return explanations, commentary, or code fences. ' +
+      'Do NOT wrap the result in quotes. Return only the bare search string on the first line. ' +
+      'Examples of valid outputs: Aaron; investor AND climate; cohort:2019 AND investor; "New Zealand" AND blockchain; women AND investor AND climate. ' +
+      'User query: ' + query;
+
+    try {
+      var ai = window.ai;
+      var generate = ai && ai.generateText ? ai.generateText.bind(ai) : null;
+      if (!generate) {
+        setNlSearchStatus('window.ai does not support text generation in this context.');
+        return;
+      }
+      generate({
+        prompt: prompt,
+        maxTokens: 32,
+        temperature: 0.2
+      })
+        .then(function (result) {
+          var text = '';
+          if (typeof result === 'string') {
+            text = result;
+          } else if (result && typeof result.text === 'string') {
+            text = result.text;
+          } else if (result && result.choices && result.choices[0] && typeof result.choices[0].text === 'string') {
+            text = result.choices[0].text;
+          }
+          text = (text || '').trim();
+          if (!text) {
+            setNlSearchStatus('The model did not return a usable search string.');
+            return;
+          }
+          var line = text.split('\n')[0];
+          line = line.replace(/["']/g, '');
+          if (line.length > 200) {
+            line = line.slice(0, 200);
+          }
+          if (!line) {
+            setNlSearchStatus('The model did not return a usable search string.');
+            return;
+          }
+          setNlSearchStatus('Using search: ' + line);
+          runSearch(line);
+        })
+        .catch(function () {
+          setNlSearchStatus('Failed to get a response from window.ai.');
+        });
+    } catch (e) {
+      setNlSearchStatus('Failed to use window.ai in this browser.');
+    }
+  }
+
+  function initWindowAISearch() {
+    if (!hasWindowAI()) return;
+    if (nlSearchContainerEl) {
+      nlSearchContainerEl.classList.remove('hidden');
+    }
+    if (nlSearchButtonEl) {
+      nlSearchButtonEl.addEventListener('click', handleNlSearchClick);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initWindowAISearch);
+  } else {
+    initWindowAISearch();
+  }
+
+  function updateConnectionBanner() {
+    if (!connectionBannerEl) return;
+    if (navigator.onLine) {
+      connectionBannerEl.textContent = 'You are online.';
+      connectionBannerEl.classList.remove('hidden');
+      setTimeout(function () {
+        connectionBannerEl.classList.add('hidden');
+      }, 2000);
+    } else {
+      connectionBannerEl.textContent = 'You are offline. Showing cached data where available.';
+      connectionBannerEl.classList.remove('hidden');
+    }
+  }
+
+  window.addEventListener('online', updateConnectionBanner);
+  window.addEventListener('offline', updateConnectionBanner);
+  updateConnectionBanner();
+
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker
+        .register('/sw.js')
+        .catch(function () {
+          // Ignore registration errors; app still works without PWA features.
+        });
+    });
+  }
 })();
