@@ -1,5 +1,6 @@
 """Pytest configuration and shared fixtures."""
 import os
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -12,6 +13,20 @@ import pytest
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
+
+DB_PATH = os.path.join(REPO_ROOT, "app", "fellows.db")
+
+
+@pytest.fixture(scope="module")
+def db():
+    """Shared SQLite connection to fellows.db; skip if missing."""
+    if not os.path.exists(DB_PATH):
+        pytest.skip(
+            f"DB not found at {DB_PATH}. Run: python build/import_json_to_sqlite.py"
+        )
+    conn = sqlite3.connect(DB_PATH)
+    yield conn
+    conn.close()
 
 # Session-scoped server: started once for M2 and e2e tests, so we don't double-bind port 8765
 _server = None

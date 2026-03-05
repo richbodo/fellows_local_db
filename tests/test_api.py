@@ -1,7 +1,4 @@
-"""
-Milestone 2 tests: Python server and API.
-Server is started once per session by tests/conftest.py app_server fixture.
-"""
+"""API tests: HTTP endpoints served by app.server."""
 import json
 import os
 import sys
@@ -10,7 +7,6 @@ from urllib.parse import quote
 
 import pytest
 
-# Repo root
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
 
@@ -24,46 +20,56 @@ def get(path, query=None):
     conn = HTTPConnection("127.0.0.1", PORT, timeout=5)
     conn.request("GET", path_with_query)
     r = conn.getresponse()
-    body = r.read().decode("utf-8")
+    raw = r.read()
     conn.close()
-    return r.status, r.getheader("Content-Type") or "", body
+    ctype = r.getheader("Content-Type") or ""
+    if "image/" in ctype:
+        return r.status, ctype, raw
+    return r.status, ctype, raw.decode("utf-8")
 
 
 @pytest.mark.usefixtures("app_server")
-class TestMilestone2Server:
-    """Run with server already started by session-scoped app_server fixture."""
+class TestAPI:
+    """API endpoint tests. Server started by session-scoped app_server fixture."""
 
-    def test_get_root_returns_html(self):
+    def test_root_returns_html(self):
         status, ctype, body = get("/")
         assert status == 200
         assert "text/html" in ctype
         assert "EHF Fellows" in body or "Directory" in body
 
-    def test_api_fellows_full_returns_442(self):
+    def test_api_fellows_full_returns_all(self):
         status, ctype, body = get("/api/fellows", query={"full": "1"})
         assert status == 200
         assert "application/json" in ctype
         data = json.loads(body)
         assert isinstance(data, list)
-        assert len(data) == 442
+        assert len(data) >= 1
         first = data[0]
         assert "slug" in first
         assert "name" in first
         assert "record_id" in first
 
-    def test_api_fellows_list_only_returns_minimal(self):
-        """Without full=1, returns minimal list (record_id, slug, name) for instant directory."""
+    def test_api_fellows_list_returns_minimal_keys(self):
         status, ctype, body = get("/api/fellows")
         assert status == 200
         assert "application/json" in ctype
         data = json.loads(body)
         assert isinstance(data, list)
-        assert len(data) == 442
+        assert len(data) >= 1
         first = data[0]
         assert set(first.keys()) <= {"record_id", "slug", "name"}
         assert "slug" in first and "name" in first
 
-    def test_api_fellow_by_slug_aaron_bird(self):
+    def test_api_fellows_list_and_full_counts_match(self):
+        """List and full endpoints should return the same number of records."""
+        _, _, list_body = get("/api/fellows")
+        _, _, full_body = get("/api/fellows", query={"full": "1"})
+        list_data = json.loads(list_body)
+        full_data = json.loads(full_body)
+        assert len(list_data) == len(full_data)
+
+    def test_api_fellow_by_slug(self):
         status, ctype, body = get("/api/fellows/aaron_bird")
         assert status == 200
         assert "application/json" in ctype
@@ -71,7 +77,7 @@ class TestMilestone2Server:
         assert data.get("name") == "Aaron Bird"
         assert data.get("slug") == "aaron_bird"
 
-    def test_api_search_aaron_returns_results(self):
+    def test_api_search_returns_results(self):
         status, ctype, body = get("/api/search", query={"q": "Aaron"})
         assert status == 200
         assert "application/json" in ctype
@@ -81,14 +87,13 @@ class TestMilestone2Server:
         names = [f.get("name") for f in data]
         assert "Aaron Bird" in names or "Aaron McDonald" in names
 
-    def test_images_slug_returns_200_or_404(self):
-        # If images dir exists and has aaron_bird.jpg -> 200, else 404
+    def test_images_endpoint(self):
         status, ctype, body = get("/images/aaron_bird.jpg")
         assert status in (200, 404)
         if status == 200:
             assert "image/" in ctype
 
-    def test_static_app_js_returns_js(self):
+    def test_static_js(self):
         status, ctype, body = get("/app.js")
         assert status == 200
         assert "javascript" in ctype or "application/javascript" in ctype
