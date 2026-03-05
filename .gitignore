@@ -1,0 +1,17 @@
+# Build output
+app/fellows.db
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Playwright
+playwright-report/
+test-results/
+.playwright/
+
+# OS
+.DS_Store
