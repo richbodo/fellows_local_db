@@ -4,13 +4,39 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>EHF Fellows Directory</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
   <h1>EHF Fellows Directory</h1>
+  <div id="connection-banner" class="connection-banner hidden" aria-live="polite"></div>
   <p id="loading">Loading…</p>
   <div id="app-wrap" class="hidden">
-    <aside id="directory" aria-label="Fellows list"></aside>
+    <aside id="directory" aria-label="Fellows list">
+      <div id="search-container">
+        <label for="search-input" class="search-label">Search fellows</label>
+        <input
+          id="search-input"
+          class="search-input"
+          type="search"
+          placeholder="Search by name, tags, cohort…"
+          autocomplete="off"
+        />
+        <p id="search-status" class="search-status" aria-live="polite"></p>
+        <div id="nl-search-container" class="nl-search-container hidden">
+          <label for="nl-search-input" class="search-label">Natural language search (window.ai)</label>
+          <textarea
+            id="nl-search-input"
+            class="search-input"
+            rows="2"
+            placeholder="e.g. Women investors in the 2019 cohort working on climate tech"
+          ></textarea>
+          <button id="nl-search-button" class="nl-search-button" type="button">Ask AI</button>
+          <p id="nl-search-status" class="search-status" aria-live="polite"></p>
+        </div>
+      </div>
+      <div id="directory-list"></div>
+    </aside>
     <main id="detail" class="detail" aria-label="Fellow detail">
       <p class="placeholder">Select a fellow from the list.</p>
     </main>
