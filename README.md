@@ -6,9 +6,9 @@ Local web app to browse Edmund Hillary Fellowship fellow profiles. Data and asse
 
 The app uses a dump of the fellows data from their wiki: `final_fellows_set/ehf_fellow_profiles_deduped.json`. Not all fellows data came across, so some records are incomplete at the time of this writing.
 
-## Plan
+## Architecture
 
-See [PLAN.md](PLAN.md) for architecture and development milestones.
+See [docs/Architecture.md](docs/Architecture.md) for system design, data flow, and database schema.
 
 ## Setup
 
