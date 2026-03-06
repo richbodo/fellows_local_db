@@ -16,6 +16,16 @@ ehf_fellow_profiles_deduped.json  →  import_json_to_sqlite.py  →  fellows.db
 Browser (vanilla JS SPA)  ←  HTTP API (server.py)  ←  SQL queries
 ```
 
+### Demo Data Filtering
+
+`build/filter_demo_data.py` filters the full JSON source down to fellows suitable for demo:
+
+1. **Name required** — records without a name are dropped
+2. **Image required** — records without a matching local image file are dropped
+3. **Placeholder detection** — images are checked against known placeholder hashes (MD5). The EHF wiki used a grey diamond logo as a default avatar; fellows with this placeholder are excluded so the demo only shows real profile photos.
+
+The filtered output is written to `ehf_fellow_profiles_demo_data.json`, which can be passed to the import script.
+
 ### Build Phase
 
 `build/import_json_to_sqlite.py` reads the JSON, deduplicates slugs, and writes two tables:
