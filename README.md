@@ -1,10 +1,11 @@
 # EHF Fellows Local Directory
 
-Local web app to browse Edmund Hillary Fellowship fellow profiles. Data and assets are fully local (SQLite + static files); uses a Python server and system browser.
+Local web app to browse Edmund Hillary Fellowship fellow profiles and run experiments. Data and assets are fully local (SQLite + static files); uses a Python server and system browser.
 
 ## Data note
 
 The app uses a dump of the fellows data from their wiki: `final_fellows_set/ehf_fellow_profiles_deduped.json`. Not all fellows data came across, so some records are incomplete at the time of this writing.
+Even though it's demo data, and incomplete as of this writing, it's still confidential.
 
 ## Architecture
 
