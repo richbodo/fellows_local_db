@@ -4,7 +4,7 @@ Local web app to browse Edmund Hillary Fellowship fellow profiles and run experi
 
 ## Data note
 
-The app uses a dump of the fellows data from their wiki: `final_fellows_set/ehf_fellow_profiles_deduped.json`. Not all fellows data came across, so some records are incomplete at the time of this writing.
+The app uses a dump of the fellows data from their wiki in json: `final_fellows_set/ehf_fellow_profiles_deduped.json`, and some profile images that were retrieved from it. Not all fellows data came across, so some records are incomplete at the time of this writing.
 Even though it's demo data, and incomplete as of this writing, it's still confidential.
 
 ## Architecture
