@@ -93,6 +93,23 @@ class TestAPI:
         if status == 200:
             assert "image/" in ctype
 
+    def test_api_stats_returns_aggregates(self):
+        status, ctype, body = get("/api/stats")
+        assert status == 200
+        assert "application/json" in ctype
+        data = json.loads(body)
+        assert "total" in data
+        assert isinstance(data["total"], int)
+        assert data["total"] >= 1
+        for key in ("by_fellow_type", "by_cohort", "by_region", "field_completeness"):
+            assert key in data
+            assert isinstance(data[key], list)
+            assert len(data[key]) >= 1
+            first = data[key][0]
+            assert "label" in first
+            assert "count" in first
+            assert isinstance(first["count"], int)
+
     def test_static_js(self):
         status, ctype, body = get("/app.js")
         assert status == 200
