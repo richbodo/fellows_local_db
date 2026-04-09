@@ -35,10 +35,7 @@ For all variables that you were not passed, use an empty string in their place. 
 
 Focus on the following files:
 - `README.md` - Contains the project overview and instructions.
-- `app/server/**` - Contains the codebase server.
-- `app/client/**` - Contains the codebase client.
-- `scripts/**` - Contains the scripts to start and stop the server + client.
-- `adws/**` - Contains the AI Developer Workflow (ADW) scripts.
+-
 
 Ignore all other files in the codebase.
 

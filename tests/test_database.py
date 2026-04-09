@@ -56,6 +56,20 @@ def test_all_slugs_are_unique(db):
     assert duplicates == [], f"Duplicate slugs found: {duplicates}"
 
 
+def test_stats_aggregation_queries(db):
+    """Stats aggregation queries should execute and return rows."""
+    cur = db.execute(
+        "SELECT fellow_type, COUNT(*) FROM fellows"
+        " WHERE fellow_type IS NOT NULL GROUP BY fellow_type"
+    )
+    assert len(cur.fetchall()) >= 1
+    cur = db.execute(
+        "SELECT json_extract(extra_json, '$.primary_global_region_of_citizenship'),"
+        " COUNT(*) FROM fellows WHERE extra_json IS NOT NULL GROUP BY 1"
+    )
+    assert len(cur.fetchall()) >= 1
+
+
 def test_schema_has_expected_columns(db):
     """Fellows table should have all expected columns."""
     cur = db.execute("PRAGMA table_info(fellows)")
