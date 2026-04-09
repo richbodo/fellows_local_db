@@ -17,8 +17,5 @@ test-results/
 # OS
 .DS_Store
 
-# Plans
-plans/
-
 .aider*
 .server.pid
