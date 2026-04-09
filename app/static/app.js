@@ -5,6 +5,7 @@
   var DETAIL_PAGE_TITLE = 'Confidential - Fellows Local-Only Directory Development Project';
   var fellowsBySlug = new Map();
   var list = [];
+  var displayedList = [];
   var loadingEl = document.getElementById('loading');
   var appWrapEl = document.getElementById('app-wrap');
   var connectionBannerEl = document.getElementById('connection-banner');
@@ -49,6 +50,7 @@
       return;
     }
     renderDirectoryList(list);
+    displayedList = list;
     showLoading(false);
     showApp(true);
   }
@@ -144,6 +146,7 @@
     var workRows = [];
     workRows.push(workBlock('Ventures', fellow.ventures));
     workRows.push(workBlock('Industries', fellow.industries));
+    workRows.push(workBlock('Industries - Other', fellow.industries_other));
     workRows.push(workBlock('What is your main mode of working?', fellow.what_is_your_main_mode_of_working));
     workRows.push(workBlock('Do you consider yourself an investor in one or more of these categories?', fellow.do_you_consider_yourself_an_investor_in_one_or_more_of_these_categories));
     workRows.push(workBlock('What are the main types of organisations you serve?', fellow.what_are_the_main_types_of_organisations_you_serve));
@@ -157,14 +160,14 @@
 
     // Build prev/next navigation arrows
     var navHtml = '';
-    if (fellow.slug && list.length) {
+    if (fellow.slug && displayedList.length) {
       var idx = -1;
-      for (var i = 0; i < list.length; i++) {
-        if (list[i].slug === fellow.slug) { idx = i; break; }
+      for (var i = 0; i < displayedList.length; i++) {
+        if (displayedList[i].slug === fellow.slug) { idx = i; break; }
       }
       if (idx !== -1) {
-        var prevSlug = idx > 0 ? list[idx - 1].slug : null;
-        var nextSlug = idx < list.length - 1 ? list[idx + 1].slug : null;
+        var prevSlug = idx > 0 ? displayedList[idx - 1].slug : null;
+        var nextSlug = idx < displayedList.length - 1 ? displayedList[idx + 1].slug : null;
         var prevClass = 'fellow-nav-arrow fellow-nav-arrow--prev' + (prevSlug ? '' : ' fellow-nav-arrow--hidden');
         var nextClass = 'fellow-nav-arrow fellow-nav-arrow--next' + (nextSlug ? '' : ' fellow-nav-arrow--hidden');
         var prevHref = prevSlug ? '#/fellow/' + encodeURIComponent(prevSlug) : '#';
@@ -218,6 +221,84 @@
     return div.innerHTML;
   }
 
+  function statsSection(title, items, color) {
+    if (!items || !items.length) return '';
+    var maxCount = items[0].count;
+    var barHeight = 28;
+    var labelWidth = 220;
+    var gap = 4;
+    var chartWidth = 500;
+    var svgHeight = items.length * (barHeight + gap);
+    var totalWidth = labelWidth + chartWidth + 60;
+
+    var svg = '<svg class="stats-chart" width="100%" viewBox="0 0 ' + totalWidth + ' ' + svgHeight + '" role="img" aria-label="' + escapeHtml(title) + '">';
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i];
+      var y = i * (barHeight + gap);
+      var barWidth = maxCount > 0 ? (item.count / maxCount) * chartWidth : 0;
+      svg += '<text x="' + (labelWidth - 8) + '" y="' + (y + barHeight / 2 + 5) + '" text-anchor="end" font-size="13" fill="#333">' + escapeHtml(item.label) + '</text>';
+      svg += '<rect x="' + labelWidth + '" y="' + y + '" width="' + barWidth + '" height="' + barHeight + '" rx="3" fill="' + color + '" opacity="0.85"/>';
+      svg += '<text x="' + (labelWidth + barWidth + 6) + '" y="' + (y + barHeight / 2 + 5) + '" font-size="13" fill="#333">' + item.count + '</text>';
+    }
+    svg += '</svg>';
+
+    return '<div class="detail-section"><h3 class="detail-section-title">' + escapeHtml(title) + '</h3><div class="detail-section-body">' + svg + '</div></div>';
+  }
+
+  function renderAboutPage() {
+    var aboutHtml = '<div class="stats-page">';
+    aboutHtml += '<h2 class="stats-title">About This App</h2>';
+    aboutHtml += '<div class="about-body">';
+    aboutHtml += '<p>V0.1 \u2014 This app is a much faster version of the fellows database. ';
+    aboutHtml += 'This app is shared with EHF fellows on request on the condition that they keep the information in it private to the EHF fellows. ';
+    aboutHtml += 'Never post this anywhere\u2014 it contains the relevant bits of data from the old fellows directory. ';
+    aboutHtml += 'There is no API, login, or web app, so this can only be shared intentionally. ';
+    aboutHtml += 'For support, request to join the github repository or just ask on one of the fellows channels.</p>';
+    aboutHtml += '<p class="about-repo"><a href="https://github.com/richbodo/fellows_local_db" target="_blank" rel="noopener">';
+    aboutHtml += '<svg class="github-icon" viewBox="0 0 16 16" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>';
+    aboutHtml += ' richbodo/fellows_local_db</a></p>';
+    aboutHtml += '</div>';
+
+    aboutHtml += '<h2 class="stats-title">Fellowship Statistics</h2>';
+    aboutHtml += '<p class="stats-total" id="stats-total">Loading stats\u2026</p>';
+    aboutHtml += '<div class="stats-grid" id="stats-grid"></div>';
+    aboutHtml += '</div>';
+    detailEl.innerHTML = aboutHtml;
+
+    fetch('/api/stats')
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data) return;
+        var totalEl = document.getElementById('stats-total');
+        var gridEl = document.getElementById('stats-grid');
+        if (totalEl) totalEl.innerHTML = 'Total Fellows: <strong>' + escapeHtml(String(data.total)) + '</strong>';
+        if (gridEl) {
+          var gh = '<div class="stats-col stats-col--left">';
+          gh += statsSection('Fellows by Type', data.by_fellow_type, '#4a2c6a');
+          gh += statsSection('Fellows by Cohort', data.by_cohort, '#2c6a4a');
+          gh += statsSection('Fellows by Region', data.by_region, '#2c4a6a');
+          gh += '</div>';
+          gh += '<div class="stats-col stats-col--right">';
+          gh += statsSection('Field Completeness', data.field_completeness, '#5a5a5a');
+          gh += '</div>';
+          gridEl.innerHTML = gh;
+        }
+      })
+      .catch(function () {
+        var totalEl = document.getElementById('stats-total');
+        if (totalEl) totalEl.textContent = 'Failed to load stats.';
+      });
+  }
+
+  function route() {
+    var hash = window.location.hash || '';
+    if (hash === '#/about') {
+      renderAboutPage();
+    } else {
+      updateDetailFromHash();
+    }
+  }
+
   function getSlugFromHash() {
     var hash = window.location.hash || '';
     var m = hash.match(/#\/fellow\/([^/]+)/);
@@ -254,7 +335,7 @@
     .then(function (data) {
       list = Array.isArray(data) ? data : [];
       renderDirectory();
-      updateDetailFromHash();
+      route();
       // Phase 2: full data in background
       fetch('/api/fellows?full=1')
         .then(function (r) { return r.json(); })
@@ -267,7 +348,7 @@
               if (f.record_id) fellowsBySlug.set(f.record_id, f);
             });
           }
-          updateDetailFromHash();
+          route();
         })
         .catch(function () {});
     })
@@ -275,7 +356,7 @@
       loadingEl.textContent = 'Failed to load directory.';
     });
 
-  window.addEventListener('hashchange', updateDetailFromHash);
+  window.addEventListener('hashchange', route);
 
   window.addEventListener('keydown', function (e) {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
@@ -323,6 +404,7 @@
           setSearchStatus('');
         } else {
           renderDirectoryList(results);
+          displayedList = results;
           setSearchStatus(results.length + ' result' + (results.length === 1 ? '' : 's') + ' found');
         }
       })
@@ -353,6 +435,7 @@
         setSearchStatus('');
       } else {
         renderDirectoryList(results);
+        displayedList = results;
         setSearchStatus(results.length + ' offline result' + (results.length === 1 ? '' : 's') + ' found');
       }
     }).catch(function () {
