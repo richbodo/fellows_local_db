@@ -144,6 +144,7 @@
     var workRows = [];
     workRows.push(workBlock('Ventures', fellow.ventures));
     workRows.push(workBlock('Industries', fellow.industries));
+    workRows.push(workBlock('Industries - Other', fellow.industries_other));
     workRows.push(workBlock('What is your main mode of working?', fellow.what_is_your_main_mode_of_working));
     workRows.push(workBlock('Do you consider yourself an investor in one or more of these categories?', fellow.do_you_consider_yourself_an_investor_in_one_or_more_of_these_categories));
     workRows.push(workBlock('What are the main types of organisations you serve?', fellow.what_are_the_main_types_of_organisations_you_serve));
@@ -218,6 +219,69 @@
     return div.innerHTML;
   }
 
+  function statsSection(title, items, color) {
+    if (!items || !items.length) return '';
+    var maxCount = items[0].count;
+    var barHeight = 28;
+    var labelWidth = 220;
+    var gap = 4;
+    var chartWidth = 500;
+    var svgHeight = items.length * (barHeight + gap);
+    var totalWidth = labelWidth + chartWidth + 60;
+
+    var svg = '<svg class="stats-chart" width="100%" viewBox="0 0 ' + totalWidth + ' ' + svgHeight + '" role="img" aria-label="' + escapeHtml(title) + '">';
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i];
+      var y = i * (barHeight + gap);
+      var barWidth = maxCount > 0 ? (item.count / maxCount) * chartWidth : 0;
+      svg += '<text x="' + (labelWidth - 8) + '" y="' + (y + barHeight / 2 + 5) + '" text-anchor="end" font-size="13" fill="#333">' + escapeHtml(item.label) + '</text>';
+      svg += '<rect x="' + labelWidth + '" y="' + y + '" width="' + barWidth + '" height="' + barHeight + '" rx="3" fill="' + color + '" opacity="0.85"/>';
+      svg += '<text x="' + (labelWidth + barWidth + 6) + '" y="' + (y + barHeight / 2 + 5) + '" font-size="13" fill="#333">' + item.count + '</text>';
+    }
+    svg += '</svg>';
+
+    return '<div class="detail-section"><h3 class="detail-section-title">' + escapeHtml(title) + '</h3><div class="detail-section-body">' + svg + '</div></div>';
+  }
+
+  function renderStatsPage() {
+    detailEl.innerHTML = '<p class="placeholder">Loading stats\u2026</p>';
+    fetch('/api/stats')
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data) {
+          detailEl.innerHTML = '<p class="placeholder">Failed to load stats.</p>';
+          return;
+        }
+        var html = '<div class="stats-page">';
+        html += '<h2 class="stats-title">Fellowship Statistics</h2>';
+        html += '<p class="stats-total">Total Fellows: <strong>' + escapeHtml(String(data.total)) + '</strong></p>';
+        html += '<div class="stats-grid">';
+        html += '<div class="stats-col stats-col--left">';
+        html += statsSection('Fellows by Type', data.by_fellow_type, '#4a2c6a');
+        html += statsSection('Fellows by Cohort', data.by_cohort, '#2c6a4a');
+        html += statsSection('Fellows by Region', data.by_region, '#2c4a6a');
+        html += '</div>';
+        html += '<div class="stats-col stats-col--right">';
+        html += statsSection('Field Completeness', data.field_completeness, '#5a5a5a');
+        html += '</div>';
+        html += '</div>';
+        html += '</div>';
+        detailEl.innerHTML = html;
+      })
+      .catch(function () {
+        detailEl.innerHTML = '<p class="placeholder">Failed to load stats.</p>';
+      });
+  }
+
+  function route() {
+    var hash = window.location.hash || '';
+    if (hash === '#/stats') {
+      renderStatsPage();
+    } else {
+      updateDetailFromHash();
+    }
+  }
+
   function getSlugFromHash() {
     var hash = window.location.hash || '';
     var m = hash.match(/#\/fellow\/([^/]+)/);
@@ -254,7 +318,7 @@
     .then(function (data) {
       list = Array.isArray(data) ? data : [];
       renderDirectory();
-      updateDetailFromHash();
+      route();
       // Phase 2: full data in background
       fetch('/api/fellows?full=1')
         .then(function (r) { return r.json(); })
@@ -267,7 +331,7 @@
               if (f.record_id) fellowsBySlug.set(f.record_id, f);
             });
           }
-          updateDetailFromHash();
+          route();
         })
         .catch(function () {});
     })
@@ -275,7 +339,7 @@
       loadingEl.textContent = 'Failed to load directory.';
     });
 
-  window.addEventListener('hashchange', updateDetailFromHash);
+  window.addEventListener('hashchange', route);
 
   window.addEventListener('keydown', function (e) {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;

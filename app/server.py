@@ -111,6 +111,86 @@ def search_fellows(conn, q: str) -> list:
     return [row_to_fellow(row) for row in cur.fetchall()]
 
 
+def get_stats(conn) -> dict:
+    """Aggregate statistics for the stats page."""
+    total = conn.execute("SELECT COUNT(*) FROM fellows").fetchone()[0]
+
+    def group_counts(sql):
+        return [{"label": r[0], "count": r[1]} for r in conn.execute(sql).fetchall()]
+
+    # Region counts: split comma-separated global_regions_currently_based_in
+    # so dual-region fellows are counted in each region
+    from collections import Counter
+    region_counter = Counter()
+    for row in conn.execute(
+        "SELECT global_regions_currently_based_in FROM fellows"
+        " WHERE global_regions_currently_based_in IS NOT NULL"
+        " AND global_regions_currently_based_in != ''"
+    ).fetchall():
+        for region in row[0].split(","):
+            region = region.strip()
+            if region:
+                region_counter[region] += 1
+    by_region = [{"label": r, "count": c} for r, c in region_counter.most_common()]
+
+    # Field completeness: count non-empty values for each DB column and extra_json key
+    field_counts = []
+    # Friendly labels for DB columns
+    col_labels = {
+        "name": "Name", "bio_tagline": "Bio / Tagline", "fellow_type": "Fellow Type",
+        "cohort": "Cohort", "contact_email": "Contact Email", "key_links": "Key Links",
+        "image_url": "Image URL", "currently_based_in": "Currently Based In",
+        "search_tags": "Search Tags", "fellow_status": "Fellow Status",
+        "gender_pronouns": "Gender / Pronouns", "ethnicity": "Ethnicity",
+        "primary_citizenship": "Primary Citizenship",
+        "global_regions_currently_based_in": "Global Regions Based In",
+    }
+    for col, label in col_labels.items():
+        count = conn.execute(
+            f"SELECT COUNT(*) FROM fellows WHERE {col} IS NOT NULL AND {col} != ''"
+        ).fetchone()[0]
+        field_counts.append({"label": label, "count": count})
+    # Extra JSON keys with friendly labels
+    extra_labels = {
+        "all_citizenships": "All Citizenships",
+        "ventures": "Ventures", "industries": "Industries",
+        "career_highlights": "Career Highlights",
+        "key_networks": "Key Networks",
+        "how_im_looking_to_support_the_nz_ecosystem": "How Supporting NZ Ecosystem",
+        "what_is_your_main_mode_of_working": "Main Mode of Working",
+        "do_you_consider_yourself_an_investor_in_one_or_more_of_these_categories": "Investor Categories",
+        "mobile_number": "Mobile Number",
+        "five_things_to_know": "Five Things to Know",
+        "skills_to_give": "Skills to Give",
+        "skills_to_receive": "Skills to Receive",
+    }
+    for key, label in extra_labels.items():
+        count = conn.execute(
+            "SELECT COUNT(*) FROM fellows WHERE extra_json IS NOT NULL"
+            " AND json_extract(extra_json, ?) IS NOT NULL"
+            " AND json_extract(extra_json, ?) != ''",
+            (f"$.{key}", f"$.{key}"),
+        ).fetchone()[0]
+        field_counts.append({"label": label, "count": count})
+    field_counts.sort(key=lambda x: x["count"], reverse=True)
+
+    return {
+        "total": total,
+        "by_fellow_type": group_counts(
+            "SELECT fellow_type, COUNT(*) FROM fellows"
+            " WHERE fellow_type IS NOT NULL"
+            " GROUP BY fellow_type ORDER BY COUNT(*) DESC"
+        ),
+        "by_cohort": group_counts(
+            "SELECT cohort, COUNT(*) FROM fellows"
+            " WHERE cohort IS NOT NULL"
+            " GROUP BY cohort ORDER BY COUNT(*) DESC"
+        ),
+        "by_region": by_region,
+        "field_completeness": field_counts,
+    }
+
+
 def find_image(slug: str) -> Path | None:
     """Return path to image file for slug (try .jpg then .png), or None."""
     if not slug:
@@ -207,6 +287,19 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
             return
 
+        # API: stats
+        if path == "/api/stats":
+            conn = get_db()
+            if not conn:
+                self.send_error_404()
+                return
+            try:
+                stats = get_stats(conn)
+                self.send_json(stats)
+            finally:
+                conn.close()
+            return
+
         # Images: /images/<slug>.jpg or .png
         if path.startswith("/images/"):
             rest = path[len("/images/"):].lstrip("/")
@@ -263,6 +356,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(data)
 

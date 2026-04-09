@@ -382,3 +382,75 @@ h1 {
   color: #888;
   margin-left: 0.5rem;
 }
+
+/* Site header with navigation */
+.site-header {
+  display: flex;
+  align-items: baseline;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.site-nav {
+  display: flex;
+  gap: 1rem;
+}
+
+.site-nav-link {
+  color: #4a2c6a;
+  text-decoration: none;
+  font-size: 0.95rem;
+  font-weight: 600;
+  padding: 0.2em 0.5em;
+  border-radius: 3px;
+}
+
+.site-nav-link:hover {
+  background: #4a2c6a;
+  color: #fff;
+}
+
+/* Stats page */
+.stats-page {
+  max-width: 100%;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.stats-col {
+  min-width: 0;
+}
+
+.stats-title {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.3rem;
+}
+
+.stats-total {
+  font-size: 1.1rem;
+  margin-bottom: 1.5rem;
+}
+
+.stats-chart {
+  display: block;
+  margin: 0.5rem 0 1rem 0;
+  max-width: 100%;
+  height: auto;
+}
+
+@media (max-width: 700px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+  .stats-chart {
+    min-width: 600px;
+  }
+  .detail-section-body {
+    overflow-x: auto;
+  }
+}
