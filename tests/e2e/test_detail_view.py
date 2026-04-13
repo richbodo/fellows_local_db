@@ -190,5 +190,8 @@ class TestDetailView:
         page.get_by_role("link", name="Aaron McDonald").first.click()
         page.wait_for_url("**/#/fellow/aaron_mcdonald", timeout=5000)
         detail = page.locator("#detail")
-        detail.get_by_text("Aaron McDonald").wait_for(state="visible", timeout=5000)
+        # Name appears in heading and bio; target the title only (Playwright strict mode).
+        detail.get_by_role("heading", name="Aaron McDonald").wait_for(
+            state="visible", timeout=5000
+        )
         assert "Aaron McDonald" in detail.inner_text()
