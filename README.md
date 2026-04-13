@@ -47,12 +47,13 @@ chmod +x run.sh
 - `GET /api/fellows?full=1` – all fellows as full JSON array (used in background after directory is shown)
 - `GET /api/fellows/<slug>` – one fellow by slug or `record_id` (e.g. `/api/fellows/aaron_bird`)
 - `GET /api/search?q=...` – FTS5 search (e.g. `?q=Aaron`)
+- `GET /api/stats` – JSON aggregates for the About page (counts by type, cohort, region, field completeness)
 - `GET /images/<slug>.jpg` or `.png` – profile image. The server looks in `app/fellow_profile_images_by_name/` first; if that folder is missing, it uses `final_fellows_set/fellow_profile_images_by_name/` (so images work without copying). Files should be named by slug (e.g. `aaron_bird.jpg`) or by name (e.g. "Aaron Bird.jpg"); the server matches both.
 - `GET /` – static app (index.html)
 
 ### Two-phase load (instant directory)
 
-The app loads the directory quickly by requesting only the minimal list first (`GET /api/fellows`), then fetches full data in the background (`GET /api/fellows?full=1`). The directory page shows **names and links only**—no images. Profile images are requested only when you open a fellow’s detail (`#/fellow/<slug>`), one image at a time.
+The app loads the directory quickly by requesting only the minimal list first (`GET /api/fellows`), then fetches full data in the background (`GET /api/fellows?full=1`). The directory page shows **names and links only**—no images. Profile images are requested only when you open a fellow’s detail (`#/fellow/<slug>`), one image at a time. The About page (`#/about`) loads statistics from `GET /api/stats`.
 
 ### Run tests
 

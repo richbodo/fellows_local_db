@@ -39,6 +39,8 @@ The explicit columns cover the fields needed for display and filtering. Any JSON
 
 The server opens a new SQLite connection per request (no connection pool — unnecessary at local scale). Responses are JSON for API routes and raw bytes for static files and images.
 
+**HTTP API** (see README for the full list): besides fellows list/detail/search, `GET /api/stats` returns aggregate statistics for the About page: total fellow count, breakdowns by fellow type and cohort, per-region counts (splitting comma-separated `global_regions_currently_based_in`), and field completeness (non-empty column counts plus selected keys in `extra_json` via `json_extract`). Heavier than a simple row fetch; still fine at local scale.
+
 ## Two-Phase Load
 
 The frontend uses two sequential fetches to minimize time-to-interactive:
@@ -50,21 +52,27 @@ When a user clicks a fellow before phase 2 completes, the app falls back to `GET
 
 ## Frontend Routing
 
-Hash-based SPA routing (`#/fellow/<slug>`). The `hashchange` event triggers `updateDetailFromHash()`, which looks up the fellow in the local cache or fetches from the API. No history API, no router library.
+Hash-based SPA routing with no history API and no router library:
+
+- `#/` — directory (default when the hash is empty or not matched below)
+- `#/about` — About page; loads fellowship statistics via `GET /api/stats`
+- `#/fellow/<slug>` — fellow detail; `hashchange` runs `updateDetailFromHash()`, which resolves the fellow from the in-memory cache or `GET /api/fellows/<slug>`
 
 ## Database Schema
+
+Produced by `build/import_json_to_sqlite.py` (matches `sqlite3 app/fellows.db ".schema"` for the app-defined objects). Slug uniqueness is enforced with an index rather than an inline `UNIQUE` column constraint.
 
 ```sql
 CREATE TABLE fellows (
     record_id TEXT PRIMARY KEY,
-    slug TEXT NOT NULL UNIQUE,
+    slug TEXT NOT NULL,
     name TEXT,
     bio_tagline TEXT,
     fellow_type TEXT,
     cohort TEXT,
     contact_email TEXT,
     key_links TEXT,
-    key_links_urls TEXT,       -- JSON array of URLs
+    key_links_urls TEXT,       -- JSON array of URLs (stored as TEXT)
     image_url TEXT,
     currently_based_in TEXT,
     search_tags TEXT,
@@ -76,11 +84,21 @@ CREATE TABLE fellows (
     extra_json TEXT            -- JSON object of all other fields
 );
 
+CREATE UNIQUE INDEX idx_fellows_slug ON fellows(slug);
+
 CREATE VIRTUAL TABLE fellows_fts USING fts5(
-    name, bio_tagline, cohort, fellow_type, search_tags, key_links,
-    content='fellows', content_rowid='rowid'
+    name,
+    bio_tagline,
+    cohort,
+    fellow_type,
+    search_tags,
+    key_links,
+    content='fellows',
+    content_rowid='rowid'
 );
 ```
+
+FTS5 also creates internal shadow tables (`fellows_fts_data`, `fellows_fts_idx`, etc.); those are SQLite-managed and not altered by hand.
 
 ## Roadmap
 

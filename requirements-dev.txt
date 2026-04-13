@@ -1,6 +1,5 @@
-# Test runner for M1 and later e2e (Playwright)
+# Dev/test stack: pytest, Playwright, and pytest-playwright (e2e).
+# After pip install, run: playwright install chromium  (see README)
 pytest>=7.0.0
-
-# Playwright for e2e (run: playwright install to install browsers)
 playwright>=1.40.0
 pytest-playwright>=0.4.0
