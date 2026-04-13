@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Free port 8765 so server-dependent tests can run (M2 API tests, e2e Playwright).
+# Free port 8765 so server-dependent tests can run (HTTP API tests, e2e Playwright).
 # Run from repo root. Safe to run even if nothing is listening.
 # Usage: ./scripts/ensure_port_8765_free.sh [pytest args...]
 #   No args: just free the port and exit.

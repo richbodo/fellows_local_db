@@ -11,16 +11,34 @@ Even though it's demo data, and incomplete as of this writing, it's still confid
 
 See [docs/Architecture.md](docs/Architecture.md) for system design, data flow, and database schema.
 
-## Setup
+## What to install
 
-- **Python 3** (3.8+).
-- Optional (for tests): create a venv and install dev deps:
+| Goal | Install |
+|------|---------|
+| **Run the app only** | **Python 3.8+** and a built **`app/fellows.db`** (see [Build script](#build-script-json-to-sqlite--fts5)). No pip packages beyond the stdlib. |
+| **Run the full test suite** (database + HTTP API + Playwright e2e) | Python 3.8+, **`app/fellows.db`**, a **virtualenv** (this README uses **`.venv`**), **`pip install -r requirements-dev.txt`**, and **Playwright’s Chromium** (`playwright install chromium` once per machine). |
+
+**`requirements-dev.txt`** pins pytest, Playwright, and pytest-playwright. After installing it, you must download browsers; the app itself does not need Playwright.
+
+## First-time setup (developers)
+
+From the repo root:
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate   # or .venv\Scripts\activate on Windows
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
+playwright install chromium        # required for tests under tests/e2e/
+python build/import_json_to_sqlite.py   # creates app/fellows.db (see below)
 ```
+
+Then start the server:
+
+```bash
+python app/server.py
+```
+
+Use **`python`** from the activated venv when running tests so `pytest` and Playwright are on your PATH. The helper script [`scripts/ensure_port_8765_free.sh`](scripts/ensure_port_8765_free.sh) expects pytest at **`.venv/bin/pytest`** (same layout as above).
 
 ## Server
 
@@ -57,36 +75,45 @@ The app loads the directory quickly by requesting only the minimal list first (`
 
 ### Run tests
 
-Port 8765 is freed automatically before the server starts. Tests are organized by function:
+**Prerequisites:** virtualenv activated, **`requirements-dev.txt`** installed, **`playwright install chromium`** done, and **`app/fellows.db`** present.
+
+**Port 8765:** API and e2e tests start a local HTTP server on **8765**. `tests/conftest.py` tries to kill whatever is listening before binding; if bind still fails (“address already in use”), free the port first.
+
+**Recommended (free port, then run all tests):**
 
 ```bash
-# All tests
+chmod +x scripts/ensure_port_8765_free.sh    # once
+./scripts/ensure_port_8765_free.sh tests/ -v
+```
+
+With no arguments, the script only frees the port and exits:
+
+```bash
+./scripts/ensure_port_8765_free.sh
+```
+
+**Or** run pytest directly (after freeing the port manually if needed):
+
+```bash
 pytest tests/ -v
-
-# By category
-pytest tests/test_database.py -v   # DB schema, FTS5, data integrity
-pytest tests/test_api.py -v        # HTTP API endpoints
-pytest tests/e2e/ -v               # Playwright browser tests (directory + detail view)
 ```
 
-For e2e tests, install Playwright browsers once:
+**By category:**
 
 ```bash
-pip install -r requirements-dev.txt
-playwright install chromium
+pytest tests/test_database.py -v   # DB schema, FTS5, data integrity
+pytest tests/test_api.py -v        # HTTP API (uses session server on 8765)
+pytest tests/e2e/ -v               # Playwright: directory + detail UI
 ```
 
-The e2e suite starts the app server in the background, loads the app in Chromium, checks the directory list, and clicks through to a fellow’s detail view.
+The e2e suite starts the app in the background, opens Chromium, and exercises the directory and detail flows.
 
 ---
 
 ### Dev coordination (you + AI)
 
-- **You run tests**: When you run `pytest tests/`, the test run **frees port 8765** before starting the server, so you don’t have to shut down anything first. If a server was left running from a previous session, it will be killed automatically.
-- **AI note**: When the AI implements a change, it will remind you to run the relevant tests so you can verify. The AI will not leave a long-lived server running in your terminal; if something is still on 8765, the next `pytest` run will free it.
-- **Manual free (optional)**: To free the port yourself (e.g. to run the app server manually), run:  
-  `lsof -ti:8765 | xargs kill -9`  
-  or use `./scripts/ensure_port_8765_free.sh` if that script is present.
+- **Port 8765**: Prefer **`./scripts/ensure_port_8765_free.sh`** before manual testing if something else is bound to the port. Equivalent one-liner: `lsof -ti:8765 | xargs kill -9` (macOS/Linux with `lsof`).
+- **AI note**: Automated test runs should not leave a long-lived server running; if the port is stuck, run the script above or `pytest` (which attempts to free the port first).
 
 ---
 
@@ -119,6 +146,8 @@ app/
   static/                        # Front-end (index.html, app.js, styles.css)
   server.py                      # Python server
 run.sh                           # Launcher: start server + open browser
+scripts/
+  ensure_port_8765_free.sh       # Free 8765; optional: pass pytest args (uses .venv/bin/pytest)
 tests/
   conftest.py                    # Shared fixtures (app_server, db)
   test_database.py               # DB schema, FTS5, data integrity

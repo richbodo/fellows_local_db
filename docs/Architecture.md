@@ -6,6 +6,7 @@
 - **Database**: SQLite3 with FTS5 full-text search
 - **Frontend**: Vanilla JS SPA with hash routing, no build step
 - **Data source**: JSON dump from EHF wiki, imported via build script
+- **Tests**: pytest for database and HTTP API tests; Playwright for browser e2e. Venv, dev dependencies, Playwright browsers, building `app/fellows.db`, and commands (including freeing port 8765) are documented in the root **README.md**.
 
 ## Data Flow
 
