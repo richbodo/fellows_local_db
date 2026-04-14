@@ -3,12 +3,36 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#4a2c6a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>EHF Fellows Directory</title>
   <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <header class="site-header">
+  <div id="sw-update-banner" class="sw-update-banner hidden" role="status" aria-live="polite">
+    <span>New version available.</span>
+    <button type="button" id="sw-update-reload" class="sw-update-reload">Reload</button>
+  </div>
+
+  <div id="install-landing" class="install-landing hidden" aria-label="Install the app">
+    <div class="install-landing-inner">
+      <div class="install-brand" aria-hidden="true">EHF</div>
+      <h1 class="install-title">EHF Fellows Directory</h1>
+      <p class="install-lead">Install the app on this device to browse the directory offline.</p>
+      <p id="install-status" class="install-status" aria-live="polite"></p>
+      <button type="button" id="install-pwa-button" class="install-pwa-button">Install app</button>
+      <p id="install-ios-hint" class="install-ios-hint hidden">
+        On iPhone or iPad: tap <strong>Share</strong>, then <strong>Add to Home Screen</strong>.
+      </p>
+      <p class="install-support">
+        Having trouble with the app? Contact the EHF Communications Working Group.
+      </p>
+    </div>
+  </div>
+
+  <header id="site-header" class="site-header hidden">
     <h1><a href="#/" class="site-title-link">EHF Fellows Directory</a></h1>
     <div id="search-container" class="header-search">
       <input
@@ -25,7 +49,7 @@
     </nav>
   </header>
   <div id="connection-banner" class="connection-banner hidden" aria-live="polite"></div>
-  <p id="loading">Loading…</p>
+  <p id="loading" class="hidden">Loading…</p>
   <div id="app-wrap" class="hidden">
     <aside id="directory" aria-label="Fellows list">
       <div id="nl-search-container" class="nl-search-container hidden">

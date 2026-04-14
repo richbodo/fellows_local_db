@@ -29,6 +29,11 @@ body {
   min-height: 60vh;
 }
 
+/* #app-wrap beats .hidden alone; keep install landing mode from showing the shell. */
+#app-wrap.hidden {
+  display: none;
+}
+
 h1 {
   margin: 0;
 }
@@ -391,6 +396,11 @@ h1 {
   flex-wrap: wrap;
 }
 
+/* Must beat .site-header { display: flex } when both classes apply (install landing vs app). */
+.site-header.hidden {
+  display: none;
+}
+
 .site-title-link {
   color: inherit;
   text-decoration: none;
@@ -497,4 +507,126 @@ h1 {
   .detail-section-body {
     overflow-x: auto;
   }
+}
+
+/* PWA install landing (browser tab only) */
+.install-landing {
+  min-height: 70vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+}
+
+.install-landing.hidden {
+  display: none;
+}
+
+.install-landing-inner {
+  max-width: 28rem;
+  text-align: center;
+  background: #fff;
+  border-radius: 12px;
+  padding: 2rem 1.75rem;
+  box-shadow: 0 4px 24px rgba(74, 44, 106, 0.12);
+  border: 1px solid #e8e4ef;
+}
+
+.install-brand {
+  width: 4rem;
+  height: 4rem;
+  margin: 0 auto 1rem;
+  border-radius: 12px;
+  background: #4a2c6a;
+  color: #fff;
+  font-weight: 700;
+  font-size: 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.install-title {
+  margin: 0 0 0.75rem;
+  font-size: 1.35rem;
+  color: #2d1f3d;
+}
+
+.install-lead {
+  margin: 0 0 1rem;
+  color: #444;
+  line-height: 1.45;
+}
+
+.install-status {
+  min-height: 1.25rem;
+  font-size: 0.9rem;
+  color: #4a2c6a;
+  margin: 0 0 1rem;
+}
+
+.install-pwa-button {
+  display: inline-block;
+  padding: 0.65rem 1.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #fff;
+  background: #4a2c6a;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.install-pwa-button:hover {
+  background: #3d2460;
+}
+
+.install-pwa-button:focus {
+  outline: 2px solid #4a2c6a;
+  outline-offset: 2px;
+}
+
+.install-ios-hint {
+  margin: 1rem 0 0;
+  font-size: 0.9rem;
+  color: #555;
+  line-height: 1.4;
+}
+
+.install-support {
+  margin: 1.5rem 0 0;
+  font-size: 0.85rem;
+  color: #666;
+  line-height: 1.4;
+}
+
+.sw-update-banner {
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+  background: #e7f1ff;
+  color: #0b3d6b;
+  border: 1px solid #b6d4fe;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.sw-update-reload {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  border-radius: 4px;
+  border: 1px solid #0b3d6b;
+  background: #fff;
+  color: #0b3d6b;
+  cursor: pointer;
+}
+
+.about-support {
+  margin-top: 1rem;
+  font-size: 0.95rem;
+  color: #4a2c6a;
 }

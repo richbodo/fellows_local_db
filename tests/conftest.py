@@ -68,7 +68,15 @@ def _wait_for_server(port, max_attempts=15):
 
 @pytest.fixture(scope="session")
 def app_server():
-    """Start the app server on port 8765 once per test session (for M2 and e2e)."""
+    """Start the app server on port 8765 once per test session (for M2 and e2e).
+
+    If ``E2E_BASE_URL`` is set (e.g. ``https://fellows.globaldonut.com``), skips starting
+    a local server so ``tests/e2e/`` can run against that origin. Use only when running
+    ``pytest tests/e2e/``; unset for ``tests/test_api.py`` and full-suite runs.
+    """
+    if os.environ.get("E2E_BASE_URL"):
+        yield
+        return
     global _server
     from app.server import PORT, HTTPServer, Handler, DB_PATH
     if not os.path.isfile(DB_PATH):

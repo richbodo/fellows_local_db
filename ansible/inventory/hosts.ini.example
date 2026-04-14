@@ -1,0 +1,14 @@
+# Copy to hosts.ini (gitignored if you store real IPs) and adjust.
+# fellows.globaldonut.com → DigitalOcean droplet or Reserved IP.
+
+[fellows]
+# First runs: connect as your normal sudo-capable user on the droplet (here: rsb).
+# After bootstrap, switch ansible_user=deploy (key-only).
+fellows-prod ansible_host=170.64.243.67 ansible_user=rsb
+
+[fellows:vars]
+# sshd listens on 52221 on this droplet — required or Ansible uses port 22.
+ansible_port=52221
+# fellows_domain=fellows.globaldonut.com
+# caddy_admin_email=richbodo@gmail.com
+# ansible_ssh_private_key_file=~/.ssh/id_ed25519

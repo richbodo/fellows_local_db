@@ -1,0 +1,21 @@
+---
+# Bootstrap + deploy for fellows PWA (Caddy + systemd).
+# From repository root (see ../ansible.cfg):
+#   ansible-playbook ansible/site.yml --tags bootstrap --ask-become-pass
+#
+# --ask-become-pass is the sudo password for ansible_user (privilege escalation), not su.
+#
+# Common tag usage:
+#   --tags bootstrap   # users/packages/firewall/ssh hardening/caddy unit
+#   --tags deploy      # app artifact sync + service restart
+
+- name: Fellows PWA on DigitalOcean
+  hosts: fellows
+  gather_facts: true
+  roles:
+    - role: common
+      tags: ["bootstrap"]
+    - role: caddy
+      tags: ["bootstrap"]
+    - role: fellows_app
+      tags: ["bootstrap", "deploy"]

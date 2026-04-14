@@ -1,0 +1,3 @@
+---
+# Overridden in group_vars (e.g. ssh_listen_port: 52221).
+ssh_listen_port: 22

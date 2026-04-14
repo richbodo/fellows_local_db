@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'fellows-app-shell-v1';
+const CACHE_VERSION = 'v1';
 const APP_SHELL_CACHE = `fellows-app-shell-${CACHE_VERSION}`;
 
 const APP_SHELL_ASSETS = [
@@ -6,7 +6,11 @@ const APP_SHELL_ASSETS = [
   '/index.html',
   '/styles.css',
   '/app.js',
-  '/manifest.webmanifest'
+  '/sw.js',
+  '/manifest.webmanifest',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
+  '/icons/icon-maskable-512.png'
 ];
 
 self.addEventListener('install', (event) => {
@@ -87,4 +91,3 @@ function networkFirst(request) {
       })
     );
 }
-

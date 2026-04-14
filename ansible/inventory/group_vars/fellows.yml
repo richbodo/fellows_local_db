@@ -1,0 +1,5 @@
+---
+# Loaded next to this inventory (reliable for connection settings).
+# Keep ssh_listen_port in sync with ansible_port for the common role UFW task.
+ansible_port: 52221
+ssh_listen_port: 52221

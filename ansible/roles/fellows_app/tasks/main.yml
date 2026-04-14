@@ -1,0 +1,46 @@
+---
+- name: Ensure app directory structure exists
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0755"
+  loop:
+    - "{{ app_root }}"
+    - "{{ app_root }}/deploy"
+    - "{{ app_root }}/deploy/dist"
+
+- name: Copy deploy server script
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../deploy/server.py"
+    dest: "{{ app_root }}/deploy/server.py"
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0755"
+  notify: Restart fellows app
+
+- name: Copy deploy dist directory if present
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../deploy/dist/"
+    dest: "{{ app_root }}/deploy/dist/"
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0644"
+  when: lookup('ansible.builtin.fileglob', playbook_dir + '/../deploy/dist/*', wantlist=True) | length > 0
+  notify: Restart fellows app
+
+- name: Deploy systemd service
+  ansible.builtin.template:
+    src: fellows-pwa.service.j2
+    dest: /etc/systemd/system/fellows-pwa.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+
+- name: Ensure fellows app service is enabled and started
+  ansible.builtin.service:
+    name: fellows-pwa
+    state: started
+    enabled: true
