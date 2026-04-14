@@ -1,0 +1,11 @@
+# Copy to ~/.ssh/config (merge with your existing file) and replace placeholders.
+# Control machine (laptop / CI) uses this to run Ansible and ad hoc checks.
+#
+#   ssh fellows-globaldonut 'systemctl status fellows-pwa caddy --no-pager'
+#
+# Host fellows-globaldonut
+#   HostName 170.64.243.67
+#   Port 52221
+#   User deploy
+#   IdentityFile ~/.ssh/id_ed25519
+#   IdentitiesOnly yes

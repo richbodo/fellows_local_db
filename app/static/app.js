@@ -20,6 +20,118 @@
   var nlSearchStatusEl = document.getElementById('nl-search-status');
   var detailEl = document.getElementById('detail');
   var fullFellowsCache = null;
+  var installLandingEl = document.getElementById('install-landing');
+  var installButtonEl = document.getElementById('install-pwa-button');
+  var installStatusEl = document.getElementById('install-status');
+  var iosHintEl = document.getElementById('install-ios-hint');
+  var swUpdateBannerEl = document.getElementById('sw-update-banner');
+  var swUpdateReloadEl = document.getElementById('sw-update-reload');
+  var siteHeaderEl = document.getElementById('site-header');
+  var deferredInstallPrompt = null;
+
+  function isStandaloneDisplayMode() {
+    if (typeof window.navigator !== 'undefined' && window.navigator.standalone === true) {
+      return true;
+    }
+    return window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
+  }
+
+  function setInstallStatus(msg) {
+    if (!installStatusEl) return;
+    installStatusEl.textContent = msg || '';
+  }
+
+  function showSwUpdateBanner() {
+    if (swUpdateBannerEl) swUpdateBannerEl.classList.remove('hidden');
+  }
+
+  function listenForSwUpdate(reg) {
+    if (!reg || typeof reg.addEventListener !== 'function') return;
+    reg.addEventListener('updatefound', function () {
+      var nw = reg.installing;
+      if (!nw) return;
+      nw.addEventListener('statechange', function () {
+        if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+          showSwUpdateBanner();
+        }
+      });
+    });
+  }
+
+  function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) return;
+    window.addEventListener('load', function () {
+      navigator.serviceWorker
+        .register('/sw.js')
+        .then(function (reg) {
+          listenForSwUpdate(reg);
+          return reg;
+        })
+        .catch(function () {});
+    });
+  }
+
+  function initSwReloadButton() {
+    if (!swUpdateReloadEl) return;
+    swUpdateReloadEl.addEventListener('click', function () {
+      window.location.reload();
+    });
+  }
+
+  function isIosSafari() {
+    var ua = navigator.userAgent || '';
+    var iOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    var webkit = /WebKit/.test(ua);
+    var noChrome = !/CriOS|FxiOS|EdgiOS/.test(ua);
+    return iOS && webkit && noChrome;
+  }
+
+  function initBrowserInstallMode() {
+    if (installLandingEl) installLandingEl.classList.remove('hidden');
+    if (siteHeaderEl) siteHeaderEl.classList.add('hidden');
+    showLoading(false);
+    showApp(false);
+    if (connectionBannerEl) connectionBannerEl.classList.add('hidden');
+
+    if (isIosSafari() && iosHintEl) {
+      iosHintEl.classList.remove('hidden');
+      if (installButtonEl) installButtonEl.classList.add('hidden');
+    }
+
+    window.addEventListener('beforeinstallprompt', function (e) {
+      e.preventDefault();
+      deferredInstallPrompt = e;
+      setInstallStatus('');
+    });
+
+    window.addEventListener('appinstalled', function () {
+      deferredInstallPrompt = null;
+      setInstallStatus('App installed — open it from your dock or app drawer.');
+      if (installButtonEl) installButtonEl.classList.add('hidden');
+    });
+
+    if (installButtonEl) {
+      installButtonEl.addEventListener('click', function () {
+        if (deferredInstallPrompt) {
+          deferredInstallPrompt.prompt();
+          deferredInstallPrompt.userChoice
+            .then(function (choice) {
+              deferredInstallPrompt = null;
+              if (choice && choice.outcome === 'accepted') {
+                setInstallStatus('Installing…');
+              }
+            })
+            .catch(function () {
+              deferredInstallPrompt = null;
+            });
+        } else {
+          setInstallStatus(
+            'Use your browser’s install option (menu) or Add to Home Screen on iOS.'
+          );
+        }
+      });
+    }
+  }
 
   function showLoading(show) {
     loadingEl.classList.toggle('hidden', !show);
@@ -254,6 +366,7 @@
     aboutHtml += 'Never post this anywhere\u2014 it contains the relevant bits of data from the old fellows directory. ';
     aboutHtml += 'There is no API, login, or web app, so this can only be shared intentionally. ';
     aboutHtml += 'For support, request to join the github repository or just ask on one of the fellows channels.</p>';
+    aboutHtml += '<p class="about-support">Having trouble with the app? Contact the EHF Communications Working Group.</p>';
     aboutHtml += '<p class="about-repo"><a href="https://github.com/richbodo/fellows_local_db" target="_blank" rel="noopener">';
     aboutHtml += '<svg class="github-icon" viewBox="0 0 16 16" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>';
     aboutHtml += ' richbodo/fellows_local_db</a></p>';
@@ -328,46 +441,6 @@
         if (getSlugFromHash() === slug) renderDetail(null);
       });
   }
-
-  // Phase 1: fetch list-only, render directory immediately (no images)
-  fetch('/api/fellows')
-    .then(function (r) { return r.json(); })
-    .then(function (data) {
-      list = Array.isArray(data) ? data : [];
-      renderDirectory();
-      route();
-      // Phase 2: full data in background
-      fetch('/api/fellows?full=1')
-        .then(function (r) { return r.json(); })
-        .then(function (full) {
-          if (Array.isArray(full)) {
-            fullFellowsCache = full;
-            saveFullFellowsToIndexedDB(full);
-            full.forEach(function (f) {
-              if (f.slug) fellowsBySlug.set(f.slug, f);
-              if (f.record_id) fellowsBySlug.set(f.record_id, f);
-            });
-          }
-          route();
-        })
-        .catch(function () {});
-    })
-    .catch(function () {
-      loadingEl.textContent = 'Failed to load directory.';
-    });
-
-  window.addEventListener('hashchange', route);
-
-  window.addEventListener('keydown', function (e) {
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-    if (e.key === 'ArrowLeft') {
-      var prev = detailEl.querySelector('.fellow-nav-arrow--prev:not(.fellow-nav-arrow--hidden)');
-      if (prev) { e.preventDefault(); prev.click(); }
-    } else if (e.key === 'ArrowRight') {
-      var next = detailEl.querySelector('.fellow-nav-arrow--next:not(.fellow-nav-arrow--hidden)');
-      if (next) { e.preventDefault(); next.click(); }
-    }
-  });
 
   function runSearch(q) {
     if (!q) {
@@ -541,17 +614,6 @@
     runSearch(q);
   }
 
-  if (searchInputEl) {
-    searchInputEl.addEventListener('input', function () {
-      if (searchDebounceId) {
-        clearTimeout(searchDebounceId);
-      }
-      searchDebounceId = setTimeout(function () {
-        handleSearchInput();
-      }, 250);
-    });
-  }
-
   function hasWindowAI() {
     return typeof window !== 'undefined' && window.ai;
   }
@@ -635,12 +697,6 @@
     }
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initWindowAISearch);
-  } else {
-    initWindowAISearch();
-  }
-
   function updateConnectionBanner() {
     if (!connectionBannerEl) return;
     if (navigator.onLine) {
@@ -655,17 +711,73 @@
     }
   }
 
-  window.addEventListener('online', updateConnectionBanner);
-  window.addEventListener('offline', updateConnectionBanner);
-  updateConnectionBanner();
+  initSwReloadButton();
 
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', function () {
-      navigator.serviceWorker
-        .register('/sw.js')
-        .catch(function () {
-          // Ignore registration errors; app still works without PWA features.
-        });
+  if (isStandaloneDisplayMode()) {
+    if (siteHeaderEl) siteHeaderEl.classList.remove('hidden');
+    loadingEl.classList.remove('hidden');
+
+    fetch('/api/fellows')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        list = Array.isArray(data) ? data : [];
+        renderDirectory();
+        route();
+        fetch('/api/fellows?full=1')
+          .then(function (r) { return r.json(); })
+          .then(function (full) {
+            if (Array.isArray(full)) {
+              fullFellowsCache = full;
+              saveFullFellowsToIndexedDB(full);
+              full.forEach(function (f) {
+                if (f.slug) fellowsBySlug.set(f.slug, f);
+                if (f.record_id) fellowsBySlug.set(f.record_id, f);
+              });
+            }
+            route();
+          })
+          .catch(function () {});
+      })
+      .catch(function () {
+        loadingEl.textContent = 'Failed to load directory.';
+      });
+
+    window.addEventListener('hashchange', route);
+
+    window.addEventListener('keydown', function (e) {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.key === 'ArrowLeft') {
+        var prev = detailEl.querySelector('.fellow-nav-arrow--prev:not(.fellow-nav-arrow--hidden)');
+        if (prev) { e.preventDefault(); prev.click(); }
+      } else if (e.key === 'ArrowRight') {
+        var next = detailEl.querySelector('.fellow-nav-arrow--next:not(.fellow-nav-arrow--hidden)');
+        if (next) { e.preventDefault(); next.click(); }
+      }
     });
+
+    if (searchInputEl) {
+      searchInputEl.addEventListener('input', function () {
+        if (searchDebounceId) {
+          clearTimeout(searchDebounceId);
+        }
+        searchDebounceId = setTimeout(function () {
+          handleSearchInput();
+        }, 250);
+      });
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initWindowAISearch);
+    } else {
+      initWindowAISearch();
+    }
+
+    window.addEventListener('online', updateConnectionBanner);
+    window.addEventListener('offline', updateConnectionBanner);
+    updateConnectionBanner();
+  } else {
+    initBrowserInstallMode();
   }
+
+  registerServiceWorker();
 })();

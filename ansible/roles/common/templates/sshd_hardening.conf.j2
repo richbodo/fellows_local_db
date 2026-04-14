@@ -1,0 +1,5 @@
+PasswordAuthentication {{ 'no' if disable_password_ssh else 'yes' }}
+KbdInteractiveAuthentication no
+ChallengeResponseAuthentication no
+PubkeyAuthentication yes
+PermitRootLogin prohibit-password
