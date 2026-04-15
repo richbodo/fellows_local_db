@@ -11,6 +11,18 @@
     - "{{ app_root }}/deploy"
     - "{{ app_root }}/deploy/dist"
 
+# Rsync uses SSH to the managed host; the remote rsync process runs as the SSH user. That user must be able
+# to write {{ app_root }}/deploy/dist (owned by deploy). Inventory may still use ansible_user=rsb for bootstrap;
+# this task overrides ansible_user for this step only so rsync connects as deploy (see README).
+- name: Ensure deploy user owns app deploy tree (fix permissions before rsync)
+  ansible.builtin.file:
+    path: "{{ app_root }}/deploy"
+    state: directory
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    recurse: true
+  become: true
+
 - name: Copy deploy server script
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../deploy/server.py"
@@ -20,14 +32,31 @@
     mode: "0755"
   notify: Restart fellows app
 
-- name: Copy deploy dist directory if present
+- name: Copy deploy SQLite API helper
   ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../deploy/dist/"
-    dest: "{{ app_root }}/deploy/dist/"
+    src: "{{ playbook_dir }}/../deploy/sqlite_api_support.py"
+    dest: "{{ app_root }}/deploy/sqlite_api_support.py"
     owner: "{{ deploy_user }}"
     group: "{{ deploy_user }}"
     mode: "0644"
+  notify: Restart fellows app
+
+# Rsync (not recursive copy): hundreds of files + large blobs are reliable and resumable; copy() can stall mid-tree.
+# Force SSH as deploy_user: if inventory ansible_user is rsb, rsb cannot write deploy-owned paths (mode 0755).
+- name: Rsync deploy dist from controller to host
+  ansible.posix.synchronize:
+    mode: push
+    src: "{{ playbook_dir }}/../deploy/dist/"
+    dest: "{{ app_root }}/deploy/dist/"
+    delete: true
+    compress: true
+    partial: true
+    times: true
   when: lookup('ansible.builtin.fileglob', playbook_dir + '/../deploy/dist/*', wantlist=True) | length > 0
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_user: "{{ deploy_user }}"
   notify: Restart fellows app
 
 - name: Deploy systemd service

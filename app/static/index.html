@@ -49,7 +49,18 @@
     </nav>
   </header>
   <div id="connection-banner" class="connection-banner hidden" aria-live="polite"></div>
-  <p id="loading" class="hidden">Loading…</p>
+  <div id="loading-panel" class="loading-panel hidden">
+    <p id="loading">Loading…</p>
+    <div id="boot-error-panel" class="boot-error-panel hidden" role="alert">
+      <p class="boot-error-lead"><strong>Could not load the directory.</strong></p>
+      <p class="boot-error-hint">
+        If you are debugging: use the report below and the browser console. Common causes include a stale service worker
+        (use <strong>Reload</strong> on the update banner), missing <code>fellows.db</code> or API routes on the server,
+        or OPFS / SQLite blocked in this context.
+      </p>
+      <pre id="boot-error-pre" class="boot-error-pre"></pre>
+    </div>
+  </div>
   <div id="app-wrap" class="hidden">
     <aside id="directory" aria-label="Fellows list">
       <div id="nl-search-container" class="nl-search-container hidden">

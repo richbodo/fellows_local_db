@@ -147,6 +147,28 @@ python build/build_pwa.py
 
 See `ansible/README.md` for deploy. Phase 2 extends this script with `fellows.db` and images.
 
+### Production HTTPS (Phase 3)
+
+The VPS serves **`deploy/dist/`** via **`deploy/server.py`** on **`127.0.0.1:8765`** behind **Caddy** (TLS, gzip). Build the bundle, then sync with Ansible (`--tags deploy`) or follow `ansible/README.md` for the full bootstrap.
+
+When **`fellows.db`** is present in **`deploy/dist/`**, the same process also serves the **read-only JSON API** (`/api/fellows`, `/api/search`, `/api/stats`, etc.) as in local dev. That lets the installed PWA load the directory if **sqlite-wasm / OPFS** fails in the browser (the offline-first path still uses `/fellows.db` + local SQLite when it works).
+
+- **Example Caddy site block:** `deploy/Caddyfile.example` (templated copy lives in `ansible/roles/caddy/templates/Caddyfile.j2`).
+- **Smoke:** `./scripts/smoke_prod.sh` (override base URL with `FELLOWS_BASE_URL=…`).
+- **DNS/TLS check:** `./scripts/check_deploy_env.sh` (override host with `FELLOWS_HOST=…`).
+
+`deploy/server.py` honors **`FELLOWS_DIST_ROOT`** if the static root is not the default `<deploy>/dist/`. Access logs go to **stdout**; startup line goes to stderr. Deploy ships **`deploy/sqlite_api_support.py`** next to **`server.py`** (Ansible copies both).
+
+**Routine deploy from your machine:** `./scripts/deploy_pwa.sh --ask-become-pass` builds `deploy/dist/`, runs the deploy role, and smoke-checks HTTPS (see `ansible/README.md`).
+
+### Production management (operators & maintainers)
+
+- **Server bootstrap, Caddy, systemd, and Ansible variables** are documented in **[`ansible/README.md`](ansible/README.md)**. Use that file as the source of truth for inventory, tags, HTTPS, and troubleshooting the VPS layout.
+- **Deploy path:** `./scripts/deploy_pwa.sh` runs `build/build_pwa.py`, syncs `deploy/dist/` and `deploy/server.py` (plus `sqlite_api_support.py`), then runs an HTTPS smoke check. Fix local or Ansible issues before relying on the installed PWA.
+- **Virtualenv (`.venv`):** use it on your **development machine** for anything that needs dev dependencies: `pytest`, Playwright e2e, and helpers that expect **`.venv/bin/pytest`**. The production host only needs **system Python 3** to run `deploy/server.py` (no project venv on the server unless you choose to add one). Running **`python app/server.py`** locally does not require activating `.venv` if you are not running tests.
+- **Smoke / DNS checks:** `./scripts/smoke_prod.sh` and `./scripts/check_deploy_env.sh` (see [Production HTTPS](#production-https-phase-3) above).
+- **Debugging the installed PWA:** if the directory does not load in **standalone** (installed) mode, the app shows a **developer report** (URL, service worker state, OPFS/sqlite eligibility, boot trace, and HTTP status for `/fellows.db`, `/api/fellows`, etc.). Also use Chrome **DevTools → Application → Service Workers / Storage**, and the **Network** tab to confirm `fellows.db` and `/api/*` return **200** over HTTPS (not a cached stale `app.js` or missing API).
+
 ## Project layout
 
 ```

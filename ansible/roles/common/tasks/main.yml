@@ -8,6 +8,7 @@
       - ufw
       - ca-certificates
       - gnupg
+      - rsync
     state: present
     update_cache: true
 

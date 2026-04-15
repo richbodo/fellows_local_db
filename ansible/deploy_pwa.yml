@@ -1,0 +1,68 @@
+---
+# Build deploy/dist on the Ansible controller, then sync to the fellows host and restart.
+# Requires: Python 3 on the controller, repo layout unchanged (build/build_pwa.py).
+#
+# From repository root:
+#   ansible-playbook ansible/deploy_pwa.yml --ask-become-pass
+#
+# Skip the build step (reuse existing deploy/dist/):
+#   ansible-playbook ansible/deploy_pwa.yml --extra-vars "fellows_skip_build=true" --ask-become-pass
+#
+# Skip HTTPS smoke (no outbound curl/requests to production):
+#   ansible-playbook ansible/deploy_pwa.yml --extra-vars "fellows_smoke=false" --ask-become-pass
+#
+# Override smoke URL:
+#   ansible-playbook ansible/deploy_pwa.yml --extra-vars "fellows_smoke_url=https://staging.example.com" --ask-become-pass
+
+- name: Build PWA bundle on controller
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars:
+    repo_root: "{{ playbook_dir | dirname }}"
+  tasks:
+    - name: Run build/build_pwa.py
+      ansible.builtin.command:
+        cmd: python3 build/build_pwa.py
+        chdir: "{{ repo_root }}"
+      register: _build
+      changed_when: "'Wrote' in (_build.stdout | default(''))"
+      when: not (fellows_skip_build | default(false) | bool)
+
+- name: Deploy to fellows host
+  hosts: fellows
+  gather_facts: true
+  roles:
+    - fellows_app
+
+- name: Smoke test production HTTPS (controller)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars:
+    fellows_smoke_url: "{{ fellows_smoke_url | default('https://fellows.globaldonut.com') }}"
+  tasks:
+    - name: GET /healthz
+      ansible.builtin.uri:
+        url: "{{ fellows_smoke_url | trim('/') }}/healthz"
+        method: GET
+        status_code: 200
+        return_content: true
+      register: _healthz
+      when: fellows_smoke | default(true) | bool
+
+    - name: GET /manifest.webmanifest (JSON)
+      ansible.builtin.uri:
+        url: "{{ fellows_smoke_url | trim('/') }}/manifest.webmanifest"
+        method: GET
+        status_code: 200
+      when: fellows_smoke | default(true) | bool
+
+    - name: Report healthz body
+      ansible.builtin.debug:
+        msg: "{{ _healthz.content | default('') }}"
+      when:
+        - fellows_smoke | default(true) | bool
+        - _healthz is defined
