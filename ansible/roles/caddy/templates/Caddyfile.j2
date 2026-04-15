@@ -1,3 +1,4 @@
+# Managed by Ansible — fellows PWA behind Caddy (Let's Encrypt).
 {
 	email {{ caddy_admin_email }}
 }
@@ -7,5 +8,6 @@
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 	}
+	# App binds 127.0.0.1:8765 only (see fellows-pwa.service).
 	reverse_proxy 127.0.0.1:8765
 }

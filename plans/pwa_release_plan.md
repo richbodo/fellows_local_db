@@ -242,7 +242,14 @@ for this user.
 
 ### Milestone test
 
-**Infra / automated**
+**Repo deliverables (Phase 3 implementation)**
+
+- `deploy/server.py`: `FELLOWS_DIST_ROOT`, `Cache-Control` (long cache for static assets; `no-cache` for HTML/SW/manifest; `no-store` for `/healthz`), request logging to **stdout**, bind **`127.0.0.1`** only.
+- `deploy/Caddyfile.example` documents the Caddy site block (Ansible template remains source of truth for the droplet).
+- `scripts/check_deploy_env.sh` — optional `dig` + `curl` for DNS/TLS smoke.
+- `README.md` / `ansible/README.md` — production and verify steps updated.
+
+**Infra / automated (operator)**
 
 - `dig fellows.globaldonut.com A` (or `nslookup`) returns the expected IPv4 (reserved or droplet).
 - `curl -fsS https://fellows.globaldonut.com/healthz` succeeds; journal shows `fellows-pwa` and `caddy` healthy.

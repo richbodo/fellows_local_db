@@ -20,3 +20,4 @@ Read README.md for project setup, API docs, and test commands. Read docs/Archite
 - Do not leave a long-lived server running in the terminal.
 - The DB file `app/fellows.db` is gitignored; rebuild from JSON source.
 - Always run relevant tests after changes.
+- For deploy- or infra-related work, put **manual QA steps for the maintainer** (smoke scripts, DNS/TLS checks, browser install flow) in the **PR description**, not only in commits or docs.

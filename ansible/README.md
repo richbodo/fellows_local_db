@@ -60,5 +60,8 @@ ansible-playbook ansible/site.yml --tags deploy --ask-become-pass
 
 ```bash
 ./scripts/smoke_prod.sh
+./scripts/check_deploy_env.sh
 ssh -p 52221 deploy@170.64.243.67 'systemctl status fellows-pwa caddy --no-pager'
 ```
+
+`check_deploy_env.sh` runs `dig` for the `A` record and `curl` against `https://<host>/` and `/healthz` (set `FELLOWS_HOST` if not using `fellows.globaldonut.com`).

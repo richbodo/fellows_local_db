@@ -7,6 +7,8 @@ Type=simple
 User={{ deploy_user }}
 Group={{ deploy_user }}
 WorkingDirectory={{ app_root }}/deploy
+Environment=PYTHONUNBUFFERED=1
+# Optional override: Environment=FELLOWS_DIST_ROOT={{ app_root }}/deploy/dist
 ExecStart=/usr/bin/python3 {{ app_root }}/deploy/server.py
 Restart=on-failure
 RestartSec=3
