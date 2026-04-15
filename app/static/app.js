@@ -252,11 +252,17 @@
       kind: 'api',
       getList: function () {
         return fetch('/api/fellows').then(function (r) {
+          if (!r.ok) {
+            throw new Error('GET /api/fellows failed: ' + r.status);
+          }
           return r.json();
         });
       },
       getFull: function () {
         return fetch('/api/fellows?full=1').then(function (r) {
+          if (!r.ok) {
+            throw new Error('GET /api/fellows?full=1 failed: ' + r.status);
+          }
           return r.json();
         });
       },

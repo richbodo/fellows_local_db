@@ -172,11 +172,12 @@ Deploy so Chrome can mint a WebAPK (requires **HTTPS** and a stable **origin**).
 ### Tasks
 
 1. **Production server** — `deploy/server.py` (Python stdlib `http.server`):
-   - Serves static files from `deploy/dist/` (or configurable `DEPLOY_ROOT`)
-   - `Cache-Control` headers: long-lived for hashed assets, `no-cache` for `sw.js` (and manifest if needed)
+   - Serves static files from `deploy/dist/` (or configurable `FELLOWS_DIST_ROOT`)
+   - When `fellows.db` exists in that tree, also serves the **same read-only directory JSON API** as `app/server.py` (`/api/fellows`, `/api/search`, …) via `deploy/sqlite_api_support.py`, so the installed PWA works if browser sqlite-wasm/OPFS fails
+   - `Cache-Control` headers: long-lived for static assets, `no-cache` for HTML / `sw.js` / manifest, `no-store` for `/healthz` and JSON API
    - Health check at `GET /healthz`
    - Request logging to stdout (journald under systemd)
-   - **Phases 1–3:** static + health only. **Phase 4** adds `/api/*` here (magic link); keep one process binding **127.0.0.1:8765** behind Caddy.
+   - **Phase 4** adds magic-link and session APIs; keep one process binding **127.0.0.1:8765** behind Caddy.
 
 2. **Caddy config** — `deploy/Caddyfile` (template in repo; render with Ansible or sed):
    - Site block for **`fellows.globaldonut.com`** only (other subdomains on the same VM get their own `import` or separate files later).
