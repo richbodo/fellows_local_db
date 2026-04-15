@@ -1,0 +1,15 @@
+# Example Caddy config for fellows.globaldonut.com (copy to /etc/caddy/Caddyfile or use
+# ansible/roles/caddy/templates/Caddyfile.j2). Replace the email with your ACME registration address.
+
+{
+	email your-letsencrypt-email@example.com
+}
+
+fellows.globaldonut.com {
+	encode gzip
+	header {
+		# Optional: enable after you are sure HTTPS-only is permanent.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+	}
+	reverse_proxy 127.0.0.1:8765
+}

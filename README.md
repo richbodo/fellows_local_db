@@ -147,6 +147,16 @@ python build/build_pwa.py
 
 See `ansible/README.md` for deploy. Phase 2 extends this script with `fellows.db` and images.
 
+### Production HTTPS (Phase 3)
+
+The VPS serves **`deploy/dist/`** via **`deploy/server.py`** on **`127.0.0.1:8765`** behind **Caddy** (TLS, gzip). Build the bundle, then sync with Ansible (`--tags deploy`) or follow `ansible/README.md` for the full bootstrap.
+
+- **Example Caddy site block:** `deploy/Caddyfile.example` (templated copy lives in `ansible/roles/caddy/templates/Caddyfile.j2`).
+- **Smoke:** `./scripts/smoke_prod.sh` (override base URL with `FELLOWS_BASE_URL=…`).
+- **DNS/TLS check:** `./scripts/check_deploy_env.sh` (override host with `FELLOWS_HOST=…`).
+
+`deploy/server.py` honors **`FELLOWS_DIST_ROOT`** if the static root is not the default `<deploy>/dist/`. Access logs go to **stdout**; startup line goes to stderr.
+
 ## Project layout
 
 ```
