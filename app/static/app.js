@@ -28,6 +28,350 @@
   var swUpdateReloadEl = document.getElementById('sw-update-reload');
   var siteHeaderEl = document.getElementById('site-header');
   var deferredInstallPrompt = null;
+  var directoryDataSource = 'api';
+  var dataProvider = null;
+
+  var FELLOW_COLS = [
+    'record_id',
+    'slug',
+    'name',
+    'bio_tagline',
+    'fellow_type',
+    'cohort',
+    'contact_email',
+    'key_links',
+    'key_links_urls',
+    'image_url',
+    'currently_based_in',
+    'search_tags',
+    'fellow_status',
+    'gender_pronouns',
+    'ethnicity',
+    'primary_citizenship',
+    'global_regions_currently_based_in'
+  ];
+
+  function rowSqliteToFellow(row) {
+    var out = {};
+    var i;
+    for (i = 0; i < FELLOW_COLS.length; i++) {
+      var k = FELLOW_COLS[i];
+      out[k] = row[k];
+    }
+    if (row.key_links_urls) {
+      try {
+        out.key_links_urls = JSON.parse(row.key_links_urls);
+      } catch (e) {
+        out.key_links_urls = row.key_links_urls;
+      }
+    }
+    if (row.extra_json) {
+      try {
+        var ex = JSON.parse(row.extra_json);
+        if (ex && typeof ex === 'object') {
+          for (var ek in ex) {
+            if (Object.prototype.hasOwnProperty.call(ex, ek)) {
+              out[ek] = ex[ek];
+            }
+          }
+        }
+      } catch (e2) {}
+    }
+    return out;
+  }
+
+  function dbSelectAll(db, sql, bind) {
+    var st = db.prepare(sql);
+    var out = [];
+    try {
+      if (bind !== undefined && bind !== null) {
+        st.bind(bind);
+      }
+      while (st.step()) {
+        out.push(st.get({}));
+      }
+    } finally {
+      st.finalize();
+    }
+    return out;
+  }
+
+  function dbSelectOne(db, sql, bind) {
+    var rows = dbSelectAll(db, sql, bind);
+    return rows.length ? rows[0] : null;
+  }
+
+  function buildStatsFromDb(db) {
+    var total = dbSelectOne(db, 'SELECT COUNT(*) AS c FROM fellows', null);
+    var totalN = total ? total.c : 0;
+
+    function groupCounts(sql) {
+      var rows = dbSelectAll(db, sql, null);
+      return rows.map(function (r) {
+        return { label: r.label, count: r.cnt };
+      });
+    }
+
+    var regionCounter = {};
+    var st = db.prepare(
+      'SELECT global_regions_currently_based_in FROM fellows WHERE global_regions_currently_based_in IS NOT NULL AND global_regions_currently_based_in != \'\''
+    );
+    try {
+      while (st.step()) {
+        var val = st.get(0);
+        if (!val) continue;
+        val.split(',').forEach(function (region) {
+          region = String(region).trim();
+          if (region) {
+            regionCounter[region] = (regionCounter[region] || 0) + 1;
+          }
+        });
+      }
+    } finally {
+      st.finalize();
+    }
+    var byRegion = Object.keys(regionCounter).map(function (k) {
+      return { label: k, count: regionCounter[k] };
+    });
+    byRegion.sort(function (a, b) {
+      return b.count - a.count;
+    });
+
+    var colLabels = {
+      name: 'Name',
+      bio_tagline: 'Bio / Tagline',
+      fellow_type: 'Fellow Type',
+      cohort: 'Cohort',
+      contact_email: 'Contact Email',
+      key_links: 'Key Links',
+      image_url: 'Image URL',
+      currently_based_in: 'Currently Based In',
+      search_tags: 'Search Tags',
+      fellow_status: 'Fellow Status',
+      gender_pronouns: 'Gender / Pronouns',
+      ethnicity: 'Ethnicity',
+      primary_citizenship: 'Primary Citizenship',
+      global_regions_currently_based_in: 'Global Regions Based In'
+    };
+    var fieldCounts = [];
+    var col;
+    for (col in colLabels) {
+      if (!Object.prototype.hasOwnProperty.call(colLabels, col)) continue;
+      var cnt = dbSelectOne(
+        db,
+        'SELECT COUNT(*) AS c FROM fellows WHERE ' + col + ' IS NOT NULL AND ' + col + " != ''",
+        null
+      );
+      fieldCounts.push({ label: colLabels[col], count: cnt ? cnt.c : 0 });
+    }
+    var extraLabels = {
+      all_citizenships: 'All Citizenships',
+      ventures: 'Ventures',
+      industries: 'Industries',
+      career_highlights: 'Career Highlights',
+      key_networks: 'Key Networks',
+      how_im_looking_to_support_the_nz_ecosystem: 'How Supporting NZ Ecosystem',
+      what_is_your_main_mode_of_working: 'Main Mode of Working',
+      do_you_consider_yourself_an_investor_in_one_or_more_of_these_categories: 'Investor Categories',
+      mobile_number: 'Mobile Number',
+      five_things_to_know: 'Five Things to Know',
+      skills_to_give: 'Skills to Give',
+      skills_to_receive: 'Skills to Receive'
+    };
+    var key;
+    for (key in extraLabels) {
+      if (!Object.prototype.hasOwnProperty.call(extraLabels, key)) continue;
+      var path = '$.' + key;
+      var ec = dbSelectOne(
+        db,
+        'SELECT COUNT(*) AS c FROM fellows WHERE extra_json IS NOT NULL AND json_extract(extra_json, ?) IS NOT NULL AND json_extract(extra_json, ?) != \'\'',
+        [path, path]
+      );
+      fieldCounts.push({ label: extraLabels[key], count: ec ? ec.c : 0 });
+    }
+    fieldCounts.sort(function (a, b) {
+      return b.count - a.count;
+    });
+
+    return {
+      total: totalN,
+      by_fellow_type: groupCounts(
+        'SELECT fellow_type AS label, COUNT(*) AS cnt FROM fellows WHERE fellow_type IS NOT NULL GROUP BY fellow_type ORDER BY cnt DESC'
+      ),
+      by_cohort: groupCounts(
+        'SELECT cohort AS label, COUNT(*) AS cnt FROM fellows WHERE cohort IS NOT NULL GROUP BY cohort ORDER BY cnt DESC'
+      ),
+      by_region: byRegion,
+      field_completeness: fieldCounts
+    };
+  }
+
+  function createSqliteDataProvider(db) {
+    return {
+      kind: 'sqlite',
+      getList: function () {
+        return Promise.resolve(
+          dbSelectAll(db, 'SELECT record_id, slug, name FROM fellows ORDER BY name ASC', null)
+        );
+      },
+      getFull: function () {
+        var rows = dbSelectAll(db, 'SELECT * FROM fellows ORDER BY name ASC', null);
+        return Promise.resolve(rows.map(rowSqliteToFellow));
+      },
+      getOne: function (slugOrId) {
+        var row = dbSelectOne(
+          db,
+          'SELECT * FROM fellows WHERE slug = ? OR record_id = ? LIMIT 1',
+          [slugOrId, slugOrId]
+        );
+        return Promise.resolve(row ? rowSqliteToFellow(row) : null);
+      },
+      search: function (q) {
+        var qq = (q || '').trim();
+        if (!qq) {
+          return Promise.resolve([]);
+        }
+        if (qq.length > 200) {
+          qq = qq.slice(0, 200);
+        }
+        var rows = dbSelectAll(
+          db,
+          'SELECT f.* FROM fellows f WHERE f.rowid IN (SELECT rowid FROM fellows_fts WHERE fellows_fts MATCH ?) ORDER BY f.name ASC',
+          [qq]
+        );
+        return Promise.resolve(rows.map(rowSqliteToFellow));
+      },
+      getStats: function () {
+        return Promise.resolve(buildStatsFromDb(db));
+      }
+    };
+  }
+
+  function createApiDataProvider() {
+    return {
+      kind: 'api',
+      getList: function () {
+        return fetch('/api/fellows').then(function (r) {
+          return r.json();
+        });
+      },
+      getFull: function () {
+        return fetch('/api/fellows?full=1').then(function (r) {
+          return r.json();
+        });
+      },
+      getOne: function (slugOrId) {
+        return fetch('/api/fellows/' + encodeURIComponent(slugOrId)).then(function (r) {
+          return r.ok ? r.json() : null;
+        });
+      },
+      search: function (q) {
+        return fetch('/api/search?q=' + encodeURIComponent(q)).then(function (r) {
+          return r.ok ? r.json() : [];
+        });
+      },
+      getStats: function () {
+        return fetch('/api/stats').then(function (r) {
+          return r.ok ? r.json() : null;
+        });
+      }
+    };
+  }
+
+  function shouldTryOpfsProvider() {
+    if (!isStandaloneDisplayMode()) {
+      return false;
+    }
+    if (typeof globalThis.sqlite3InitModule !== 'function') {
+      return false;
+    }
+    if (!navigator.storage || typeof navigator.storage.getDirectory !== 'function') {
+      return false;
+    }
+    if (!globalThis.isSecureContext) {
+      return false;
+    }
+    return true;
+  }
+
+  function setSetupStatus(msg) {
+    if (!loadingEl) return;
+    loadingEl.textContent = msg || 'Loading…';
+  }
+
+  function fetchFellowsDbWithProgress(onProgress) {
+    return fetch('/fellows.db').then(function (r) {
+      if (!r.ok) {
+        throw new Error('fellows.db fetch failed');
+      }
+      var lenHeader = r.headers.get('Content-Length');
+      var total = lenHeader ? parseInt(lenHeader, 10) : 0;
+      if (!r.body || !r.body.getReader) {
+        return r.arrayBuffer().then(function (buf) {
+          if (onProgress && total) {
+            onProgress(buf.byteLength, total);
+          }
+          return new Uint8Array(buf);
+        });
+      }
+      var reader = r.body.getReader();
+      var chunks = [];
+      var received = 0;
+      return reader.read().then(function processChunk(result) {
+        if (result.done) {
+          var i;
+          var totalLen = 0;
+          for (i = 0; i < chunks.length; i++) {
+            totalLen += chunks[i].byteLength;
+          }
+          var out = new Uint8Array(totalLen);
+          var pos = 0;
+          for (i = 0; i < chunks.length; i++) {
+            out.set(chunks[i], pos);
+            pos += chunks[i].byteLength;
+          }
+          return out;
+        }
+        chunks.push(result.value);
+        received += result.value.byteLength;
+        if (onProgress && total) {
+          onProgress(received, total);
+        }
+        return reader.read().then(processChunk);
+      });
+    });
+  }
+
+  function initOpfsDataProvider() {
+    setSetupStatus('Setting up your local directory…');
+    return globalThis
+      .sqlite3InitModule()
+      .then(function (Module) {
+        return Module.sqlite3.installOpfsSAHPoolVfs();
+      })
+      .then(function (poolUtil) {
+        setSetupStatus('Downloading directory data…');
+        return fetchFellowsDbWithProgress(function (n, total) {
+          var pct = total ? Math.round((100 * n) / total) : 0;
+          setSetupStatus('Downloading directory data… ' + pct + '%');
+        }).then(function (bytes) {
+          setSetupStatus('Preparing offline database…');
+          poolUtil.importDb('fellows.db', bytes);
+          var db = new poolUtil.OpfsSAHPoolDb('fellows.db');
+          return createSqliteDataProvider(db);
+        });
+      });
+  }
+
+  function pickDataProvider() {
+    if (!shouldTryOpfsProvider()) {
+      return Promise.resolve(createApiDataProvider());
+    }
+    return initOpfsDataProvider().catch(function (e) {
+      console.warn('Local SQLite / OPFS unavailable, using API:', e);
+      return createApiDataProvider();
+    });
+  }
 
   function isStandaloneDisplayMode() {
     if (typeof window.navigator !== 'undefined' && window.navigator.standalone === true) {
@@ -378,8 +722,13 @@
     aboutHtml += '</div>';
     detailEl.innerHTML = aboutHtml;
 
-    fetch('/api/stats')
-      .then(function (r) { return r.ok ? r.json() : null; })
+    if (!dataProvider) {
+      var totalEl0 = document.getElementById('stats-total');
+      if (totalEl0) totalEl0.textContent = 'Failed to load stats.';
+      return;
+    }
+    dataProvider
+      .getStats()
       .then(function (data) {
         if (!data) return;
         var totalEl = document.getElementById('stats-total');
@@ -431,10 +780,17 @@
     }
     detailEl.innerHTML = '<p class="placeholder">Loading…</p>';
     detailEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    fetch('/api/fellows/' + encodeURIComponent(slug))
-      .then(function (r) { return r.ok ? r.json() : null; })
+    if (!dataProvider) {
+      if (getSlugFromHash() === slug) renderDetail(null);
+      return;
+    }
+    dataProvider
+      .getOne(slug)
       .then(function (data) {
-        if (data) fellowsBySlug.set(data.slug, data);
+        if (data) {
+          if (data.slug) fellowsBySlug.set(data.slug, data);
+          if (data.record_id) fellowsBySlug.set(data.record_id, data);
+        }
         if (getSlugFromHash() === slug) renderDetail(data);
       })
       .catch(function () {
@@ -446,6 +802,36 @@
     if (!q) {
       setSearchStatus('');
       renderDirectory();
+      return;
+    }
+    if (directoryDataSource === 'sqlite' && dataProvider) {
+      setSearchStatus('Searching…');
+      dataProvider
+        .search(q)
+        .then(function (results) {
+          if (!Array.isArray(results)) {
+            results = [];
+          }
+          results.forEach(function (f) {
+            if (f && f.slug) {
+              fellowsBySlug.set(f.slug, f);
+            }
+            if (f && f.record_id) {
+              fellowsBySlug.set(f.record_id, f);
+            }
+          });
+          if (!results.length) {
+            directoryListEl.innerHTML = '<p class="placeholder">No fellows match that search.</p>';
+            setSearchStatus('');
+          } else {
+            renderDirectoryList(results);
+            displayedList = results;
+            setSearchStatus(results.length + ' result' + (results.length === 1 ? '' : 's') + ' found');
+          }
+        })
+        .catch(function () {
+          setSearchStatus('Search failed.');
+        });
       return;
     }
     if (!navigator.onLine) {
@@ -717,26 +1103,42 @@
     if (siteHeaderEl) siteHeaderEl.classList.remove('hidden');
     loadingEl.classList.remove('hidden');
 
-    fetch('/api/fellows')
-      .then(function (r) { return r.json(); })
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', function (ev) {
+        var d = ev.data;
+        if (d && d.type === 'sw-cache-progress' && loadingEl && !loadingEl.classList.contains('hidden')) {
+          setSetupStatus('Getting app ready… ' + d.loaded + '/' + d.total);
+        }
+      });
+    }
+
+    pickDataProvider()
+      .then(function (provider) {
+        dataProvider = provider;
+        if (provider.kind === 'sqlite') {
+          directoryDataSource = 'sqlite';
+        }
+        setSetupStatus('Loading…');
+        return provider.getList();
+      })
       .then(function (data) {
         list = Array.isArray(data) ? data : [];
         renderDirectory();
         route();
-        fetch('/api/fellows?full=1')
-          .then(function (r) { return r.json(); })
-          .then(function (full) {
-            if (Array.isArray(full)) {
-              fullFellowsCache = full;
-              saveFullFellowsToIndexedDB(full);
-              full.forEach(function (f) {
-                if (f.slug) fellowsBySlug.set(f.slug, f);
-                if (f.record_id) fellowsBySlug.set(f.record_id, f);
-              });
-            }
-            route();
-          })
-          .catch(function () {});
+        return dataProvider.getFull();
+      })
+      .then(function (full) {
+        if (Array.isArray(full)) {
+          fullFellowsCache = full;
+          if (directoryDataSource === 'api') {
+            saveFullFellowsToIndexedDB(full);
+          }
+          full.forEach(function (f) {
+            if (f.slug) fellowsBySlug.set(f.slug, f);
+            if (f.record_id) fellowsBySlug.set(f.record_id, f);
+          });
+        }
+        route();
       })
       .catch(function () {
         loadingEl.textContent = 'Failed to load directory.';

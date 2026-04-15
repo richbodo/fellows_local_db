@@ -300,6 +300,24 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
             return
 
+        # Static DB snapshot for PWA offline (Phase 2)
+        if path == "/fellows.db":
+            if not DB_PATH.is_file():
+                self.send_error_404()
+                return
+            try:
+                data = DB_PATH.read_bytes()
+            except OSError:
+                self.send_error_404()
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(data)
+            return
+
         # Images: /images/<slug>.jpg or .png
         if path.startswith("/images/"):
             rest = path[len("/images/"):].lstrip("/")
@@ -346,6 +364,8 @@ class Handler(BaseHTTPRequestHandler):
             ".jpg": "image/jpeg",
             ".jpeg": "image/jpeg",
             ".svg": "image/svg+xml",
+            ".wasm": "application/wasm",
+            ".db": "application/octet-stream",
         }
         ctype = content_types.get(suffix, "application/octet-stream")
         try:
@@ -372,6 +392,7 @@ def main():
     print("  GET /api/fellows?full=1  - all fellows")
     print("  GET /api/fellows/<slug>  - one fellow")
     print("  GET /api/search?q=...    - FTS5 search")
+    print("  GET /fellows.db          - SQLite snapshot (PWA offline)")
     print("  GET /images/<slug>.jpg   - profile image")
     try:
         server.serve_forever()

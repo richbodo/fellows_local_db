@@ -105,7 +105,7 @@ The installed app queries a local SQLite DB in the browser via OPFS instead of h
 
 ### Tasks
 
-1. **Vendor sqlite-wasm** — Download `sqlite3.js` + `sqlite3.wasm` from the [official SQLite WASM release](https://sqlite.org/wasm/doc/trunk/index.md). Place in `app/static/vendor/`. Load via `<script src="/vendor/sqlite3.js">` in `index.html` before `app.js`.
+1. **Vendor sqlite-wasm** — Download `sqlite3.js` + `sqlite3.wasm` from the [official SQLite WASM release](https://sqlite.org/wasm/doc/trunk/index.md). Place in `app/static/vendor/`. Load via `<script src="/vendor/sqlite3.js">` in `index.html` before `app.js`. *(Done: official 3.50.4 jswasm bundle.)*
 
 2. **Data provider abstraction** — In `app.js`, add a function-based data layer (no classes per CLAUDE.md):
    ```javascript
@@ -113,26 +113,26 @@ The installed app queries a local SQLite DB in the browser via OPFS instead of h
    // OPFS provider: queries sqlite-wasm on OPFS (PWA mode)
    // All UI code calls dataProvider.getList(), dataProvider.search(q), etc.
    ```
-   Detection: if running in standalone mode and `window.sqlite3` and `navigator.storage.getDirectory` exist, use OPFS provider. Otherwise fall back to API provider. Local dev with `server.py` continues to work unchanged.
+   Detection: standalone + `sqlite3InitModule` + OPFS (`navigator.storage.getDirectory`) + secure context → `installOpfsSAHPoolVfs` + `OpfsSAHPoolDb`; otherwise API provider. Failures fall back to API + IndexedDB as before.
 
 3. **Build script** — `build/build_pwa.py` (Python stdlib only):
-   - **Phase 1 (done):** copies `app/static/` recursively into `deploy/dist/` (run before every production deploy).
-   - **Phase 2 (pending):** also copy `app/static/vendor/*`, `fellows.db`, and profile images into `dist/`.
+   - Copies `app/static/` recursively into `deploy/dist/` (vendor included).
+   - Also copies `app/fellows.db` and profile images into `deploy/dist/` and `deploy/dist/images/`.
    - Output: self-contained `dist/` directory ready to serve
 
-4. **SW caches DB + images** — Extend `sw.js`:
-   - On install, fetch `/fellows.db` and cache it (~450KB)
-   - Images: cache-on-fetch strategy (cached when first viewed, not bulk pre-downloaded)
-   - Report download progress to client via `postMessage`
+4. **SW caches DB + images** — `sw.js`:
+   - On install, precaches app shell including `/vendor/sqlite3.js`, `/vendor/sqlite3.wasm`, and `/fellows.db`
+   - Same-origin assets and `/images/*`: cache-on-fetch
+   - `postMessage` to clients during install (`sw-cache-progress`)
 
-5. **OPFS provider implementation** — On first app launch (standalone mode):
-   - Fetch `/fellows.db` from SW cache
-   - Write to OPFS via `navigator.storage.getDirectory()` + `FileSystemFileHandle.createWritable()`
-   - Open with sqlite-wasm
-   - Implement `getList()`, `getFull()`, `getOne(slug)`, `search(q)` running SQL queries locally
-   - FTS5 works in sqlite-wasm — same queries as `server.py`
+5. **OPFS provider implementation** — On first standalone launch:
+   - Fetch `/fellows.db` (with progress text on main thread)
+   - `poolUtil.importDb('fellows.db', bytes)` then `new poolUtil.OpfsSAHPoolDb('fellows.db')`
+   - `getList`, `getFull`, `getOne`, `search` (FTS5), `getStats` mirror `server.py` SQL
 
-6. **Progress UI** — On first launch, show download/setup progress ("Setting up your local directory...") before revealing the app.
+6. **Progress UI** — Loading text: "Setting up your local directory…", download %, "Preparing offline database…"
+
+**Dev server:** `GET /fellows.db` serves `app/fellows.db` as `application/octet-stream`.
 
 ### Data Payload
 
