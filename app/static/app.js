@@ -7,6 +7,9 @@
   var list = [];
   var displayedList = [];
   var loadingEl = document.getElementById('loading');
+  var loadingPanelEl = document.getElementById('loading-panel');
+  var bootErrorPanelEl = document.getElementById('boot-error-panel');
+  var bootErrorPreEl = document.getElementById('boot-error-pre');
   var appWrapEl = document.getElementById('app-wrap');
   var connectionBannerEl = document.getElementById('connection-banner');
   var directoryEl = document.getElementById('directory');
@@ -30,6 +33,7 @@
   var deferredInstallPrompt = null;
   var directoryDataSource = 'api';
   var dataProvider = null;
+  var bootDebugLines = [];
 
   var FELLOW_COLS = [
     'record_id',
@@ -300,6 +304,117 @@
     return true;
   }
 
+  function bootDebugPush(msg) {
+    bootDebugLines.push(new Date().toISOString() + ' ' + String(msg));
+  }
+
+  function describeOpfsGates() {
+    var lines = [];
+    lines.push('standalone display-mode: ' + isStandaloneDisplayMode());
+    lines.push('globalThis.sqlite3InitModule: ' + typeof globalThis.sqlite3InitModule);
+    lines.push('navigator.storage: ' + (navigator.storage ? 'present' : 'missing'));
+    lines.push(
+      'navigator.storage.getDirectory: ' +
+        (navigator.storage && typeof navigator.storage.getDirectory)
+    );
+    lines.push('isSecureContext: ' + globalThis.isSecureContext);
+    lines.push('navigator.onLine: ' + navigator.onLine);
+    lines.push('shouldTryOpfsProvider(): ' + shouldTryOpfsProvider());
+    return lines.join('\n');
+  }
+
+  function describeSwState() {
+    if (!('serviceWorker' in navigator)) {
+      return 'serviceWorker: not available in this context';
+    }
+    var c = navigator.serviceWorker.controller;
+    if (!c) {
+      return 'serviceWorker: no active controller yet';
+    }
+    return 'serviceWorker: controller scriptURL=' + String(c.scriptURL || '');
+  }
+
+  function formatBootError(err) {
+    if (err == null) {
+      return '(no error object)';
+    }
+    if (typeof err === 'string') {
+      return err;
+    }
+    var msg = err.message != null ? String(err.message) : String(err);
+    var stack = err.stack ? '\n' + String(err.stack) : '';
+    return msg + stack;
+  }
+
+  function buildBootFailureSyncReport(err) {
+    var parts = [];
+    parts.push('=== Fellows PWA boot failure ===');
+    parts.push('time (ISO): ' + new Date().toISOString());
+    parts.push('href: ' + String(location.href));
+    parts.push('origin: ' + String(location.origin));
+    parts.push('userAgent: ' + String(navigator.userAgent || ''));
+    parts.push(describeSwState());
+    parts.push('');
+    parts.push('directoryDataSource: ' + directoryDataSource);
+    parts.push('dataProvider present: ' + (dataProvider ? 'yes' : 'no'));
+    if (dataProvider && dataProvider.kind) {
+      parts.push('dataProvider.kind: ' + dataProvider.kind);
+    }
+    parts.push('');
+    parts.push('--- OPFS / SQLite eligibility ---');
+    parts.push(describeOpfsGates());
+    parts.push('');
+    parts.push('--- Boot trace (chronological) ---');
+    parts.push(bootDebugLines.length ? bootDebugLines.join('\n') : '(no trace lines recorded)');
+    parts.push('');
+    parts.push('--- Thrown error ---');
+    parts.push(formatBootError(err));
+    return parts.join('\n');
+  }
+
+  function probeHttpEndpoints() {
+    var urls = ['/fellows.db', '/api/fellows', '/api/stats', '/manifest.webmanifest'];
+    return Promise.all(
+      urls.map(function (url) {
+        return fetch(url, { method: 'GET', cache: 'no-store' })
+          .then(function (r) {
+            var ct = r.headers.get('content-type') || '';
+            return url + ' → HTTP ' + r.status + ' ' + r.statusText + ' content-type: ' + ct;
+          })
+          .catch(function (e) {
+            return url + ' → fetch error: ' + (e && e.message ? e.message : String(e));
+          });
+      })
+    ).then(function (lines) {
+      return lines.join('\n');
+    });
+  }
+
+  function showBootFailure(err) {
+    var syncReport = buildBootFailureSyncReport(err);
+    console.error('[Fellows PWA] Boot failure', {
+      error: err,
+      report: syncReport,
+      bootTrace: bootDebugLines.slice()
+    });
+    if (loadingEl) {
+      loadingEl.classList.add('hidden');
+    }
+    if (bootErrorPanelEl) {
+      bootErrorPanelEl.classList.remove('hidden');
+    }
+    if (bootErrorPreEl) {
+      bootErrorPreEl.textContent =
+        syncReport + '\n\n--- HTTP probes (same-origin, cache: no-store) ---\n… fetching …';
+      probeHttpEndpoints().then(function (probeText) {
+        if (bootErrorPreEl) {
+          bootErrorPreEl.textContent =
+            syncReport + '\n\n--- HTTP probes (same-origin, cache: no-store) ---\n' + probeText;
+        }
+      });
+    }
+  }
+
   function setSetupStatus(msg) {
     if (!loadingEl) return;
     loadingEl.textContent = msg || 'Loading…';
@@ -308,7 +423,7 @@
   function fetchFellowsDbWithProgress(onProgress) {
     return fetch('/fellows.db').then(function (r) {
       if (!r.ok) {
-        throw new Error('fellows.db fetch failed');
+        throw new Error('GET /fellows.db failed: HTTP ' + r.status);
       }
       var lenHeader = r.headers.get('Content-Length');
       var total = lenHeader ? parseInt(lenHeader, 10) : 0;
@@ -353,14 +468,17 @@
     return globalThis
       .sqlite3InitModule()
       .then(function (Module) {
+        bootDebugPush('sqlite3InitModule: OK');
         return Module.sqlite3.installOpfsSAHPoolVfs();
       })
       .then(function (poolUtil) {
+        bootDebugPush('installOpfsSAHPoolVfs: OK');
         setSetupStatus('Downloading directory data…');
         return fetchFellowsDbWithProgress(function (n, total) {
           var pct = total ? Math.round((100 * n) / total) : 0;
           setSetupStatus('Downloading directory data… ' + pct + '%');
         }).then(function (bytes) {
+          bootDebugPush('fellows.db download: OK bytes=' + (bytes && bytes.byteLength));
           setSetupStatus('Preparing offline database…');
           poolUtil.importDb('fellows.db', bytes);
           var db = new poolUtil.OpfsSAHPoolDb('fellows.db');
@@ -370,10 +488,17 @@
   }
 
   function pickDataProvider() {
+    bootDebugPush('pickDataProvider: start');
+    bootDebugPush('gates (one line): ' + describeOpfsGates().replace(/\n/g, ' | '));
     if (!shouldTryOpfsProvider()) {
+      bootDebugPush('using API provider (OPFS path not used)');
       return Promise.resolve(createApiDataProvider());
     }
+    bootDebugPush('trying OPFS + sqlite-wasm');
     return initOpfsDataProvider().catch(function (e) {
+      bootDebugPush(
+        'OPFS path failed → API fallback: ' + (e && e.message ? e.message : String(e))
+      );
       console.warn('Local SQLite / OPFS unavailable, using API:', e);
       return createApiDataProvider();
     });
@@ -513,6 +638,9 @@
     }
     renderDirectoryList(list);
     displayedList = list;
+    if (loadingPanelEl) {
+      loadingPanelEl.classList.add('hidden');
+    }
     showLoading(false);
     showApp(true);
   }
@@ -1106,13 +1234,26 @@
   initSwReloadButton();
 
   if (isStandaloneDisplayMode()) {
+    bootDebugLines.length = 0;
     if (siteHeaderEl) siteHeaderEl.classList.remove('hidden');
-    loadingEl.classList.remove('hidden');
+    if (loadingPanelEl) {
+      loadingPanelEl.classList.remove('hidden');
+    }
+    if (loadingEl) {
+      loadingEl.classList.remove('hidden');
+    }
 
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.addEventListener('message', function (ev) {
         var d = ev.data;
-        if (d && d.type === 'sw-cache-progress' && loadingEl && !loadingEl.classList.contains('hidden')) {
+        if (
+          d &&
+          d.type === 'sw-cache-progress' &&
+          loadingPanelEl &&
+          !loadingPanelEl.classList.contains('hidden') &&
+          loadingEl &&
+          !loadingEl.classList.contains('hidden')
+        ) {
           setSetupStatus('Getting app ready… ' + d.loaded + '/' + d.total);
         }
       });
@@ -1121,6 +1262,7 @@
     pickDataProvider()
       .then(function (provider) {
         dataProvider = provider;
+        bootDebugPush('provider ready kind=' + provider.kind);
         if (provider.kind === 'sqlite') {
           directoryDataSource = 'sqlite';
         }
@@ -1128,12 +1270,16 @@
         return provider.getList();
       })
       .then(function (data) {
+        bootDebugPush(
+          'getList: OK count=' + (Array.isArray(data) ? data.length : typeof data)
+        );
         list = Array.isArray(data) ? data : [];
         renderDirectory();
         route();
         return dataProvider.getFull();
       })
       .then(function (full) {
+        bootDebugPush('getFull: OK rows=' + (Array.isArray(full) ? full.length : typeof full));
         if (Array.isArray(full)) {
           fullFellowsCache = full;
           if (directoryDataSource === 'api') {
@@ -1146,8 +1292,8 @@
         }
         route();
       })
-      .catch(function () {
-        loadingEl.textContent = 'Failed to load directory.';
+      .catch(function (err) {
+        showBootFailure(err);
       });
 
     window.addEventListener('hashchange', route);

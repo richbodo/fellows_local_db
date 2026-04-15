@@ -20,6 +20,47 @@ body {
   display: none;
 }
 
+.loading-panel {
+  margin: 0.75rem 0;
+  max-width: 52rem;
+}
+
+.boot-error-panel {
+  margin-top: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+  border: 1px solid #c9c2d4;
+  background: #faf8fc;
+}
+
+.boot-error-lead {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  color: #2d1f3d;
+}
+
+.boot-error-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: #444;
+}
+
+.boot-error-pre {
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 55vh;
+  overflow: auto;
+  background: #1e1e1e;
+  color: #e8e8e8;
+  border-radius: 3px;
+  font-family: ui-monospace, "Cascadia Code", Menlo, Monaco, Consolas, monospace;
+}
+
 /* Side-by-side: directory (left) + detail (right) so detail is always visible */
 #app-wrap {
   display: flex;
