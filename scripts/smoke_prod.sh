@@ -17,3 +17,17 @@ if [[ "$code" != "200" ]]; then
   exit 1
 fi
 echo "OK (${code})"
+
+echo "GET ${BASE}/manifest.webmanifest"
+code=$(curl -sS -D /tmp/fellows_smoke_mf.hdr -o /tmp/fellows_smoke_mf.txt -w "%{http_code}" "${BASE}/manifest.webmanifest" || true)
+body_head=$(head -c 5 /tmp/fellows_smoke_mf.txt 2>/dev/null || true)
+rm -f /tmp/fellows_smoke_mf.txt /tmp/fellows_smoke_mf.hdr
+if [[ "$code" != "200" ]]; then
+  echo "FAIL: manifest expected HTTP 200, got ${code}"
+  exit 1
+fi
+if [[ "$body_head" != "{"* ]]; then
+  echo "FAIL: manifest body does not look like JSON"
+  exit 1
+fi
+echo "OK manifest (${code})"
