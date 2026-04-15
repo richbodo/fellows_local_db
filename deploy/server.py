@@ -19,6 +19,8 @@ class Handler(SimpleHTTPRequestHandler):
         ".webmanifest": "application/manifest+json; charset=utf-8",
         ".js": "application/javascript; charset=utf-8",
         ".json": "application/json; charset=utf-8",
+        ".wasm": "application/wasm",
+        ".db": "application/octet-stream",
     }
 
     def list_directory(self, path):

@@ -66,6 +66,7 @@ chmod +x run.sh
 - `GET /api/fellows/<slug>` – one fellow by slug or `record_id` (e.g. `/api/fellows/aaron_bird`)
 - `GET /api/search?q=...` – FTS5 search (e.g. `?q=Aaron`)
 - `GET /api/stats` – JSON aggregates for the About page (counts by type, cohort, region, field completeness)
+- `GET /fellows.db` – raw SQLite file (same data as `app/fellows.db`) for the installed PWA’s offline copy; not used by normal browser-tab viewing
 - `GET /images/<slug>.jpg` or `.png` – profile image. The server looks in `app/fellow_profile_images_by_name/` first; if that folder is missing, it uses `final_fellows_set/fellow_profile_images_by_name/` (so images work without copying). Files should be named by slug (e.g. `aaron_bird.jpg`) or by name (e.g. "Aaron Bird.jpg"); the server matches both.
 - `GET /` – static app (index.html)
 

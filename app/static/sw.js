@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const APP_SHELL_CACHE = `fellows-app-shell-${CACHE_VERSION}`;
 
 const APP_SHELL_ASSETS = [
@@ -10,29 +10,57 @@ const APP_SHELL_ASSETS = [
   '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
-  '/icons/icon-maskable-512.png'
+  '/icons/icon-maskable-512.png',
+  '/vendor/sqlite3.js',
+  '/vendor/sqlite3.wasm',
+  '/fellows.db'
 ];
+
+function postCacheProgress(payload) {
+  self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+    clients.forEach((client) => {
+      try {
+        client.postMessage(payload);
+      } catch (e) {}
+    });
+  });
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(APP_SHELL_CACHE).then((cache) => cache.addAll(APP_SHELL_ASSETS)).then(() => {
-      return self.skipWaiting();
+    caches.open(APP_SHELL_CACHE).then(async (cache) => {
+      const total = APP_SHELL_ASSETS.length;
+      let loaded = 0;
+      for (let i = 0; i < APP_SHELL_ASSETS.length; i++) {
+        const url = APP_SHELL_ASSETS[i];
+        const res = await fetch(url);
+        if (!res.ok) {
+          throw new Error('sw install fetch failed ' + url + ' ' + res.status);
+        }
+        await cache.put(url, res);
+        loaded += 1;
+        postCacheProgress({ type: 'sw-cache-progress', url: url, loaded: loaded, total: total });
+      }
+      await self.skipWaiting();
     })
   );
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(
-        keys.map((key) => {
-          if (key.startsWith('fellows-app-shell-') && key !== APP_SHELL_CACHE) {
-            return caches.delete(key);
-          }
-          return Promise.resolve(false);
-        })
+    caches
+      .keys()
+      .then((keys) =>
+        Promise.all(
+          keys.map((key) => {
+            if (key.startsWith('fellows-app-shell-') && key !== APP_SHELL_CACHE) {
+              return caches.delete(key);
+            }
+            return Promise.resolve(false);
+          })
+        )
       )
-    ).then(() => self.clients.claim())
+      .then(() => self.clients.claim())
   );
 });
 

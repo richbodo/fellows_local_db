@@ -114,3 +114,15 @@ class TestAPI:
         status, ctype, body = get("/app.js")
         assert status == 200
         assert "javascript" in ctype or "application/javascript" in ctype
+
+    def test_fellows_db_snapshot(self):
+        conn = HTTPConnection("127.0.0.1", PORT, timeout=5)
+        conn.request("GET", "/fellows.db")
+        r = conn.getresponse()
+        raw = r.read()
+        conn.close()
+        assert r.status == 200
+        ctype = r.getheader("Content-Type") or ""
+        assert "octet-stream" in ctype
+        assert raw[:15] == b"SQLite format 3"
+        assert len(raw) > 512
