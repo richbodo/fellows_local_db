@@ -151,11 +151,13 @@ See `ansible/README.md` for deploy. Phase 2 extends this script with `fellows.db
 
 The VPS serves **`deploy/dist/`** via **`deploy/server.py`** on **`127.0.0.1:8765`** behind **Caddy** (TLS, gzip). Build the bundle, then sync with Ansible (`--tags deploy`) or follow `ansible/README.md` for the full bootstrap.
 
+When **`fellows.db`** is present in **`deploy/dist/`**, the same process also serves the **read-only JSON API** (`/api/fellows`, `/api/search`, `/api/stats`, etc.) as in local dev. That lets the installed PWA load the directory if **sqlite-wasm / OPFS** fails in the browser (the offline-first path still uses `/fellows.db` + local SQLite when it works).
+
 - **Example Caddy site block:** `deploy/Caddyfile.example` (templated copy lives in `ansible/roles/caddy/templates/Caddyfile.j2`).
 - **Smoke:** `./scripts/smoke_prod.sh` (override base URL with `FELLOWS_BASE_URL=…`).
 - **DNS/TLS check:** `./scripts/check_deploy_env.sh` (override host with `FELLOWS_HOST=…`).
 
-`deploy/server.py` honors **`FELLOWS_DIST_ROOT`** if the static root is not the default `<deploy>/dist/`. Access logs go to **stdout**; startup line goes to stderr.
+`deploy/server.py` honors **`FELLOWS_DIST_ROOT`** if the static root is not the default `<deploy>/dist/`. Access logs go to **stdout**; startup line goes to stderr. Deploy ships **`deploy/sqlite_api_support.py`** next to **`server.py`** (Ansible copies both).
 
 ## Project layout
 

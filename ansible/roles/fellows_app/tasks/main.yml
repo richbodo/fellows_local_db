@@ -20,6 +20,15 @@
     mode: "0755"
   notify: Restart fellows app
 
+- name: Copy deploy SQLite API helper
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../deploy/sqlite_api_support.py"
+    dest: "{{ app_root }}/deploy/sqlite_api_support.py"
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0644"
+  notify: Restart fellows app
+
 - name: Copy deploy dist directory if present
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../deploy/dist/"
