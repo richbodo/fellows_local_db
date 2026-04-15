@@ -159,6 +159,8 @@ When **`fellows.db`** is present in **`deploy/dist/`**, the same process also se
 
 `deploy/server.py` honors **`FELLOWS_DIST_ROOT`** if the static root is not the default `<deploy>/dist/`. Access logs go to **stdout**; startup line goes to stderr. Deploy ships **`deploy/sqlite_api_support.py`** next to **`server.py`** (Ansible copies both).
 
+**Routine deploy from your machine:** `./scripts/deploy_pwa.sh --ask-become-pass` builds `deploy/dist/`, runs the deploy role, and smoke-checks HTTPS (see `ansible/README.md`).
+
 ## Project layout
 
 ```

@@ -56,6 +56,34 @@ python build/build_pwa.py
 ansible-playbook ansible/site.yml --tags deploy --ask-become-pass
 ```
 
+### One-command build, deploy, and HTTPS smoke
+
+From the repository root, this runs **`build/build_pwa.py` on your laptop** (Ansible controller), syncs `deploy/` to the host with the **`fellows_app`** role (same as `--tags deploy`), then hits **`/healthz`** and **`/manifest.webmanifest`** on the public URL via **`ansible.builtin.uri`**:
+
+```bash
+./scripts/deploy_pwa.sh --ask-become-pass
+```
+
+Equivalent:
+
+```bash
+ansible-playbook ansible/deploy_pwa.yml --ask-become-pass
+```
+
+**Extra variables:**
+
+| Variable | Purpose |
+|----------|---------|
+| `fellows_skip_build=true` | Skip `build_pwa.py` when `deploy/dist/` is already up to date. |
+| `fellows_smoke=false` | Skip HTTPS checks (offline controller, or no outbound access). |
+| `fellows_smoke_url=https://…` | Override the default `https://fellows.globaldonut.com` smoke target. |
+
+Example:
+
+```bash
+ansible-playbook ansible/deploy_pwa.yml --extra-vars "fellows_skip_build=true" --ask-become-pass
+```
+
 ## 4) Verify
 
 ```bash
