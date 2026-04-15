@@ -136,14 +136,25 @@ sqlite3 app/fellows.db "SELECT name, slug FROM fellows WHERE name != '' ORDER BY
 sqlite3 app/fellows.db "SELECT name FROM fellows_fts WHERE fellows_fts MATCH 'Aaron';"
 ```
 
+### PWA static bundle (production)
+
+Copy the current `app/static/` tree into `deploy/dist/` before Ansible or manual upload:
+
+```bash
+python build/build_pwa.py
+```
+
+See `ansible/README.md` for deploy. Phase 2 extends this script with `fellows.db` and images.
+
 ## Project layout
 
 ```
 build/import_json_to_sqlite.py   # JSON → SQLite + FTS5
+build/build_pwa.py               # app/static → deploy/dist (PWA deploy bundle)
 app/
   fellows.db                     # Produced by build (gitignored)
   fellow_profile_images_by_name/ # 268 images, slug-named (optional)
-  static/                        # Front-end (index.html, app.js, styles.css)
+  static/                        # Front-end (index.html, app.js, manifest, icons, …)
   server.py                      # Python server
 run.sh                           # Launcher: start server + open browser
 scripts/

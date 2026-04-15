@@ -1,0 +1,86 @@
+---
+- name: Install baseline packages
+  ansible.builtin.apt:
+    name:
+      - python3
+      - python3-venv
+      - curl
+      - ufw
+      - ca-certificates
+      - gnupg
+    state: present
+    update_cache: true
+
+- name: Ensure deploy group exists
+  ansible.builtin.group:
+    name: "{{ deploy_user }}"
+    state: present
+
+- name: Ensure deploy user exists
+  ansible.builtin.user:
+    name: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    shell: /bin/bash
+    create_home: true
+    state: present
+
+- name: Ensure deploy .ssh directory exists
+  ansible.builtin.file:
+    path: "/home/{{ deploy_user }}/.ssh"
+    state: directory
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0700"
+
+- name: Install deploy user authorized keys
+  ansible.builtin.copy:
+    dest: "/home/{{ deploy_user }}/.ssh/authorized_keys"
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0600"
+    content: |
+      {% for key in deploy_public_keys %}
+      {{ key }}
+      {% endfor %}
+
+- name: Install limited sudoers for deploy user
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/90-{{ deploy_user }}-fellows"
+    owner: root
+    group: root
+    mode: "0440"
+    content: |
+      {{ deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl status fellows-pwa, /bin/systemctl restart fellows-pwa, /bin/systemctl status caddy, /bin/systemctl reload caddy
+
+- name: Configure UFW defaults
+  ansible.builtin.command: ufw --force default deny incoming
+  changed_when: false
+
+- name: Configure UFW allow outgoing
+  ansible.builtin.command: ufw --force default allow outgoing
+  changed_when: false
+
+- name: Allow SSH daemon port through UFW
+  ansible.builtin.command: "ufw allow from any to any port {{ ssh_listen_port }} proto tcp"
+  changed_when: false
+
+- name: Allow HTTP through UFW
+  ansible.builtin.command: "ufw allow from any to any port 80 proto tcp"
+  changed_when: false
+
+- name: Allow HTTPS through UFW
+  ansible.builtin.command: "ufw allow from any to any port 443 proto tcp"
+  changed_when: false
+
+- name: Enable UFW
+  ansible.builtin.command: ufw --force enable
+  changed_when: false
+
+- name: Install SSH hardening override
+  ansible.builtin.template:
+    src: sshd_hardening.conf.j2
+    dest: /etc/ssh/sshd_config.d/99-fellows.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart sshd
