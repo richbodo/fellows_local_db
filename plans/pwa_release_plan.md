@@ -116,10 +116,8 @@ The installed app queries a local SQLite DB in the browser via OPFS instead of h
    Detection: if running in standalone mode and `window.sqlite3` and `navigator.storage.getDirectory` exist, use OPFS provider. Otherwise fall back to API provider. Local dev with `server.py` continues to work unchanged.
 
 3. **Build script** — `build/build_pwa.py` (Python stdlib only):
-   - Copies `app/static/*` into `dist/`
-   - Copies `app/static/vendor/*` into `dist/vendor/`
-   - Copies `fellows.db` into `dist/`
-   - Copies profile images into `dist/images/`
+   - **Phase 1 (done):** copies `app/static/` recursively into `deploy/dist/` (run before every production deploy).
+   - **Phase 2 (pending):** also copy `app/static/vendor/*`, `fellows.db`, and profile images into `dist/`.
    - Output: self-contained `dist/` directory ready to serve
 
 4. **SW caches DB + images** — Extend `sw.js`:
