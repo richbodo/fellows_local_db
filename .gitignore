@@ -19,3 +19,9 @@ test-results/
 
 .aider*
 .server.pid
+
+# Ansible local inventory (copy from inventory/hosts.ini.example)
+ansible/inventory/hosts.ini
+
+# Production build output (rsync / Ansible target)
+deploy/dist/

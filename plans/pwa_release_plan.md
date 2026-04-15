@@ -12,6 +12,32 @@ The VPS is a **distribution server**, not a web app. Fellows never "use the webs
 4. They open the installed app → data downloads once in background → done
 5. From then on, they tap the app icon. It works offline. It never feels like a website.
 
+**Production hostname for this rollout:** `https://fellows.globaldonut.com/` (subdomain on `globaldonut.com`). The VPS is a **distribution endpoint** only. For this rollout, DNS points `fellows.globaldonut.com` to the **DigitalOcean Reserved IP** and stays **Cloudflare DNS-only** while we develop and stabilize.
+
+## Deployment Decisions (locked)
+
+- **DNS target:** `A fellows -> 170.64.243.67` (Reserved IP)
+- **Cloudflare mode:** `DNS only` until post-launch hardening
+- **Linux access model:** Ansible bootstraps while SSH’d as **`rsb`** (your sudo-capable user); playbook creates dedicated **`deploy`** with **key-only** login for ongoing deploys. **sshd** is reached on port **52221** (`ansible_port` + UFW).
+- **Magic-link sender:** `noreply@fellows.globaldonut.com`
+- **Mail provider:** Postmark (server API token stored via vault/secret file, never in git)
+- **Environment topology:** start simple with **one droplet now** (can host `fellows` and a basic apex static index if desired), and split apps into separate droplets later only if isolation/scale needs it
+
+### Public site journey (`https://fellows.globaldonut.com/`)
+
+End-to-end flow we are building toward (browser vs installed PWA is still Phase 1; email gate is Phase 4):
+
+1. User opens **`https://fellows.globaldonut.com/`** in a normal browser tab.
+2. They enter their **fellowship email** and submit (e.g. “Download app” / “Get access”).
+3. UI shows **“check your email”** and instructions to use the **magic link** (no directory data yet).
+4. They click the link in email → returns to the same origin (e.g. `/#/unlock/TOKEN`) → session established → they see the **install / PWA** page with an explicit install action.
+5. They install the PWA; **standalone** opens the **full directory**; data is fetched/cached for **offline** use (Phase 2 sqlite-wasm + SW).
+6. Later launches use the **installed app icon**; works **offline** without revisiting the site.
+
+**Plan mapping:** Phase **1** defines install vs standalone UI and installability. Phase **3** is **HTTPS + static hosting + health** (no magic-link API until Phase **4**). Phase **4** adds **`/api/send-unlock`**, **`/api/verify-token`**, cookie gating, and SW rules so data only caches after auth.
+
+**Deployments:** Nothing auto-runs. **You** (or CI) run **`ansible-playbook … --tags deploy`** after building `deploy/dist`. There is no cron in the current Ansible roles.
+
 ### Two modes, one URL
 
 The PWA detects whether it's running installed (standalone) or in a browser tab:
@@ -90,10 +116,8 @@ The installed app queries a local SQLite DB in the browser via OPFS instead of h
    Detection: if running in standalone mode and `window.sqlite3` and `navigator.storage.getDirectory` exist, use OPFS provider. Otherwise fall back to API provider. Local dev with `server.py` continues to work unchanged.
 
 3. **Build script** — `build/build_pwa.py` (Python stdlib only):
-   - Copies `app/static/*` into `dist/`
-   - Copies `app/static/vendor/*` into `dist/vendor/`
-   - Copies `fellows.db` into `dist/`
-   - Copies profile images into `dist/images/`
+   - **Phase 1 (done):** copies `app/static/` recursively into `deploy/dist/` (run before every production deploy).
+   - **Phase 2 (pending):** also copy `app/static/vendor/*`, `fellows.db`, and profile images into `dist/`.
    - Output: self-contained `dist/` directory ready to serve
 
 4. **SW caches DB + images** — Extend `sw.js`:
@@ -129,37 +153,73 @@ The installed app queries a local SQLite DB in the browser via OPFS instead of h
 
 ## Phase 3: VPS Deployment + HTTPS
 
-**Test on:** Digital Ocean VPS, desktop Chrome, then Android Chrome
+**Test on:** DigitalOcean droplet (e.g. Ubuntu 24.04 LTS), desktop Chrome, then Android Chrome.
 
-Deploy to the VPS so Chrome can mint a WebAPK (requires HTTPS) and fellows can access the install page.
+Deploy so Chrome can mint a WebAPK (requires **HTTPS** and a stable **origin**). **Canonical URL:** `https://fellows.globaldonut.com/`.
+
+### Infrastructure assumptions (this project)
+
+| Item | Notes |
+|------|--------|
+| **Host** | DigitalOcean Droplet (example: 1 vCPU / 1 GB / 25 GB, SYD1). |
+| **Public IPv4** | Droplet-attached address (e.g. `170.64.138.50`). |
+| **Reserved IP** | **Chosen:** `170.64.243.67` attached and used for `fellows` DNS target. |
+| **DNS** | Cloudflare zone `globaldonut.com`. Add an **`A` record** for hostname **`fellows`** → target IPv4 (reserved or droplet public). Apex may already point at the same host; the **subdomain record is still required** so Caddy can serve TLS for `fellows.globaldonut.com`. |
+| **Cloudflare proxy** | **Chosen:** keep `fellows` **DNS only** (grey cloud) through development and initial release. Revisit **Proxied** later if you want WAF/CDN; then use **Full (strict)** and ensure origin cert is valid. |
+| **Automation** | **Ansible** from a control node (your laptop or CI). No requirement to run Ansible *on* the droplet. |
+| **Agents (Cursor / humans)** | Same interface: SSH for ad hoc checks + `ansible-playbook` for repeatable deploy. Document inventory, vault, and smoke commands so any agent with credentials can verify milestones. |
 
 ### Tasks
 
 1. **Production server** — `deploy/server.py` (Python stdlib `http.server`):
-   - Serves static files from `deploy/dist/`
-   - `Cache-Control` headers: long-lived for hashed assets, `no-cache` for `sw.js`
+   - Serves static files from `deploy/dist/` (or configurable `DEPLOY_ROOT`)
+   - `Cache-Control` headers: long-lived for hashed assets, `no-cache` for `sw.js` (and manifest if needed)
    - Health check at `GET /healthz`
-   - Request logging
-   - This server serves only static files — no API endpoints needed (all data access is local via sqlite-wasm in the installed PWA)
+   - Request logging to stdout (journald under systemd)
+   - **Phases 1–3:** static + health only. **Phase 4** adds `/api/*` here (magic link); keep one process binding **127.0.0.1:8765** behind Caddy.
 
-2. **Caddy config** — `deploy/Caddyfile`:
-   - Automatic Let's Encrypt SSL for the domain
-   - Reverse proxy to `localhost:8765`
-   - HSTS headers
+2. **Caddy config** — `deploy/Caddyfile` (template in repo; render with Ansible or sed):
+   - Site block for **`fellows.globaldonut.com`** only (other subdomains on the same VM get their own `import` or separate files later).
+   - **Reverse proxy** to `127.0.0.1:8765` (not `localhost` if you ever need to avoid IPv6 ambiguity — pick one and document it).
+   - Automatic Let’s Encrypt (`tls` via Caddy’s ACME); set **admin email** for registration.
+   - Optional: **HSTS** once you are confident you will not need plain HTTP except ACME.
 
-3. **Deployment automation** — `deploy/setup.sh` or Ansible playbook:
-   - Install Caddy
-   - Create systemd unit for `deploy/server.py`
-   - Enable auto-start on reboot
-   - Deploy `dist/` directory
+3. **OS baseline (Ansible)** — Suggested layout under `ansible/`:
+   - `inventory/` — e.g. `hosts.ini` with `[fellows]`, `ansible_host=<ip>`, and **`ansible_port`** / **`ansible_user`** if sshd is not on 22 (this rollout: port **52221**, bootstrap user **`rsb`**, then **`deploy`**).
+   - `group_vars/fellows.yml` — `fellows_domain`, `caddy_admin_email`, `deploy_user`, `app_root` (e.g. `/opt/fellows`).
+   - `roles/common` — `apt update`, install `python3`, `ufw`, enable **`OpenSSH`**, **`80/tcp`**, **`443/tcp`**, default deny inbound.
+   - `roles/caddy` — Install Caddy (official apt repo or documented method), deploy templated `Caddyfile`, `systemctl enable --now caddy`.
+   - `roles/fellows_app` — Create `deploy_user`, `app_root`, sync `deploy/dist/` via `ansible.builtin.copy`/`synchronize`, systemd unit **`fellows-pwa.service`**:
+     - `WorkingDirectory=<app_root>/deploy`
+     - `ExecStart=/usr/bin/python3 <app_root>/deploy/server.py` (or explicit venv if you add one later — stdlib-only app can use system Python)
+     - `Restart=on-failure`
+   - `site.yml` — ordering: common → caddy → fellows_app.
+   - **Tags:** e.g. `bootstrap` (packages, firewall, users) vs `deploy` (artifacts only) so agents can run quick content updates without replaying the whole OS role.
 
-4. **Build + deploy workflow**:
+4. **Secrets (Phase 4 prep)** — Store SMTP/API keys for magic links in **`ansible-vault`**-encrypted vars or a root-only file on the server — **not** in git plaintext. For this project, use Postmark server token + sender `noreply@fellows.globaldonut.com`. Document decrypt/run pattern for operators.
+
+5. **Build + deploy workflow** (from dev machine):
    ```bash
-   python build/build_pwa.py          # produces dist/
-   rsync dist/ user@vps:deploy/dist/  # or ansible/scp
+   python build/build_pwa.py          # produces dist/ (see Phase 2)
+   ansible-playbook -i ansible/inventory/hosts.ini ansible/site.yml --tags deploy
    ```
+   Alternative: `rsync`/`scp` `dist/` to `deploy_user@app_root/deploy/dist/` then `systemctl restart fellows-pwa` (Ansible can wrap both).
 
-5. **Domain setup** — Point domain (or subdomain) to the VPS IP. Caddy handles SSL automatically.
+6. **Domain setup** — Cloudflare **`A` `fellows` → IPv4** as above. Wait for propagation; Caddy obtains cert on first successful request to `:443` from the public Internet.
+
+### Tooling for agents and milestone verification
+
+These items are **documentation + small scripts** so humans and Cursor agents can validate deploys the same way:
+
+| Tool | Purpose |
+|------|--------|
+| **SSH config** | Add a documented host alias (e.g. `Host fellows-globaldonut`, `HostName <ip>`, `User <deploy_user>`, `IdentityFile …`) in operator docs or a committed **example** `deploy/ssh_config.example` (no real keys). |
+| **Smoke check** | `scripts/smoke_prod.sh` (or `curl` one-liner): `curl -fsS https://fellows.globaldonut.com/healthz` → expect `200` and body OK. Run after every deploy. |
+| **TLS / DNS** | Optional: `scripts/check_deploy_env.sh` — `dig +short fellows.globaldonut.com A`, `curl -fsSI https://fellows.globaldonut.com/` (fail if cert name mismatch). |
+| **E2E against staging URL** | Extend Playwright `base_url` via env (e.g. `E2E_BASE_URL=https://fellows.globaldonut.com`) for **read-only** smoke tests when you intentionally hit production; keep default `localhost:8765` for CI. |
+| **Ansible check mode** | `ansible-playbook … --check` for dry-run when tuning tasks. |
+
+**What “agent access” means in practice:** agents do not get a separate DigitalOcean API by default. They use **the same SSH key and inventory** you place in the workspace (or vault password in env). Restrict keys to **`deploy_user`** with **sudo only if needed** for Caddy reload; prefer **`systemctl` via passwordless sudo** for a single unit file.
 
 ### Architecture
 
@@ -168,8 +228,8 @@ Fellow's browser                    VPS (Digital Ocean)
 ─────────────────                   ───────────────────
 Visit URL              ──HTTPS──>   Caddy (Let's Encrypt)
                                       │
-See install page       <────────    deploy/server.py
-Tap "Install"                         serves dist/
+See install page       <────────    127.0.0.1:8765  deploy/server.py
+Tap "Install"                         serves deploy/dist/
                                         ├── index.html
 PWA installed locally                   ├── app.js, styles.css, sw.js
 App downloads DB       <────────        ├── fellows.db
@@ -180,21 +240,31 @@ VPS no longer needed
 for this user.
 ```
 
-### Milestone Test
+### Milestone test
 
-- Visit `https://your-domain/` in desktop Chrome → see install page, not directory
-- Install PWA → open standalone → directory works
-- Visit `https://your-domain/` on Android Chrome → install prompt appears → install → standalone app works
-- Go offline → browse fellows, search, cached images all work
-- Lighthouse PWA audit: full score
+**Infra / automated**
+
+- `dig fellows.globaldonut.com A` (or `nslookup`) returns the expected IPv4 (reserved or droplet).
+- `curl -fsS https://fellows.globaldonut.com/healthz` succeeds; journal shows `fellows-pwa` and `caddy` healthy.
+- UFW: only 22/80/443 (and any intentional services) open; app not bound to `0.0.0.0:8765` from outside (only **Caddy** on 443).
+
+**PWA / product**
+
+- Visit `https://fellows.globaldonut.com/` in desktop Chrome → install page, not directory (per Phase 1 behavior).
+- Install PWA → open standalone → directory works (Phase 2 sqlite-wasm when implemented).
+- Android Chrome: install prompt → standalone works.
+- Airplane mode / DevTools offline: browse, search, cached images behave as designed.
+- Lighthouse PWA audit on **this origin** (HTTPS): aim for full installability score; investigate any mixed-content or redirect issues introduced by subdomain.
 
 ---
 
 ## Phase 4: Auth (Magic Link)
 
-**Test on:** VPS
+**Test on:** `https://fellows.globaldonut.com/` (same VPS as Phase 3)
 
 Gate access so only authorized fellows can reach the install page. Unauthorized visitors see a branded "this is a private app" page.
+
+**Deployment note:** Magic-link email deliverability may require **SPF**, **DKIM**, and (for DMARC alignment) a coherent **From** domain on `globaldonut.com`. For this rollout: sender is `noreply@fellows.globaldonut.com` via Postmark. Plan DNS/email changes with whoever administers the zone; Ansible should template secrets via **vault**, not plaintext in `group_vars`.
 
 ### Tasks
 
@@ -322,9 +392,23 @@ PWAs on iOS (Safari) have limitations requiring specific handling.
 - **No npm/bundlers**: sqlite-wasm loaded via `<script>` tag from vendored files
 - **Single IIFE**: `app.js` stays as one IIFE, no modules/classes
 - **`app/server.py` unchanged**: Local dev workflow continues to work identically
-- **Port 8765**: Unchanged for local dev and production
+- **Port 8765**: Unchanged for local dev and **behind Caddy** on the VPS (bind loopback in production)
 - **No new pip deps for app**: Build-time deps go in `requirements-dev.txt`
 - **`deploy/server.py`** is a separate file for production; `app/server.py` stays clean
+
+## Plan review: gaps and how this document addresses them
+
+| Gap | Risk | Mitigation in plan |
+|-----|------|---------------------|
+| **Subdomain vs apex** | Manifest `scope` / `start_url` must match the served origin. | Use **`https://fellows.globaldonut.com/`** consistently; PWA `scope: "/"` is correct for that host. |
+| **Cloudflare proxy vs DNS-only** | Orange cloud can break ACME or cache SW unexpectedly. | Start with **DNS only** for `fellows`; document move to proxied + Full (strict) as a later hardening step. |
+| **Ephemeral droplet IP** | DNS drift after rebuild. | Prefer **Reserved IP** in DO + DNS to that address. |
+| **Phase 3 vs Phase 4 server** | One file (`deploy/server.py`) grows API routes. | Single systemd unit; Phase 4 extends same server; Caddy unchanged. |
+| **SW caching auth-gated assets (Phase 4)** | Complex race between cookie and SW fetch. | Plan already specifies SW gates DB/images until session — implement with clear integration tests (manual checklist + optional e2e with auth). |
+| **Agent “access”** | No magic Cursor-only channel. | **SSH + Ansible + smoke scripts** documented; operators commit **examples** only, never real keys. |
+| **Email deliverability (Phase 4)** | Magic links spam-foldered or rejected. | SPF/DKIM/DMARC called out; secrets via **ansible-vault**. |
+
+**Testing rhythm:** Local Phases 1–2 on `localhost:8765` → Phase 3 smoke (`/healthz`, TLS, DNS) → optional Playwright with `E2E_BASE_URL` → Phase 4 end-to-end on real mail.
 
 ## Project Layout (after all phases)
 
@@ -345,12 +429,20 @@ build/
   import_json_to_sqlite.py         # Existing: JSON → SQLite
   filter_demo_data.py              # Existing: demo data filter
   build_pwa.py                     # New: assemble deploy/dist/
+ansible/
+  inventory/hosts.ini              # Example inventory (no secrets)
+  group_vars/                      # fellows_domain, deploy_user; vault for secrets
+  roles/common, caddy, fellows_app/
+  site.yml
 deploy/
   server.py                        # Production static file server + auth endpoints
-  Caddyfile                        # Caddy reverse proxy config
-  setup.sh                         # VPS bootstrap script
+  Caddyfile                        # Caddy site for fellows.globaldonut.com
+  ssh_config.example               # Optional: template for operator SSH config
+  setup.sh                         # Optional: bootstrap if not using Ansible for first boot
   dist/                            # Built output (gitignored)
     fellows.db                     # DB (plaintext until F1)
     allowed_emails.json            # SHA-256 hashed email allowlist
     (+ all static files, icons, vendor, images)
+scripts/
+  smoke_prod.sh                    # curl healthz + optional TLS/DNS checks (add in Phase 3)
 ```

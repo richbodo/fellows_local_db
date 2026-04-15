@@ -1,0 +1,30 @@
+---
+# Copy to ansible/group_vars/fellows.yml and customize.
+# Keep secrets out of this file; put them in vault-encrypted vars.
+
+fellows_domain: fellows.globaldonut.com
+deploy_user: deploy
+app_root: /opt/fellows
+
+# Caddy ACME registration email (not the sender address)
+caddy_admin_email: richbodo@gmail.com
+
+# SSH port + UFW: see ansible/inventory/group_vars/fellows.yml (committed).
+# Optional: duplicate ansible_port / ssh_listen_port here if you do not use that file.
+
+# Human operator account on the droplet used for first Ansible runs (inventory ansible_user).
+bootstrap_user: rsb
+
+deploy_public_keys:
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFd4U9vPzPBAhzdjbZ2+FkZI0J47EPjvBxveY945iSCW richbodo@gmail.com"
+
+# Harden SSH after key setup
+disable_password_ssh: true
+
+# Phase 4 mail settings (values shown are defaults/placeholders)
+mail_provider: postmark
+mail_from_address: noreply@fellows.globaldonut.com
+mail_from_name: EHF Fellows Directory
+
+# Secrets: define in ansible-vault (example keys)
+# postmark_server_api_token: "pm_..."

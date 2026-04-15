@@ -1,0 +1,10 @@
+---
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+  notify: Restart fellows app
+
+- name: Restart fellows app
+  ansible.builtin.service:
+    name: fellows-pwa
+    state: restarted
