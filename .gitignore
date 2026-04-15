@@ -25,3 +25,9 @@ ansible/inventory/hosts.ini
 
 # Production build output (rsync / Ansible target)
 deploy/dist/
+
+# Ansible Galaxy collections (see ansible/collections/requirements.yml)
+ansible/collections/ansible_collections/
+
+# Ansible run log (ansible.cfg log_path)
+ansible/ansible.log
