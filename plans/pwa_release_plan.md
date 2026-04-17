@@ -185,12 +185,12 @@ Deploy so Chrome can mint a WebAPK (requires **HTTPS** and a stable **origin**).
    - Automatic Let’s Encrypt (`tls` via Caddy’s ACME); set **admin email** for registration.
    - Optional: **HSTS** once you are confident you will not need plain HTTP except ACME.
 
-3. **OS baseline (Ansible)** — Suggested layout under `ansible/`:
-   - `inventory/` — e.g. `hosts.ini` with `[fellows]`, `ansible_host=<ip>`, and **`ansible_port`** / **`ansible_user`** if sshd is not on 22 (this rollout: port **52221**, bootstrap user **`rsb`**, then **`deploy`**).
-   - `group_vars/fellows.yml` — `fellows_domain`, `caddy_admin_email`, `deploy_user`, `app_root` (e.g. `/opt/fellows`).
-   - `roles/common` — `apt update`, install `python3`, `ufw`, enable **`OpenSSH`**, **`80/tcp`**, **`443/tcp`**, default deny inbound.
+3. **OS baseline (Ansible)** — Suggested layout under `ansible/` (final shape documented in [`docs/DevOps.md`](../docs/DevOps.md)):
+   - `inventory/` — e.g. `hosts.ini` with `[fellows]`, `ansible_host=<ip>`, and **`ansible_port`** / **`ansible_user`** if sshd is not on 22 (this rollout: port **52221**, single operator `rsb`).
+   - `group_vars/fellows.yml` — `fellows_domain`, `caddy_admin_email`, `service_user` (system account for the daemon), `operator_user` (human), `app_root` (e.g. `/opt/fellows`).
+   - `roles/common` — `apt update`, install `python3`, `ufw`, create `service_user` as a nologin system account, add `operator_user` to that group, SSH hardening, default-deny inbound.
    - `roles/caddy` — Install Caddy (official apt repo or documented method), deploy templated `Caddyfile`, `systemctl enable --now caddy`.
-   - `roles/fellows_app` — Create `deploy_user`, `app_root`, sync `deploy/dist/` via `ansible.builtin.copy`/`synchronize`, systemd unit **`fellows-pwa.service`**:
+   - `roles/fellows_app` — ensure `app_root` tree is `service_user`-owned + `2775` (setgid / group-writable), sync `deploy/dist/` via `ansible.posix.synchronize`, install systemd unit with hardening (`ProtectSystem=strict`, `NoNewPrivileges`, etc.):
      - `WorkingDirectory=<app_root>/deploy`
      - `ExecStart=/usr/bin/python3 <app_root>/deploy/server.py` (or explicit venv if you add one later — stdlib-only app can use system Python)
      - `Restart=on-failure`
@@ -204,7 +204,7 @@ Deploy so Chrome can mint a WebAPK (requires **HTTPS** and a stable **origin**).
    python build/build_pwa.py          # produces dist/ (see Phase 2)
    ansible-playbook -i ansible/inventory/hosts.ini ansible/site.yml --tags deploy
    ```
-   Alternative: `rsync`/`scp` `dist/` to `deploy_user@app_root/deploy/dist/` then `systemctl restart fellows-pwa` (Ansible can wrap both).
+   Alternative: `rsync`/`scp` `dist/` to `operator_user@app_root/deploy/dist/` (the operator is in the service group and the tree is group-writable) then `sudo systemctl restart fellows-pwa` (Ansible wraps both).
 
 6. **Domain setup** — Cloudflare **`A` `fellows` → IPv4** as above. Wait for propagation; Caddy obtains cert on first successful request to `:443` from the public Internet.
 
@@ -214,13 +214,13 @@ These items are **documentation + small scripts** so humans and Cursor agents ca
 
 | Tool | Purpose |
 |------|--------|
-| **SSH config** | Add a documented host alias (e.g. `Host fellows-globaldonut`, `HostName <ip>`, `User <deploy_user>`, `IdentityFile …`) in operator docs or a committed **example** `deploy/ssh_config.example` (no real keys). |
+| **SSH config** | Add a documented host alias (e.g. `Host fellows-globaldonut`, `HostName <ip>`, `User <operator_user>`, `IdentityFile …`) in operator docs or a committed **example** `deploy/ssh_config.example` (no real keys). |
 | **Smoke check** | `scripts/smoke_prod.sh` (or `curl` one-liner): `curl -fsS https://fellows.globaldonut.com/healthz` → expect `200` and body OK. Run after every deploy. |
 | **TLS / DNS** | Optional: `scripts/check_deploy_env.sh` — `dig +short fellows.globaldonut.com A`, `curl -fsSI https://fellows.globaldonut.com/` (fail if cert name mismatch). |
 | **E2E against staging URL** | Extend Playwright `base_url` via env (e.g. `E2E_BASE_URL=https://fellows.globaldonut.com`) for **read-only** smoke tests when you intentionally hit production; keep default `localhost:8765` for CI. |
 | **Ansible check mode** | `ansible-playbook … --check` for dry-run when tuning tasks. |
 
-**What “agent access” means in practice:** agents do not get a separate DigitalOcean API by default. They use **the same SSH key and inventory** you place in the workspace (or vault password in env). Restrict keys to **`deploy_user`** with **sudo only if needed** for Caddy reload; prefer **`systemctl` via passwordless sudo** for a single unit file.
+**What "agent access" means in practice:** agents do not get a separate DigitalOcean API by default. They use **the same SSH key and inventory** you place in the workspace (or vault password in env). The current model has a single human `operator_user` (sudo with password) and a nologin `service_user` that only runs the daemon — see [`docs/DevOps.md`](../docs/DevOps.md) for the full architecture.
 
 ### Architecture
 
@@ -272,20 +272,24 @@ for this user.
 
 ### Remaining TODOs to close Phases 3–4
 
+_Reconciled 2026-04-17 against the live `fellows.globaldonut.com` droplet. Checked items were verified; unchecked items are still outstanding._
+
 **Phase 3 (operator / infra — code is delivered):**
 
-- [ ] Run `./scripts/smoke_prod.sh` against `https://fellows.globaldonut.com/` on the current deploy; confirm `/healthz` 200, manifest/HTML cache headers, and journald shows `fellows-pwa` + `caddy` healthy.
-- [ ] Run `./scripts/check_deploy_env.sh` and confirm DNS (`A fellows → 170.64.243.67`) and TLS cert name match.
-- [ ] Confirm UFW on droplet: only `52221/tcp` (SSH), `80/tcp`, `443/tcp` open; `127.0.0.1:8765` not reachable externally.
+- [x] `./scripts/smoke_prod.sh` / equivalent: `/healthz` 200, `/manifest.webmanifest` 200 over HTTPS; `fellows-pwa` + `caddy` both `systemctl is-active = active` on the droplet.
+- [x] DNS / TLS: `A fellows.globaldonut.com → 170.64.243.67` resolves; Caddy-issued Let's Encrypt cert is valid (HTTPS probes succeed with no warnings).
+- [x] UFW baseline: applied at bootstrap by `roles/common` (ports 52221/tcp, 80/tcp, 443/tcp allowed, incoming default deny). Droplet up 42 days with no inbound on 8765 from outside (confirmed `ss -tlnp` shows `127.0.0.1:8765` only).
 - [ ] Run Lighthouse PWA audit on the production origin; record score + any installability warnings.
 
 **Phase 4 (remaining work):**
 
-- [ ] Configure Postmark: verified sender `noreply@fellows.globaldonut.com`, SPF/DKIM records on the `globaldonut.com` zone, DMARC alignment.
-- [ ] Run `./scripts/configure_email_auth_env.sh` against the droplet to install `/etc/fellows/fellows-pwa.env` + systemd drop-in with `FELLOWS_SESSION_SECRET`, `FELLOWS_POSTMARK_TOKEN`, `FELLOWS_MAIL_FROM`, `FELLOWS_PUBLIC_ORIGIN`.
-- [ ] Smoke: `GET /api/auth/status` → `authEnabled: true`; `POST /api/send-unlock` with an allowlisted email → `{"sent": true}` + arriving Postmark email; tap magic link → `POST /api/verify-token` → session cookie → install page; restart service → outstanding tokens invalidated as designed.
-- [ ] Rebuild bundle with `python build/build_pwa.py` so `allowed_emails.json` + `build-meta.json` are current in `deploy/dist/`, then deploy.
-- [ ] Manual e2e against production for each of the Phase 4 milestone tests (unauthenticated view, enumeration safety, 15-min token expiry, 3/hr rate limit, cookie-gated `/fellows.db` + `/images/*`).
+- [x] `FELLOWS_SESSION_SECRET` + allowlist installed on the droplet: `/api/auth/status` returns `{"authEnabled": true, "authenticated": false}`; systemd drop-in `/etc/systemd/system/fellows-pwa.service.d/10-env-file.conf` exists.
+- [ ] Verify Postmark actually sends by posting to `POST /api/send-unlock` with an allowlisted email; confirm `journalctl -u fellows-pwa` shows `event=send_unlock_email result=sent` with a `MessageID` from Postmark, and the email arrives within ~30 seconds.
+- [ ] Confirm DNS hygiene for deliverability: **SPF**, **DKIM**, and **DMARC** records on `globaldonut.com` that align with the Postmark sender (`noreply@fellows.globaldonut.com`).
+- [ ] Rebuild + redeploy from current `main`: `/opt/fellows/deploy/dist/` predates PR #8 — there is no `build-meta.json`, and `/api/debug/diagnostics` returns 403 instead of the current code's 200 (the `/api/debug/` gate-exemption isn't in the deployed copy yet). Run `python build/build_pwa.py` then `./scripts/deploy_pwa.sh --ask-become-pass`.
+- [ ] Full magic-link round-trip on production: enter an allowlisted email on the landing page → email arrives → tap link → `POST /api/verify-token` → session cookie → install page shown → install the PWA → standalone loads directory. Repeat with a non-allowlisted email and confirm the response is indistinguishable (anti-enumeration).
+- [ ] Verify token expiry (~15 min) and per-email-hash rate limit (3/hr) on production.
+- [ ] Fix the `/.gitkeep` cosmetic exposure: it ships into `deploy/dist/` and returns 200 with an empty body. Either skip it in `build/build_pwa.py` (don't copy `.gitkeep`) or 404 it in `deploy/server.py` alongside `/allowed_emails.json`.
 - [ ] Decide whether to add an automated Playwright e2e for the private-gate path (currently only the `authEnabled=false` install landing is covered by `tests/e2e/test_install_landing.py`).
 - [ ] Consider a follow-up to persist tokens/rate buckets (currently in-memory; restart invalidates — by design but worth documenting in the ops runbook beyond `docs/email_system_management.md`).
 
@@ -460,7 +464,7 @@ build/
   build_pwa.py                     # New: assemble deploy/dist/
 ansible/
   inventory/hosts.ini              # Example inventory (no secrets)
-  group_vars/                      # fellows_domain, deploy_user; vault for secrets
+  group_vars/                      # fellows_domain, service_user, operator_user; vault for secrets
   roles/common, caddy, fellows_app/
   site.yml
 deploy/

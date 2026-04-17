@@ -17,12 +17,8 @@ Local web app to browse Edmund Hillary Fellowship fellow profiles and run experi
 - [Build And Data Pipeline](#build-and-data-pipeline)
   - [JSON To SQLite + FTS5](#json-to-sqlite-fts5)
   - [PWA Static Bundle](#pwa-static-bundle)
-- [Production Operations](#production-operations)
-  - [Deploy Model](#deploy-model)
-  - [Routine Deploy](#routine-deploy)
-  - [Magic-Link Auth And Email](#magic-link-auth-and-email)
-  - [Debugging Installed PWA](#debugging-installed-pwa)
-- [DevOps Notes](#devops-notes)
+- [Production / DevOps](#production--devops)
+- [Local Dev Notes](#local-dev-notes)
 - [Project Layout](#project-layout)
 
 ## Data Note
@@ -148,62 +144,17 @@ python build/build_pwa.py
 
 `build/build_pwa.py` assembles `deploy/dist/` from `app/static/`, adds `fellows.db`, images, and writes `allowed_emails.json` (SHA-256 hashes of normalized `contact_email` values from the DB).
 
-## Production Operations
+## Production / DevOps
 
-### Deploy Model
+Production runs one Ubuntu droplet behind Caddy TLS. The unix architecture (service account, operator sudo model, systemd hardening, filesystem layout) and routine ops (build + deploy, smoke, bootstrap) are in [`docs/DevOps.md`](docs/DevOps.md). Mechanical Ansible details (tags, galaxy install, logs, troubleshooting) are in [`ansible/README.md`](ansible/README.md). Magic-link auth operator steps (Postmark, env file, journald event schema) are in [`docs/email_system_management.md`](docs/email_system_management.md).
 
-The VPS serves `deploy/dist/` via `deploy/server.py` on `127.0.0.1:8765` behind Caddy TLS.
-
-- Caddy site example: `deploy/Caddyfile.example` (templated in `ansible/roles/caddy/templates/Caddyfile.j2`).
-- Smoke: `./scripts/smoke_prod.sh` (`FELLOWS_BASE_URL=...` override).
-- DNS/TLS check: `./scripts/check_deploy_env.sh` (`FELLOWS_HOST=...` override).
-
-`deploy/server.py` supports `FELLOWS_DIST_ROOT`. Logs go to stdout/stderr and are collected by journald under systemd.
-
-### Routine Deploy
-
-Preferred:
+Most common command, from the repo root:
 
 ```bash
 ./scripts/deploy_pwa.sh --ask-become-pass
 ```
 
-Equivalent manual flow:
-
-```bash
-python build/build_pwa.py
-ansible-playbook ansible/site.yml --tags deploy --ask-become-pass
-```
-
-For inventory/bootstrap/systemd details, use [`ansible/README.md`](ansible/README.md).
-
-### Magic-Link Auth And Email
-
-Browser access can be gated by email magic links when:
-
-- `deploy/dist/allowed_emails.json` exists and is non-empty (built by `build/build_pwa.py`), and
-- server env includes `FELLOWS_SESSION_SECRET` and `FELLOWS_POSTMARK_TOKEN`.
-
-When enabled, `deploy/server.py`:
-
-- accepts `POST /api/send-unlock` and `POST /api/verify-token`,
-- sets a signed session cookie after token verification, and
-- requires session auth for `/fellows.db`, `/images/*`, and directory `/api/*` endpoints.
-
-Detailed operator steps, production setup, and debugging are in [`docs/email_system_management.md`](docs/email_system_management.md).
-
-### Debugging Installed PWA
-
-If standalone app fails to load, the UI shows a developer report with boot trace and HTTP probe status. Also check Chrome DevTools:
-
-- Application → Service Workers / Storage
-- Network (verify `/fellows.db` and `/api/*` responses and cache behavior)
-
-**Browser vs server bundle drift (stale `app.js`):** In the deployed app, open the **Diagnostics** control (fixed button, or add **`?diag=1`** to the URL). It fetches `/api/auth/status`, `/api/debug/diagnostics`, and `/build-meta.json`, and lists service worker and Cache API state. Compare **response headers** `X-Fellows-Build` / `X-Fellows-Auth-Active` with the JSON body. The session cookie is **HttpOnly**, so **Application → Cookies** may show `fellows_session` even when `document.cookie` looks empty.
-
-**Server logs (production):** `deploy/server.py` logs structured lines to stderr for each `GET /api/auth/status` (`event=auth_status`, …) and once at startup for `build-meta` (`event=build_meta`). View with `journalctl -u fellows-pwa -f` on the app server (see [`ansible/README.md`](ansible/README.md)).
-
-## DevOps Notes
+## Local Dev Notes
 
 - **Port 8765:** Prefer `./scripts/ensure_port_8765_free.sh` before manual testing when the port is occupied. Equivalent one-liner: `lsof -ti:8765 | xargs kill -9`.
 - **Automation hygiene:** test runs should not leave long-lived servers running. If the port is stuck, run the script above or re-run pytest (which also attempts cleanup in fixtures).

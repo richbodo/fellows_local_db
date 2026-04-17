@@ -3,8 +3,13 @@
 # Keep secrets out of this file; put them in vault-encrypted vars.
 
 fellows_domain: fellows.globaldonut.com
-deploy_user: deploy
 app_root: /opt/fellows
+
+# System user the fellows-pwa daemon runs as. Created by the common role as a
+# --system --no-create-home --shell /usr/sbin/nologin account. Never used for
+# SSH. Owns /opt/fellows tree; the operator ({{ operator_user }}) is added to
+# this group so rsync-based deploys can write without sudo.
+service_user: fellows
 
 # Caddy ACME registration email (not the sender address)
 caddy_admin_email: richbodo@gmail.com
@@ -12,11 +17,10 @@ caddy_admin_email: richbodo@gmail.com
 # SSH port + UFW: see ansible/inventory/group_vars/fellows.yml (committed).
 # Optional: duplicate ansible_port / ssh_listen_port here if you do not use that file.
 
-# Human operator account on the droplet used for first Ansible runs (inventory ansible_user).
-bootstrap_user: rsb
-
-deploy_public_keys:
-  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFd4U9vPzPBAhzdjbZ2+FkZI0J47EPjvBxveY945iSCW richbodo@gmail.com"
+# Human operator account on the droplet. Matches inventory ansible_user.
+# Stays in the sudo group with password'd sudo. Added to {{ service_user }}
+# group so routine deploys write to fellows-owned dirs without sudo.
+operator_user: rsb
 
 # Harden SSH after key setup
 disable_password_ssh: true
