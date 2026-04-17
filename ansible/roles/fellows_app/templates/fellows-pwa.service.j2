@@ -4,14 +4,34 @@ After=network.target
 
 [Service]
 Type=simple
-User={{ deploy_user }}
-Group={{ deploy_user }}
+User={{ service_user }}
+Group={{ service_user }}
 WorkingDirectory={{ app_root }}/deploy
 Environment=PYTHONUNBUFFERED=1
-# Optional override: Environment=FELLOWS_DIST_ROOT={{ app_root }}/deploy/dist
+# Optional: Environment=FELLOWS_DIST_ROOT={{ app_root }}/deploy/dist
 ExecStart=/usr/bin/python3 {{ app_root }}/deploy/server.py
 Restart=on-failure
 RestartSec=3
+
+# Hardening. The service binds 127.0.0.1:8765 (Caddy reverse-proxies) and
+# reads server.py + helpers + fellows.db + static files. It never writes to
+# its own code tree. dist/ is listed in ReadWritePaths only as a safety net
+# for sqlite3 journal files; the server's query path is read-only in practice.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+ReadWritePaths={{ app_root }}/deploy/dist
 
 [Install]
 WantedBy=multi-user.target

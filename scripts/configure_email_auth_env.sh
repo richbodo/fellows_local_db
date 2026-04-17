@@ -104,9 +104,9 @@ scp -P "$port" "$tmp_env" "${ssh_user}@${host}:${remote_tmp}"
 
 echo "Installing env file, systemd drop-in, and restarting service..."
 ssh -t -p "$port" "${ssh_user}@${host}" "set -euo pipefail; \
-  sudo install -d -m 0750 -o root -g deploy /etc/fellows; \
+  sudo install -d -m 0750 -o root -g fellows /etc/fellows; \
   sudo mv \"$remote_tmp\" /etc/fellows/fellows-pwa.env; \
-  sudo chown root:deploy /etc/fellows/fellows-pwa.env; \
+  sudo chown root:fellows /etc/fellows/fellows-pwa.env; \
   sudo chmod 0640 /etc/fellows/fellows-pwa.env; \
   sudo install -d -m 0755 /etc/systemd/system/fellows-pwa.service.d; \
   printf '[Service]\nEnvironmentFile=/etc/fellows/fellows-pwa.env\n' | sudo tee /etc/systemd/system/fellows-pwa.service.d/10-env-file.conf >/dev/null; \

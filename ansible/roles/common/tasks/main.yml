@@ -12,46 +12,39 @@
     state: present
     update_cache: true
 
-- name: Ensure deploy group exists
+# Service identity: a system account with no login shell and no home, per
+# Ubuntu convention for daemons (www-data, postgres, etc.). The account
+# exists only to run fellows-pwa and own /opt/fellows.
+- name: Ensure service group exists
   ansible.builtin.group:
-    name: "{{ deploy_user }}"
+    name: "{{ service_user }}"
+    system: true
     state: present
 
-- name: Ensure deploy user exists
+- name: Ensure service user exists (system, nologin, no home)
   ansible.builtin.user:
-    name: "{{ deploy_user }}"
-    group: "{{ deploy_user }}"
-    shell: /bin/bash
-    create_home: true
+    name: "{{ service_user }}"
+    group: "{{ service_user }}"
+    shell: /usr/sbin/nologin
+    home: /nonexistent
+    create_home: false
+    system: true
     state: present
 
-- name: Ensure deploy .ssh directory exists
-  ansible.builtin.file:
-    path: "/home/{{ deploy_user }}/.ssh"
-    state: directory
-    owner: "{{ deploy_user }}"
-    group: "{{ deploy_user }}"
-    mode: "0700"
+# Operator joins the service group so rsync writes under /opt/fellows/deploy/
+# land with the right group without needing sudo. Paired with the setgid +
+# group-writable mode set by the fellows_app role, this avoids the narrow
+# "deploy" sudoers pattern we had previously.
+- name: Ensure operator ({{ operator_user }}) is a member of {{ service_user }} group
+  ansible.builtin.user:
+    name: "{{ operator_user }}"
+    groups: "{{ service_user }}"
+    append: true
 
-- name: Install deploy user authorized keys
-  ansible.builtin.copy:
-    dest: "/home/{{ deploy_user }}/.ssh/authorized_keys"
-    owner: "{{ deploy_user }}"
-    group: "{{ deploy_user }}"
-    mode: "0600"
-    content: |
-      {% for key in deploy_public_keys %}
-      {{ key }}
-      {% endfor %}
-
-- name: Install limited sudoers for deploy user
-  ansible.builtin.copy:
-    dest: "/etc/sudoers.d/90-{{ deploy_user }}-fellows"
-    owner: root
-    group: root
-    mode: "0440"
-    content: |
-      {{ deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl status fellows-pwa, /bin/systemctl restart fellows-pwa, /bin/systemctl status caddy, /bin/systemctl reload caddy
+# Supplementary group membership only takes effect at next login. Force a
+# fresh SSH session so subsequent tasks (and later rsync) see the new group.
+- name: Reset SSH connection so new group membership takes effect
+  ansible.builtin.meta: reset_connection
 
 - name: Configure UFW defaults
   ansible.builtin.command: ufw --force default deny incoming

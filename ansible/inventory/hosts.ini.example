@@ -2,8 +2,9 @@
 # fellows.globaldonut.com → DigitalOcean droplet or Reserved IP.
 
 [fellows]
-# First runs: connect as your normal sudo-capable user on the droplet (here: rsb).
-# After bootstrap, switch ansible_user=deploy (key-only).
+# Always connect as the human operator (sudo-capable). There is no separate
+# SSH-able deploy account: the running service uses a nologin system user
+# (see service_user in group_vars/fellows.yml and docs/DevOps.md).
 fellows-prod ansible_host=170.64.243.67 ansible_user=rsb
 
 [fellows:vars]
