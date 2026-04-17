@@ -287,6 +287,14 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
             return
 
+        # API: auth status stub — dev server has no auth, but the PWA client
+        # (app/static/app.js) probes this on every non-standalone load.
+        # Returning a valid shape prevents the browser from showing the auth
+        # failure panel in local development.
+        if path == "/api/auth/status":
+            self.send_json({"authEnabled": False, "authenticated": False})
+            return
+
         # API: stats
         if path == "/api/stats":
             conn = get_db()

@@ -115,6 +115,10 @@ Example:
 ansible-playbook ansible/deploy_pwa.yml --extra-vars "fellows_skip_build=true" --ask-become-pass
 ```
 
+### Phase 4 (magic link) on the server
+
+The deploy bundle includes **`allowed_emails.json`** (from `build/build_pwa.py`). To turn on the browser gate, the **`fellows-pwa`** service needs environment variables **`FELLOWS_SESSION_SECRET`** and **`FELLOWS_POSTMARK_TOKEN`** (see **`ansible/group_vars/fellows.yml.example`** comments). Use a **systemd drop-in** or **`EnvironmentFile=`** pointing at a root-only file on the droplet; do not commit secrets. Without them, **`deploy/server.py`** behaves like Phase 3 (no email gate).
+
 ## 4) Verify
 
 ```bash

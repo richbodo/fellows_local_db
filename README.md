@@ -1,135 +1,138 @@
 # EHF Fellows Local Directory
 
-Local web app to browse Edmund Hillary Fellowship fellow profiles and run experiments. Data and assets are fully local (SQLite + static files); uses a Python server and system browser.
+Local web app to browse Edmund Hillary Fellowship fellow profiles and run experiments. Data and assets are local-first (SQLite + static files), served by Python stdlib.
 
-## Data note
+## Table of Contents
 
-The app uses a dump of the fellows data from their wiki in json: `final_fellows_set/ehf_fellow_profiles_deduped.json`, and some profile images that were retrieved from it. Not all fellows data came across, so some records are incomplete at the time of this writing.
-Even though it's demo data, and incomplete as of this writing, it's still confidential.
+- [Data Note](#data-note)
+- [Architecture](#architecture)
+- [Setup](#setup)
+  - [What To Install](#what-to-install)
+  - [First-Time Setup (Developers)](#first-time-setup-developers)
+- [Run Locally](#run-locally)
+  - [Server](#server)
+  - [API Endpoints](#api-endpoints)
+  - [Two-Phase Load](#two-phase-load)
+- [Testing](#testing)
+- [Build And Data Pipeline](#build-and-data-pipeline)
+  - [JSON To SQLite + FTS5](#json-to-sqlite-fts5)
+  - [PWA Static Bundle](#pwa-static-bundle)
+- [Production Operations](#production-operations)
+  - [Deploy Model](#deploy-model)
+  - [Routine Deploy](#routine-deploy)
+  - [Magic-Link Auth And Email](#magic-link-auth-and-email)
+  - [Debugging Installed PWA](#debugging-installed-pwa)
+- [DevOps Notes](#devops-notes)
+- [Project Layout](#project-layout)
+
+## Data Note
+
+The app uses a dump of fellows data from `final_fellows_set/ehf_fellow_profiles_deduped.json` plus retrieved profile images. Some records are incomplete. Even as demo data, treat it as confidential.
 
 ## Architecture
 
-See [docs/Architecture.md](docs/Architecture.md) for system design, data flow, and database schema.
+See [`docs/Architecture.md`](docs/Architecture.md) for system design, data flow, and schema.
 
-## What to install
+## Setup
+
+### What To Install
 
 | Goal | Install |
 |------|---------|
-| **Run the app only** | **Python 3.8+** and a built **`app/fellows.db`** (see [Build script](#build-script-json-to-sqlite--fts5)). No pip packages beyond the stdlib. |
-| **Run the full test suite** (database + HTTP API + Playwright e2e) | Python 3.8+, **`app/fellows.db`**, a **virtualenv** (this README uses **`.venv`**), **`pip install -r requirements-dev.txt`**, and **Playwright’s Chromium** (`playwright install chromium` once per machine). |
+| **Run the app only** | **Python 3.8+** and built **`app/fellows.db`**. No pip deps beyond stdlib. |
+| **Run full test suite** (DB + API + Playwright e2e) | Python 3.8+, **`app/fellows.db`**, **`.venv`**, `pip install -r requirements-dev.txt`, and `playwright install chromium`. |
 
-**`requirements-dev.txt`** pins pytest, Playwright, and pytest-playwright. After installing it, you must download browsers; the app itself does not need Playwright.
+`requirements-dev.txt` only covers dev/test tools (pytest, Playwright). The app runtime itself does not need them.
 
-## First-time setup (developers)
+### First-Time Setup (Developers)
 
-From the repo root:
+From repo root:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
-playwright install chromium        # required for tests under tests/e2e/
-python build/import_json_to_sqlite.py   # creates app/fellows.db (see below)
+playwright install chromium
+python build/import_json_to_sqlite.py
 ```
 
-Then start the server:
+Use `python` from the activated `.venv` when running tests so `pytest` and Playwright are on PATH. `scripts/ensure_port_8765_free.sh` expects `.venv/bin/pytest`.
+
+## Run Locally
+
+### Server
 
 ```bash
 python app/server.py
 ```
 
-Use **`python`** from the activated venv when running tests so `pytest` and Playwright are on your PATH. The helper script [`scripts/ensure_port_8765_free.sh`](scripts/ensure_port_8765_free.sh) expects pytest at **`.venv/bin/pytest`** (same layout as above).
+Then open `http://localhost:8765/`.
 
-## Server
-
-### Run the server
-
-From the repo root:
-
-```bash
-python app/server.py
-```
-
-Then open http://localhost:8765/ in your browser.
-
-Or use the launcher (starts server and opens browser):
+Launcher option:
 
 ```bash
 chmod +x run.sh
 ./run.sh
 ```
 
-### API endpoints
+### API Endpoints
 
-- `GET /api/fellows` – **list only** (record_id, slug, name) for instant directory load
-- `GET /api/fellows?full=1` – all fellows as full JSON array (used in background after directory is shown)
-- `GET /api/fellows/<slug>` – one fellow by slug or `record_id` (e.g. `/api/fellows/aaron_bird`)
-- `GET /api/search?q=...` – FTS5 search (e.g. `?q=Aaron`)
-- `GET /api/stats` – JSON aggregates for the About page (counts by type, cohort, region, field completeness)
-- `GET /fellows.db` – raw SQLite file (same data as `app/fellows.db`) for the installed PWA’s offline copy; not used by normal browser-tab viewing
-- `GET /images/<slug>.jpg` or `.png` – profile image. The server looks in `app/fellow_profile_images_by_name/` first; if that folder is missing, it uses `final_fellows_set/fellow_profile_images_by_name/` (so images work without copying). Files should be named by slug (e.g. `aaron_bird.jpg`) or by name (e.g. "Aaron Bird.jpg"); the server matches both.
-- `GET /` – static app (index.html)
+- `GET /api/fellows` — list only (`record_id`, `slug`, `name`) for fast directory load.
+- `GET /api/fellows?full=1` — full fellow rows.
+- `GET /api/fellows/<slug>` — one fellow by slug or `record_id`.
+- `GET /api/search?q=...` — FTS5 search.
+- `GET /api/stats` — aggregates for About page.
+- `GET /fellows.db` — raw SQLite file for installed PWA bootstrap.
+- `GET /images/<slug>.jpg|.png` — profile image lookup by slug/name fallback.
+- `GET /` — static app shell.
 
-### Two-phase load (instant directory)
+### Two-Phase Load
 
-The app loads the directory quickly by requesting only the minimal list first (`GET /api/fellows`), then fetches full data in the background (`GET /api/fellows?full=1`). The directory page shows **names and links only**—no images. Profile images are requested only when you open a fellow’s detail (`#/fellow/<slug>`), one image at a time. The About page (`#/about`) loads statistics from `GET /api/stats`.
+The UI requests `/api/fellows` first (instant list), then fetches `/api/fellows?full=1` in the background. Directory view is names/links only; images load on detail view only.
 
-### Run tests
+## Testing
 
-**Prerequisites:** virtualenv activated, **`requirements-dev.txt`** installed, **`playwright install chromium`** done, and **`app/fellows.db`** present.
+Prereqs: `.venv` active, `requirements-dev.txt` installed, Playwright Chromium installed, and `app/fellows.db` present.
 
-**Port 8765:** API and e2e tests start a local HTTP server on **8765**. `tests/conftest.py` tries to kill whatever is listening before binding; if bind still fails (“address already in use”), free the port first.
-
-**Recommended (free port, then run all tests):**
+Recommended:
 
 ```bash
-chmod +x scripts/ensure_port_8765_free.sh    # once
+chmod +x scripts/ensure_port_8765_free.sh
 ./scripts/ensure_port_8765_free.sh tests/ -v
 ```
 
-With no arguments, the script only frees the port and exits:
+Free port only:
 
 ```bash
 ./scripts/ensure_port_8765_free.sh
 ```
 
-**Or** run pytest directly (after freeing the port manually if needed):
+Direct pytest:
 
 ```bash
 pytest tests/ -v
 ```
 
-**By category:**
+By category:
 
 ```bash
-pytest tests/test_database.py -v   # DB schema, FTS5, data integrity
-pytest tests/test_api.py -v        # HTTP API (uses session server on 8765)
-pytest tests/e2e/ -v               # Playwright: directory + detail UI
+pytest tests/test_database.py -v
+pytest tests/test_api.py -v
+pytest tests/e2e/ -v
 ```
 
-The e2e suite starts the app in the background, opens Chromium, and exercises the directory and detail flows.
+## Build And Data Pipeline
 
----
-
-### Dev coordination (you + AI)
-
-- **Port 8765**: Prefer **`./scripts/ensure_port_8765_free.sh`** before manual testing if something else is bound to the port. Equivalent one-liner: `lsof -ti:8765 | xargs kill -9` (macOS/Linux with `lsof`).
-- **AI note**: Automated test runs should not leave a long-lived server running; if the port is stuck, run the script above or `pytest` (which attempts to free the port first).
-
----
-
-## Build script (JSON to SQLite + FTS5)
-
-Import fellow profiles into the database:
+### JSON To SQLite + FTS5
 
 ```bash
-python build/import_json_to_sqlite.py                       # default JSON path
-python build/import_json_to_sqlite.py /path/to/other.json   # custom JSON path
+python build/import_json_to_sqlite.py
+python build/import_json_to_sqlite.py /path/to/other.json
 ```
 
-This reads the JSON and writes `app/fellows.db` (table `fellows` + FTS5 table `fellows_fts`). If `fellows.db` already exists, it is backed up to `app/fellows.db.backup.YYYY-MM-DD` before overwriting.
+Writes `app/fellows.db` and backs up existing DB to `app/fellows.db.backup.YYYY-MM-DD`.
 
-### Verify
+Verify:
 
 ```bash
 sqlite3 app/fellows.db "SELECT COUNT(*) FROM fellows;"
@@ -137,57 +140,102 @@ sqlite3 app/fellows.db "SELECT name, slug FROM fellows WHERE name != '' ORDER BY
 sqlite3 app/fellows.db "SELECT name FROM fellows_fts WHERE fellows_fts MATCH 'Aaron';"
 ```
 
-### PWA static bundle (production)
-
-Copy the current `app/static/` tree into `deploy/dist/` before Ansible or manual upload:
+### PWA Static Bundle
 
 ```bash
 python build/build_pwa.py
 ```
 
-See `ansible/README.md` for deploy. Phase 2 extends this script with `fellows.db` and images.
+`build/build_pwa.py` assembles `deploy/dist/` from `app/static/`, adds `fellows.db`, images, and writes `allowed_emails.json` (SHA-256 hashes of normalized `contact_email` values from the DB).
 
-### Production HTTPS (Phase 3)
+## Production Operations
 
-The VPS serves **`deploy/dist/`** via **`deploy/server.py`** on **`127.0.0.1:8765`** behind **Caddy** (TLS, gzip). Build the bundle, then sync with Ansible (`--tags deploy`) or follow `ansible/README.md` for the full bootstrap.
+### Deploy Model
 
-When **`fellows.db`** is present in **`deploy/dist/`**, the same process also serves the **read-only JSON API** (`/api/fellows`, `/api/search`, `/api/stats`, etc.) as in local dev. That lets the installed PWA load the directory if **sqlite-wasm / OPFS** fails in the browser (the offline-first path still uses `/fellows.db` + local SQLite when it works).
+The VPS serves `deploy/dist/` via `deploy/server.py` on `127.0.0.1:8765` behind Caddy TLS.
 
-- **Example Caddy site block:** `deploy/Caddyfile.example` (templated copy lives in `ansible/roles/caddy/templates/Caddyfile.j2`).
-- **Smoke:** `./scripts/smoke_prod.sh` (override base URL with `FELLOWS_BASE_URL=…`).
-- **DNS/TLS check:** `./scripts/check_deploy_env.sh` (override host with `FELLOWS_HOST=…`).
+- Caddy site example: `deploy/Caddyfile.example` (templated in `ansible/roles/caddy/templates/Caddyfile.j2`).
+- Smoke: `./scripts/smoke_prod.sh` (`FELLOWS_BASE_URL=...` override).
+- DNS/TLS check: `./scripts/check_deploy_env.sh` (`FELLOWS_HOST=...` override).
 
-`deploy/server.py` honors **`FELLOWS_DIST_ROOT`** if the static root is not the default `<deploy>/dist/`. Access logs go to **stdout**; startup line goes to stderr. Deploy ships **`deploy/sqlite_api_support.py`** next to **`server.py`** (Ansible copies both).
+`deploy/server.py` supports `FELLOWS_DIST_ROOT`. Logs go to stdout/stderr and are collected by journald under systemd.
 
-**Routine deploy from your machine:** `./scripts/deploy_pwa.sh --ask-become-pass` builds `deploy/dist/`, runs the deploy role, and smoke-checks HTTPS (see `ansible/README.md`).
+### Routine Deploy
 
-### Production management (operators & maintainers)
+Preferred:
 
-- **Server bootstrap, Caddy, systemd, and Ansible variables** are documented in **[`ansible/README.md`](ansible/README.md)**. Use that file as the source of truth for inventory, tags, HTTPS, and troubleshooting the VPS layout.
-- **Deploy path:** `./scripts/deploy_pwa.sh` runs `build/build_pwa.py`, syncs `deploy/dist/` and `deploy/server.py` (plus `sqlite_api_support.py`), then runs an HTTPS smoke check. Fix local or Ansible issues before relying on the installed PWA.
-- **Virtualenv (`.venv`):** use it on your **development machine** for anything that needs dev dependencies: `pytest`, Playwright e2e, and helpers that expect **`.venv/bin/pytest`**. The production host only needs **system Python 3** to run `deploy/server.py` (no project venv on the server unless you choose to add one). Running **`python app/server.py`** locally does not require activating `.venv` if you are not running tests.
-- **Smoke / DNS checks:** `./scripts/smoke_prod.sh` and `./scripts/check_deploy_env.sh` (see [Production HTTPS](#production-https-phase-3) above).
-- **Debugging the installed PWA:** if the directory does not load in **standalone** (installed) mode, the app shows a **developer report** (URL, service worker state, OPFS/sqlite eligibility, boot trace, and HTTP status for `/fellows.db`, `/api/fellows`, etc.). Also use Chrome **DevTools → Application → Service Workers / Storage**, and the **Network** tab to confirm `fellows.db` and `/api/*` return **200** over HTTPS (not a cached stale `app.js` or missing API).
-
-## Project layout
-
+```bash
+./scripts/deploy_pwa.sh --ask-become-pass
 ```
-build/import_json_to_sqlite.py   # JSON → SQLite + FTS5
-build/build_pwa.py               # app/static → deploy/dist (PWA deploy bundle)
+
+Equivalent manual flow:
+
+```bash
+python build/build_pwa.py
+ansible-playbook ansible/site.yml --tags deploy --ask-become-pass
+```
+
+For inventory/bootstrap/systemd details, use [`ansible/README.md`](ansible/README.md).
+
+### Magic-Link Auth And Email
+
+Browser access can be gated by email magic links when:
+
+- `deploy/dist/allowed_emails.json` exists and is non-empty (built by `build/build_pwa.py`), and
+- server env includes `FELLOWS_SESSION_SECRET` and `FELLOWS_POSTMARK_TOKEN`.
+
+When enabled, `deploy/server.py`:
+
+- accepts `POST /api/send-unlock` and `POST /api/verify-token`,
+- sets a signed session cookie after token verification, and
+- requires session auth for `/fellows.db`, `/images/*`, and directory `/api/*` endpoints.
+
+Detailed operator steps, production setup, and debugging are in [`docs/email_system_management.md`](docs/email_system_management.md).
+
+### Debugging Installed PWA
+
+If standalone app fails to load, the UI shows a developer report with boot trace and HTTP probe status. Also check Chrome DevTools:
+
+- Application → Service Workers / Storage
+- Network (verify `/fellows.db` and `/api/*` responses and cache behavior)
+
+**Browser vs server bundle drift (stale `app.js`):** In the deployed app, open the **Diagnostics** control (fixed button, or add **`?diag=1`** to the URL). It fetches `/api/auth/status`, `/api/debug/diagnostics`, and `/build-meta.json`, and lists service worker and Cache API state. Compare **response headers** `X-Fellows-Build` / `X-Fellows-Auth-Active` with the JSON body. The session cookie is **HttpOnly**, so **Application → Cookies** may show `fellows_session` even when `document.cookie` looks empty.
+
+**Server logs (production):** `deploy/server.py` logs structured lines to stderr for each `GET /api/auth/status` (`event=auth_status`, …) and once at startup for `build-meta` (`event=build_meta`). View with `journalctl -u fellows-pwa -f` on the app server (see [`ansible/README.md`](ansible/README.md)).
+
+## DevOps Notes
+
+- **Port 8765:** Prefer `./scripts/ensure_port_8765_free.sh` before manual testing when the port is occupied. Equivalent one-liner: `lsof -ti:8765 | xargs kill -9`.
+- **Automation hygiene:** test runs should not leave long-lived servers running. If the port is stuck, run the script above or re-run pytest (which also attempts cleanup in fixtures).
+- **Virtualenv scope:** use `.venv` for dev/test tooling on your workstation; production server runtime uses system Python.
+
+## Project Layout
+
+```text
+build/import_json_to_sqlite.py   # JSON -> SQLite + FTS5
+build/build_pwa.py               # app/static -> deploy/dist
 app/
-  fellows.db                     # Produced by build (gitignored)
-  fellow_profile_images_by_name/ # 268 images, slug-named (optional)
-  static/                        # Front-end (index.html, app.js, manifest, icons, …)
-  server.py                      # Python server
-run.sh                           # Launcher: start server + open browser
+  fellows.db                     # Build artifact (gitignored)
+  fellow_profile_images_by_name/ # Optional source images
+  static/                        # Front-end (index.html, app.js, sw.js, manifest, icons)
+  server.py                      # Local dev server
+deploy/
+  server.py                      # Production server (static + auth + API fallback)
+  sqlite_api_support.py          # Shared SQLite query helper
+  magic_link_auth.py             # Magic-link/session helper
+  dist/                          # Build output (gitignored)
 scripts/
-  ensure_port_8765_free.sh       # Free 8765; optional: pass pytest args (uses .venv/bin/pytest)
+  ensure_port_8765_free.sh
+  deploy_pwa.sh
+  smoke_prod.sh
+  check_deploy_env.sh
+ansible/
+  site.yml
+  roles/
+  README.md
 tests/
-  conftest.py                    # Shared fixtures (app_server, db)
-  test_database.py               # DB schema, FTS5, data integrity
-  test_api.py                    # HTTP API endpoints
+  test_database.py
+  test_api.py
+  test_magic_link_auth.py
   e2e/
-    conftest.py                  # e2e server + base_url fixture
-    test_directory.py            # Playwright: directory page
-    test_detail_view.py          # Playwright: detail view
 ```

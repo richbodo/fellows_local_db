@@ -10,6 +10,8 @@
   var loadingPanelEl = document.getElementById('loading-panel');
   var bootErrorPanelEl = document.getElementById('boot-error-panel');
   var bootErrorPreEl = document.getElementById('boot-error-pre');
+  var authErrorPanelEl = document.getElementById('auth-error-panel');
+  var authErrorPreEl = document.getElementById('auth-error-pre');
   var appWrapEl = document.getElementById('app-wrap');
   var connectionBannerEl = document.getElementById('connection-banner');
   var directoryEl = document.getElementById('directory');
@@ -24,9 +26,15 @@
   var detailEl = document.getElementById('detail');
   var fullFellowsCache = null;
   var installLandingEl = document.getElementById('install-landing');
+  var installGatePrivateEl = document.getElementById('install-gate-private');
+  var unlockEmailFormEl = document.getElementById('unlock-email-form');
+  var unlockEmailInputEl = document.getElementById('unlock-email');
+  var unlockStatusEl = document.getElementById('unlock-status');
   var installButtonEl = document.getElementById('install-pwa-button');
   var installStatusEl = document.getElementById('install-status');
   var iosHintEl = document.getElementById('install-ios-hint');
+  var authDebugPrivateEl = document.getElementById('auth-debug-private');
+  var authDebugInstallEl = document.getElementById('auth-debug-install');
   var swUpdateBannerEl = document.getElementById('sw-update-banner');
   var swUpdateReloadEl = document.getElementById('sw-update-reload');
   var siteHeaderEl = document.getElementById('site-header');
@@ -34,6 +42,9 @@
   var directoryDataSource = 'api';
   var dataProvider = null;
   var bootDebugLines = [];
+  var authDebugLines = [];
+  /** Bump when changing diagnostics behavior (shown in Diagnostics panel). */
+  var FELLOWS_UI_DIAG = 'diag-2026-04c';
 
   var FELLOW_COLS = [
     'record_id',
@@ -308,6 +319,10 @@
     bootDebugLines.push(new Date().toISOString() + ' ' + String(msg));
   }
 
+  function authDebugPush(msg) {
+    authDebugLines.push(new Date().toISOString() + ' ' + String(msg));
+  }
+
   function describeOpfsGates() {
     var lines = [];
     lines.push('standalone display-mode: ' + isStandaloneDisplayMode());
@@ -415,6 +430,242 @@
     }
   }
 
+  function clearCookiesBestEffort() {
+    var cookiePairs = (document.cookie || '').split(';');
+    cookiePairs.forEach(function (cookie) {
+      var eqPos = cookie.indexOf('=');
+      var rawName = eqPos > -1 ? cookie.slice(0, eqPos) : cookie;
+      var name = rawName.trim();
+      if (!name) return;
+      document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
+      document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;SameSite=Strict';
+      document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;Secure;SameSite=Strict';
+    });
+  }
+
+  async function clearAllAppData() {
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+
+      if (window.indexedDB && typeof window.indexedDB.deleteDatabase === 'function') {
+        try {
+          window.indexedDB.deleteDatabase('fellows-local-db');
+        } catch (err) {}
+      }
+
+      if ('caches' in window) {
+        try {
+          var cacheNames = await caches.keys();
+          await Promise.all(
+            cacheNames.map(function (cacheName) {
+              return caches.delete(cacheName);
+            })
+          );
+        } catch (err) {
+          console.error('Error clearing Cache API caches:', err);
+        }
+      }
+
+      if ('serviceWorker' in navigator) {
+        try {
+          var registrations = await navigator.serviceWorker.getRegistrations();
+          for (var i = 0; i < registrations.length; i++) {
+            await registrations[i].unregister();
+          }
+        } catch (err2) {
+          console.error('Error unregistering service workers:', err2);
+        }
+      }
+
+      clearCookiesBestEffort();
+      window.location.replace(
+        window.location.pathname + '?cache_reset=' + Date.now() + (window.location.hash || '')
+      );
+    } catch (e) {
+      console.error('[Fellows] clearAllAppData failed:', e);
+      try {
+        window.location.replace(
+          window.location.pathname + '?cache_reset=force' + (window.location.hash || '')
+        );
+      } catch (e2) {
+        window.location.reload();
+      }
+    }
+  }
+
+  window.clearAllAppData = clearAllAppData;
+
+  function initClearCacheButton() {
+    var btn = document.getElementById('clear-app-cache-button');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      Promise.resolve(clearAllAppData()).catch(function (e) {
+        console.error('[Fellows] clearAllAppData rejected:', e);
+      });
+    });
+  }
+
+  async function collectDiagnosticsText() {
+    var lines = [];
+    lines.push('=== Fellows client diagnostics (UI mark: ' + FELLOWS_UI_DIAG + ') ===');
+    lines.push('time (ISO): ' + new Date().toISOString());
+    lines.push('href: ' + String(location.href));
+    lines.push(
+      'document.cookie length (HttpOnly cookies are NOT visible to JS): ' +
+        String((document.cookie || '').length)
+    );
+    lines.push('');
+    if ('serviceWorker' in navigator) {
+      try {
+        var reg = await navigator.serviceWorker.getRegistration();
+        lines.push('serviceWorker.getRegistration: ' + (reg ? 'yes' : 'no'));
+        if (reg && reg.active) {
+          lines.push('SW active: ' + String(reg.active.scriptURL));
+        }
+        if (reg && reg.waiting) {
+          lines.push('SW waiting: yes (update not yet active)');
+        }
+        if (reg && reg.installing) {
+          lines.push('SW installing: yes');
+        }
+      } catch (e) {
+        lines.push('SW registration error: ' + String(e && e.message));
+      }
+      if (navigator.serviceWorker.controller) {
+        lines.push('navigator.serviceWorker.controller: ' + String(navigator.serviceWorker.controller.scriptURL));
+      } else {
+        lines.push('navigator.serviceWorker.controller: (none yet)');
+      }
+    } else {
+      lines.push('serviceWorker: not available in this context');
+    }
+    lines.push('');
+    try {
+      var r = await fetch('/api/auth/status', { credentials: 'same-origin', cache: 'no-store' });
+      lines.push('GET /api/auth/status → HTTP ' + r.status);
+      lines.push('  X-Fellows-Build: ' + (r.headers.get('X-Fellows-Build') || '(none)'));
+      lines.push('  X-Fellows-Auth-Active: ' + (r.headers.get('X-Fellows-Auth-Active') || '(none)'));
+      var j = await r.json();
+      lines.push('  body: ' + JSON.stringify(j));
+    } catch (e) {
+      lines.push('/api/auth/status failed: ' + String(e && e.message));
+    }
+    lines.push('');
+    try {
+      var r2 = await fetch('/api/debug/diagnostics', { credentials: 'same-origin', cache: 'no-store' });
+      lines.push('GET /api/debug/diagnostics → HTTP ' + r2.status);
+      lines.push('  X-Fellows-Build: ' + (r2.headers.get('X-Fellows-Build') || '(none)'));
+      lines.push(JSON.stringify(await r2.json(), null, 2));
+    } catch (e2) {
+      lines.push('/api/debug/diagnostics failed: ' + String(e2 && e2.message));
+    }
+    lines.push('');
+    try {
+      var r3 = await fetch('/build-meta.json', { cache: 'no-store' });
+      lines.push('GET /build-meta.json → HTTP ' + r3.status);
+      lines.push((await r3.text()).trim());
+    } catch (e3) {
+      lines.push('GET /build-meta.json failed (expected before first build): ' + String(e3 && e3.message));
+    }
+    lines.push('');
+    if ('caches' in window) {
+      try {
+        var keys = await caches.keys();
+        lines.push('Cache API keys (' + keys.length + '): ' + (keys.length ? keys.join(', ') : '(none)'));
+      } catch (e4) {
+        lines.push('caches.keys error: ' + String(e4 && e4.message));
+      }
+    }
+    lines.push('');
+    lines.push(
+      'Tip: In Chrome DevTools → Application → Cookies → https://your-host — HttpOnly session cookie may list there while document.cookie stays empty.'
+    );
+    return lines.join('\n');
+  }
+
+  function initDiagnosticsPanel() {
+    var panel = document.getElementById('diag-panel');
+    var pre = document.getElementById('diag-pre');
+    var toggle = document.getElementById('diag-toggle');
+    var closeBtn = document.getElementById('diag-close');
+    var refreshBtn = document.getElementById('diag-refresh');
+
+    async function refresh() {
+      if (!pre) return;
+      pre.textContent = 'Loading…';
+      try {
+        pre.textContent = await collectDiagnosticsText();
+      } catch (err) {
+        pre.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
+      }
+    }
+
+    if (toggle) {
+      toggle.addEventListener('click', function () {
+        if (!panel) return;
+        panel.classList.toggle('hidden');
+        var hidden = panel.classList.contains('hidden');
+        panel.setAttribute('aria-hidden', hidden ? 'true' : 'false');
+        if (!hidden) {
+          refresh();
+        }
+      });
+    }
+    if (closeBtn) {
+      closeBtn.addEventListener('click', function () {
+        if (panel) {
+          panel.classList.add('hidden');
+          panel.setAttribute('aria-hidden', 'true');
+        }
+      });
+    }
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', function () {
+        refresh();
+      });
+    }
+
+    try {
+      if (new URLSearchParams(location.search).get('diag') === '1' && panel) {
+        panel.classList.remove('hidden');
+        panel.setAttribute('aria-hidden', 'false');
+        refresh();
+      }
+    } catch (e5) {}
+  }
+
+  function showAuthFailure(reason, extra) {
+    var lines = [];
+    lines.push('=== Fellows auth check failure ===');
+    lines.push('time (ISO): ' + new Date().toISOString());
+    lines.push('href: ' + String(location.href));
+    lines.push('origin: ' + String(location.origin));
+    lines.push('userAgent: ' + String(navigator.userAgent || ''));
+    lines.push('reason: ' + String(reason || 'unknown'));
+    if (extra != null) {
+      lines.push('details: ' + String(extra));
+    }
+    lines.push('');
+    lines.push('--- Auth trace (chronological) ---');
+    lines.push(authDebugLines.length ? authDebugLines.join('\n') : '(no auth trace lines recorded)');
+    lines.push('');
+    lines.push('--- Recommended checks ---');
+    lines.push('1) Confirm /api/auth/status returns JSON over HTTPS');
+    lines.push('2) Confirm service worker is current (use Clear App Cache & Reload)');
+    lines.push('3) Check app server logs for auth initialization warnings');
+
+    if (loadingEl) loadingEl.classList.add('hidden');
+    if (loadingPanelEl) loadingPanelEl.classList.add('hidden');
+    if (installLandingEl) installLandingEl.classList.add('hidden');
+    if (installGatePrivateEl) installGatePrivateEl.classList.add('hidden');
+    if (appWrapEl) appWrapEl.classList.add('hidden');
+    if (siteHeaderEl) siteHeaderEl.classList.add('hidden');
+    if (connectionBannerEl) connectionBannerEl.classList.add('hidden');
+    if (authErrorPanelEl) authErrorPanelEl.classList.remove('hidden');
+    if (authErrorPreEl) authErrorPreEl.textContent = lines.join('\n');
+  }
+
   function setSetupStatus(msg) {
     if (!loadingEl) return;
     loadingEl.textContent = msg || 'Loading…';
@@ -520,8 +771,15 @@
     if (swUpdateBannerEl) swUpdateBannerEl.classList.remove('hidden');
   }
 
+  function hideSwUpdateBanner() {
+    if (swUpdateBannerEl) swUpdateBannerEl.classList.add('hidden');
+  }
+
   function listenForSwUpdate(reg) {
     if (!reg || typeof reg.addEventListener !== 'function') return;
+    if (reg.waiting && navigator.serviceWorker.controller) {
+      showSwUpdateBanner();
+    }
     reg.addEventListener('updatefound', function () {
       var nw = reg.installing;
       if (!nw) return;
@@ -535,6 +793,9 @@
 
   function registerServiceWorker() {
     if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      hideSwUpdateBanner();
+    });
     window.addEventListener('load', function () {
       navigator.serviceWorker
         .register('/sw.js')
@@ -549,6 +810,7 @@
   function initSwReloadButton() {
     if (!swUpdateReloadEl) return;
     swUpdateReloadEl.addEventListener('click', function () {
+      hideSwUpdateBanner();
       window.location.reload();
     });
   }
@@ -561,12 +823,53 @@
     return iOS && webkit && noChrome;
   }
 
-  function initBrowserInstallMode() {
+  function formatAuthDebugLine(data, httpStatus) {
+    var st = httpStatus != null ? String(httpStatus) : '?';
+    var ae = data && typeof data.authEnabled === 'boolean' ? data.authEnabled : '?';
+    var au = data && typeof data.authenticated === 'boolean' ? data.authenticated : '?';
+    return (
+      'Auth debug: GET /api/auth/status → HTTP ' +
+      st +
+      ' · authEnabled=' +
+      ae +
+      ' · authenticated=' +
+      au
+    );
+  }
+
+  function showAuthDebugInstall(data, httpStatus) {
+    if (authDebugPrivateEl) {
+      authDebugPrivateEl.classList.add('hidden');
+      authDebugPrivateEl.textContent = '';
+    }
+    if (authDebugInstallEl) {
+      authDebugInstallEl.textContent = formatAuthDebugLine(data, httpStatus);
+      authDebugInstallEl.classList.remove('hidden');
+    }
+  }
+
+  function showAuthDebugPrivate(data, httpStatus) {
+    if (authDebugInstallEl) {
+      authDebugInstallEl.classList.add('hidden');
+      authDebugInstallEl.textContent = '';
+    }
+    if (authDebugPrivateEl) {
+      authDebugPrivateEl.textContent = formatAuthDebugLine(data, httpStatus);
+      authDebugPrivateEl.classList.remove('hidden');
+    }
+  }
+
+  function initBrowserInstallMode(authPayload, httpStatus) {
+    if (installGatePrivateEl) installGatePrivateEl.classList.add('hidden');
     if (installLandingEl) installLandingEl.classList.remove('hidden');
     if (siteHeaderEl) siteHeaderEl.classList.add('hidden');
     showLoading(false);
     showApp(false);
     if (connectionBannerEl) connectionBannerEl.classList.add('hidden');
+
+    if (authPayload) {
+      showAuthDebugInstall(authPayload, httpStatus != null ? httpStatus : 200);
+    }
 
     if (isIosSafari() && iosHintEl) {
       iosHintEl.classList.remove('hidden');
@@ -606,6 +909,120 @@
         }
       });
     }
+  }
+
+  function initPrivateGate(authPayload, httpStatus) {
+    if (installGatePrivateEl) installGatePrivateEl.classList.remove('hidden');
+    if (installLandingEl) installLandingEl.classList.add('hidden');
+    if (siteHeaderEl) siteHeaderEl.classList.add('hidden');
+    showLoading(false);
+    showApp(false);
+    if (connectionBannerEl) connectionBannerEl.classList.add('hidden');
+
+    if (authPayload) {
+      showAuthDebugPrivate(authPayload, httpStatus != null ? httpStatus : 200);
+    }
+
+    if (unlockEmailFormEl) {
+      unlockEmailFormEl.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        var email = (unlockEmailInputEl && unlockEmailInputEl.value) || '';
+        if (unlockStatusEl) unlockStatusEl.textContent = 'Sending…';
+        fetch('/api/send-unlock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ email: email.trim() })
+        })
+          .then(function (r) {
+            return r.json();
+          })
+          .then(function () {
+            if (unlockStatusEl) {
+              unlockStatusEl.textContent =
+                'If that email is on file, you will receive a link shortly. Check your inbox.';
+            }
+          })
+          .catch(function () {
+            if (unlockStatusEl) unlockStatusEl.textContent = 'Could not send. Try again later.';
+          });
+      });
+    }
+
+    if (sessionStorage.getItem('fellows_unlock_err')) {
+      sessionStorage.removeItem('fellows_unlock_err');
+      if (unlockStatusEl) {
+        unlockStatusEl.textContent =
+          'Link expired or invalid — request a new one from your fellowship email.';
+      }
+    }
+  }
+
+  function tryUnlockFromHash() {
+    var hash = window.location.hash || '';
+    var m = hash.match(/^#\/unlock\/(.+)$/);
+    if (!m) {
+      return Promise.resolve();
+    }
+    var token = m[1];
+    window.history.replaceState(null, '', window.location.pathname + window.location.search + '#/');
+    return fetch('/api/verify-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ token: token })
+    })
+      .then(function (r) {
+        return r.json().then(function (j) {
+          if (!r.ok || !j.ok) {
+            sessionStorage.setItem('fellows_unlock_err', '1');
+          }
+        });
+      })
+      .catch(function () {
+        sessionStorage.setItem('fellows_unlock_err', '1');
+      });
+  }
+
+  function startBrowserUx() {
+    authDebugLines.length = 0;
+    authDebugPush('startBrowserUx: begin auth status check');
+    fetch('/api/auth/status', { credentials: 'same-origin' })
+      .then(function (r) {
+        authDebugPush('/api/auth/status HTTP ' + r.status);
+        if (!r.ok) {
+          throw new Error('/api/auth/status failed with HTTP ' + r.status);
+        }
+        return r.json().then(function (data) {
+          return { status: r.status, data: data };
+        });
+      })
+      .then(function (result) {
+        var data = result.data;
+        var httpStatus = result.status;
+        if (!data || typeof data.authEnabled !== 'boolean' || typeof data.authenticated !== 'boolean') {
+          throw new Error('/api/auth/status returned invalid payload shape');
+        }
+        authDebugPush(
+          '/api/auth/status payload authEnabled=' + data.authEnabled + ' authenticated=' + data.authenticated
+        );
+        if (!data.authEnabled) {
+          authDebugPush('auth disabled on server: using install mode');
+          initBrowserInstallMode(data, httpStatus);
+          return;
+        }
+        if (data.authenticated) {
+          authDebugPush('session authenticated: using install mode');
+          initBrowserInstallMode(data, httpStatus);
+          return;
+        }
+        authDebugPush('auth enabled + unauthenticated: using private gate');
+        initPrivateGate(data, httpStatus);
+      })
+      .catch(function (err) {
+        authDebugPush('auth status check failed: ' + (err && err.message ? err.message : String(err)));
+        showAuthFailure('Unable to validate auth status; refusing install-mode fallback', err && err.message);
+      });
   }
 
   function showLoading(show) {
@@ -1232,6 +1649,8 @@
   }
 
   initSwReloadButton();
+  initClearCacheButton();
+  initDiagnosticsPanel();
 
   if (isStandaloneDisplayMode()) {
     bootDebugLines.length = 0;
@@ -1330,7 +1749,9 @@
     window.addEventListener('offline', updateConnectionBanner);
     updateConnectionBanner();
   } else {
-    initBrowserInstallMode();
+    tryUnlockFromHash().then(function () {
+      startBrowserUx();
+    });
   }
 
   registerServiceWorker();
