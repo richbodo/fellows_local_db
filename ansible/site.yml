@@ -19,3 +19,27 @@
       tags: ["bootstrap"]
     - role: fellows_app
       tags: ["bootstrap", "deploy"]
+
+# Second play: one-time migration from the legacy "deploy" SSH/service user
+# to the "fellows" system account. Idempotent — after first run these tasks
+# are no-ops because the deploy user and its sudoers drop-in no longer exist.
+- name: Retire legacy deploy SSH/service account (idempotent)
+  hosts: fellows
+  gather_facts: false
+  tags: ["bootstrap"]
+  tasks:
+    - name: Verify fellows-pwa is active before removing legacy account
+      ansible.builtin.command: systemctl is-active fellows-pwa
+      changed_when: false
+
+    - name: Remove legacy deploy sudoers drop-in (if present)
+      ansible.builtin.file:
+        path: /etc/sudoers.d/90-deploy-fellows
+        state: absent
+
+    - name: Remove legacy deploy user and home directory (if present)
+      ansible.builtin.user:
+        name: deploy
+        state: absent
+        remove: true
+        force: true
