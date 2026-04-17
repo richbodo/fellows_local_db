@@ -41,6 +41,15 @@
     mode: "0644"
   notify: Restart fellows app
 
+- name: Copy deploy magic-link auth helper
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../deploy/magic_link_auth.py"
+    dest: "{{ app_root }}/deploy/magic_link_auth.py"
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0644"
+  notify: Restart fellows app
+
 # Rsync (not recursive copy): hundreds of files + large blobs are reliable and resumable; copy() can stall mid-tree.
 # Force SSH as deploy_user: if inventory ansible_user is rsb, rsb cannot write deploy-owned paths (mode 0755).
 - name: Rsync deploy dist from controller to host

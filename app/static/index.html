@@ -11,9 +11,53 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
+  <button type="button" id="clear-app-cache-button" class="clear-app-cache-button">
+    Clear App Cache & Reload
+  </button>
+  <button type="button" id="diag-toggle" class="diag-toggle" title="Show bundle and auth diagnostics">
+    Diagnostics
+  </button>
+
+  <div id="diag-panel" class="diag-panel hidden" role="region" aria-label="Diagnostics" aria-hidden="true">
+    <div class="diag-panel-toolbar">
+      <strong>Diagnostics</strong>
+      <span class="diag-panel-hint">Add <code>?diag=1</code> to URL to open on load</span>
+      <button type="button" id="diag-refresh" class="diag-toolbar-btn">Refresh</button>
+      <button type="button" id="diag-close" class="diag-toolbar-btn">Close</button>
+    </div>
+    <pre id="diag-pre" class="diag-pre"></pre>
+  </div>
+
   <div id="sw-update-banner" class="sw-update-banner hidden" role="status" aria-live="polite">
     <span>New version available.</span>
     <button type="button" id="sw-update-reload" class="sw-update-reload">Reload</button>
+  </div>
+
+  <div id="install-gate-private" class="install-landing install-gate-private hidden" aria-label="Request access">
+    <div class="install-landing-inner">
+      <div class="install-brand" aria-hidden="true">EHF</div>
+      <h1 class="install-title">EHF Fellows Directory</h1>
+      <p class="install-lead install-lead--private">
+        This is a private app for EHF Fellows. Enter your fellowship email to receive a sign-in link.
+      </p>
+      <p id="auth-debug-private" class="auth-debug-line hidden" aria-live="polite"></p>
+      <form id="unlock-email-form" class="unlock-email-form" action="#" method="post">
+        <label class="unlock-label" for="unlock-email">Fellowship email</label>
+        <input
+          type="email"
+          id="unlock-email"
+          class="unlock-email-input search-input"
+          name="email"
+          autocomplete="email"
+          required
+        />
+        <button type="submit" class="install-pwa-button unlock-submit" id="unlock-submit">Get access</button>
+      </form>
+      <p id="unlock-status" class="install-status" aria-live="polite"></p>
+      <p class="install-support">
+        Having trouble with the app? Contact the EHF Communications Working Group.
+      </p>
+    </div>
   </div>
 
   <div id="install-landing" class="install-landing hidden" aria-label="Install the app">
@@ -21,6 +65,7 @@
       <div class="install-brand" aria-hidden="true">EHF</div>
       <h1 class="install-title">EHF Fellows Directory</h1>
       <p class="install-lead">Install the app on this device to browse the directory offline.</p>
+      <p id="auth-debug-install" class="auth-debug-line hidden" aria-live="polite"></p>
       <p id="install-status" class="install-status" aria-live="polite"></p>
       <button type="button" id="install-pwa-button" class="install-pwa-button">Install app</button>
       <p id="install-ios-hint" class="install-ios-hint hidden">
@@ -60,6 +105,14 @@
       </p>
       <pre id="boot-error-pre" class="boot-error-pre"></pre>
     </div>
+  </div>
+  <div id="auth-error-panel" class="auth-error-panel hidden" role="alert">
+    <p class="boot-error-lead"><strong>Authentication check failed.</strong></p>
+    <p class="boot-error-hint">
+      The app could not safely verify magic-link auth state. For security, install mode is blocked until this is resolved.
+      Use the report below, then clear cache and retry.
+    </p>
+    <pre id="auth-error-pre" class="boot-error-pre"></pre>
   </div>
   <div id="app-wrap" class="hidden">
     <aside id="directory" aria-label="Fellows list">

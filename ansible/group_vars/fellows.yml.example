@@ -28,3 +28,9 @@ mail_from_name: EHF Fellows Directory
 
 # Secrets: define in ansible-vault (example keys)
 # postmark_server_api_token: "pm_..."
+
+# Phase 4 (magic link): set on the server via systemd drop-in or EnvironmentFile — not committed here.
+# FELLOWS_SESSION_SECRET   — random long string; required with allowed_emails.json to enable auth.
+# FELLOWS_POSTMARK_TOKEN   — Postmark server API token; required to send magic-link email.
+# FELLOWS_MAIL_FROM        — optional (default noreply@fellows.globaldonut.com).
+# FELLOWS_PUBLIC_ORIGIN    — optional; magic link base URL if Host / X-Forwarded-Proto inference is wrong.

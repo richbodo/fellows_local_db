@@ -1,6 +1,7 @@
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = 'v6';
 const APP_SHELL_CACHE = `fellows-app-shell-${CACHE_VERSION}`;
 
+// fellows.db is fetched only after magic-link session (Phase 4); not precached here.
 const APP_SHELL_ASSETS = [
   '/',
   '/index.html',
@@ -12,8 +13,7 @@ const APP_SHELL_ASSETS = [
   '/icons/icon-512.png',
   '/icons/icon-maskable-512.png',
   '/vendor/sqlite3.js',
-  '/vendor/sqlite3.wasm',
-  '/fellows.db'
+  '/vendor/sqlite3.wasm'
 ];
 
 function postCacheProgress(payload) {
@@ -64,6 +64,14 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+function shellPathNetworkFirst(pathname) {
+  if (pathname === '/' || pathname === '/index.html') return true;
+  const base = pathname.split('/').pop() || '';
+  if (base === 'app.js' || base === 'styles.css' || base === 'sw.js') return true;
+  if (base === 'manifest.webmanifest' || base === 'build-meta.json') return true;
+  return false;
+}
+
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   const url = new URL(request.url);
@@ -73,6 +81,12 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (url.pathname.startsWith('/api/')) {
+    event.respondWith(networkFirst(request));
+    return;
+  }
+
+  // HTML/JS/CSS/SW must not be served stale from Cache API — old app.js skipped email gate.
+  if (request.mode === 'navigate' || shellPathNetworkFirst(url.pathname)) {
     event.respondWith(networkFirst(request));
     return;
   }
@@ -101,10 +115,12 @@ function cacheFirst(request) {
 function networkFirst(request) {
   return fetch(request)
     .then((response) => {
-      const responseClone = response.clone();
-      caches.open(APP_SHELL_CACHE).then((cache) => {
-        cache.put(request, responseClone);
-      });
+      if (response && response.ok && response.status === 200) {
+        const responseClone = response.clone();
+        caches.open(APP_SHELL_CACHE).then((cache) => {
+          cache.put(request, responseClone);
+        });
+      }
       return response;
     })
     .catch(() =>

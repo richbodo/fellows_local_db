@@ -7,4 +7,4 @@ git ls-files
 ## Read
 README.md
 app/server.py
-docs/Architecture.md
+docs/*

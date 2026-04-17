@@ -42,11 +42,13 @@
   gather_facts: false
   become: false
   vars:
-    fellows_smoke_url: "{{ fellows_smoke_url | default('https://fellows.globaldonut.com') }}"
+    # Do not set fellows_smoke_url from fellows_smoke_url — that self-reference recurses in Jinja2.
+    # Extra-var fellows_smoke_url (optional) is read here into a distinct name.
+    fellows_smoke_base_url: "{{ fellows_smoke_url | default('https://fellows.globaldonut.com') }}"
   tasks:
     - name: GET /healthz
       ansible.builtin.uri:
-        url: "{{ fellows_smoke_url | trim('/') }}/healthz"
+        url: "{{ fellows_smoke_base_url | trim('/') }}/healthz"
         method: GET
         status_code: 200
         return_content: true
@@ -55,7 +57,7 @@
 
     - name: GET /manifest.webmanifest (JSON)
       ansible.builtin.uri:
-        url: "{{ fellows_smoke_url | trim('/') }}/manifest.webmanifest"
+        url: "{{ fellows_smoke_base_url | trim('/') }}/manifest.webmanifest"
         method: GET
         status_code: 200
       when: fellows_smoke | default(true) | bool
