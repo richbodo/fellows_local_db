@@ -61,6 +61,8 @@ If CI is added later, the right move is to introduce a `deploy` account then —
 
 The `2775` mode on `/opt/fellows/*` is two things at once: the sticky `2` bit (setgid) means new files under the directory inherit its group (`fellows`), and `775` means `owner rwx, group rwx, other r-x`. Combined with operator membership in `fellows`, the operator can push code without sudo.
 
+**Gotcha: group write ≠ utime.** Being in the group lets you create, modify, and delete files, but setting arbitrary timestamps on a file you don't own requires ownership or `CAP_FOWNER` — group-write is not enough. This matters for `rsync -a`, which tries to preserve directory mtimes. The Ansible synchronize task passes `--omit-dir-times` so rsync doesn't try to `utime` fellows-owned directories; file mtimes are still preserved because the files rsync creates are operator-owned.
+
 ## systemd hardening
 
 `fellows-pwa.service` runs with the following directives. Most are cheap — costs zero at runtime, closes whole classes of exploitation if the Python server is ever compromised:
