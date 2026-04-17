@@ -1,34 +1,41 @@
 ---
-- name: Ensure app directory structure exists
+# /opt/fellows owned by the service user. Mode 2775 (setgid + group-writable):
+# the operator is in the service group, so new files created by rsync inherit
+# group={{ service_user }} and the service reads them via group permission.
+# The service runs under systemd with ProtectSystem=strict and so cannot
+# write here at runtime regardless of mode.
+- name: Ensure app directory structure exists, owned by service user
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
-    owner: "{{ deploy_user }}"
-    group: "{{ deploy_user }}"
-    mode: "0755"
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
+    mode: "2775"
   loop:
     - "{{ app_root }}"
     - "{{ app_root }}/deploy"
     - "{{ app_root }}/deploy/dist"
 
-# Rsync uses SSH to the managed host; the remote rsync process runs as the SSH user. That user must be able
-# to write {{ app_root }}/deploy/dist (owned by deploy). Inventory may still use ansible_user=rsb for bootstrap;
-# this task overrides ansible_user for this step only so rsync connects as deploy (see README).
-- name: Ensure deploy user owns app deploy tree (fix permissions before rsync)
-  ansible.builtin.file:
-    path: "{{ app_root }}/deploy"
-    state: directory
-    owner: "{{ deploy_user }}"
-    group: "{{ deploy_user }}"
-    recurse: true
-  become: true
+# One-time migration: if anything under {{ app_root }} is still owned by a
+# previous account (e.g. the legacy "deploy" user), recursively chown it to
+# the service user. Cheap and idempotent in effect.
+- name: Detect legacy ownership of app tree
+  ansible.builtin.stat:
+    path: "{{ app_root }}/deploy/dist"
+  register: app_dist_stat
+
+- name: Recursively chown app tree to service user (migration no-op after first run)
+  ansible.builtin.command:
+    cmd: "chown -R {{ service_user }}:{{ service_user }} {{ app_root }}"
+  when: app_dist_stat.stat.exists and app_dist_stat.stat.pw_name != service_user
+  changed_when: true
 
 - name: Copy deploy server script
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../deploy/server.py"
     dest: "{{ app_root }}/deploy/server.py"
-    owner: "{{ deploy_user }}"
-    group: "{{ deploy_user }}"
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
     mode: "0755"
   notify: Restart fellows app
 
@@ -36,8 +43,8 @@
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../deploy/sqlite_api_support.py"
     dest: "{{ app_root }}/deploy/sqlite_api_support.py"
-    owner: "{{ deploy_user }}"
-    group: "{{ deploy_user }}"
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
     mode: "0644"
   notify: Restart fellows app
 
@@ -45,13 +52,14 @@
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../deploy/magic_link_auth.py"
     dest: "{{ app_root }}/deploy/magic_link_auth.py"
-    owner: "{{ deploy_user }}"
-    group: "{{ deploy_user }}"
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
     mode: "0644"
   notify: Restart fellows app
 
-# Rsync (not recursive copy): hundreds of files + large blobs are reliable and resumable; copy() can stall mid-tree.
-# Force SSH as deploy_user: if inventory ansible_user is rsb, rsb cannot write deploy-owned paths (mode 0755).
+# rsync connects as ansible_user (the operator), who is a member of the
+# service group and can write to the group-writable dist tree. No sudo or
+# per-task SSH-user override needed.
 - name: Rsync deploy dist from controller to host
   ansible.posix.synchronize:
     mode: push
@@ -64,9 +72,33 @@
   when: lookup('ansible.builtin.fileglob', playbook_dir + '/../deploy/dist/*', wantlist=True) | length > 0
   delegate_to: localhost
   become: false
-  vars:
-    ansible_user: "{{ deploy_user }}"
   notify: Restart fellows app
+
+# If the Phase 4 env file is present, make sure it is readable by the new
+# service group. (The configure_email_auth_env.sh script originally created
+# it as root:deploy; this task rewrites the group so the new service user
+# can load it via EnvironmentFile= in the unit.)
+- name: Stat Phase 4 env file
+  ansible.builtin.stat:
+    path: /etc/fellows/fellows-pwa.env
+  register: fellows_env_stat
+
+- name: Ensure /etc/fellows dir is group-readable by service user
+  ansible.builtin.file:
+    path: /etc/fellows
+    state: directory
+    owner: root
+    group: "{{ service_user }}"
+    mode: "0750"
+  when: fellows_env_stat.stat.exists
+
+- name: Ensure /etc/fellows/fellows-pwa.env is group-readable by service user
+  ansible.builtin.file:
+    path: /etc/fellows/fellows-pwa.env
+    owner: root
+    group: "{{ service_user }}"
+    mode: "0640"
+  when: fellows_env_stat.stat.exists
 
 - name: Deploy systemd service
   ansible.builtin.template:
