@@ -268,6 +268,27 @@ for this user.
 
 ## Phase 4: Auth (Magic Link)
 
+**Implementation status:** Core pieces are in the repo: `deploy/magic_link_auth.py`, `deploy/server.py` routes (`/api/send-unlock`, `/api/verify-token`, `/api/auth/status`), gated `GET` for `/fellows.db` and directory APIs when auth is active, `build/build_pwa.py` → `allowed_emails.json`, browser UI (`install-gate-private`, `#/unlock/TOKEN`), and `sw.js` v6 (no precache of `fellows.db`; network-first on app shell + `build-meta.json`). Operators still need **Postmark**, **DNS (SPF/DKIM)**, and a **systemd `EnvironmentFile`** for secrets on the droplet.
+
+### Remaining TODOs to close Phases 3–4
+
+**Phase 3 (operator / infra — code is delivered):**
+
+- [ ] Run `./scripts/smoke_prod.sh` against `https://fellows.globaldonut.com/` on the current deploy; confirm `/healthz` 200, manifest/HTML cache headers, and journald shows `fellows-pwa` + `caddy` healthy.
+- [ ] Run `./scripts/check_deploy_env.sh` and confirm DNS (`A fellows → 170.64.243.67`) and TLS cert name match.
+- [ ] Confirm UFW on droplet: only `52221/tcp` (SSH), `80/tcp`, `443/tcp` open; `127.0.0.1:8765` not reachable externally.
+- [ ] Run Lighthouse PWA audit on the production origin; record score + any installability warnings.
+
+**Phase 4 (remaining work):**
+
+- [ ] Configure Postmark: verified sender `noreply@fellows.globaldonut.com`, SPF/DKIM records on the `globaldonut.com` zone, DMARC alignment.
+- [ ] Run `./scripts/configure_email_auth_env.sh` against the droplet to install `/etc/fellows/fellows-pwa.env` + systemd drop-in with `FELLOWS_SESSION_SECRET`, `FELLOWS_POSTMARK_TOKEN`, `FELLOWS_MAIL_FROM`, `FELLOWS_PUBLIC_ORIGIN`.
+- [ ] Smoke: `GET /api/auth/status` → `authEnabled: true`; `POST /api/send-unlock` with an allowlisted email → `{"sent": true}` + arriving Postmark email; tap magic link → `POST /api/verify-token` → session cookie → install page; restart service → outstanding tokens invalidated as designed.
+- [ ] Rebuild bundle with `python build/build_pwa.py` so `allowed_emails.json` + `build-meta.json` are current in `deploy/dist/`, then deploy.
+- [ ] Manual e2e against production for each of the Phase 4 milestone tests (unauthenticated view, enumeration safety, 15-min token expiry, 3/hr rate limit, cookie-gated `/fellows.db` + `/images/*`).
+- [ ] Decide whether to add an automated Playwright e2e for the private-gate path (currently only the `authEnabled=false` install landing is covered by `tests/e2e/test_install_landing.py`).
+- [ ] Consider a follow-up to persist tokens/rate buckets (currently in-memory; restart invalidates — by design but worth documenting in the ops runbook beyond `docs/email_system_management.md`).
+
 **Test on:** `https://fellows.globaldonut.com/` (same VPS as Phase 3)
 
 Gate access so only authorized fellows can reach the install page. Unauthorized visitors see a branded "this is a private app" page.
