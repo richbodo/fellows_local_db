@@ -53,7 +53,7 @@ If CI is added later, the right move is to introduce a `deploy` account then —
 | `/opt/fellows/deploy/` | `fellows:fellows` | `2775` | Python server + helpers |
 | `/opt/fellows/deploy/dist/` | `fellows:fellows` | `2775` | static bundle, `fellows.db`, images (operator rsyncs here) |
 | `/etc/fellows/` | `root:fellows` | `0750` | operator-provisioned config dir |
-| `/etc/fellows/fellows-pwa.env` | `root:fellows` | `0640` | Phase 4 secrets (`FELLOWS_SESSION_SECRET`, `FELLOWS_POSTMARK_TOKEN`, …) |
+| `/etc/fellows/fellows-pwa.env` | `root:fellows` | `0640` | Magic-link auth secrets (`FELLOWS_SESSION_SECRET`, `FELLOWS_POSTMARK_TOKEN`, …) |
 | `/etc/systemd/system/fellows-pwa.service` | `root:root` | `0644` | unit file (managed by Ansible) |
 | `/etc/systemd/system/fellows-pwa.service.d/10-env-file.conf` | `root:root` | `0644` | drop-in that points `EnvironmentFile=` at `/etc/fellows/fellows-pwa.env` |
 | `/etc/caddy/Caddyfile` | `root:root` | `0644` | Caddy site config (managed by Ansible) |
@@ -143,7 +143,7 @@ ansible-playbook ansible/site.yml --tags bootstrap --ask-become-pass
 
 The first run creates the `fellows` system user, adds `rsb` to the `fellows` group, writes the hardened systemd unit, and starts the service. If a legacy `deploy` account is present from a pre-migration droplet, the second play in `site.yml` removes it.
 
-## Phase 4 magic-link env file
+## Magic-link env file
 
 After bootstrap, install Postmark + session secrets once:
 

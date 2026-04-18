@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Optional DNS + TLS sanity check before or after deploy. See plans/pwa_release_plan.md Phase 3.
+# Optional DNS + TLS sanity check before or after deploy.
 # Usage:
 #   ./scripts/check_deploy_env.sh
 #   FELLOWS_HOST=fellows.globaldonut.com ./scripts/check_deploy_env.sh
