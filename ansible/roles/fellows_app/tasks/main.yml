@@ -16,19 +16,50 @@
     - "{{ app_root }}/deploy"
     - "{{ app_root }}/deploy/dist"
 
-# One-time migration: if anything under {{ app_root }} is still owned by a
-# previous account (e.g. the legacy "deploy" user), recursively chown it to
-# the service user. Cheap and idempotent in effect.
-- name: Detect legacy ownership of app tree
-  ansible.builtin.stat:
-    path: "{{ app_root }}/deploy/dist"
-  register: app_dist_stat
+# Normalize the app tree ownership and modes on every run. This replaces the
+# earlier "stat the top dir and maybe chown recursively" check, which missed
+# the real failure mode: subdirectories (dist/vendor, dist/images, dist/icons)
+# left behind by the legacy "deploy" account with orphan UID/GID and mode 0755
+# after that account was removed. The top-level {{ app_root }}/deploy/dist
+# stat'd as {{ service_user }} (the earlier file task above had fixed it), so
+# the old check skipped — but the subtree was still unwritable by the
+# operator. Idempotent: only fires chown/chmod when `find` reports drift, so
+# task results honestly report ok vs changed.
+- name: Find entries under app tree not owned by {{ service_user }}
+  ansible.builtin.command:
+    cmd: "find {{ app_root }} \\( ! -user {{ service_user }} -o ! -group {{ service_user }} \\) -print"
+  register: fellows_wrong_owner
+  changed_when: false
+  check_mode: false
 
-- name: Recursively chown app tree to service user (migration no-op after first run)
+- name: Normalize app tree ownership to {{ service_user }}:{{ service_user }}
   ansible.builtin.command:
     cmd: "chown -R {{ service_user }}:{{ service_user }} {{ app_root }}"
-  when: app_dist_stat.stat.exists and app_dist_stat.stat.pw_name != service_user
-  changed_when: true
+  when: fellows_wrong_owner.stdout | length > 0
+
+- name: Find dist directories not mode 2775
+  ansible.builtin.command:
+    cmd: "find {{ app_root }}/deploy/dist -type d ! -perm 2775 -print"
+  register: fellows_wrong_dir_mode
+  changed_when: false
+  check_mode: false
+
+- name: Normalize dist directory modes to 2775 (setgid + group-writable)
+  ansible.builtin.command:
+    cmd: "find {{ app_root }}/deploy/dist -type d ! -perm 2775 -exec chmod 2775 {} +"
+  when: fellows_wrong_dir_mode.stdout | length > 0
+
+- name: Find dist files without group-write bit
+  ansible.builtin.command:
+    cmd: "find {{ app_root }}/deploy/dist -type f ! -perm -g+w -print"
+  register: fellows_wrong_file_mode
+  changed_when: false
+  check_mode: false
+
+- name: Normalize dist files to group-writable (0664)
+  ansible.builtin.command:
+    cmd: "find {{ app_root }}/deploy/dist -type f ! -perm -g+w -exec chmod 0664 {} +"
+  when: fellows_wrong_file_mode.stdout | length > 0
 
 - name: Copy deploy server script
   ansible.builtin.copy:
@@ -57,9 +88,42 @@
     mode: "0644"
   notify: Restart fellows app
 
+# Preflight: confirm the operator (ansible_user, not root) can actually write
+# into every dist subdirectory before rsync tries. If normalization above
+# didn't take — filesystem ACLs, mount options, something unexpected — we
+# want a readable failure message here instead of rsync's cryptic
+# "mkstemp ... Permission denied (13)" at the generator/receiver layer.
+# Runs as the operator (become: false); if this passes, rsync will too.
+- name: Preflight - verify operator can write to dist tree
+  ansible.builtin.shell: |
+    set -e
+    probe="{{ app_root }}/deploy/dist/.__ansible_write_probe__"
+    touch "$probe" && rm -f "$probe"
+    while IFS= read -r d; do
+      p="$d/.__ansible_write_probe__"
+      if ! ( : > "$p" ) 2>/dev/null; then
+        echo "FAIL: operator cannot write to $d" >&2
+        exit 1
+      fi
+      rm -f "$p"
+    done < <(find "{{ app_root }}/deploy/dist" -mindepth 1 -type d)
+  args:
+    executable: /bin/bash
+  register: fellows_write_probe
+  changed_when: false
+  become: false
+
 # rsync connects as ansible_user (the operator), who is a member of the
 # service group and can write to the group-writable dist tree. No sudo or
 # per-task SSH-user override needed.
+#
+# Two flags from --archive (-a) fail for a non-owner even with group write:
+#   -p (perms): chmod(2) requires ownership or CAP_FOWNER. Worse, preserving
+#               source perms would strip the setgid bit (2775 → 755) and
+#               silently break group-inheritance for new files.
+#   -t (times): utime requires ownership or CAP_FOWNER.
+# perms: false adds --no-perms. --omit-dir-times skips utime on directories.
+# File mtimes are still preserved (rsync-created files are rsb-owned).
 - name: Rsync deploy dist from controller to host
   ansible.posix.synchronize:
     mode: push
@@ -69,6 +133,9 @@
     compress: true
     partial: true
     times: true
+    perms: false
+    rsync_opts:
+      - "--omit-dir-times"
   when: lookup('ansible.builtin.fileglob', playbook_dir + '/../deploy/dist/*', wantlist=True) | length > 0
   delegate_to: localhost
   become: false
