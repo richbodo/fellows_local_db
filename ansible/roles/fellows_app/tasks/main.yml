@@ -16,19 +16,50 @@
     - "{{ app_root }}/deploy"
     - "{{ app_root }}/deploy/dist"
 
-# One-time migration: if anything under {{ app_root }} is still owned by a
-# previous account (e.g. the legacy "deploy" user), recursively chown it to
-# the service user. Cheap and idempotent in effect.
-- name: Detect legacy ownership of app tree
-  ansible.builtin.stat:
-    path: "{{ app_root }}/deploy/dist"
-  register: app_dist_stat
+# Normalize the app tree ownership and modes on every run. This replaces the
+# earlier "stat the top dir and maybe chown recursively" check, which missed
+# the real failure mode: subdirectories (dist/vendor, dist/images, dist/icons)
+# left behind by the legacy "deploy" account with orphan UID/GID and mode 0755
+# after that account was removed. The top-level {{ app_root }}/deploy/dist
+# stat'd as {{ service_user }} (the earlier file task above had fixed it), so
+# the old check skipped — but the subtree was still unwritable by the
+# operator. Idempotent: only fires chown/chmod when `find` reports drift, so
+# task results honestly report ok vs changed.
+- name: Find entries under app tree not owned by {{ service_user }}
+  ansible.builtin.command:
+    cmd: "find {{ app_root }} \\( ! -user {{ service_user }} -o ! -group {{ service_user }} \\) -print"
+  register: fellows_wrong_owner
+  changed_when: false
+  check_mode: false
 
-- name: Recursively chown app tree to service user (migration no-op after first run)
+- name: Normalize app tree ownership to {{ service_user }}:{{ service_user }}
   ansible.builtin.command:
     cmd: "chown -R {{ service_user }}:{{ service_user }} {{ app_root }}"
-  when: app_dist_stat.stat.exists and app_dist_stat.stat.pw_name != service_user
-  changed_when: true
+  when: fellows_wrong_owner.stdout | length > 0
+
+- name: Find dist directories not mode 2775
+  ansible.builtin.command:
+    cmd: "find {{ app_root }}/deploy/dist -type d ! -perm 2775 -print"
+  register: fellows_wrong_dir_mode
+  changed_when: false
+  check_mode: false
+
+- name: Normalize dist directory modes to 2775 (setgid + group-writable)
+  ansible.builtin.command:
+    cmd: "find {{ app_root }}/deploy/dist -type d ! -perm 2775 -exec chmod 2775 {} +"
+  when: fellows_wrong_dir_mode.stdout | length > 0
+
+- name: Find dist files without group-write bit
+  ansible.builtin.command:
+    cmd: "find {{ app_root }}/deploy/dist -type f ! -perm -g+w -print"
+  register: fellows_wrong_file_mode
+  changed_when: false
+  check_mode: false
+
+- name: Normalize dist files to group-writable (0664)
+  ansible.builtin.command:
+    cmd: "find {{ app_root }}/deploy/dist -type f ! -perm -g+w -exec chmod 0664 {} +"
+  when: fellows_wrong_file_mode.stdout | length > 0
 
 - name: Copy deploy server script
   ansible.builtin.copy:
