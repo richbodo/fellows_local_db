@@ -43,8 +43,17 @@
   var dataProvider = null;
   var bootDebugLines = [];
   var authDebugLines = [];
+  var swLifecycleLog = [];
   /** Bump when changing diagnostics behavior (shown in Diagnostics panel). */
-  var FELLOWS_UI_DIAG = 'diag-2026-04c';
+  var FELLOWS_UI_DIAG = 'diag-2026-04d-sw-trace';
+
+  function logSwLifecycle(event, detail) {
+    swLifecycleLog.push({
+      t: new Date().toISOString(),
+      event: event,
+      detail: detail != null ? detail : null
+    });
+  }
 
   var FELLOW_COLS = [
     'record_id',
@@ -518,24 +527,44 @@
     lines.push('');
     if ('serviceWorker' in navigator) {
       try {
-        var reg = await navigator.serviceWorker.getRegistration();
-        lines.push('serviceWorker.getRegistration: ' + (reg ? 'yes' : 'no'));
-        if (reg && reg.active) {
-          lines.push('SW active: ' + String(reg.active.scriptURL));
-        }
-        if (reg && reg.waiting) {
-          lines.push('SW waiting: yes (update not yet active)');
-        }
-        if (reg && reg.installing) {
-          lines.push('SW installing: yes');
+        var regs = await navigator.serviceWorker.getRegistrations();
+        lines.push('serviceWorker.getRegistrations: ' + regs.length);
+        for (var ri = 0; ri < regs.length; ri++) {
+          var reg = regs[ri];
+          lines.push(
+            '  [' + ri + '] scope=' + reg.scope +
+              ' active=' + (reg.active ? reg.active.scriptURL : '(none)') +
+              ' waiting=' + (reg.waiting ? reg.waiting.scriptURL : '(none)') +
+              ' installing=' + (reg.installing ? reg.installing.scriptURL : '(none)')
+          );
         }
       } catch (e) {
-        lines.push('SW registration error: ' + String(e && e.message));
+        lines.push('SW getRegistrations error: ' + String(e && e.message));
       }
       if (navigator.serviceWorker.controller) {
         lines.push('navigator.serviceWorker.controller: ' + String(navigator.serviceWorker.controller.scriptURL));
       } else {
         lines.push('navigator.serviceWorker.controller: (none yet)');
+      }
+      if (swUpdateBannerEl) {
+        lines.push(
+          'sw-update-banner visible=' + !swUpdateBannerEl.classList.contains('hidden') +
+            ' shownReason=' + (swUpdateBannerEl.getAttribute('data-shown-reason') || '(none)') +
+            ' shownAt=' + (swUpdateBannerEl.getAttribute('data-shown-at') || '(never)') +
+            ' hiddenAt=' + (swUpdateBannerEl.getAttribute('data-hidden-at') || '(never)')
+        );
+      }
+      lines.push('SW lifecycle log (' + swLifecycleLog.length + ' events):');
+      if (swLifecycleLog.length === 0) {
+        lines.push('  (empty)');
+      } else {
+        for (var li = 0; li < swLifecycleLog.length; li++) {
+          var ev = swLifecycleLog[li];
+          lines.push(
+            '  ' + ev.t + ' ' + ev.event +
+              (ev.detail != null ? ' ' + JSON.stringify(ev.detail) : '')
+          );
+        }
       }
     } else {
       lines.push('serviceWorker: not available in this context');
@@ -767,27 +796,51 @@
     installStatusEl.textContent = msg || '';
   }
 
-  function showSwUpdateBanner() {
-    if (swUpdateBannerEl) swUpdateBannerEl.classList.remove('hidden');
+  function showSwUpdateBanner(reason) {
+    var r = reason || 'unknown';
+    if (swUpdateBannerEl) {
+      swUpdateBannerEl.classList.remove('hidden');
+      swUpdateBannerEl.setAttribute('data-shown-reason', r);
+      swUpdateBannerEl.setAttribute('data-shown-at', new Date().toISOString());
+    }
+    logSwLifecycle('banner_show', { reason: r });
   }
 
   function hideSwUpdateBanner() {
-    if (swUpdateBannerEl) swUpdateBannerEl.classList.add('hidden');
+    if (swUpdateBannerEl) {
+      swUpdateBannerEl.classList.add('hidden');
+      swUpdateBannerEl.setAttribute('data-hidden-at', new Date().toISOString());
+    }
+    logSwLifecycle('banner_hide', null);
   }
 
   function listenForSwUpdate(reg) {
     if (!reg || typeof reg.addEventListener !== 'function') return;
     // Snapshot: null here means this is a first-time install, not an update.
     var hadControllerAtRegister = !!navigator.serviceWorker.controller;
+    logSwLifecycle('listen_start', {
+      hadControllerAtRegister: hadControllerAtRegister,
+      regActive: reg.active ? reg.active.scriptURL : null,
+      regWaiting: reg.waiting ? reg.waiting.scriptURL : null,
+      regInstalling: reg.installing ? reg.installing.scriptURL : null
+    });
     if (reg.waiting && hadControllerAtRegister) {
-      showSwUpdateBanner();
+      showSwUpdateBanner('waiting-at-register');
     }
     reg.addEventListener('updatefound', function () {
       var nw = reg.installing;
+      logSwLifecycle('updatefound', {
+        hasInstalling: !!nw,
+        hadControllerAtRegister: hadControllerAtRegister
+      });
       if (!nw) return;
       nw.addEventListener('statechange', function () {
+        logSwLifecycle('statechange', {
+          state: nw.state,
+          hadControllerAtRegister: hadControllerAtRegister
+        });
         if (nw.state === 'installed' && hadControllerAtRegister) {
-          showSwUpdateBanner();
+          showSwUpdateBanner('installed-event');
         }
       });
     });
@@ -796,16 +849,33 @@
   function registerServiceWorker() {
     if (!('serviceWorker' in navigator)) return;
     navigator.serviceWorker.addEventListener('controllerchange', function () {
+      logSwLifecycle('controllerchange', {
+        newController: navigator.serviceWorker.controller
+          ? navigator.serviceWorker.controller.scriptURL
+          : null
+      });
       hideSwUpdateBanner();
     });
     window.addEventListener('load', function () {
+      logSwLifecycle('window_load', {
+        controllerAtLoad: navigator.serviceWorker.controller
+          ? navigator.serviceWorker.controller.scriptURL
+          : null
+      });
       navigator.serviceWorker
         .register('/sw.js')
         .then(function (reg) {
+          logSwLifecycle('register_resolved', {
+            active: reg.active ? reg.active.scriptURL : null,
+            waiting: reg.waiting ? reg.waiting.scriptURL : null,
+            installing: reg.installing ? reg.installing.scriptURL : null
+          });
           listenForSwUpdate(reg);
           return reg;
         })
-        .catch(function () {});
+        .catch(function (err) {
+          logSwLifecycle('register_error', { message: err && err.message });
+        });
     });
   }
 
