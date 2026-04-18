@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke-check production (or staging) HTTPS deploy. See plans/pwa_release_plan.md Phase 3.
+# Smoke-check production (or staging) HTTPS deploy.
 # Usage:
 #   ./scripts/smoke_prod.sh
 #   FELLOWS_BASE_URL=https://fellows.globaldonut.com ./scripts/smoke_prod.sh
