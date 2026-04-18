@@ -58,8 +58,27 @@ class TestAPI:
         assert isinstance(data, list)
         assert len(data) >= 1
         first = data[0]
-        assert set(first.keys()) <= {"record_id", "slug", "name"}
+        assert set(first.keys()) <= {"record_id", "slug", "name", "has_contact_email"}
         assert "slug" in first and "name" in first
+        assert "has_contact_email" in first
+        assert isinstance(first["has_contact_email"], bool)
+
+    def test_api_fellows_list_has_contact_email_flag_is_consistent(self):
+        """has_contact_email in list should match the full record's contact_email presence."""
+        _, _, list_body = get("/api/fellows")
+        _, _, full_body = get("/api/fellows", query={"full": "1"})
+        list_data = json.loads(list_body)
+        full_data = json.loads(full_body)
+        full_by_id = {f["record_id"]: f for f in full_data}
+        mismatches = []
+        for entry in list_data:
+            full = full_by_id.get(entry["record_id"])
+            if not full:
+                continue
+            has_email_full = bool((full.get("contact_email") or "").strip())
+            if entry["has_contact_email"] != has_email_full:
+                mismatches.append(entry["record_id"])
+        assert not mismatches, f"has_contact_email mismatch for {mismatches[:5]}"
 
     def test_api_fellows_list_and_full_counts_match(self):
         """List and full endpoints should return the same number of records."""

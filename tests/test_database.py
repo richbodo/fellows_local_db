@@ -90,3 +90,26 @@ def test_has_image_is_boolean_and_consistent(db):
     with_image = db.execute("SELECT COUNT(*) FROM fellows WHERE has_image = 1").fetchone()[0]
     without_image = db.execute("SELECT COUNT(*) FROM fellows WHERE has_image = 0").fetchone()[0]
     assert with_image + without_image == total, "has_image must always be 0 or 1"
+
+
+def test_every_row_has_a_name(db):
+    """Every fellow must have a non-empty name after the source_name fallback lands."""
+    cur = db.execute(
+        "SELECT record_id, slug FROM fellows WHERE name IS NULL OR name = ''"
+    )
+    nameless = cur.fetchall()
+    assert not nameless, (
+        "Rows without name: " + ", ".join(f"{rid}({slug})" for rid, slug in nameless[:5])
+    )
+
+
+def test_slug_never_falls_back_to_record_id(db):
+    """Importer falls back to source_name before record_id; no slug should equal its record_id."""
+    cur = db.execute(
+        "SELECT record_id, slug FROM fellows WHERE slug = record_id"
+    )
+    rows = cur.fetchall()
+    assert not rows, (
+        "Slugs equal to record_id (importer fallback exhausted): "
+        + ", ".join(f"{rid}" for rid, _ in rows[:5])
+    )
