@@ -890,6 +890,57 @@ h1 {
   line-height: 1.4;
 }
 
+.install-ttl-hint {
+  margin: 1rem 0 0;
+  font-size: 0.85rem;
+  color: #5a4578;
+  line-height: 1.4;
+  font-style: italic;
+}
+
+.install-unsupported-hint {
+  margin: 1rem 0 0;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.9rem;
+  color: #664d03;
+  background: #fff3cd;
+  border: 1px solid #ffe69c;
+  border-radius: 4px;
+  line-height: 1.45;
+  text-align: left;
+}
+
+.install-back-gate {
+  margin: 0.75rem 0 0;
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.install-back-gate-link {
+  color: #4a2c6a;
+  text-decoration: underline;
+}
+
+.install-back-gate-link:hover {
+  color: #3d2460;
+}
+
+.gate-reason-banner {
+  margin: 0 0 1rem;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.9rem;
+  color: #664d03;
+  background: #fff3cd;
+  border: 1px solid #ffe69c;
+  border-radius: 4px;
+  line-height: 1.4;
+  text-align: left;
+}
+
+.gate-reason-banner.hidden {
+  display: none;
+}
+
 .auth-debug-line {
   margin: 0 0 0.75rem;
   padding: 0.45rem 0.55rem;

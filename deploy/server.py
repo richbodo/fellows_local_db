@@ -135,13 +135,23 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("X-Fellows-Auth-Active", "1" if AUTH_ACTIVE else "0")
 
     def has_valid_session(self) -> bool:
+        return self.session_payload() is not None
+
+    def session_payload(self):
+        """Return ``{token_issued_at}`` for the verified cookie, else None.
+
+        When auth is disabled, returns an empty dict (truthy) so existing
+        guards keep working.
+        """
         if not AUTH_ACTIVE:
-            return True
+            return {}
         sec = ml.session_secret_bytes()
         if not sec:
-            return False
+            return None
         c = ml.parse_cookie_header(self.headers.get("Cookie"), ml.SESSION_COOKIE)
-        return bool(c and ml.verify_session_value(c, sec))
+        if not c:
+            return None
+        return ml.verify_session_value(c, sec)
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -164,7 +174,13 @@ class Handler(SimpleHTTPRequestHandler):
             has_cookie = bool(
                 ml.parse_cookie_header(self.headers.get("Cookie"), ml.SESSION_COOKIE)
             )
-            authed = self.has_valid_session()
+            session = self.session_payload()
+            authed = session is not None
+            install_allowed = False
+            if AUTH_ACTIVE and session and "token_issued_at" in session:
+                install_allowed = ml.install_recently_allowed(
+                    session.get("token_issued_at") or 0
+                )
             print(
                 json.dumps(
                     {
@@ -172,6 +188,7 @@ class Handler(SimpleHTTPRequestHandler):
                         "auth_active": AUTH_ACTIVE,
                         "authenticated": authed,
                         "has_session_cookie": has_cookie,
+                        "install_recently_allowed": install_allowed,
                         "user_agent": (self.headers.get("User-Agent") or "")[:240],
                     }
                 ),
@@ -181,6 +198,7 @@ class Handler(SimpleHTTPRequestHandler):
                 "authEnabled": AUTH_ACTIVE,
                 "authenticated": authed,
                 "hasSessionCookie": has_cookie,
+                "installRecentlyAllowed": install_allowed,
             }
             if BUILD_META:
                 payload["build"] = BUILD_META.get("built_at")
@@ -268,7 +286,19 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/verify-token":
             self._handle_verify_token(body)
             return
+        if path == "/api/logout":
+            self._handle_logout()
+            return
         self.send_error(HTTPStatus.NOT_FOUND, "Not Found")
+
+    def _handle_logout(self) -> None:
+        """Clear the session cookie regardless of current state.
+
+        Always 200 — we don't reveal whether the caller had a valid session.
+        Client navigates to ``/?gate=1`` after this.
+        """
+        cookie = ml.clear_session_cookie_line(self.headers)
+        self.send_json_with_headers({"ok": True}, 200, [("Set-Cookie", cookie)])
 
     def _handle_send_unlock(self, body: dict) -> None:
         # Anti-enumeration: always 200 {"sent": true}
@@ -346,14 +376,23 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json({"ok": True})
             return
         tok = (body.get("token") or "").strip()
-        if not tok or not ml.consume_token(tok):
-            self.send_json({"ok": False, "error": "invalid_or_expired"}, status=401)
+        if not tok:
+            self.send_json({"ok": False, "error": "invalid"}, status=401)
+            return
+        result = ml.consume_token(tok)
+        status = (result or {}).get("status")
+        if status != "ok":
+            # "expired" and "invalid" are both 401 but carry distinct error
+            # strings so the client can render "link expired" vs "link invalid"
+            # banners on the gate after a redirect.
+            err = status if status in ("expired", "invalid") else "invalid"
+            self.send_json({"ok": False, "error": err}, status=401)
             return
         sec = ml.session_secret_bytes()
         if not sec:
             self.send_json({"ok": False, "error": "server_misconfigured"}, status=500)
             return
-        val = ml.sign_session_value(sec)
+        val = ml.sign_session_value(sec, token_issued_at=result.get("issued_at"))
         cookie = ml.set_session_cookie_line(val, self.headers)
         self.send_json_with_headers({"ok": True}, 200, [("Set-Cookie", cookie)])
 
