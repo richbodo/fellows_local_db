@@ -91,21 +91,26 @@ def slugify(text: str) -> str:
 
 
 def get_slug(record: dict) -> str:
-    """Get slug from name or table_name; fallback to record_id."""
-    name = (record.get("name") or "").strip()
-    table_name = (record.get("table_name") or "").strip()
-    display = name or table_name
+    """Get slug from name, table_name, or source_name; fallback to record_id."""
+    display = (
+        (record.get("name") or "").strip()
+        or (record.get("table_name") or "").strip()
+        or (record.get("source_name") or "").strip()
+    )
     if display:
         return slugify(display)
     return (record.get("record_id") or "").strip() or "unknown"
 
 
 def get_name(record: dict) -> str:
-    """Display name: name or table_name."""
+    """Display name: name, table_name, or source_name (fallback for stub records)."""
     name = (record.get("name") or "").strip()
     if name:
         return name
-    return (record.get("table_name") or "").strip() or ""
+    table_name = (record.get("table_name") or "").strip()
+    if table_name:
+        return table_name
+    return (record.get("source_name") or "").strip() or ""
 
 
 def serialize_value(v):

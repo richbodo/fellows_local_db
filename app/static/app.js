@@ -19,6 +19,10 @@
   var searchInputEl = document.getElementById('search-input');
   var searchStatusEl = document.getElementById('search-status');
   var searchDebounceId = null;
+  var hasEmailFilterEl = document.getElementById('has-email-filter');
+  var filterCountEl = document.getElementById('filter-count');
+  var HAS_EMAIL_FILTER_KEY = 'ehf_has_email_only';
+  var hasEmailOnly = loadHasEmailFilter();
   var nlSearchContainerEl = document.getElementById('nl-search-container');
   var nlSearchInputEl = document.getElementById('nl-search-input');
   var nlSearchButtonEl = document.getElementById('nl-search-button');
@@ -321,9 +325,22 @@
     return {
       kind: 'sqlite',
       getList: function () {
-        return Promise.resolve(
-          dbSelectAll(db, 'SELECT record_id, slug, name FROM fellows ORDER BY name ASC', null)
+        var rows = dbSelectAll(
+          db,
+          'SELECT record_id, slug, name,' +
+            " CASE WHEN contact_email IS NOT NULL AND contact_email != '' THEN 1 ELSE 0 END" +
+            ' AS has_contact_email' +
+            ' FROM fellows ORDER BY name ASC',
+          null
         );
+        return Promise.resolve(rows.map(function (r) {
+          return {
+            record_id: r.record_id,
+            slug: r.slug,
+            name: r.name,
+            has_contact_email: r.has_contact_email === 1 || r.has_contact_email === true
+          };
+        }));
       },
       getFull: function () {
         var rows = dbSelectAll(db, 'SELECT * FROM fellows ORDER BY name ASC', null);
@@ -1229,6 +1246,33 @@
     if (appWrapEl) appWrapEl.classList.toggle('hidden', !show);
   }
 
+  function loadHasEmailFilter() {
+    try {
+      var v = localStorage.getItem(HAS_EMAIL_FILTER_KEY);
+      if (v === '0') return false;
+      if (v === '1') return true;
+    } catch (e) {}
+    return true;
+  }
+
+  function saveHasEmailFilter(v) {
+    try { localStorage.setItem(HAS_EMAIL_FILTER_KEY, v ? '1' : '0'); } catch (e) {}
+  }
+
+  function fellowHasEmail(f) {
+    if (f.has_contact_email === true || f.has_contact_email === 1) return true;
+    return !!(f.contact_email && String(f.contact_email).trim());
+  }
+
+  function applyHasEmailFilter(items) {
+    if (!hasEmailOnly) return items;
+    return items.filter(fellowHasEmail);
+  }
+
+  function setFilterCount(msg) {
+    if (filterCountEl) filterCountEl.textContent = msg || '';
+  }
+
   function renderDirectoryList(items) {
     var ul = document.createElement('ul');
     items.forEach(function (f) {
@@ -1247,10 +1291,22 @@
   function renderDirectory() {
     if (!list.length) {
       directoryListEl.innerHTML = '<p class="placeholder">No fellows loaded.</p>';
+      setFilterCount('');
       return;
     }
-    renderDirectoryList(list);
-    displayedList = list;
+    var filtered = applyHasEmailFilter(list);
+    if (!filtered.length) {
+      directoryListEl.innerHTML = '<p class="placeholder">No fellows match the current filter.</p>';
+      displayedList = [];
+    } else {
+      renderDirectoryList(filtered);
+      displayedList = filtered;
+    }
+    setFilterCount(
+      filtered.length === list.length
+        ? list.length + ' fellows'
+        : filtered.length + ' of ' + list.length + ' fellows'
+    );
     if (loadingPanelEl) {
       loadingPanelEl.classList.add('hidden');
     }
@@ -1598,14 +1654,7 @@
               fellowsBySlug.set(f.record_id, f);
             }
           });
-          if (!results.length) {
-            directoryListEl.innerHTML = '<p class="placeholder">No fellows match that search.</p>';
-            setSearchStatus('');
-          } else {
-            renderDirectoryList(results);
-            displayedList = results;
-            setSearchStatus(results.length + ' result' + (results.length === 1 ? '' : 's') + ' found');
-          }
+          renderSearchResults(results, 'result');
         })
         .catch(function () {
           setSearchStatus('Search failed.');
@@ -1636,19 +1685,36 @@
             fellowsBySlug.set(f.record_id, f);
           }
         });
-        if (!results.length) {
-          directoryListEl.innerHTML = '<p class="placeholder">No fellows match that search.</p>';
-          setSearchStatus('');
-        } else {
-          renderDirectoryList(results);
-          displayedList = results;
-          setSearchStatus(results.length + ' result' + (results.length === 1 ? '' : 's') + ' found');
-        }
+        renderSearchResults(results, 'result');
       })
       .catch(function () {
         setSearchStatus('Network search failed. Trying cached data…');
         runLocalSearch(q);
       });
+  }
+
+  function renderSearchResults(results, label) {
+    var total = results.length;
+    var filtered = applyHasEmailFilter(results);
+    displayedList = filtered;
+    setFilterCount('');
+    if (!filtered.length) {
+      if (!total) {
+        directoryListEl.innerHTML = '<p class="placeholder">No fellows match that search.</p>';
+      } else {
+        directoryListEl.innerHTML =
+          '<p class="placeholder">No fellows match that search with the current filter.</p>';
+      }
+      setSearchStatus('');
+      return;
+    }
+    renderDirectoryList(filtered);
+    var suffix = filtered.length === 1 ? '' : 's';
+    var msg = filtered.length + ' ' + label + suffix + ' found';
+    if (filtered.length !== total) {
+      msg += ' (' + total + ' before filter)';
+    }
+    setSearchStatus(msg);
   }
 
   function runLocalSearch(q) {
@@ -1667,14 +1733,7 @@
           fellowsBySlug.set(f.record_id, f);
         }
       });
-      if (!results.length) {
-        directoryListEl.innerHTML = '<p class="placeholder">No fellows match that search in cached data.</p>';
-        setSearchStatus('');
-      } else {
-        renderDirectoryList(results);
-        displayedList = results;
-        setSearchStatus(results.length + ' offline result' + (results.length === 1 ? '' : 's') + ' found');
-      }
+      renderSearchResults(results, 'offline result');
     }).catch(function () {
       directoryListEl.innerHTML = '<p class="placeholder">Offline search failed.</p>';
       setSearchStatus('');
@@ -1970,6 +2029,20 @@
         searchDebounceId = setTimeout(function () {
           handleSearchInput();
         }, 250);
+      });
+    }
+
+    if (hasEmailFilterEl) {
+      hasEmailFilterEl.checked = hasEmailOnly;
+      hasEmailFilterEl.addEventListener('change', function () {
+        hasEmailOnly = !!hasEmailFilterEl.checked;
+        saveHasEmailFilter(hasEmailOnly);
+        var q = (searchInputEl && searchInputEl.value || '').trim();
+        if (q) {
+          runSearch(q);
+        } else {
+          renderDirectory();
+        }
       });
     }
 

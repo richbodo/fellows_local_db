@@ -230,6 +230,33 @@ h1 {
   color: #555;
 }
 
+.filter-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0.4rem 0 0;
+  font-size: 0.85rem;
+  color: #333;
+}
+
+.filter-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.filter-checkbox input {
+  margin: 0;
+}
+
+.filter-count {
+  font-size: 0.8rem;
+  color: #555;
+}
+
 .nl-search-container {
   margin-top: 0.75rem;
 }

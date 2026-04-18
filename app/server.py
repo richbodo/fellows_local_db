@@ -75,12 +75,18 @@ def get_all_fellows(conn) -> list:
 
 
 def get_fellows_list(conn) -> list:
-    """Minimal list for instant directory: record_id, slug, name only."""
+    """Minimal list for instant directory: record_id, slug, name, has_contact_email."""
     cur = conn.execute(
-        "SELECT record_id, slug, name FROM fellows ORDER BY name ASC"
+        "SELECT record_id, slug, name,"
+        " CASE WHEN contact_email IS NOT NULL AND contact_email != '' THEN 1 ELSE 0 END"
+        " AS has_contact_email"
+        " FROM fellows ORDER BY name ASC"
     )
     rows = cur.fetchall()
-    return [{"record_id": r[0], "slug": r[1], "name": r[2]} for r in rows]
+    return [
+        {"record_id": r[0], "slug": r[1], "name": r[2], "has_contact_email": bool(r[3])}
+        for r in rows
+    ]
 
 
 def get_fellow_by_slug_or_id(conn, slug_or_id: str) -> dict | None:
