@@ -25,6 +25,7 @@ FELLOW_COLUMNS = [
     "ethnicity",
     "primary_citizenship",
     "global_regions_currently_based_in",
+    "has_image",
 ]
 
 

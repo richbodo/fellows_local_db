@@ -79,6 +79,14 @@ def test_schema_has_expected_columns(db):
         "contact_email", "key_links", "key_links_urls", "image_url",
         "currently_based_in", "search_tags", "fellow_status", "gender_pronouns",
         "ethnicity", "primary_citizenship", "global_regions_currently_based_in",
-        "extra_json",
+        "has_image", "extra_json",
     }
     assert expected.issubset(columns), f"Missing columns: {expected - columns}"
+
+
+def test_has_image_is_boolean_and_consistent(db):
+    """has_image is always 0 or 1; counts partition the table."""
+    total = db.execute("SELECT COUNT(*) FROM fellows").fetchone()[0]
+    with_image = db.execute("SELECT COUNT(*) FROM fellows WHERE has_image = 1").fetchone()[0]
+    without_image = db.execute("SELECT COUNT(*) FROM fellows WHERE has_image = 0").fetchone()[0]
+    assert with_image + without_image == total, "has_image must always be 0 or 1"
