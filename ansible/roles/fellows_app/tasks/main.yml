@@ -88,6 +88,29 @@
     mode: "0644"
   notify: Restart fellows app
 
+# Preflight: confirm the operator (ansible_user, not root) can actually write
+# into every dist subdirectory before rsync tries. If normalization above
+# didn't take — filesystem ACLs, mount options, something unexpected — we
+# want a readable failure message here instead of rsync's cryptic
+# "mkstemp ... Permission denied (13)" at the generator/receiver layer.
+# Runs as the operator (become: false); if this passes, rsync will too.
+- name: Preflight - verify operator can write to dist tree
+  ansible.builtin.shell: |
+    set -e
+    probe="{{ app_root }}/deploy/dist/.__ansible_write_probe__"
+    touch "$probe" && rm -f "$probe"
+    while IFS= read -r d; do
+      p="$d/.__ansible_write_probe__"
+      if ! ( : > "$p" ) 2>/dev/null; then
+        echo "FAIL: operator cannot write to $d" >&2
+        exit 1
+      fi
+      rm -f "$p"
+    done < <(find "{{ app_root }}/deploy/dist" -mindepth 1 -type d)
+  register: fellows_write_probe
+  changed_when: false
+  become: false
+
 # rsync connects as ansible_user (the operator), who is a member of the
 # service group and can write to the group-writable dist tree. No sudo or
 # per-task SSH-user override needed.
