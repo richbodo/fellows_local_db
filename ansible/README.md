@@ -114,8 +114,8 @@ ssh -p 52221 rsb@170.64.243.67 'systemctl status fellows-pwa caddy --no-pager'
   `-n` is a dry run. Drop `-n` to perform the sync. If this hangs or errors, the issue is SSH / rsync / network — not Ansible's YAML.
 - **Partial `deploy/dist` on the server:** the role uses rsync with `--delete`, which reconciles the tree. Re-run `--tags deploy` after `python build/build_pwa.py`. To reset aggressively: `sudo rm -rf /opt/fellows/deploy/dist/*` on the server, then redeploy.
 
-## Phase 4 (magic link)
+## Magic-link env
 
-The deploy bundle includes `allowed_emails.json` (from `build/build_pwa.py`). To turn on the browser gate, the `fellows-pwa` service needs env vars `FELLOWS_SESSION_SECRET` and `FELLOWS_POSTMARK_TOKEN`. Run `./scripts/configure_email_auth_env.sh` from the repo root to install `/etc/fellows/fellows-pwa.env` (`root:fellows 0640`) and the systemd `EnvironmentFile=` drop-in. Without these, `deploy/server.py` behaves like Phase 3 (no email gate).
+The deploy bundle includes `allowed_emails.json` (from `build/build_pwa.py`). To turn on the browser gate, the `fellows-pwa` service needs env vars `FELLOWS_SESSION_SECRET` and `FELLOWS_POSTMARK_TOKEN`. Run `./scripts/configure_email_auth_env.sh` from the repo root to install `/etc/fellows/fellows-pwa.env` (`root:fellows 0640`) and the systemd `EnvironmentFile=` drop-in. Without these, `deploy/server.py` serves without the email gate.
 
 See [`docs/email_system_management.md`](../docs/email_system_management.md) for full operator runbook, Postmark debugging, and journald event schema.
