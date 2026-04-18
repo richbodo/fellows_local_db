@@ -1,5 +1,7 @@
 const CACHE_VERSION = 'v7';
 const APP_SHELL_CACHE = `fellows-app-shell-${CACHE_VERSION}`;
+// Separate cache so shell-version bumps don't evict the ~34 MB of profile images.
+const IMAGES_CACHE = 'fellows-images-v1';
 
 // fellows.db is fetched only after magic-link session (Phase 4); not precached here.
 const APP_SHELL_ASSETS = [
@@ -95,10 +97,16 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  event.respondWith(cacheFirst(request));
+  // Profile images get their own long-lived cache.
+  if (url.pathname.startsWith('/images/')) {
+    event.respondWith(cacheFirstInto(request, IMAGES_CACHE));
+    return;
+  }
+
+  event.respondWith(cacheFirstInto(request, APP_SHELL_CACHE));
 });
 
-function cacheFirst(request) {
+function cacheFirstInto(request, cacheName) {
   return caches.match(request).then((cached) => {
     if (cached) {
       return cached;
@@ -108,7 +116,7 @@ function cacheFirst(request) {
         return response;
       }
       const responseToCache = response.clone();
-      caches.open(APP_SHELL_CACHE).then((cache) => {
+      caches.open(cacheName).then((cache) => {
         cache.put(request, responseToCache);
       });
       return response;

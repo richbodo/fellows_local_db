@@ -44,14 +44,100 @@
   var bootDebugLines = [];
   var authDebugLines = [];
   var swLifecycleLog = [];
+  var imagePrewarmState = {
+    status: 'idle',
+    total: 0,
+    loaded: 0,
+    errors: 0,
+    startedAt: null,
+    finishedAt: null,
+    reason: null
+  };
   /** Bump when changing diagnostics behavior (shown in Diagnostics panel). */
-  var FELLOWS_UI_DIAG = 'diag-2026-04d-sw-trace';
+  var FELLOWS_UI_DIAG = 'diag-2026-04e-image-prewarm';
 
   function logSwLifecycle(event, detail) {
     swLifecycleLog.push({
       t: new Date().toISOString(),
       event: event,
       detail: detail != null ? detail : null
+    });
+  }
+
+  function prewarmProfileImages(fellows) {
+    if (!Array.isArray(fellows) || !fellows.length) {
+      imagePrewarmState.status = 'skipped-empty';
+      return Promise.resolve();
+    }
+    try {
+      var conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      if (conn && conn.saveData) {
+        imagePrewarmState.status = 'skipped-save-data';
+        imagePrewarmState.reason = 'navigator.connection.saveData=true';
+        return Promise.resolve();
+      }
+    } catch (e) {}
+
+    var eligible = fellows.filter(function (f) {
+      return (f.has_image === 1 || f.has_image === true) && f.slug;
+    });
+    imagePrewarmState.total = eligible.length;
+    imagePrewarmState.loaded = 0;
+    imagePrewarmState.errors = 0;
+    imagePrewarmState.status = 'running';
+    imagePrewarmState.startedAt = new Date().toISOString();
+
+    if (!eligible.length) {
+      imagePrewarmState.status = 'done';
+      imagePrewarmState.finishedAt = new Date().toISOString();
+      return Promise.resolve();
+    }
+
+    var queue = eligible.slice();
+    var CONCURRENCY = 6;
+
+    function next() {
+      var f = queue.shift();
+      if (!f) return null;
+      var url = '/images/' + encodeURIComponent(f.slug) + '.jpg';
+      return fetch(url, { cache: 'default', credentials: 'same-origin' })
+        .then(function (r) {
+          if (r && r.ok) {
+            imagePrewarmState.loaded += 1;
+          } else {
+            imagePrewarmState.errors += 1;
+          }
+        })
+        .catch(function () {
+          imagePrewarmState.errors += 1;
+        })
+        .then(next);
+    }
+
+    var starters = [];
+    for (var i = 0; i < CONCURRENCY; i++) starters.push(next());
+    return Promise.all(starters).then(function () {
+      imagePrewarmState.status = 'done';
+      imagePrewarmState.finishedAt = new Date().toISOString();
+    });
+  }
+
+  function countCachedImages() {
+    if (!('caches' in self)) return Promise.resolve(null);
+    return caches.keys().then(function (keys) {
+      var imagesKey = keys.indexOf('fellows-images-v1') !== -1
+        ? 'fellows-images-v1'
+        : keys.filter(function (k) { return k.indexOf('fellows-') === 0; })[0];
+      if (!imagesKey) return { key: null, count: 0 };
+      return caches.open(imagesKey).then(function (c) {
+        return c.keys().then(function (reqs) {
+          var count = 0;
+          for (var i = 0; i < reqs.length; i++) {
+            if (reqs[i].url.indexOf('/images/') !== -1) count += 1;
+          }
+          return { key: imagesKey, count: count };
+        });
+      });
     });
   }
 
@@ -72,7 +158,8 @@
     'gender_pronouns',
     'ethnicity',
     'primary_citizenship',
-    'global_regions_currently_based_in'
+    'global_regions_currently_based_in',
+    'has_image'
   ];
 
   function rowSqliteToFellow(row) {
@@ -605,6 +692,26 @@
       } catch (e4) {
         lines.push('caches.keys error: ' + String(e4 && e4.message));
       }
+      try {
+        var imgStat = await countCachedImages();
+        if (imgStat) {
+          lines.push(
+            'Profile images cached: ' + imgStat.count +
+              ' (cache=' + (imgStat.key || '(none)') + ')'
+          );
+        }
+      } catch (e5) {
+        lines.push('image-cache count error: ' + String(e5 && e5.message));
+      }
+      lines.push(
+        'Image prewarm: status=' + imagePrewarmState.status +
+          ' loaded=' + imagePrewarmState.loaded +
+          '/' + imagePrewarmState.total +
+          ' errors=' + imagePrewarmState.errors +
+          (imagePrewarmState.reason ? ' reason=' + imagePrewarmState.reason : '') +
+          (imagePrewarmState.startedAt ? ' started=' + imagePrewarmState.startedAt : '') +
+          (imagePrewarmState.finishedAt ? ' finished=' + imagePrewarmState.finishedAt : '')
+      );
     }
     lines.push('');
     lines.push(
@@ -1208,7 +1315,19 @@
     var demo = [fellow.gender_pronouns, fellow.ethnicity].filter(Boolean).join(' | ');
     leftTop += '<h2 class="detail-name">' + escapeHtml(name) + '</h2>';
     if (demo) leftTop += '<p class="detail-demographics">' + escapeHtml(demo) + '</p>';
-    leftTop += '<div class="profile-image-wrap"><img class="profile-image" data-slug="' + escapeHtml(slug) + '" src="/images/' + escapeHtml(slug) + '.jpg" alt="' + escapeHtml(name) + '"></div>';
+    var hasImage = fellow.has_image === 1 || fellow.has_image === true;
+    if (hasImage && slug) {
+      leftTop +=
+        '<div class="profile-image-wrap profile-image-wrap--loading" data-slug="' + escapeHtml(slug) + '">' +
+          '<img class="profile-image" data-slug="' + escapeHtml(slug) + '" src="/images/' + escapeHtml(slug) + '.jpg" alt="' + escapeHtml(name) + '">' +
+          '<span class="profile-image-status profile-image-status--loading">Loading… just a sec.</span>' +
+        '</div>';
+    } else {
+      leftTop +=
+        '<div class="profile-image-wrap profile-image-wrap--none" data-slug="' + escapeHtml(slug) + '">' +
+          '<span class="profile-image-status profile-image-status--none">Not Submitted</span>' +
+        '</div>';
+    }
     if (fellow.bio_tagline) leftTop += '<p class="detail-tagline">' + escapeHtml(fellow.bio_tagline) + '</p>';
 
     var howRows = [];
@@ -1289,25 +1408,44 @@
 
     var img = detailEl.querySelector('.profile-image');
     if (img) {
-      img.onerror = function () {
-        var s = img.getAttribute('data-slug');
-        if (img.src.indexOf('.png') === -1 && s) {
-          img.src = '/images/' + s + '.png';
-          img.onerror = function () { showImagePlaceholder(img); };
-        } else {
-          showImagePlaceholder(img);
+      var wrap = img.parentNode;
+      var markLoaded = function () {
+        wrap.classList.remove('profile-image-wrap--loading');
+        wrap.classList.add('profile-image-wrap--loaded');
+      };
+      var markNone = function () {
+        wrap.classList.remove('profile-image-wrap--loading');
+        wrap.classList.add('profile-image-wrap--none');
+        var status = wrap.querySelector('.profile-image-status');
+        if (status) {
+          status.className = 'profile-image-status profile-image-status--none';
+          status.textContent = 'Not Submitted';
         }
       };
+      // Image already decoded (served from Cache Storage / memory) — skip the
+      // loading flash entirely.
+      if (img.complete && img.naturalWidth > 0) {
+        markLoaded();
+      } else if (img.complete) {
+        markNone();
+      } else {
+        img.addEventListener('load', markLoaded, { once: true });
+        img.addEventListener(
+          'error',
+          function () {
+            var s = img.getAttribute('data-slug');
+            if (s && img.src.indexOf('.png') === -1) {
+              img.src = '/images/' + s + '.png';
+              img.addEventListener('load', markLoaded, { once: true });
+              img.addEventListener('error', markNone, { once: true });
+            } else {
+              markNone();
+            }
+          },
+          { once: true }
+        );
+      }
     }
-  }
-
-  function showImagePlaceholder(imgEl) {
-    imgEl.onerror = null;
-    imgEl.style.display = 'none';
-    var p = document.createElement('span');
-    p.className = 'placeholder';
-    p.textContent = 'No image';
-    imgEl.parentNode.appendChild(p);
   }
 
   function escapeHtml(s) {
@@ -1800,6 +1938,12 @@
           });
         }
         route();
+        // Kick off image prewarm in the background — does not block UI.
+        if (Array.isArray(full)) {
+          setTimeout(function () {
+            prewarmProfileImages(full).catch(function () {});
+          }, 0);
+        }
       })
       .catch(function (err) {
         showBootFailure(err);

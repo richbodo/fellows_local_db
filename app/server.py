@@ -29,6 +29,7 @@ FELLOW_COLUMNS = [
     "contact_email", "key_links", "key_links_urls", "image_url",
     "currently_based_in", "search_tags", "fellow_status", "gender_pronouns",
     "ethnicity", "primary_citizenship", "global_regions_currently_based_in",
+    "has_image",
 ]
 
 
