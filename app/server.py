@@ -299,7 +299,14 @@ class Handler(BaseHTTPRequestHandler):
         # Returning a valid shape prevents the browser from showing the auth
         # failure panel in local development.
         if path == "/api/auth/status":
-            self.send_json({"authEnabled": False, "authenticated": False})
+            self.send_json(
+                {
+                    "authEnabled": False,
+                    "authenticated": False,
+                    "hasSessionCookie": False,
+                    "installRecentlyAllowed": False,
+                }
+            )
             return
 
         # API: stats
