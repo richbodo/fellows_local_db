@@ -168,6 +168,7 @@ Most common command, from the repo root:
 - **Port 8765:** Prefer `./scripts/ensure_port_8765_free.sh` before manual testing when the port is occupied. Equivalent one-liner: `lsof -ti:8765 | xargs kill -9`.
 - **Automation hygiene:** test runs should not leave long-lived servers running. If the port is stuck, run the script above or re-run pytest (which also attempts cleanup in fixtures).
 - **Virtualenv scope:** use `.venv` for dev/test tooling on your workstation; production server runtime uses system Python.
+- **Debugging a stuck PWA / service worker:** when a bug reproduces on your own browser but not on a clean Playwright profile, see [`docs/debugging.md`](docs/debugging.md) for the chrome-devtools-mcp setup that attaches Claude Code to your running Chrome.
 
 ## Before Making This Repo Public
 
