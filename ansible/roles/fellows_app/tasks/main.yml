@@ -107,6 +107,8 @@
       fi
       rm -f "$p"
     done < <(find "{{ app_root }}/deploy/dist" -mindepth 1 -type d)
+  args:
+    executable: /bin/bash
   register: fellows_write_probe
   changed_when: false
   become: false
