@@ -777,14 +777,16 @@
 
   function listenForSwUpdate(reg) {
     if (!reg || typeof reg.addEventListener !== 'function') return;
-    if (reg.waiting && navigator.serviceWorker.controller) {
+    // Snapshot: null here means this is a first-time install, not an update.
+    var hadControllerAtRegister = !!navigator.serviceWorker.controller;
+    if (reg.waiting && hadControllerAtRegister) {
       showSwUpdateBanner();
     }
     reg.addEventListener('updatefound', function () {
       var nw = reg.installing;
       if (!nw) return;
       nw.addEventListener('statechange', function () {
-        if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+        if (nw.state === 'installed' && hadControllerAtRegister) {
           showSwUpdateBanner();
         }
       });
@@ -984,12 +986,29 @@
       });
   }
 
+  function reloadIfBuildChanged(currentBuild) {
+    if (!currentBuild) return false;
+    var key = 'fellows_last_seen_build';
+    var prev = null;
+    try { prev = localStorage.getItem(key); } catch (e) { return false; }
+    try { localStorage.setItem(key, currentBuild); } catch (e) {}
+    if (prev && prev !== currentBuild) {
+      authDebugPush('build changed ' + prev + ' → ' + currentBuild + '; reloading once');
+      try { window.location.reload(); } catch (e) {}
+      return true;
+    }
+    return false;
+  }
+
   function startBrowserUx() {
     authDebugLines.length = 0;
     authDebugPush('startBrowserUx: begin auth status check');
     fetch('/api/auth/status', { credentials: 'same-origin' })
       .then(function (r) {
         authDebugPush('/api/auth/status HTTP ' + r.status);
+        if (reloadIfBuildChanged(r.headers.get('X-Fellows-Build'))) {
+          return new Promise(function () {});
+        }
         if (!r.ok) {
           throw new Error('/api/auth/status failed with HTTP ' + r.status);
         }
