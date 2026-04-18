@@ -57,8 +57,47 @@
     finishedAt: null,
     reason: null
   };
-  /** Bump when changing diagnostics behavior (shown in Diagnostics panel). */
-  var FELLOWS_UI_DIAG = 'diag-2026-04e-image-prewarm';
+  /** Bump on every meaningful UI / diagnostics change. Rendered in the
+   *  always-visible build badge so a dev can tell at a glance which app.js
+   *  is actually running vs what the server was deployed with. */
+  var FELLOWS_UI_DIAG = 'diag-2026-04f-visible-build-marker';
+
+  function initBuildBadge() {
+    var clientEl = document.getElementById('build-badge-client');
+    if (clientEl) clientEl.textContent = 'app: ' + FELLOWS_UI_DIAG;
+  }
+
+  function setBuildBadgeServer(gitSha, builtAt) {
+    var serverEl = document.getElementById('build-badge-server');
+    var badgeEl = document.getElementById('build-badge');
+    if (!serverEl) return;
+    var label = gitSha || builtAt || 'unknown';
+    serverEl.textContent = 'server: ' + label;
+    if (badgeEl && gitSha) {
+      // Heuristic: when server exposes a sha, the client constant should have
+      // been bumped for any change that reached this server build. A mismatch
+      // between "what sha the server reports" and the client constant isn't a
+      // hard error, but the highlight class is reserved for future use when we
+      // add a client→server mapping.
+      badgeEl.classList.remove('build-badge--mismatch');
+    }
+  }
+
+  initBuildBadge();
+
+  // Populate the server-side label independently of the auth flow so a dev
+  // reading the badge still gets a signal when /api/auth/status is failing.
+  function primeServerBadgeFromBuildMeta() {
+    try {
+      fetch('/build-meta.json', { cache: 'no-cache', credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (meta) {
+          if (meta) setBuildBadgeServer(meta.git_sha, meta.built_at);
+        })
+        .catch(function () {});
+    } catch (e) {}
+  }
+  primeServerBadgeFromBuildMeta();
 
   function logSwLifecycle(event, detail) {
     swLifecycleLog.push({
@@ -1219,6 +1258,7 @@
         authDebugPush(
           '/api/auth/status payload authEnabled=' + data.authEnabled + ' authenticated=' + data.authenticated
         );
+        setBuildBadgeServer(data.buildGitSha, data.build);
         if (!data.authEnabled) {
           authDebugPush('auth disabled on server: using install mode');
           initBrowserInstallMode(data, httpStatus);
