@@ -47,6 +47,7 @@
     <div class="install-landing-inner">
       <div class="install-brand" aria-hidden="true">EHF</div>
       <h1 class="install-title">EHF Fellows Directory</h1>
+      <p id="gate-reason-banner" class="gate-reason-banner hidden" role="alert"></p>
       <p class="install-lead install-lead--private">
         This is a private app for EHF Fellows. Enter your fellowship email to receive a sign-in link.
       </p>
@@ -61,9 +62,10 @@
           autocomplete="email"
           required
         />
-        <button type="submit" class="install-pwa-button unlock-submit" id="unlock-submit">Get access</button>
+        <button type="submit" class="install-pwa-button unlock-submit" id="unlock-submit">Send link</button>
       </form>
       <p id="unlock-status" class="install-status" aria-live="polite"></p>
+      <p class="install-ttl-hint">Magic links expire in 30 minutes. Request a new one if yours has expired.</p>
       <p class="install-support">
         Having trouble with the app? Contact the EHF Communications Working Group.
       </p>
@@ -80,6 +82,14 @@
       <button type="button" id="install-pwa-button" class="install-pwa-button">Install app</button>
       <p id="install-ios-hint" class="install-ios-hint hidden">
         On iPhone or iPad: tap <strong>Share</strong>, then <strong>Add to Home Screen</strong>.
+      </p>
+      <p id="install-unsupported-hint" class="install-unsupported-hint hidden">
+        Your browser doesn't support install. We don't want to run this as SaaS, so please use Chrome,
+        Edge, Safari, or any other browser that supports installing a progressive web app. Thanks.
+      </p>
+      <p class="install-ttl-hint">Install within 30 minutes of requesting the link, or request a new one.</p>
+      <p class="install-back-gate">
+        <a href="/?gate=1" id="back-to-gate-link" class="install-back-gate-link">Back to email gate</a>
       </p>
       <p class="install-support">
         Having trouble with the app? Contact the EHF Communications Working Group.

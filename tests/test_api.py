@@ -112,6 +112,18 @@ class TestAPI:
         if status == 200:
             assert "image/" in ctype
 
+    def test_api_auth_status_shape_includes_install_recently_allowed(self):
+        """Dev server stub must include installRecentlyAllowed=false so the
+        client's decision tree stays on the local-dev passthrough path."""
+        status, ctype, body = get("/api/auth/status")
+        assert status == 200
+        assert "application/json" in ctype
+        data = json.loads(body)
+        assert data.get("authEnabled") is False
+        assert data.get("authenticated") is False
+        assert "installRecentlyAllowed" in data
+        assert data["installRecentlyAllowed"] is False
+
     def test_api_stats_returns_aggregates(self):
         status, ctype, body = get("/api/stats")
         assert status == 200

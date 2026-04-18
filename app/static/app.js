@@ -39,6 +39,9 @@
   var iosHintEl = document.getElementById('install-ios-hint');
   var authDebugPrivateEl = document.getElementById('auth-debug-private');
   var authDebugInstallEl = document.getElementById('auth-debug-install');
+  var gateReasonBannerEl = document.getElementById('gate-reason-banner');
+  var installUnsupportedHintEl = document.getElementById('install-unsupported-hint');
+  var backToGateLinkEl = document.getElementById('back-to-gate-link');
   var swUpdateBannerEl = document.getElementById('sw-update-banner');
   var swUpdateReloadEl = document.getElementById('sw-update-reload');
   var siteHeaderEl = document.getElementById('site-header');
@@ -1115,6 +1118,8 @@
       e.preventDefault();
       deferredInstallPrompt = e;
       setInstallStatus('');
+      if (installUnsupportedHintEl) installUnsupportedHintEl.classList.add('hidden');
+      if (installButtonEl) installButtonEl.classList.remove('hidden');
     });
 
     window.addEventListener('appinstalled', function () {
@@ -1123,7 +1128,20 @@
       if (installButtonEl) installButtonEl.classList.add('hidden');
     });
 
-    if (installButtonEl) {
+    // Unsupported-browser detection: if after ~3s no beforeinstallprompt has
+    // fired AND we're not iOS Safari (which uses Share → Add to Home Screen),
+    // swap the install button for the "your browser doesn't support install"
+    // hint. The timer is long enough to avoid a flash on browsers that fire
+    // late, short enough that a dev doesn't think the page is broken.
+    setTimeout(function () {
+      if (deferredInstallPrompt) return;
+      if (isIosSafari()) return;
+      if (installUnsupportedHintEl) installUnsupportedHintEl.classList.remove('hidden');
+      if (installButtonEl) installButtonEl.classList.add('hidden');
+    }, 3000);
+
+    if (installButtonEl && !installButtonEl._wired) {
+      installButtonEl._wired = true;
       installButtonEl.addEventListener('click', function () {
         if (deferredInstallPrompt) {
           deferredInstallPrompt.prompt();
@@ -1137,16 +1155,51 @@
             .catch(function () {
               deferredInstallPrompt = null;
             });
+        } else if (isIosSafari()) {
+          setInstallStatus('Use Share → Add to Home Screen.');
         } else {
-          setInstallStatus(
-            'Use your browser’s install option (menu) or Add to Home Screen on iOS.'
-          );
+          if (installUnsupportedHintEl) installUnsupportedHintEl.classList.remove('hidden');
+          if (installButtonEl) installButtonEl.classList.add('hidden');
         }
+      });
+    }
+
+    if (backToGateLinkEl && !backToGateLinkEl._wired) {
+      backToGateLinkEl._wired = true;
+      backToGateLinkEl.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        fetch('/api/logout', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}'
+        })
+          .catch(function () {})
+          .then(function () {
+            window.location.replace('/?gate=1');
+          });
       });
     }
   }
 
-  function initPrivateGate(authPayload, httpStatus) {
+  function setGateReasonBanner(reason) {
+    if (!gateReasonBannerEl) return;
+    var text = '';
+    if (reason === 'expired') {
+      text = 'That link expired. Enter your email to get a new one.';
+    } else if (reason === 'invalid') {
+      text = "That link isn't valid. Enter your email to get a new one.";
+    }
+    if (text) {
+      gateReasonBannerEl.textContent = text;
+      gateReasonBannerEl.classList.remove('hidden');
+    } else {
+      gateReasonBannerEl.textContent = '';
+      gateReasonBannerEl.classList.add('hidden');
+    }
+  }
+
+  function initEmailGate(authPayload, httpStatus, reason) {
     if (installGatePrivateEl) installGatePrivateEl.classList.remove('hidden');
     if (installLandingEl) installLandingEl.classList.add('hidden');
     if (siteHeaderEl) siteHeaderEl.classList.add('hidden');
@@ -1154,15 +1207,19 @@
     showApp(false);
     if (connectionBannerEl) connectionBannerEl.classList.add('hidden');
 
+    setGateReasonBanner(reason);
+
     if (authPayload) {
       showAuthDebugPrivate(authPayload, httpStatus != null ? httpStatus : 200);
     }
 
-    if (unlockEmailFormEl) {
+    if (unlockEmailFormEl && !unlockEmailFormEl._wired) {
+      unlockEmailFormEl._wired = true;
       unlockEmailFormEl.addEventListener('submit', function (ev) {
         ev.preventDefault();
         var email = (unlockEmailInputEl && unlockEmailInputEl.value) || '';
         if (unlockStatusEl) unlockStatusEl.textContent = 'Sending…';
+        setGateReasonBanner('');
         fetch('/api/send-unlock', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1183,14 +1240,6 @@
           });
       });
     }
-
-    if (sessionStorage.getItem('fellows_unlock_err')) {
-      sessionStorage.removeItem('fellows_unlock_err');
-      if (unlockStatusEl) {
-        unlockStatusEl.textContent =
-          'Link expired or invalid — request a new one from your fellowship email.';
-      }
-    }
   }
 
   function tryUnlockFromHash() {
@@ -1200,7 +1249,6 @@
       return Promise.resolve();
     }
     var token = m[1];
-    window.history.replaceState(null, '', window.location.pathname + window.location.search + '#/');
     return fetch('/api/verify-token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1209,13 +1257,23 @@
     })
       .then(function (r) {
         return r.json().then(function (j) {
-          if (!r.ok || !j.ok) {
-            sessionStorage.setItem('fellows_unlock_err', '1');
+          if (r.ok && j.ok) {
+            // Success: strip the token from the URL so reload doesn't re-submit,
+            // drop any ?gate=1&reason=… that may have been carried through, and
+            // let startBrowserUx run — it will see authenticated=true &
+            // installRecentlyAllowed=true and render the install landing.
+            window.history.replaceState(null, '', '/#/');
+            return;
           }
+          var reason = (j && j.error) === 'expired' ? 'expired' : 'invalid';
+          window.location.replace('/?gate=1&reason=' + reason);
+          // stall remaining chain — the replace will reload us
+          return new Promise(function () {});
         });
       })
       .catch(function () {
-        sessionStorage.setItem('fellows_unlock_err', '1');
+        window.location.replace('/?gate=1&reason=invalid');
+        return new Promise(function () {});
       });
   }
 
@@ -1233,9 +1291,21 @@
     return false;
   }
 
+  function parseGateOverride() {
+    try {
+      var u = new URL(window.location.href);
+      if (u.searchParams.get('gate') === '1') {
+        var reason = u.searchParams.get('reason') || '';
+        return { force: true, reason: reason };
+      }
+    } catch (e) {}
+    return { force: false, reason: '' };
+  }
+
   function startBrowserUx() {
     authDebugLines.length = 0;
     authDebugPush('startBrowserUx: begin auth status check');
+    var override = parseGateOverride();
     fetch('/api/auth/status', { credentials: 'same-origin' })
       .then(function (r) {
         authDebugPush('/api/auth/status HTTP ' + r.status);
@@ -1256,21 +1326,36 @@
           throw new Error('/api/auth/status returned invalid payload shape');
         }
         authDebugPush(
-          '/api/auth/status payload authEnabled=' + data.authEnabled + ' authenticated=' + data.authenticated
+          '/api/auth/status payload authEnabled=' + data.authEnabled +
+          ' authenticated=' + data.authenticated +
+          ' installRecentlyAllowed=' + (data.installRecentlyAllowed === true)
         );
         setBuildBadgeServer(data.buildGitSha, data.build);
+
+        // Decision tree per docs/email_gate.md:
+        // 1. Force-gate URL (?gate=1) overrides everything — explicit dev escape.
+        // 2. If auth isn't active on the server (local dev), skip the gate and
+        //    go straight to install mode as before.
+        // 3. Install landing only when authenticated AND inside the
+        //    install-recently-allowed window.
+        // 4. Otherwise: email gate.
+        if (override.force) {
+          authDebugPush('?gate=1 override: using email gate (reason=' + (override.reason || 'none') + ')');
+          initEmailGate(data, httpStatus, override.reason);
+          return;
+        }
         if (!data.authEnabled) {
           authDebugPush('auth disabled on server: using install mode');
           initBrowserInstallMode(data, httpStatus);
           return;
         }
-        if (data.authenticated) {
-          authDebugPush('session authenticated: using install mode');
+        if (data.authenticated && data.installRecentlyAllowed === true) {
+          authDebugPush('authenticated + recent-token-window: using install mode');
           initBrowserInstallMode(data, httpStatus);
           return;
         }
-        authDebugPush('auth enabled + unauthenticated: using private gate');
-        initPrivateGate(data, httpStatus);
+        authDebugPush('default: using email gate');
+        initEmailGate(data, httpStatus, '');
       })
       .catch(function (err) {
         authDebugPush('auth status check failed: ' + (err && err.message ? err.message : String(err)));
