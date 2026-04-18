@@ -809,6 +809,12 @@ h1 {
   flex-wrap: wrap;
 }
 
+/* Equal-specificity tie vs .hidden; both are 0,1,0 — .sw-update-banner is defined later
+   and would otherwise beat .hidden on source order. Needed to actually hide the banner. */
+.sw-update-banner.hidden {
+  display: none;
+}
+
 .sw-update-reload {
   padding: 0.35rem 0.75rem;
   font-size: 0.85rem;
