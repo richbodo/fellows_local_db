@@ -468,6 +468,9 @@ h1 {
 
 .profile-image-wrap {
   margin-bottom: 0.75rem;
+  position: relative;
+  width: 200px;
+  height: 200px;
 }
 
 .detail img.profile-image {
@@ -476,6 +479,51 @@ h1 {
   height: 200px;
   object-fit: cover;
   display: block;
+}
+
+/* Hide the image while loading so the status label occupies the box. */
+.profile-image-wrap--loading .profile-image {
+  visibility: hidden;
+}
+
+.profile-image-wrap--loaded .profile-image-status {
+  display: none;
+}
+
+.profile-image-wrap--none .profile-image {
+  display: none;
+}
+
+.profile-image-status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem;
+  border: 1px solid #c9c2d4;
+  border-radius: 4px;
+  background: #faf8fc;
+  font-size: 0.9rem;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+.profile-image-status--loading {
+  color: #5a4578;
+  font-style: italic;
+  animation: profile-image-pulse 1.6s ease-in-out infinite;
+}
+
+.profile-image-status--none {
+  color: #8a7c9f;
+  background: #f2eff7;
+  font-weight: 500;
+}
+
+@keyframes profile-image-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
 }
 
 .detail .field {
