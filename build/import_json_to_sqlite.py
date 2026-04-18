@@ -20,6 +20,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 JSON_PATH = Path(sys.argv[1]) if len(sys.argv) > 1 else REPO_ROOT / "final_fellows_set" / "ehf_fellow_profiles_deduped.json"
 DB_PATH = REPO_ROOT / "app" / "fellows.db"
+IMAGES_DIR_SOURCE = REPO_ROOT / "final_fellows_set" / "fellow_profile_images_by_name"
+IMAGES_DIR_APP = REPO_ROOT / "app" / "fellow_profile_images_by_name"
 
 # Columns we store explicitly for display/search; rest go into extra_json
 FELLOW_COLUMNS = [
@@ -40,8 +42,43 @@ FELLOW_COLUMNS = [
     "ethnicity",
     "primary_citizenship",
     "global_regions_currently_based_in",
+    "has_image",
 ]
 EXTRA_JSON_KEYS = None  # All keys not in FELLOW_COLUMNS go into extra_json
+
+
+def _pick_images_dir():
+    if IMAGES_DIR_SOURCE.is_dir():
+        return IMAGES_DIR_SOURCE
+    if IMAGES_DIR_APP.is_dir():
+        return IMAGES_DIR_APP
+    return None
+
+
+def build_image_index():
+    """Map alpha-normalized filename stem → Path for O(1) slug lookup.
+
+    Mirrors app/server.py:find_image() behavior: prefer exact stem, else fuzzy
+    alpha-only match (handles slug/filename underscore/hyphen differences).
+    """
+    images_dir = _pick_images_dir()
+    if images_dir is None:
+        return {}
+    index = {}
+    for p in images_dir.iterdir():
+        if not p.is_file() or p.suffix.lower() not in (".jpg", ".jpeg", ".png"):
+            continue
+        stem_alpha = re.sub(r"[^a-z0-9]", "", p.stem.lower())
+        if stem_alpha and stem_alpha not in index:
+            index[stem_alpha] = p
+    return index
+
+
+def slug_has_image(slug: str, image_index: dict) -> int:
+    if not slug or not image_index:
+        return 0
+    base_alpha = re.sub(r"[^a-z0-9]", "", slug.split("/")[-1].split(".")[0].lower())
+    return 1 if base_alpha in image_index else 0
 
 
 def slugify(text: str) -> str:
@@ -80,7 +117,7 @@ def serialize_value(v):
     return str(v).strip() or None
 
 
-def build_row(record: dict) -> tuple:
+def build_row(record: dict, image_index: dict) -> tuple:
     """Build a single row for fellows table (order matches FELLOW_COLUMNS + extra_json)."""
     slug = record.get("_slug") or get_slug(record)
     name = get_name(record)
@@ -102,6 +139,7 @@ def build_row(record: dict) -> tuple:
         "ethnicity": serialize_value(record.get("ethnicity")),
         "primary_citizenship": serialize_value(record.get("primary_citizenship")),
         "global_regions_currently_based_in": serialize_value(record.get("global_regions_currently_based_in")),
+        "has_image": slug_has_image(slug, image_index),
     }
     extra = {k: v for k, v in record.items() if k not in FELLOW_COLUMNS}
     row["extra_json"] = json.dumps(extra) if extra else None
@@ -149,9 +187,11 @@ def main():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
 
-    # Create fellows table
+    # Drop + recreate so schema changes (e.g. new columns) apply cleanly.
+    conn.execute("DROP TABLE IF EXISTS fellows_fts")
+    conn.execute("DROP TABLE IF EXISTS fellows")
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS fellows (
+        CREATE TABLE fellows (
             record_id TEXT PRIMARY KEY,
             slug TEXT NOT NULL,
             name TEXT,
@@ -169,23 +209,24 @@ def main():
             ethnicity TEXT,
             primary_citizenship TEXT,
             global_regions_currently_based_in TEXT,
+            has_image INTEGER NOT NULL DEFAULT 0,
             extra_json TEXT
         )
     """)
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_fellows_slug ON fellows(slug)")
 
-    conn.execute("DELETE FROM fellows")
+    image_index = build_image_index()
+
     cols = FELLOW_COLUMNS + ["extra_json"]
     placeholders = ",".join("?" * len(cols))
     for r in records:
-        row = build_row(r)
+        row = build_row(r, image_index)
         conn.execute(
             f"INSERT OR REPLACE INTO fellows ({','.join(cols)}) VALUES ({placeholders})",
             row,
         )
 
     # FTS5 virtual table (external content) over fellows
-    conn.execute("DROP TABLE IF EXISTS fellows_fts")
     conn.execute("""
         CREATE VIRTUAL TABLE fellows_fts USING fts5(
             name,
@@ -202,9 +243,10 @@ def main():
 
     conn.commit()
     count = conn.execute("SELECT COUNT(*) FROM fellows").fetchone()[0]
+    with_image = conn.execute("SELECT COUNT(*) FROM fellows WHERE has_image = 1").fetchone()[0]
     conn.close()
 
-    print(f"Imported {count} fellows into {DB_PATH}")
+    print(f"Imported {count} fellows into {DB_PATH} ({with_image} with profile image)")
     print("Verify: sqlite3 app/fellows.db \"SELECT name, slug FROM fellows ORDER BY name LIMIT 3;\"")
     print("FTS5:   sqlite3 app/fellows.db \"SELECT rowid, name FROM fellows_fts WHERE fellows_fts MATCH 'Aaron';\"")
     return 0

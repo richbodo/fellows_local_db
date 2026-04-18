@@ -19,7 +19,7 @@ class TestDetailView:
         assert has_image or has_placeholder or "Aaron Bird" in detail.inner_text()
 
     def test_direct_hash_shows_fellow_detail(self, standalone_page, base_url_fixture):
-        """Navigate to #/fellow/aaron_bird - name, at least one other field, image or placeholder."""
+        """Navigate to #/fellow/aaron_bird — name, at least one other field, image box present."""
         standalone_page.goto(base_url_fixture + "/#/fellow/aaron_bird", wait_until="networkidle")
         standalone_page.locator("#loading").wait_for(state="hidden", timeout=10000)
         detail = standalone_page.locator("#detail")
@@ -29,29 +29,30 @@ class TestDetailView:
         assert any(
             label in text for label in ["Tagline", "Cohort", "Type", "Email", "Based in", "Links"]
         ), "Detail should show at least one field (Tagline, Cohort, Type, etc.)"
-        has_img = standalone_page.locator("#detail .profile-image").count() >= 1
-        has_placeholder = "No image" in text or "Select a fellow" in text
-        assert has_img or has_placeholder, "Detail should show profile image or 'No image' placeholder"
+        # Contract: a .profile-image-wrap is rendered for every fellow detail.
+        assert standalone_page.locator("#detail .profile-image-wrap").count() == 1
 
-    def test_detail_shows_placeholder_when_no_image(self, standalone_page, base_url_fixture):
-        """Fellow without image shows placeholder (image 404 -> 'No image')."""
+    def test_detail_image_settles_into_terminal_state(self, standalone_page, base_url_fixture):
+        """Image box settles into either loaded (image visible) or none ('Not Submitted');
+        never stuck in loading after a short wait."""
         standalone_page.goto(base_url_fixture + "/#/fellow/aaron_bird", wait_until="networkidle")
         standalone_page.locator("#loading").wait_for(state="hidden", timeout=10000)
         detail = standalone_page.locator("#detail")
         detail.wait_for(state="visible", timeout=5000)
         standalone_page.wait_for_function(
             """() => {
-              const d = document.getElementById('detail');
-              if (!d) return false;
-              const img = d.querySelector('.profile-image');
-              const ph = d.querySelector('.placeholder');
-              return (img && img.offsetParent !== null) || (ph && ph.textContent.includes('No image'));
+              const wrap = document.querySelector('#detail .profile-image-wrap');
+              if (!wrap) return false;
+              return wrap.classList.contains('profile-image-wrap--loaded')
+                  || wrap.classList.contains('profile-image-wrap--none');
             }""",
             timeout=5000,
         )
         text = detail.inner_text()
         assert "Aaron Bird" in text
-        assert standalone_page.locator("#detail .profile-image").is_visible() or "No image" in text
+        has_loaded = standalone_page.locator("#detail .profile-image-wrap--loaded").count() == 1
+        has_not_submitted = "Not Submitted" in text
+        assert has_loaded or has_not_submitted
 
     def test_nav_arrows_visible_on_screen(self, standalone_page, base_url_fixture):
         """Both arrows are rendered, visually visible, and appear in a screenshot."""
