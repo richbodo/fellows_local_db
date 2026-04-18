@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v6';
+const CACHE_VERSION = 'v7';
 const APP_SHELL_CACHE = `fellows-app-shell-${CACHE_VERSION}`;
 
 // fellows.db is fetched only after magic-link session (Phase 4); not precached here.
@@ -47,21 +47,25 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches
-      .keys()
-      .then((keys) =>
-        Promise.all(
-          keys.map((key) => {
-            if (key.startsWith('fellows-app-shell-') && key !== APP_SHELL_CACHE) {
-              return caches.delete(key);
-            }
-            return Promise.resolve(false);
-          })
-        )
-      )
-      .then(() => self.clients.claim())
-  );
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    const oldShellCaches = keys.filter(
+      (k) => k.startsWith('fellows-app-shell-') && k !== APP_SHELL_CACHE
+    );
+    await Promise.all(oldShellCaches.map((k) => caches.delete(k)));
+    await self.clients.claim();
+    // Burn-down: only force-reload controlled windows when we're replacing a
+    // prior shell cache. Rescues tabs stuck on stale in-memory app.js from a
+    // previous cacheFirst SW. First-time installs skip this.
+    if (oldShellCaches.length > 0) {
+      const wins = await self.clients.matchAll({ type: 'window' });
+      await Promise.all(
+        wins.map((w) => {
+          try { return w.navigate(w.url); } catch (e) { return null; }
+        })
+      );
+    }
+  })());
 });
 
 function shellPathNetworkFirst(pathname) {
