@@ -6,6 +6,6 @@
 # Host fellows-globaldonut
 #   HostName 170.64.243.67
 #   Port 52221
-#   User deploy
+#   User rsb
 #   IdentityFile ~/.ssh/id_ed25519
 #   IdentitiesOnly yes

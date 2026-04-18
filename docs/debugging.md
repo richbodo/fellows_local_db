@@ -4,7 +4,7 @@ Playbooks for the debug scenarios that have actually come up on this project.
 
 ## Inspecting a developer's live Chrome via Claude Code
 
-When a PWA bug reproduces on your own browser but not on a clean Playwright profile (stuck service worker, stale cached shell, misbehaving installed PWA, cookie/session state you can't explain), let Claude Code attach to your real Chrome and inspect it directly. This is the setup that traced the "install landing appears without a magic link" bug to a pre-Phase-4 `app.js` lingering in JS memory after the old cacheFirst SW had been cleared.
+When a PWA bug reproduces on your own browser but not on a clean Playwright profile (stuck service worker, stale cached shell, misbehaving installed PWA, cookie/session state you can't explain), let Claude Code attach to your real Chrome and inspect it directly. This is the setup that traced the "install landing appears without a magic link" bug to a pre-auth-gate `app.js` lingering in JS memory after the old cacheFirst SW had been cleared.
 
 ### One-time install
 
@@ -56,6 +56,6 @@ When local code and production behavior diverge, check that the droplet is on cu
 curl -sSI https://fellows.globaldonut.com/api/auth/status | grep -i x-fellows-build
 ```
 
-Compare with `git log --format='%ci %h' -1 origin/main`. The plan in `plans/pwa_release_plan.md` has shipped with stale `deploy/dist/` before; if the build timestamp trails main, run `./scripts/deploy_pwa.sh --ask-become-pass`.
+Compare with `git log --format='%ci %h' -1 origin/main`. Production has shipped with stale `deploy/dist/` before; if the build timestamp trails main, run `./scripts/deploy_pwa.sh --ask-become-pass`.
 
 Other production debug entry points (service logs, Postmark send flow, Diagnostics panel) live in [`docs/email_system_management.md`](email_system_management.md) and [`docs/DevOps.md`](DevOps.md).
