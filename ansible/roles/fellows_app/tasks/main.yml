@@ -61,12 +61,13 @@
 # service group and can write to the group-writable dist tree. No sudo or
 # per-task SSH-user override needed.
 #
-# --omit-dir-times: rsync with --archive tries to preserve mtimes on
-# directories, but setting arbitrary times on a fellows-owned dir (even if
-# group-writable) requires ownership or CAP_FOWNER — operator group
-# membership isn't enough. Skipping directory mtime preservation avoids
-# EPERM; file mtimes are still preserved (those files are rsb-owned after
-# rsync writes them).
+# Two flags from --archive (-a) fail for a non-owner even with group write:
+#   -p (perms): chmod(2) requires ownership or CAP_FOWNER. Worse, preserving
+#               source perms would strip the setgid bit (2775 → 755) and
+#               silently break group-inheritance for new files.
+#   -t (times): utime requires ownership or CAP_FOWNER.
+# perms: false adds --no-perms. --omit-dir-times skips utime on directories.
+# File mtimes are still preserved (rsync-created files are rsb-owned).
 - name: Rsync deploy dist from controller to host
   ansible.posix.synchronize:
     mode: push
@@ -76,6 +77,7 @@
     compress: true
     partial: true
     times: true
+    perms: false
     rsync_opts:
       - "--omit-dir-times"
   when: lookup('ansible.builtin.fileglob', playbook_dir + '/../deploy/dist/*', wantlist=True) | length > 0
