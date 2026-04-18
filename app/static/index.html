@@ -11,6 +11,16 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
+  <div
+    id="build-badge"
+    class="build-badge"
+    role="status"
+    aria-live="polite"
+    title="app.js constant (what this tab is running) · server build SHA / timestamp (what was deployed)"
+  >
+    <span id="build-badge-client" class="build-badge-line">app: …</span>
+    <span id="build-badge-server" class="build-badge-line build-badge-line--muted">server: …</span>
+  </div>
   <button type="button" id="clear-app-cache-button" class="clear-app-cache-button">
     Clear App Cache & Reload
   </button>
