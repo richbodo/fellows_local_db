@@ -1767,7 +1767,8 @@
       });
     }
 
-    pickDataProvider()
+    tryUnlockFromHash()
+      .then(function () { return pickDataProvider(); })
       .then(function (provider) {
         dataProvider = provider;
         bootDebugPush('provider ready kind=' + provider.kind);
