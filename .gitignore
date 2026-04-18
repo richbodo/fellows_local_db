@@ -31,3 +31,8 @@ ansible/collections/ansible_collections/
 
 # Ansible run log (ansible.cfg log_path)
 ansible/ansible.log
+
+# Fellow PII — never commit. Contains contact emails, phone numbers,
+# photos, and free-text fields. See README "Data Note" for how to obtain
+# the source JSON and images for local development.
+final_fellows_set/
