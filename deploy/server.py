@@ -396,9 +396,19 @@ class Handler(SimpleHTTPRequestHandler):
         cookie = ml.set_session_cookie_line(val, self.headers)
         self.send_json_with_headers({"ok": True}, 200, [("Set-Cookie", cookie)])
 
+    def send_response(self, code, message=None):
+        # Track status so end_headers can pick the right Cache-Control. A long
+        # max-age on a 404 is poison: a file that appears later gets shadowed
+        # by the stale 404 in every browser that requested it once during the
+        # 'missing' window. We learned this the hard way when missing fellow
+        # photos cached 7-day 404s then failed to render after the S3 recovery.
+        self._last_status = code
+        super().send_response(code, message)
+
     def end_headers(self):
         path = urllib.parse.urlparse(self.path).path
         pl = path.lower()
+        is_ok = getattr(self, "_last_status", 200) == 200
         if pl == "/" or pl.endswith(".html"):
             self.send_header("Cache-Control", "no-cache")
         elif pl.endswith("/sw.js") or pl.rsplit("/", 1)[-1] == "sw.js":
@@ -426,7 +436,13 @@ class Handler(SimpleHTTPRequestHandler):
                 ".json",
             )
         ):
-            self.send_header("Cache-Control", LONG_CACHE_CONTROL)
+            # Only apply the 7-day cache to successful responses. 404 / 403
+            # responses must NOT be long-cached — otherwise transient misses
+            # become permanent client-side.
+            if is_ok:
+                self.send_header("Cache-Control", LONG_CACHE_CONTROL)
+            else:
+                self.send_header("Cache-Control", "no-cache")
         self._telemetry_headers()
         super().end_headers()
 

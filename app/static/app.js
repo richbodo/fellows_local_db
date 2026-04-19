@@ -63,7 +63,7 @@
   /** Bump on every meaningful UI / diagnostics change. Rendered in the
    *  always-visible build badge so a dev can tell at a glance which app.js
    *  is actually running vs what the server was deployed with. */
-  var FELLOWS_UI_DIAG = 'diag-2026-04g-image-pending-state';
+  var FELLOWS_UI_DIAG = 'diag-2026-04h-image-cache-bust';
 
   function initBuildBadge() {
     var clientEl = document.getElementById('build-badge-client');
@@ -145,7 +145,9 @@
     function next() {
       var f = queue.shift();
       if (!f) return null;
-      var url = '/images/' + encodeURIComponent(f.slug) + '.jpg';
+      // Same cache-busting suffix as <img src> in renderDetail — keeps the
+      // prewarm and the on-demand render aligned so we hit one cache entry.
+      var url = '/images/' + encodeURIComponent(f.slug) + '.jpg?v=' + encodeURIComponent(FELLOWS_UI_DIAG);
       return fetch(url, { cache: 'default', credentials: 'same-origin' })
         .then(function (r) {
           if (r && r.ok) {
@@ -1498,9 +1500,15 @@
     if (demo) leftTop += '<p class="detail-demographics">' + escapeHtml(demo) + '</p>';
     var hasImage = fellow.has_image === 1 || fellow.has_image === true;
     if (hasImage && slug) {
+      // Cache-bust against stale 404s from before a fellow's photo existed.
+      // The HTTP cache has a long max-age for 200 images (good), but if a
+      // browser cached a 404 during a gap, it would persist for days. Adding
+      // ?v=<version> to the URL forces a fresh cache key on every release
+      // so a recovered image surfaces immediately after deploy.
+      var imgUrl = '/images/' + escapeHtml(slug) + '.jpg?v=' + escapeHtml(FELLOWS_UI_DIAG);
       leftTop +=
         '<div class="profile-image-wrap profile-image-wrap--loading" data-slug="' + escapeHtml(slug) + '">' +
-          '<img class="profile-image" data-slug="' + escapeHtml(slug) + '" src="/images/' + escapeHtml(slug) + '.jpg" alt="' + escapeHtml(name) + '">' +
+          '<img class="profile-image" data-slug="' + escapeHtml(slug) + '" src="' + imgUrl + '" alt="' + escapeHtml(name) + '">' +
           '<span class="profile-image-status profile-image-status--loading">Loading… just a sec.</span>' +
         '</div>';
     } else {
@@ -1617,7 +1625,7 @@
           function () {
             var s = img.getAttribute('data-slug');
             if (s && img.src.indexOf('.png') === -1) {
-              img.src = '/images/' + s + '.png';
+              img.src = '/images/' + s + '.png?v=' + FELLOWS_UI_DIAG;
               img.addEventListener('load', markLoaded, { once: true });
               img.addEventListener('error', markPending, { once: true });
             } else {
