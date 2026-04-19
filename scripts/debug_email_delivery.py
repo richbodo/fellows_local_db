@@ -246,6 +246,46 @@ def filter_events(
 
 
 DEFAULT_ENV_FILE = "/etc/fellows/fellows-pwa.env"
+DEFAULT_ALLOWLIST_PATH = "/opt/fellows/deploy/dist/allowed_emails.json"
+
+
+def fetch_allowlist_from_prod(
+    host: str,
+    port: str,
+    user: str,
+    allowlist_path: str = DEFAULT_ALLOWLIST_PATH,
+) -> set[str]:
+    """SSH + plain `cat` the allowlist JSON; no sudo needed.
+
+    ``/opt/fellows/deploy/dist/`` is mode 2775 owned by ``fellows:fellows``,
+    and the operator (``rsb``) is in the ``fellows`` group, so we can read it
+    directly. Returns a set of hex SHA-256 hashes.
+    """
+    remote_cmd = f"cat {shlex.quote(allowlist_path)}"
+    cmd = ["ssh", "-o", "BatchMode=yes", "-p", str(port), f"{user}@{host}", remote_cmd]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=30, check=False)
+    if r.returncode != 0:
+        raise RuntimeError(
+            f"ssh/cat allowlist failed (exit {r.returncode}): "
+            + (r.stderr.strip() or "no stderr")
+        )
+    try:
+        data = json.loads(r.stdout)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"allowlist JSON parse failed: {e}")
+    hashes = data.get("hashes") or []
+    return {str(h).lower() for h in hashes if h}
+
+
+def check_allowlist(email: str, allowlist: set[str]) -> dict:
+    """Return {email, hash, hit, allowlist_size} for the given email."""
+    h = hash_email(email)
+    return {
+        "email": email,
+        "hash": h,
+        "hit": h in allowlist,
+        "allowlist_size": len(allowlist),
+    }
 
 
 def fetch_postmark_token_from_prod(
@@ -343,10 +383,35 @@ def fetch_postmark_message(message_id: str, token: str) -> dict:
         return {"_error": str(e)}
 
 
+def _format_allowlist_status(chk: dict) -> list[str]:
+    """Render the allowlist check block for the human-readable report."""
+    out = ["Allowlist status:"]
+    hp = chk["hash"][:16]
+    if chk["hit"]:
+        out.append(
+            f"  HIT — {chk['email']} (hash {hp}…) is in the {chk['allowlist_size']}-entry allowlist."
+        )
+    else:
+        out.append(
+            f"  MISS — {chk['email']} (hash {hp}…) is NOT in the {chk['allowlist_size']}-entry allowlist."
+        )
+        out.append(
+            "  The server silently returns {sent: true} for non-allowlisted emails"
+        )
+        out.append(
+            "  (anti-enumeration). No send event is ever logged. This explains"
+        )
+        out.append(
+            "  'no events found' for this address."
+        )
+    return out
+
+
 def format_report(
     events: list[dict],
     postmark_lookups: dict[str, dict],
     header_meta: dict,
+    allowlist_check: dict | None = None,
 ) -> str:
     """Human-readable report. Newest-first events + summary."""
     lines: list[str] = []
@@ -355,6 +420,10 @@ def format_report(
     if header_meta.get("filter_desc"):
         lines.append(f"Filter: {header_meta['filter_desc']}")
     lines.append("")
+    if allowlist_check is not None:
+        lines.extend(_format_allowlist_status(allowlist_check))
+        lines.append("")
+
     if not events:
         lines.append("No events in window.")
         return "\n".join(lines) + "\n"
@@ -509,11 +578,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument(
         "--sudo",
-        action="store_true",
-        help="Run journalctl under sudo on the remote. Prompts locally for the "
-        "password via getpass, then pipes to `sudo -S`. Needed when the operator "
-        "isn't in adm / systemd-journal (journalctl silently hides other users' "
-        "unit logs otherwise).",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Run journalctl under sudo on the remote (default: on). Prompts "
+        "locally for the password via getpass, then pipes to `sudo -S`. Needed "
+        "when the operator isn't in adm / systemd-journal — journalctl silently "
+        "hides other users' unit logs otherwise. Pass --no-sudo only if you've "
+        "added the operator to the systemd-journal group on prod.",
     )
     ap.add_argument(
         "-v",
@@ -568,6 +639,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.limit > 0:
         events = events[-args.limit :]
 
+    # Allowlist check: cheap (no sudo, group-readable file) and answers the
+    # single most common "no events, no email, why?" question directly.
+    allowlist_check: dict | None = None
+    if args.email:
+        try:
+            allow = fetch_allowlist_from_prod(args.host, args.port, args.user)
+            allowlist_check = check_allowlist(args.email, allow)
+        except RuntimeError as e:
+            sys.stderr.write(f"(allowlist check skipped: {e})\n")
+
     postmark_lookups: dict[str, dict] = {}
     if args.postmark:
         token, source = resolve_postmark_token(args, sudo_password)
@@ -607,6 +688,7 @@ def main(argv: list[str] | None = None) -> int:
             },
             "events": events,
             "postmark": postmark_lookups,
+            "allowlist": allowlist_check,
         }
         print(json.dumps(out, indent=2, default=str))
     else:
@@ -618,6 +700,7 @@ def main(argv: list[str] | None = None) -> int:
                 "since": args.since,
                 "filter_desc": filter_desc,
             },
+            allowlist_check=allowlist_check,
         )
         sys.stdout.write(report)
 
