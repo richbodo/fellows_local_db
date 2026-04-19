@@ -36,3 +36,6 @@ ansible/ansible.log
 # photos, and free-text fields. See README "Data Note" for how to obtain
 # the source JSON and images for local development.
 final_fellows_set/
+
+# Local-only fellows data snapshots (see backup/README.md)
+backup/*.zip
