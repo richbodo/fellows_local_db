@@ -367,13 +367,17 @@ def test_main_refuses_both_email_and_hash_prefix(capsys, monkeypatch):
 
 
 def test_main_json_output_round_trips(monkeypatch, capsys):
-    """End-to-end JSON path: mock ssh_journal, verify JSON structure."""
+    """End-to-end JSON path: mock ssh_journal, verify JSON structure.
+
+    Use --no-postmark so the default-on Postmark resolution doesn't try to
+    fetch a token for this unit test.
+    """
     monkeypatch.setattr(
         ded,
         "ssh_journal",
         lambda host, port, user, since, **kw: _journal_envelope(_send_event_json()),
     )
-    rc = ded.main(["--json", "--since", "1 hour ago"])
+    rc = ded.main(["--json", "--no-postmark", "--since", "1 hour ago"])
     assert rc == 0
     out = capsys.readouterr().out
     data = json.loads(out)
@@ -382,3 +386,100 @@ def test_main_json_output_round_trips(monkeypatch, capsys):
     assert len(data["events"]) == 1
     assert data["events"][0]["result"] == "sent"
     assert data["postmark"] == {}
+
+
+def test_postmark_default_is_on(monkeypatch):
+    """No flag → args.postmark is True (default-on; --no-postmark opts out)."""
+    ap = ded.build_arg_parser()
+    args = ap.parse_args([])
+    assert args.postmark is True
+
+
+def test_postmark_no_postmark_flag_opts_out():
+    ap = ded.build_arg_parser()
+    args = ap.parse_args(["--no-postmark"])
+    assert args.postmark is False
+
+
+def test_resolve_postmark_token_prefers_cli_arg(monkeypatch):
+    """Priority 1: --postmark-token beats env and auto-fetch."""
+    monkeypatch.setenv("FELLOWS_POSTMARK_TOKEN", "env-token")
+    ap = ded.build_arg_parser()
+    args = ap.parse_args(["--postmark-token", "cli-token"])
+    tok, source = ded.resolve_postmark_token(args, sudo_password="pw")
+    assert tok == "cli-token"
+    assert "--postmark-token" in source
+
+
+def test_resolve_postmark_token_falls_back_to_env(monkeypatch):
+    """Priority 2: env var when --postmark-token unset."""
+    monkeypatch.setenv("FELLOWS_POSTMARK_TOKEN", "env-token")
+    ap = ded.build_arg_parser()
+    args = ap.parse_args([])
+    tok, source = ded.resolve_postmark_token(args, sudo_password=None)
+    assert tok == "env-token"
+    assert "env" in source
+
+
+def test_resolve_postmark_token_auto_fetches_with_sudo(monkeypatch):
+    """Priority 3: auto-fetch from prod env file when sudo password available."""
+    monkeypatch.delenv("FELLOWS_POSTMARK_TOKEN", raising=False)
+    monkeypatch.setattr(
+        ded, "fetch_postmark_token_from_prod",
+        lambda host, port, user, pw: "fetched-token",
+    )
+    ap = ded.build_arg_parser()
+    args = ap.parse_args([])
+    tok, source = ded.resolve_postmark_token(args, sudo_password="pw")
+    assert tok == "fetched-token"
+    assert "auto-fetch" in source
+
+
+def test_resolve_postmark_token_returns_none_without_sources(monkeypatch):
+    """No --postmark-token, no env, no --sudo → no token, main errors cleanly."""
+    monkeypatch.delenv("FELLOWS_POSTMARK_TOKEN", raising=False)
+    ap = ded.build_arg_parser()
+    args = ap.parse_args([])
+    tok, source = ded.resolve_postmark_token(args, sudo_password=None)
+    assert tok is None
+
+
+def test_fetch_postmark_token_from_prod_parses_quoted_and_unquoted(monkeypatch):
+    """Env-file parser handles both KEY=val and KEY='val' and KEY=\"val\"."""
+    cases = [
+        ('FELLOWS_POSTMARK_TOKEN=abc123\nFELLOWS_MAIL_FROM=admin@x\n', "abc123"),
+        ('FELLOWS_POSTMARK_TOKEN="abc123"\n', "abc123"),
+        ("FELLOWS_POSTMARK_TOKEN='abc123'\n", "abc123"),
+        ("FELLOWS_SESSION_SECRET=ignore\nFELLOWS_POSTMARK_TOKEN=tkn\n", "tkn"),
+    ]
+    for stdout, expected in cases:
+        class _R:
+            returncode = 0
+        _R.stdout = stdout
+        _R.stderr = ""
+        monkeypatch.setattr(ded.subprocess, "run", lambda *a, **kw: _R())
+        assert ded.fetch_postmark_token_from_prod("h", "22", "u", "pw") == expected
+
+
+def test_fetch_postmark_token_from_prod_raises_when_missing(monkeypatch):
+    class _R:
+        returncode = 0
+        stdout = "FELLOWS_SESSION_SECRET=only-this\n"
+        stderr = ""
+
+    monkeypatch.setattr(ded.subprocess, "run", lambda *a, **kw: _R())
+    import pytest
+    with pytest.raises(RuntimeError, match="not found"):
+        ded.fetch_postmark_token_from_prod("h", "22", "u", "pw")
+
+
+def test_fetch_postmark_token_from_prod_raises_on_ssh_failure(monkeypatch):
+    class _R:
+        returncode = 255
+        stdout = ""
+        stderr = "Permission denied"
+
+    monkeypatch.setattr(ded.subprocess, "run", lambda *a, **kw: _R())
+    import pytest
+    with pytest.raises(RuntimeError, match="exit 255"):
+        ded.fetch_postmark_token_from_prod("h", "22", "u", "pw")
