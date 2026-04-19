@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # Dump /etc/fellows/fellows-pwa.env from prod, with secrets masked.
 #
-# Requires sudo on the droplet (same permissions as restarting the service).
-# Reads the env file via `ssh -tt sudo cat`, then masks values whose KEY
+# Prompts locally for your sudo password (hidden input) and pipes it to
+# remote `sudo -S`. No pty allocation — the old `ssh -tt sudo` approach
+# merged stdout+stderr on the remote, and our awk pipeline captured the
+# prompt, so "Password:" never reached the terminal and the script hung.
+#
+# Reads the env file via `sudo -S -p '' cat`, then masks values whose KEY
 # matches TOKEN/SECRET/PASSWORD/KEY/CREDENTIAL patterns. Pass --raw to
 # show secrets in full.
 #
@@ -37,10 +41,19 @@ case "${1:-}" in
     ;;
 esac
 
-# -tt forces a pty so sudo's password prompt reaches the terminal.
-# tr -d '\r' strips the CRs the pty introduces so we can parse cleanly.
-ssh -tt -p "$PORT" "$USER_@$HOST" "sudo cat $(printf '%q' "$ENV_FILE")" \
-  | tr -d '\r' \
+# Hidden-input read. -s suppresses echo; prompt goes to stderr so it can't
+# contaminate stdout if the caller redirects.
+printf "sudo password for %s@%s: " "$USER_" "$HOST" >&2
+IFS= read -rs SUDO_PW
+printf "\n" >&2
+
+# `sudo -S` reads the password from stdin. `-p ''` silences sudo's prompt
+# text so nothing lands in the env-file stream. Single remote command
+# string — printf %q escapes the path for the remote shell.
+REMOTE_CMD="sudo -S -p '' cat $(printf '%q' "$ENV_FILE")"
+
+printf '%s\n' "$SUDO_PW" \
+  | ssh -o BatchMode=no -p "$PORT" "$USER_@$HOST" "$REMOTE_CMD" \
   | awk -v raw="$RAW" '
       BEGIN { FS = "=" }
       /^[[:space:]]*$/  { print; next }
