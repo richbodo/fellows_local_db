@@ -102,3 +102,41 @@ def test_gated_paths():
     assert not ml.is_gated_api_path("/api/debug/diagnostics")
     assert ml.is_protected_data_path("/fellows.db")
     assert ml.is_protected_data_path("/images/foo.jpg")
+
+
+def test_build_postmark_body_default_sender_is_admin(monkeypatch):
+    """Default FELLOWS_MAIL_FROM is admin@… (no-reply retired per Postmark guidance)."""
+    monkeypatch.delenv("FELLOWS_MAIL_FROM", raising=False)
+    monkeypatch.delenv("FELLOWS_REPLY_TO", raising=False)
+    body = ml.build_postmark_body("user@example.com", "https://fellows.globaldonut.com/#/unlock/tok")
+    assert body["From"] == "admin@fellows.globaldonut.com"
+    assert body["To"] == "user@example.com"
+    assert body["MessageStream"] == "outbound"
+    assert "expires in 30 minutes" in body["Subject"]
+    assert "30 minutes" in body["TextBody"]
+    assert "30 minutes" in body["HtmlBody"]
+    # Reply-To absent when env var unset — Postmark defaults reply to From.
+    assert "ReplyTo" not in body
+
+
+def test_build_postmark_body_reply_to_env_wins(monkeypatch):
+    """FELLOWS_REPLY_TO becomes the ReplyTo header when set."""
+    monkeypatch.setenv("FELLOWS_MAIL_FROM", "admin@fellows.globaldonut.com")
+    monkeypatch.setenv("FELLOWS_REPLY_TO", "richbodo+fellows@gmail.com")
+    body = ml.build_postmark_body("u@x.com", "https://example/#/unlock/tok")
+    assert body["From"] == "admin@fellows.globaldonut.com"
+    assert body["ReplyTo"] == "richbodo+fellows@gmail.com"
+
+
+def test_build_postmark_body_reply_to_empty_string_is_ignored(monkeypatch):
+    """Empty FELLOWS_REPLY_TO is treated as unset, not as an empty Reply-To header."""
+    monkeypatch.setenv("FELLOWS_REPLY_TO", "   ")
+    body = ml.build_postmark_body("u@x.com", "https://example/#/unlock/tok")
+    assert "ReplyTo" not in body
+
+
+def test_build_postmark_body_mail_from_override(monkeypatch):
+    """FELLOWS_MAIL_FROM overrides the default."""
+    monkeypatch.setenv("FELLOWS_MAIL_FROM", "hello@fellows.globaldonut.com")
+    body = ml.build_postmark_body("u@x.com", "https://example/#/unlock/tok")
+    assert body["From"] == "hello@fellows.globaldonut.com"
