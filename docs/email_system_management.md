@@ -103,7 +103,7 @@ sudo systemctl restart fellows-pwa
 Then from your laptop:
 
 ```bash
-scripts/show_server_env.sh          # confirms the change landed (secrets masked)
+scripts/show_server_env.sh          # confirms the change landed (values shown raw — copy/paste-ready)
 ```
 
 ### D. Smoke-test the new sender
