@@ -68,14 +68,21 @@ def test_build_ssh_cmd_quotes_unit_and_simple_since():
     assert " 24h " in remote + " "  # 24h appears as its own token
 
 
-def test_build_ssh_cmd_sudo_mode_forces_tty_and_prepends_sudo():
+def test_build_ssh_cmd_sudo_mode_uses_sudo_s_not_pty():
+    """--sudo uses `sudo -S -p ''` + piped stdin password, not a pty.
+
+    Regression: the old `-tt` pty approach swallowed sudo's prompt into the
+    captured stdout stream so the user never saw "Password:" and the script
+    hung waiting for input they didn't know to provide.
+    """
     cmd = ded.build_ssh_cmd("example.com", "52221", "rsb", "2 hours ago", use_sudo=True)
-    # -tt forces pty so sudo can prompt; BatchMode must NOT be present.
-    assert "-tt" in cmd
+    assert "-tt" not in cmd
     assert "BatchMode=yes" not in " ".join(cmd)
-    # Remote command starts with sudo journalctl ...
-    assert cmd[-1].startswith("sudo journalctl ")
-    assert "'2 hours ago'" in cmd[-1]
+    remote = cmd[-1]
+    # `sudo -S -p '' journalctl ...` — the empty -p silences the prompt text
+    # so it doesn't contaminate the journalctl JSON output.
+    assert remote.startswith("sudo -S -p '' journalctl ")
+    assert "'2 hours ago'" in remote
 
 
 def test_build_ssh_cmd_default_uses_batchmode_no_sudo():
@@ -83,6 +90,48 @@ def test_build_ssh_cmd_default_uses_batchmode_no_sudo():
     assert "-tt" not in cmd
     assert "BatchMode=yes" in cmd
     assert not cmd[-1].startswith("sudo ")
+
+
+def test_ssh_journal_sudo_pipes_password_to_stdin(monkeypatch):
+    """--sudo path should pipe the password to subprocess stdin, not rely on a tty."""
+    captured = {}
+
+    class _FakeResult:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["input"] = kwargs.get("input")
+        captured["capture_output"] = kwargs.get("capture_output")
+        return _FakeResult()
+
+    monkeypatch.setattr(ded.subprocess, "run", fake_run)
+    ded.ssh_journal(
+        "h", "22", "u", "24h", use_sudo=True, sudo_password="secret-pw"
+    )
+    assert captured["input"] == "secret-pw\n"
+    assert captured["capture_output"] is True
+    # Password never ends up in argv itself.
+    assert "secret-pw" not in " ".join(captured["cmd"])
+
+
+def test_ssh_journal_non_sudo_does_not_write_stdin(monkeypatch):
+    captured = {}
+
+    class _FakeResult:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        captured["input"] = kwargs.get("input")
+        return _FakeResult()
+
+    monkeypatch.setattr(ded.subprocess, "run", fake_run)
+    ded.ssh_journal("h", "22", "u", "24h", use_sudo=False)
+    assert captured["input"] is None
 
 
 def test_hash_email_matches_server_contract():
