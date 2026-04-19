@@ -31,6 +31,7 @@ the send half of that flow.
 from __future__ import annotations
 
 import argparse
+import getpass
 import hashlib
 import json
 import os
@@ -73,23 +74,20 @@ def build_ssh_cmd(
     it with "Failed to parse timestamp: 2". Quote each remote arg and pass
     the whole remote command as a single SSH argument.
 
-    When ``use_sudo=True``, prepend ``sudo`` to the remote command and force
-    a pty with ``-tt`` so sudo can prompt for a password interactively.
-    Needed when the operator isn't in the ``systemd-journal`` / ``adm``
-    group — non-privileged journalctl silently returns no rows for other
-    units' logs.
+    When ``use_sudo=True``, prepend ``sudo -S -p ''`` on the remote. Caller
+    is responsible for supplying the password on the subprocess's stdin.
+    ``-S`` reads the password from stdin; ``-p ''`` silences the prompt
+    text so nothing contaminates the journalctl JSON stream. No pty
+    allocation (no ``-tt``) — that swallowed the prompt into captured
+    stdout and caused indefinite hangs.
     """
     remote_argv = ["journalctl", "-u", unit, "--since", since, "-o", "json", "--no-pager"]
     if use_sudo:
-        remote_argv = ["sudo"] + remote_argv
+        remote_argv = ["sudo", "-S", "-p", ""] + remote_argv
     remote_cmd = " ".join(shlex.quote(a) for a in remote_argv)
 
     ssh_flags: list[str] = ["-p", str(port)]
-    if use_sudo:
-        # Force a pty so the remote sudo can prompt on stderr; BatchMode would
-        # actively suppress that prompt and cause immediate failure.
-        ssh_flags.append("-tt")
-    else:
+    if not use_sudo:
         ssh_flags.extend(["-o", "BatchMode=yes"])
 
     return ["ssh", *ssh_flags, f"{user}@{host}", remote_cmd]
@@ -102,40 +100,70 @@ def ssh_journal(
     since: str,
     unit: str = UNIT,
     use_sudo: bool = False,
+    verbose: bool = False,
+    sudo_password: str | None = None,
 ) -> str:
-    """Fetch journalctl JSON lines via SSH. Returns raw stdout."""
+    """Fetch journalctl JSON lines via SSH. Returns raw stdout.
+
+    With ``use_sudo=True``, prompts locally for the sudo password via
+    ``getpass`` (unless ``sudo_password`` is supplied, mostly for tests)
+    and pipes it to the remote ``sudo -S`` via the subprocess's stdin.
+    """
+    if use_sudo and sudo_password is None:
+        sudo_password = getpass.getpass(f"sudo password for {user}@{host}: ")
+
     cmd = build_ssh_cmd(host, port, user, since, unit=unit, use_sudo=use_sudo)
+
+    # Always print a one-line breadcrumb so a hang is obviously a hang on a
+    # known line, not a silent wedge. --verbose echoes the full quoted cmd.
+    sys.stderr.write(f"→ SSH {user}@{host}:{port} journalctl (use_sudo={use_sudo})…\n")
+    sys.stderr.flush()
+    if verbose:
+        sys.stderr.write(
+            "[verbose] " + " ".join(shlex.quote(a) for a in cmd) + "\n"
+        )
+        sys.stderr.flush()
+
     try:
-        if use_sudo:
-            # Let sudo's password prompt reach the user's terminal on stderr,
-            # and inherit stdin so they can type. Capture stdout only.
-            r = subprocess.run(
-                cmd,
-                stdout=subprocess.PIPE,
-                text=True,
-                timeout=120,
-                check=False,
-            )
-        else:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=False)
+        r = subprocess.run(
+            cmd,
+            input=(sudo_password + "\n") if use_sudo else None,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
     except FileNotFoundError:
         sys.stderr.write("ssh binary not found on PATH\n")
         sys.exit(2)
     except subprocess.TimeoutExpired:
-        sys.stderr.write("ssh/journalctl timed out\n")
+        sys.stderr.write("ssh/journalctl timed out after 120s\n")
         sys.exit(2)
+
     if r.returncode != 0:
         sys.stderr.write(f"ssh/journalctl failed (exit {r.returncode}):\n")
-        if not use_sudo:
-            sys.stderr.write(r.stderr or "")
+        if r.stderr:
+            sys.stderr.write(r.stderr)
+            if not r.stderr.endswith("\n"):
+                sys.stderr.write("\n")
         sys.stderr.write(
             "\nHints: is your SSH key loaded? Does "
             f"`ssh -p {port} {user}@{host} true` succeed interactively?\n"
-            "If journalctl returns no rows for the fellows-pwa unit, rerun "
-            "with --sudo (the operator needs to be in adm or systemd-journal "
-            "to read other users' unit logs without it).\n"
         )
+        if use_sudo:
+            sys.stderr.write(
+                "If sudo failed: check the password. Alternatively, add "
+                f"{user} to the systemd-journal group on prod to drop the "
+                "--sudo requirement entirely.\n"
+            )
+        else:
+            sys.stderr.write(
+                "If journalctl returned no rows for fellows-pwa, rerun with "
+                "--sudo — non-privileged journalctl silently hides other "
+                "users' unit logs.\n"
+            )
         sys.exit(1)
+
     return r.stdout
 
 
@@ -410,9 +438,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--sudo",
         action="store_true",
-        help="Run journalctl under sudo on the remote (forces a tty for the prompt). "
-        "Needed when the operator isn't in adm / systemd-journal and so journalctl "
-        "silently returns no rows for the fellows-pwa unit.",
+        help="Run journalctl under sudo on the remote. Prompts locally for the "
+        "password via getpass, then pipes to `sudo -S`. Needed when the operator "
+        "isn't in adm / systemd-journal (journalctl silently hides other users' "
+        "unit logs otherwise).",
+    )
+    ap.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Echo the SSH command to stderr before running (doesn't include "
+        "the sudo password — that's piped in separately).",
     )
     ap.add_argument(
         "--json",
@@ -439,7 +475,14 @@ def main(argv: list[str] | None = None) -> int:
         prefix = args.email_hash_prefix.lower().strip()
         email_desc = f"{prefix}…"
 
-    raw = ssh_journal(args.host, args.port, args.user, args.since, use_sudo=args.sudo)
+    raw = ssh_journal(
+        args.host,
+        args.port,
+        args.user,
+        args.since,
+        use_sudo=args.sudo,
+        verbose=args.verbose,
+    )
     events = parse_events(raw)
     events = filter_events(events, email_hash_prefix=prefix, result=args.result)
     if args.limit > 0:
