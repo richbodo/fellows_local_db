@@ -63,7 +63,7 @@
   /** Bump on every meaningful UI / diagnostics change. Rendered in the
    *  always-visible build badge so a dev can tell at a glance which app.js
    *  is actually running vs what the server was deployed with. */
-  var FELLOWS_UI_DIAG = 'diag-2026-04f-visible-build-marker';
+  var FELLOWS_UI_DIAG = 'diag-2026-04g-image-pending-state';
 
   function initBuildBadge() {
     var clientEl = document.getElementById('build-badge-client');
@@ -1594,21 +1594,22 @@
         wrap.classList.remove('profile-image-wrap--loading');
         wrap.classList.add('profile-image-wrap--loaded');
       };
-      var markNone = function () {
-        wrap.classList.remove('profile-image-wrap--loading');
-        wrap.classList.add('profile-image-wrap--none');
+      // The fellow's `has_image=1` — they DID submit a photo. If the <img>
+      // fetch fails (network, auth, 404, cache miss), we must NOT flip to
+      // "Not Submitted" — that would lie to users about a fellow we have
+      // data for. Instead, keep the loading visual and hint at reloading.
+      // "Not Submitted" is reserved for has_image=0 (rendered statically
+      // at HTML build time; never reached by this JS path).
+      var markPending = function () {
         var status = wrap.querySelector('.profile-image-status');
-        if (status) {
-          status.className = 'profile-image-status profile-image-status--none';
-          status.textContent = 'Not Submitted';
-        }
+        if (status) status.textContent = 'Loading… try reloading';
       };
       // Image already decoded (served from Cache Storage / memory) — skip the
       // loading flash entirely.
       if (img.complete && img.naturalWidth > 0) {
         markLoaded();
       } else if (img.complete) {
-        markNone();
+        markPending();
       } else {
         img.addEventListener('load', markLoaded, { once: true });
         img.addEventListener(
@@ -1618,9 +1619,9 @@
             if (s && img.src.indexOf('.png') === -1) {
               img.src = '/images/' + s + '.png';
               img.addEventListener('load', markLoaded, { once: true });
-              img.addEventListener('error', markNone, { once: true });
+              img.addEventListener('error', markPending, { once: true });
             } else {
-              markNone();
+              markPending();
             }
           },
           { once: true }
@@ -1677,9 +1678,33 @@
 
     aboutHtml += '<h2 class="stats-title">Fellowship Statistics</h2>';
     aboutHtml += '<p class="stats-total" id="stats-total">Loading stats\u2026</p>';
+    aboutHtml += '<p class="stats-images-cached" id="stats-images-cached">Counting cached profile photos\u2026</p>';
     aboutHtml += '<div class="stats-grid" id="stats-grid"></div>';
     aboutHtml += '</div>';
     detailEl.innerHTML = aboutHtml;
+
+    // Render the "N / M" cached-photo counter using the existing helper.
+    // Snapshotted at page-render time; refreshes on next About visit.
+    (function renderImagesCachedCounter() {
+      var el = document.getElementById('stats-images-cached');
+      if (!el) return;
+      var withImageTotal = 0;
+      var source = Array.isArray(fullFellowsCache) ? fullFellowsCache : list;
+      source.forEach(function (f) {
+        if (f && (f.has_image === 1 || f.has_image === true)) withImageTotal++;
+      });
+      countCachedImages().then(function (result) {
+        if (!result) {
+          el.textContent = 'Profile photos cached locally: unknown (Cache API unavailable on this browser).';
+          return;
+        }
+        el.textContent =
+          'Profile photos cached locally: ' + result.count + ' / ' + withImageTotal +
+          ' (fellows who uploaded a photo). Reload this page to update the count.';
+      }).catch(function () {
+        el.textContent = 'Profile photos cached locally: unknown.';
+      });
+    })();
 
     if (!dataProvider) {
       var totalEl0 = document.getElementById('stats-total');
