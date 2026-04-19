@@ -246,6 +246,172 @@ def filter_events(
 
 
 DEFAULT_ENV_FILE = "/etc/fellows/fellows-pwa.env"
+DEFAULT_ALLOWLIST_PATH = "/opt/fellows/deploy/dist/allowed_emails.json"
+
+
+def fetch_allowlist_from_prod(
+    host: str,
+    port: str,
+    user: str,
+    allowlist_path: str = DEFAULT_ALLOWLIST_PATH,
+) -> set[str]:
+    """SSH + plain `cat` the allowlist JSON; no sudo needed.
+
+    ``/opt/fellows/deploy/dist/`` is mode 2775 owned by ``fellows:fellows``,
+    and the operator (``rsb``) is in the ``fellows`` group, so we can read it
+    directly. Returns a set of hex SHA-256 hashes.
+    """
+    remote_cmd = f"cat {shlex.quote(allowlist_path)}"
+    cmd = ["ssh", "-o", "BatchMode=yes", "-p", str(port), f"{user}@{host}", remote_cmd]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=30, check=False)
+    if r.returncode != 0:
+        raise RuntimeError(
+            f"ssh/cat allowlist failed (exit {r.returncode}): "
+            + (r.stderr.strip() or "no stderr")
+        )
+    try:
+        data = json.loads(r.stdout)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"allowlist JSON parse failed: {e}")
+    hashes = data.get("hashes") or []
+    return {str(h).lower() for h in hashes if h}
+
+
+def check_allowlist(email: str, allowlist: set[str]) -> dict:
+    """Return {email, hash, hit, allowlist_size} for the given email."""
+    h = hash_email(email)
+    return {
+        "email": email,
+        "hash": h,
+        "hit": h in allowlist,
+        "allowlist_size": len(allowlist),
+    }
+
+
+DEFAULT_FELLOWS_DB = "/opt/fellows/deploy/dist/fellows.db"
+
+
+def fetch_fellow_emails_from_prod(
+    host: str,
+    port: str,
+    user: str,
+    db_path: str = DEFAULT_FELLOWS_DB,
+) -> list[dict]:
+    """SSH + remote Python to pull fellow records with contact emails.
+
+    Prod droplet runs the app on Python, so ``python3`` + stdlib ``sqlite3`` is
+    always available. The ``sqlite3`` CLI binary is NOT installed (it's not a
+    fellows-pwa dep) so we use Python directly — one-liner, JSON out.
+
+    Same path as the allowlist (group-readable, no sudo needed). Returns a list
+    of ``{"record_id", "name", "email"}`` dicts with email lowercased+trimmed,
+    matching the build_pwa hashing recipe.
+    """
+    py_code = (
+        "import json, sqlite3; "
+        f"c = sqlite3.connect({db_path!r}); "
+        "c.row_factory = sqlite3.Row; "
+        "rows = c.execute("
+        "\"SELECT record_id, name, lower(trim(contact_email)) AS email "
+        "FROM fellows WHERE contact_email IS NOT NULL "
+        "AND trim(contact_email) != ''\""
+        ").fetchall(); "
+        "print(json.dumps([dict(r) for r in rows]))"
+    )
+    remote_cmd = f"python3 -c {shlex.quote(py_code)}"
+    cmd = ["ssh", "-o", "BatchMode=yes", "-p", str(port), f"{user}@{host}", remote_cmd]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=30, check=False)
+    if r.returncode != 0:
+        raise RuntimeError(
+            f"ssh/python3 query failed (exit {r.returncode}): "
+            + (r.stderr.strip() or "no stderr")
+        )
+    if not r.stdout.strip():
+        return []
+    try:
+        data = json.loads(r.stdout)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"sqlite3 JSON parse failed: {e}")
+    return data if isinstance(data, list) else []
+
+
+def dump_allowlist_report(host: str, port: str, user: str) -> dict:
+    """Cross-reference allowlist hashes against the fellows DB.
+
+    Returns a structured summary and writes a human-readable report to stdout.
+    Flags two invariants:
+      - every fellow with a contact_email should have their hash on the allowlist
+      - every hash on the allowlist should map back to at least one fellow email
+    Both should be true whenever build_pwa.py runs over the same DB. Drift
+    means the allowlist and DB were built from different sources.
+    """
+    allow = fetch_allowlist_from_prod(host, port, user)
+    fellows = fetch_fellow_emails_from_prod(host, port, user)
+
+    fellow_hash_to_fellow: dict[str, dict] = {}
+    for f in fellows:
+        email = (f.get("email") or "").strip().lower()
+        if not email:
+            continue
+        fellow_hash_to_fellow.setdefault(hash_email(email), f)
+
+    fellow_hashes = set(fellow_hash_to_fellow.keys())
+
+    missing_from_allowlist = [
+        fellow_hash_to_fellow[h] for h in fellow_hashes if h not in allow
+    ]
+    orphans_in_allowlist = sorted(allow - fellow_hashes)
+
+    summary = {
+        "allowlist_size": len(allow),
+        "fellows_with_email": len(fellows),
+        "fellow_distinct_email_hashes": len(fellow_hashes),
+        "missing_from_allowlist": missing_from_allowlist,
+        "orphans_in_allowlist": orphans_in_allowlist,
+        "in_sync": not missing_from_allowlist and not orphans_in_allowlist,
+    }
+    return summary
+
+
+def format_dump_report(host: str, summary: dict) -> str:
+    lines = [f"Allowlist state on {host}:"]
+    lines.append(f"  Allowlist hashes:             {summary['allowlist_size']}")
+    lines.append(f"  Fellows with contact_email:   {summary['fellows_with_email']}")
+    lines.append(
+        f"  Distinct email hashes from DB: {summary['fellow_distinct_email_hashes']}"
+    )
+    if summary["in_sync"]:
+        lines.append("  ✓ In sync — every email hash is on the allowlist and vice versa.")
+        return "\n".join(lines) + "\n"
+
+    lines.append("  ✗ Drift detected.")
+    missing = summary["missing_from_allowlist"]
+    orphans = summary["orphans_in_allowlist"]
+    if missing:
+        lines.append("")
+        lines.append(
+            f"  Fellows with email NOT on allowlist ({len(missing)}) — they can't get magic links:"
+        )
+        for f in missing[:50]:
+            lines.append(f"    {f.get('name', '?')}  <{f.get('email', '?')}>")
+        if len(missing) > 50:
+            lines.append(f"    … {len(missing) - 50} more")
+    if orphans:
+        lines.append("")
+        lines.append(
+            f"  Hashes on allowlist with no matching fellow email ({len(orphans)}):"
+        )
+        for h in orphans[:20]:
+            lines.append(f"    {h[:16]}…")
+        if len(orphans) > 20:
+            lines.append(f"    … {len(orphans) - 20} more")
+    lines.append("")
+    lines.append(
+        "  Drift usually means allowed_emails.json and fellows.db were "
+        "generated from different sources. Rebuild both together via "
+        "`python build/build_pwa.py` and redeploy."
+    )
+    return "\n".join(lines) + "\n"
 
 
 def fetch_postmark_token_from_prod(
@@ -343,10 +509,35 @@ def fetch_postmark_message(message_id: str, token: str) -> dict:
         return {"_error": str(e)}
 
 
+def _format_allowlist_status(chk: dict) -> list[str]:
+    """Render the allowlist check block for the human-readable report."""
+    out = ["Allowlist status:"]
+    hp = chk["hash"][:16]
+    if chk["hit"]:
+        out.append(
+            f"  HIT — {chk['email']} (hash {hp}…) is in the {chk['allowlist_size']}-entry allowlist."
+        )
+    else:
+        out.append(
+            f"  MISS — {chk['email']} (hash {hp}…) is NOT in the {chk['allowlist_size']}-entry allowlist."
+        )
+        out.append(
+            "  The server silently returns {sent: true} for non-allowlisted emails"
+        )
+        out.append(
+            "  (anti-enumeration). No send event is ever logged. This explains"
+        )
+        out.append(
+            "  'no events found' for this address."
+        )
+    return out
+
+
 def format_report(
     events: list[dict],
     postmark_lookups: dict[str, dict],
     header_meta: dict,
+    allowlist_check: dict | None = None,
 ) -> str:
     """Human-readable report. Newest-first events + summary."""
     lines: list[str] = []
@@ -355,6 +546,10 @@ def format_report(
     if header_meta.get("filter_desc"):
         lines.append(f"Filter: {header_meta['filter_desc']}")
     lines.append("")
+    if allowlist_check is not None:
+        lines.extend(_format_allowlist_status(allowlist_check))
+        lines.append("")
+
     if not events:
         lines.append("No events in window.")
         return "\n".join(lines) + "\n"
@@ -509,11 +704,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument(
         "--sudo",
-        action="store_true",
-        help="Run journalctl under sudo on the remote. Prompts locally for the "
-        "password via getpass, then pipes to `sudo -S`. Needed when the operator "
-        "isn't in adm / systemd-journal (journalctl silently hides other users' "
-        "unit logs otherwise).",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Run journalctl under sudo on the remote (default: on). Prompts "
+        "locally for the password via getpass, then pipes to `sudo -S`. Needed "
+        "when the operator isn't in adm / systemd-journal — journalctl silently "
+        "hides other users' unit logs otherwise. Pass --no-sudo only if you've "
+        "added the operator to the systemd-journal group on prod.",
     )
     ap.add_argument(
         "-v",
@@ -521,6 +718,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Echo the SSH command to stderr before running (doesn't include "
         "the sudo password — that's piped in separately).",
+    )
+    ap.add_argument(
+        "--dump-allowlist",
+        action="store_true",
+        help="Dump the allowlist and cross-reference against the fellows DB on "
+        "prod. Doesn't fetch journal events; doesn't need --sudo. Flags drift "
+        "(fellow emails missing from allowlist, or allowlist hashes without a "
+        "matching fellow email) — both are invariants that should never hold "
+        "if allowed_emails.json and fellows.db were built from the same DB.",
     )
     ap.add_argument(
         "--json",
@@ -536,6 +742,20 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.email and args.email_hash_prefix:
         ap.error("pass one of --email or --email-hash-prefix, not both")
+
+    if args.dump_allowlist:
+        # Short-circuit: no journal fetch, no sudo, no Postmark. Just the
+        # allowlist ↔ DB consistency report.
+        try:
+            summary = dump_allowlist_report(args.host, args.port, args.user)
+        except RuntimeError as e:
+            sys.stderr.write(f"dump failed: {e}\n")
+            return 1
+        if args.json:
+            print(json.dumps(summary, indent=2, default=str))
+        else:
+            sys.stdout.write(format_dump_report(args.host, summary))
+        return 0 if summary["in_sync"] else 1
 
     prefix = None
     email_desc = None
@@ -567,6 +787,16 @@ def main(argv: list[str] | None = None) -> int:
     events = filter_events(events, email_hash_prefix=prefix, result=args.result)
     if args.limit > 0:
         events = events[-args.limit :]
+
+    # Allowlist check: cheap (no sudo, group-readable file) and answers the
+    # single most common "no events, no email, why?" question directly.
+    allowlist_check: dict | None = None
+    if args.email:
+        try:
+            allow = fetch_allowlist_from_prod(args.host, args.port, args.user)
+            allowlist_check = check_allowlist(args.email, allow)
+        except RuntimeError as e:
+            sys.stderr.write(f"(allowlist check skipped: {e})\n")
 
     postmark_lookups: dict[str, dict] = {}
     if args.postmark:
@@ -607,6 +837,7 @@ def main(argv: list[str] | None = None) -> int:
             },
             "events": events,
             "postmark": postmark_lookups,
+            "allowlist": allowlist_check,
         }
         print(json.dumps(out, indent=2, default=str))
     else:
@@ -618,6 +849,7 @@ def main(argv: list[str] | None = None) -> int:
                 "since": args.since,
                 "filter_desc": filter_desc,
             },
+            allowlist_check=allowlist_check,
         )
         sys.stdout.write(report)
 

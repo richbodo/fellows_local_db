@@ -369,15 +369,15 @@ def test_main_refuses_both_email_and_hash_prefix(capsys, monkeypatch):
 def test_main_json_output_round_trips(monkeypatch, capsys):
     """End-to-end JSON path: mock ssh_journal, verify JSON structure.
 
-    Use --no-postmark so the default-on Postmark resolution doesn't try to
-    fetch a token for this unit test.
+    --no-sudo so getpass doesn't prompt, --no-postmark so we don't try to
+    fetch a token. No --email so the allowlist check isn't triggered.
     """
     monkeypatch.setattr(
         ded,
         "ssh_journal",
         lambda host, port, user, since, **kw: _journal_envelope(_send_event_json()),
     )
-    rc = ded.main(["--json", "--no-postmark", "--since", "1 hour ago"])
+    rc = ded.main(["--json", "--no-sudo", "--no-postmark", "--since", "1 hour ago"])
     assert rc == 0
     out = capsys.readouterr().out
     data = json.loads(out)
@@ -471,6 +471,214 @@ def test_fetch_postmark_token_from_prod_raises_when_missing(monkeypatch):
     import pytest
     with pytest.raises(RuntimeError, match="not found"):
         ded.fetch_postmark_token_from_prod("h", "22", "u", "pw")
+
+
+def test_sudo_default_is_on():
+    """No flag → args.sudo is True (default-on; --no-sudo opts out).
+
+    Zero-flag happy path needs sudo: the operator isn't in systemd-journal
+    on prod, so journalctl silently returns empty otherwise.
+    """
+    ap = ded.build_arg_parser()
+    args = ap.parse_args([])
+    assert args.sudo is True
+
+
+def test_sudo_no_sudo_flag_opts_out():
+    ap = ded.build_arg_parser()
+    args = ap.parse_args(["--no-sudo"])
+    assert args.sudo is False
+
+
+def test_fetch_allowlist_from_prod_parses_and_normalises(monkeypatch):
+    class _R:
+        returncode = 0
+        stdout = '{"hashes": ["AABBCC", "ddEEff", "1234"]}'
+        stderr = ""
+
+    captured = {}
+
+    def fake_run(cmd, **kw):
+        captured["cmd"] = cmd
+        return _R()
+
+    monkeypatch.setattr(ded.subprocess, "run", fake_run)
+    allow = ded.fetch_allowlist_from_prod("h", "22", "u")
+    # lowercased for consistent comparison with sha256().hexdigest()
+    assert allow == {"aabbcc", "ddeeff", "1234"}
+    # No sudo involved — must use BatchMode=yes to fail fast on auth prompts.
+    assert "BatchMode=yes" in " ".join(captured["cmd"])
+    # And we didn't smuggle sudo into the remote command.
+    assert "sudo" not in captured["cmd"][-1]
+
+
+def test_fetch_allowlist_from_prod_raises_on_ssh_failure(monkeypatch):
+    class _R:
+        returncode = 255
+        stdout = ""
+        stderr = "Permission denied"
+
+    monkeypatch.setattr(ded.subprocess, "run", lambda *a, **kw: _R())
+    import pytest
+    with pytest.raises(RuntimeError, match="exit 255"):
+        ded.fetch_allowlist_from_prod("h", "22", "u")
+
+
+def test_fetch_allowlist_from_prod_raises_on_bad_json(monkeypatch):
+    class _R:
+        returncode = 0
+        stdout = "not json {"
+        stderr = ""
+
+    monkeypatch.setattr(ded.subprocess, "run", lambda *a, **kw: _R())
+    import pytest
+    with pytest.raises(RuntimeError, match="parse failed"):
+        ded.fetch_allowlist_from_prod("h", "22", "u")
+
+
+def test_check_allowlist_hit_and_miss():
+    allow = {
+        ded.hash_email("a@example.com"),
+        ded.hash_email("b@example.com"),
+    }
+    hit = ded.check_allowlist("a@example.com", allow)
+    assert hit["hit"] is True
+    assert hit["allowlist_size"] == 2
+    assert hit["hash"] == ded.hash_email("a@example.com")
+    miss = ded.check_allowlist("c@example.com", allow)
+    assert miss["hit"] is False
+
+
+def test_format_report_surfaces_allowlist_miss_as_root_cause():
+    """When --email is passed and the hash isn't on the list, the report
+    must explicitly explain why no events showed up — otherwise the user
+    chases 'is the debug script broken?' instead of 'is the email
+    allowlisted?'."""
+    chk = {
+        "email": "c@example.com",
+        "hash": "a" * 64,
+        "hit": False,
+        "allowlist_size": 268,
+    }
+    out = ded.format_report(
+        [], {}, {"host": "h", "since": "s", "filter_desc": "email hash aaaa…"},
+        allowlist_check=chk,
+    )
+    assert "MISS" in out
+    assert "268-entry" in out
+    assert "anti-enumeration" in out
+
+
+def test_format_report_allowlist_hit_does_not_misleadingly_explain_empty_events():
+    chk = {
+        "email": "a@example.com",
+        "hash": "b" * 64,
+        "hit": True,
+        "allowlist_size": 268,
+    }
+    out = ded.format_report(
+        [], {}, {"host": "h", "since": "s", "filter_desc": None},
+        allowlist_check=chk,
+    )
+    assert "HIT" in out
+    # The "explains empty" prose must NOT appear on a hit — empty events with
+    # a hit means something else is wrong (not the allowlist).
+    assert "anti-enumeration" not in out
+
+
+def test_fetch_fellow_emails_from_prod_parses_sqlite_json(monkeypatch):
+    class _R:
+        returncode = 0
+        stdout = json.dumps(
+            [
+                {"record_id": "abc", "name": "Alice", "email": "alice@example.com"},
+                {"record_id": "def", "name": "Bob", "email": "bob@example.com"},
+            ]
+        )
+        stderr = ""
+
+    captured = {}
+
+    def fake_run(cmd, **kw):
+        captured["cmd"] = cmd
+        return _R()
+
+    monkeypatch.setattr(ded.subprocess, "run", fake_run)
+    rows = ded.fetch_fellow_emails_from_prod("h", "22", "u")
+    assert len(rows) == 2
+    assert rows[0]["email"] == "alice@example.com"
+    # Remote command uses Python (prod lacks the sqlite3 CLI; it's not a
+    # fellows-pwa dependency). BatchMode=yes; no sudo.
+    remote = captured["cmd"][-1]
+    assert "python3 -c" in remote
+    assert "sqlite3" in remote  # stdlib module is used inside the Python snippet
+    assert "sudo" not in remote
+    assert "BatchMode=yes" in " ".join(captured["cmd"])
+
+
+def test_fetch_fellow_emails_from_prod_handles_empty_result(monkeypatch):
+    class _R:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr(ded.subprocess, "run", lambda *a, **kw: _R())
+    assert ded.fetch_fellow_emails_from_prod("h", "22", "u") == []
+
+
+def test_dump_allowlist_in_sync_when_fellows_hashes_match_allowlist(monkeypatch):
+    fellows = [
+        {"record_id": "r1", "name": "Alice", "email": "alice@example.com"},
+        {"record_id": "r2", "name": "Bob", "email": "bob@example.com"},
+    ]
+    allow = {ded.hash_email(f["email"]) for f in fellows}
+
+    monkeypatch.setattr(ded, "fetch_allowlist_from_prod", lambda *a, **kw: allow)
+    monkeypatch.setattr(ded, "fetch_fellow_emails_from_prod", lambda *a, **kw: fellows)
+    summary = ded.dump_allowlist_report("h", "22", "u")
+    assert summary["in_sync"] is True
+    assert summary["allowlist_size"] == 2
+    assert summary["fellows_with_email"] == 2
+    assert summary["missing_from_allowlist"] == []
+    assert summary["orphans_in_allowlist"] == []
+
+
+def test_dump_allowlist_surfaces_fellow_missing_from_allowlist(monkeypatch):
+    """The exact failure mode that broke Rich's testing on Apr 20."""
+    fellows = [
+        {"record_id": "r1", "name": "Richard Bodo", "email": "richbodo@gmail.com"},
+        {"record_id": "r2", "name": "Bob", "email": "bob@example.com"},
+    ]
+    # Only Bob's hash on the allowlist — Rich's missing.
+    allow = {ded.hash_email("bob@example.com")}
+
+    monkeypatch.setattr(ded, "fetch_allowlist_from_prod", lambda *a, **kw: allow)
+    monkeypatch.setattr(ded, "fetch_fellow_emails_from_prod", lambda *a, **kw: fellows)
+    summary = ded.dump_allowlist_report("h", "22", "u")
+    assert summary["in_sync"] is False
+    assert len(summary["missing_from_allowlist"]) == 1
+    assert summary["missing_from_allowlist"][0]["name"] == "Richard Bodo"
+    report = ded.format_dump_report("fellows.example", summary)
+    assert "Drift detected" in report
+    assert "Richard Bodo" in report
+    assert "richbodo@gmail.com" in report
+
+
+def test_dump_allowlist_surfaces_orphan_hashes(monkeypatch):
+    """Hashes on the allowlist that don't correspond to any fellow's email."""
+    fellows = [{"record_id": "r1", "name": "Alice", "email": "alice@example.com"}]
+    allow = {
+        ded.hash_email("alice@example.com"),
+        ded.hash_email("stale@example.com"),  # no fellow with this email
+    }
+
+    monkeypatch.setattr(ded, "fetch_allowlist_from_prod", lambda *a, **kw: allow)
+    monkeypatch.setattr(ded, "fetch_fellow_emails_from_prod", lambda *a, **kw: fellows)
+    summary = ded.dump_allowlist_report("h", "22", "u")
+    assert summary["in_sync"] is False
+    assert len(summary["orphans_in_allowlist"]) == 1
+    report = ded.format_dump_report("fellows.example", summary)
+    assert "no matching fellow email (1)" in report
 
 
 def test_fetch_postmark_token_from_prod_raises_on_ssh_failure(monkeypatch):
