@@ -63,7 +63,22 @@
   /** Bump on every meaningful UI / diagnostics change. Rendered in the
    *  always-visible build badge so a dev can tell at a glance which app.js
    *  is actually running vs what the server was deployed with. */
-  var FELLOWS_UI_DIAG = 'diag-2026-04h-image-cache-bust';
+  var FELLOWS_UI_DIAG = 'diag-2026-04i-offline-fallback';
+
+  // Persistent marker: "this origin has been authenticated successfully at
+  // least once." Preserved across clearAllAppData. Used by startBrowserUx's
+  // catch path so a transient /api/auth/status failure (e.g. 503 during a
+  // deploy, or flaky mobile data) does NOT block a previously-authed user
+  // behind the scary 'Authentication check failed' panel.
+  var AUTH_ONCE_KEY = 'fellows_authenticated_once';
+
+  function markAuthenticatedOnce() {
+    try { localStorage.setItem(AUTH_ONCE_KEY, '1'); } catch (e) {}
+  }
+
+  function hasAuthenticatedOnce() {
+    try { return localStorage.getItem(AUTH_ONCE_KEY) === '1'; } catch (e) { return false; }
+  }
 
   function initBuildBadge() {
     var clientEl = document.getElementById('build-badge-client');
@@ -84,6 +99,15 @@
       // add a client→server mapping.
       badgeEl.classList.remove('build-badge--mismatch');
     }
+  }
+
+  function setBuildBadgeServerUnreachable() {
+    // Called from the auth-status fallback path when the server is 5xx or
+    // network-unreachable. Low-drama label: non-technical users should not
+    // read this as "something is broken" — the app continues to work from
+    // cached state.
+    var serverEl = document.getElementById('build-badge-server');
+    if (serverEl) serverEl.textContent = 'server: unreachable';
   }
 
   initBuildBadge();
@@ -169,6 +193,26 @@
       imagePrewarmState.finishedAt = new Date().toISOString();
     });
   }
+
+  // Throttled resume hook. When the browser transitions to online, re-run
+  // the prewarm so any images that failed during a flaky-network window
+  // get another chance. Browser + SW cache mean already-cached images
+  // resolve fast without network; only misses actually hit prod.
+  //
+  // Floor of 60s between attempts so mobile radio flapping doesn't hammer
+  // the server. Only runs if we have fellows data loaded AND the previous
+  // attempt finished with errors (or was mid-flight but stalled).
+  var _lastPrewarmAttempt = 0;
+  function maybeResumePrewarm() {
+    if (!Array.isArray(fullFellowsCache) || !fullFellowsCache.length) return;
+    var now = Date.now();
+    if (now - _lastPrewarmAttempt < 60000) return;
+    // Don't bother re-running if everything was already captured.
+    if (imagePrewarmState.status === 'done' && imagePrewarmState.errors === 0) return;
+    _lastPrewarmAttempt = now;
+    prewarmProfileImages(fullFellowsCache).catch(function () {});
+  }
+  window.addEventListener('online', maybeResumePrewarm);
 
   function countCachedImages() {
     if (!('caches' in self)) return Promise.resolve(null);
@@ -602,8 +646,18 @@
 
   async function clearAllAppData() {
     try {
+      // Preserve the "has ever been authenticated" marker across full reset.
+      // Rationale: Clear App Cache is meant to fix "my app is broken," not
+      // "log me out of an installed PWA I was happily using." Without this,
+      // an intermittent server error after clear + reload drops users into
+      // the email gate unnecessarily.
+      var preservedAuthMarker = null;
+      try { preservedAuthMarker = localStorage.getItem(AUTH_ONCE_KEY); } catch (e) {}
       localStorage.clear();
       sessionStorage.clear();
+      if (preservedAuthMarker === '1') {
+        try { localStorage.setItem(AUTH_ONCE_KEY, '1'); } catch (e) {}
+      }
 
       if (window.indexedDB && typeof window.indexedDB.deleteDatabase === 'function') {
         try {
@@ -1353,15 +1407,39 @@
         }
         if (data.authenticated && data.installRecentlyAllowed === true) {
           authDebugPush('authenticated + recent-token-window: using install mode');
+          markAuthenticatedOnce();
           initBrowserInstallMode(data, httpStatus);
           return;
+        }
+        if (data.authenticated) {
+          // Authenticated but outside the install window. Record the marker
+          // so future transient failures fall through gracefully.
+          markAuthenticatedOnce();
         }
         authDebugPush('default: using email gate');
         initEmailGate(data, httpStatus, '');
       })
       .catch(function (err) {
-        authDebugPush('auth status check failed: ' + (err && err.message ? err.message : String(err)));
-        showAuthFailure('Unable to validate auth status; refusing install-mode fallback', err && err.message);
+        var errMsg = err && err.message ? err.message : String(err);
+        authDebugPush('auth status check failed: ' + errMsg);
+        // If this origin has been authenticated successfully at least once, a
+        // transient auth-status failure (5xx, network error) must NOT block
+        // the app behind a scary "Authentication check failed" panel.
+        // Quiet fallback: label the server as unreachable on the build badge
+        // and show the email gate as the default view. The user still has
+        // the option to submit a new email if they want a fresh token; most
+        // will just reload when the server is back.
+        if (hasAuthenticatedOnce()) {
+          authDebugPush('fallback: marker set → quiet email-gate (no auth-failure panel)');
+          setBuildBadgeServerUnreachable();
+          initEmailGate(
+            { authEnabled: true, authenticated: false, _offline: true },
+            0,
+            ''
+          );
+          return;
+        }
+        showAuthFailure('Unable to validate auth status; refusing install-mode fallback', errMsg);
       });
   }
 
@@ -2137,6 +2215,10 @@
         bootDebugPush(
           'getList: OK count=' + (Array.isArray(data) ? data.length : typeof data)
         );
+        // Reaching getList success means auth was good (or the local cache
+        // answered). Record the marker so the browser-tab fallback works
+        // for the same user later.
+        markAuthenticatedOnce();
         list = Array.isArray(data) ? data : [];
         renderDirectory();
         route();
