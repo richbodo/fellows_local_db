@@ -245,6 +245,75 @@ def filter_events(
     return out
 
 
+DEFAULT_ENV_FILE = "/etc/fellows/fellows-pwa.env"
+
+
+def fetch_postmark_token_from_prod(
+    host: str,
+    port: str,
+    user: str,
+    sudo_password: str,
+    env_file: str = DEFAULT_ENV_FILE,
+) -> str:
+    """SSH + `sudo -S cat` the prod env file, return FELLOWS_POSTMARK_TOKEN.
+
+    Raises RuntimeError on any failure (ssh, sudo, missing key). Caller
+    should catch and fall through to a clear error message.
+    """
+    remote_cmd = f"sudo -S -p '' cat {shlex.quote(env_file)}"
+    cmd = ["ssh", "-p", str(port), f"{user}@{host}", remote_cmd]
+    r = subprocess.run(
+        cmd,
+        input=sudo_password + "\n",
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    if r.returncode != 0:
+        raise RuntimeError(
+            f"ssh/sudo cat failed (exit {r.returncode}): "
+            + (r.stderr.strip() or "no stderr")
+        )
+    for line in r.stdout.splitlines():
+        if line.startswith("FELLOWS_POSTMARK_TOKEN="):
+            val = line.split("=", 1)[1].strip()
+            # Strip surrounding quotes if any.
+            if len(val) >= 2 and val[0] in ("'", '"') and val[-1] == val[0]:
+                val = val[1:-1]
+            if not val:
+                raise RuntimeError("FELLOWS_POSTMARK_TOKEN is set to an empty value on prod")
+            return val
+    raise RuntimeError(f"FELLOWS_POSTMARK_TOKEN not found in {env_file}")
+
+
+def resolve_postmark_token(
+    args,
+    sudo_password: str | None,
+) -> tuple[str | None, str]:
+    """Determine the Postmark token to use, per the documented priority.
+
+    Returns (token_or_None, source_label). Never raises — caller inspects
+    token to decide whether to error or proceed without Postmark resolution.
+    """
+    tok = (args.postmark_token or "").strip()
+    if tok:
+        return tok, "--postmark-token"
+    tok = os.environ.get("FELLOWS_POSTMARK_TOKEN", "").strip()
+    if tok:
+        return tok, "FELLOWS_POSTMARK_TOKEN env"
+    if sudo_password is not None:
+        try:
+            tok = fetch_postmark_token_from_prod(
+                args.host, args.port, args.user, sudo_password
+            )
+            return tok, "auto-fetched from prod env file"
+        except RuntimeError as e:
+            sys.stderr.write(f"(Postmark token auto-fetch failed: {e})\n")
+            return None, "auto-fetch failed"
+    return None, "no source"
+
+
 def fetch_postmark_message(message_id: str, token: str) -> dict:
     """Resolve a Postmark outbound ``MessageID`` to its full record + events.
 
@@ -425,15 +494,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument(
         "--postmark",
-        action="store_true",
-        help="Resolve Postmark MessageIDs via the Messages API. Token comes from "
-        "--postmark-token or FELLOWS_POSTMARK_TOKEN env (in that order).",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Resolve Postmark MessageIDs via the Messages API (default: on). "
+        "Token resolution order: --postmark-token > FELLOWS_POSTMARK_TOKEN env "
+        "> auto-fetch from prod env file via ssh+sudo (requires --sudo). Pass "
+        "--no-postmark to skip entirely.",
     )
     ap.add_argument(
         "--postmark-token",
         metavar="TOKEN",
-        help="Postmark Server API token. Alternative to FELLOWS_POSTMARK_TOKEN env. "
-        "Implies --postmark.",
+        help="Postmark Server API token. Alternative to FELLOWS_POSTMARK_TOKEN env "
+        "and to auto-fetching from the prod env file.",
     )
     ap.add_argument(
         "--sudo",
@@ -475,6 +547,13 @@ def main(argv: list[str] | None = None) -> int:
         prefix = args.email_hash_prefix.lower().strip()
         email_desc = f"{prefix}…"
 
+    # Prompt once for the sudo password if --sudo is set; reuse for both the
+    # journalctl fetch and (if needed) the Postmark token auto-fetch, so the
+    # user never types it twice.
+    sudo_password = None
+    if args.sudo:
+        sudo_password = getpass.getpass(f"sudo password for {args.user}@{args.host}: ")
+
     raw = ssh_journal(
         args.host,
         args.port,
@@ -482,22 +561,27 @@ def main(argv: list[str] | None = None) -> int:
         args.since,
         use_sudo=args.sudo,
         verbose=args.verbose,
+        sudo_password=sudo_password,
     )
     events = parse_events(raw)
     events = filter_events(events, email_hash_prefix=prefix, result=args.result)
     if args.limit > 0:
         events = events[-args.limit :]
 
-    want_postmark = bool(args.postmark or args.postmark_token)
     postmark_lookups: dict[str, dict] = {}
-    if want_postmark:
-        token = (args.postmark_token or os.environ.get("FELLOWS_POSTMARK_TOKEN", "")).strip()
+    if args.postmark:
+        token, source = resolve_postmark_token(args, sudo_password)
         if not token:
             sys.stderr.write(
-                "Postmark resolution needs a token: pass --postmark-token <TOKEN> "
-                "or set FELLOWS_POSTMARK_TOKEN in env.\n"
+                "Postmark resolution needs a token. Options:\n"
+                "  - pass --postmark-token <TOKEN>\n"
+                "  - set FELLOWS_POSTMARK_TOKEN in env\n"
+                "  - run with --sudo to auto-fetch from the prod env file\n"
+                "  - pass --no-postmark to skip Postmark resolution entirely\n"
             )
             return 2
+        if args.verbose:
+            sys.stderr.write(f"[verbose] Postmark token source: {source}\n")
         seen: set[str] = set()
         for e in events:
             mid = ((e.get("postmark") or {}).get("message_id")
