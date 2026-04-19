@@ -607,9 +607,11 @@ def test_fetch_fellow_emails_from_prod_parses_sqlite_json(monkeypatch):
     rows = ded.fetch_fellow_emails_from_prod("h", "22", "u")
     assert len(rows) == 2
     assert rows[0]["email"] == "alice@example.com"
-    # Remote query uses -json for safe parsing; BatchMode=yes; no sudo.
+    # Remote command uses Python (prod lacks the sqlite3 CLI; it's not a
+    # fellows-pwa dependency). BatchMode=yes; no sudo.
     remote = captured["cmd"][-1]
-    assert "sqlite3 -json" in remote
+    assert "python3 -c" in remote
+    assert "sqlite3" in remote  # stdlib module is used inside the Python snippet
     assert "sudo" not in remote
     assert "BatchMode=yes" in " ".join(captured["cmd"])
 
