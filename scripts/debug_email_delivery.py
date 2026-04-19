@@ -35,6 +35,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import urllib.error
@@ -56,38 +57,83 @@ def hash_email(email: str) -> str:
     return hashlib.sha256(email.strip().lower().encode("utf-8")).hexdigest()
 
 
-def ssh_journal(host: str, port: str, user: str, since: str, unit: str = UNIT) -> str:
+def build_ssh_cmd(
+    host: str,
+    port: str,
+    user: str,
+    since: str,
+    unit: str = UNIT,
+    use_sudo: bool = False,
+) -> list[str]:
+    """Build the ssh command list.
+
+    SSH concatenates argv with spaces on the wire and the remote shell
+    re-parses, so ``--since '2 hours ago'`` passed as separate argv entries
+    arrives on the remote as ``--since 2 hours ago`` and journalctl rejects
+    it with "Failed to parse timestamp: 2". Quote each remote arg and pass
+    the whole remote command as a single SSH argument.
+
+    When ``use_sudo=True``, prepend ``sudo`` to the remote command and force
+    a pty with ``-tt`` so sudo can prompt for a password interactively.
+    Needed when the operator isn't in the ``systemd-journal`` / ``adm``
+    group — non-privileged journalctl silently returns no rows for other
+    units' logs.
+    """
+    remote_argv = ["journalctl", "-u", unit, "--since", since, "-o", "json", "--no-pager"]
+    if use_sudo:
+        remote_argv = ["sudo"] + remote_argv
+    remote_cmd = " ".join(shlex.quote(a) for a in remote_argv)
+
+    ssh_flags: list[str] = ["-p", str(port)]
+    if use_sudo:
+        # Force a pty so the remote sudo can prompt on stderr; BatchMode would
+        # actively suppress that prompt and cause immediate failure.
+        ssh_flags.append("-tt")
+    else:
+        ssh_flags.extend(["-o", "BatchMode=yes"])
+
+    return ["ssh", *ssh_flags, f"{user}@{host}", remote_cmd]
+
+
+def ssh_journal(
+    host: str,
+    port: str,
+    user: str,
+    since: str,
+    unit: str = UNIT,
+    use_sudo: bool = False,
+) -> str:
     """Fetch journalctl JSON lines via SSH. Returns raw stdout."""
-    cmd = [
-        "ssh",
-        "-p",
-        str(port),
-        "-o",
-        "BatchMode=yes",
-        f"{user}@{host}",
-        "journalctl",
-        "-u",
-        unit,
-        "--since",
-        since,
-        "-o",
-        "json",
-        "--no-pager",
-    ]
+    cmd = build_ssh_cmd(host, port, user, since, unit=unit, use_sudo=use_sudo)
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=False)
+        if use_sudo:
+            # Let sudo's password prompt reach the user's terminal on stderr,
+            # and inherit stdin so they can type. Capture stdout only.
+            r = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                text=True,
+                timeout=120,
+                check=False,
+            )
+        else:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=False)
     except FileNotFoundError:
         sys.stderr.write("ssh binary not found on PATH\n")
         sys.exit(2)
     except subprocess.TimeoutExpired:
-        sys.stderr.write("ssh/journalctl timed out after 60s\n")
+        sys.stderr.write("ssh/journalctl timed out\n")
         sys.exit(2)
     if r.returncode != 0:
         sys.stderr.write(f"ssh/journalctl failed (exit {r.returncode}):\n")
-        sys.stderr.write(r.stderr)
+        if not use_sudo:
+            sys.stderr.write(r.stderr or "")
         sys.stderr.write(
             "\nHints: is your SSH key loaded? Does "
             f"`ssh -p {port} {user}@{host} true` succeed interactively?\n"
+            "If journalctl returns no rows for the fellows-pwa unit, rerun "
+            "with --sudo (the operator needs to be in adm or systemd-journal "
+            "to read other users' unit logs without it).\n"
         )
         sys.exit(1)
     return r.stdout
@@ -352,7 +398,21 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--postmark",
         action="store_true",
-        help="Resolve Postmark MessageIDs via the Messages API. Requires FELLOWS_POSTMARK_TOKEN.",
+        help="Resolve Postmark MessageIDs via the Messages API. Token comes from "
+        "--postmark-token or FELLOWS_POSTMARK_TOKEN env (in that order).",
+    )
+    ap.add_argument(
+        "--postmark-token",
+        metavar="TOKEN",
+        help="Postmark Server API token. Alternative to FELLOWS_POSTMARK_TOKEN env. "
+        "Implies --postmark.",
+    )
+    ap.add_argument(
+        "--sudo",
+        action="store_true",
+        help="Run journalctl under sudo on the remote (forces a tty for the prompt). "
+        "Needed when the operator isn't in adm / systemd-journal and so journalctl "
+        "silently returns no rows for the fellows-pwa unit.",
     )
     ap.add_argument(
         "--json",
@@ -379,17 +439,21 @@ def main(argv: list[str] | None = None) -> int:
         prefix = args.email_hash_prefix.lower().strip()
         email_desc = f"{prefix}…"
 
-    raw = ssh_journal(args.host, args.port, args.user, args.since)
+    raw = ssh_journal(args.host, args.port, args.user, args.since, use_sudo=args.sudo)
     events = parse_events(raw)
     events = filter_events(events, email_hash_prefix=prefix, result=args.result)
     if args.limit > 0:
         events = events[-args.limit :]
 
+    want_postmark = bool(args.postmark or args.postmark_token)
     postmark_lookups: dict[str, dict] = {}
-    if args.postmark:
-        token = os.environ.get("FELLOWS_POSTMARK_TOKEN", "").strip()
+    if want_postmark:
+        token = (args.postmark_token or os.environ.get("FELLOWS_POSTMARK_TOKEN", "")).strip()
         if not token:
-            sys.stderr.write("--postmark requires FELLOWS_POSTMARK_TOKEN in env.\n")
+            sys.stderr.write(
+                "Postmark resolution needs a token: pass --postmark-token <TOKEN> "
+                "or set FELLOWS_POSTMARK_TOKEN in env.\n"
+            )
             return 2
         seen: set[str] = set()
         for e in events:
