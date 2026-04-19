@@ -103,6 +103,29 @@ def test_every_row_has_a_name(db):
     )
 
 
+def test_email_coverage_ratio_catches_demo_filter_regression(db):
+    """Regression: >90% of fellows should have contact_email.
+
+    If a demo-filter JSON (which drops fellows without profile images AND
+    strips emails from the remainder) gets used as the rebuild source,
+    the ratio falls to ~60%. This test is the tripwire.
+
+    The full Apr 8 Knack REST-API extraction gives 100% coverage — any
+    fellow in the dataset has their email.
+    """
+    total = db.execute("SELECT COUNT(*) FROM fellows").fetchone()[0]
+    with_email = db.execute(
+        "SELECT COUNT(*) FROM fellows "
+        "WHERE contact_email IS NOT NULL AND trim(contact_email) != ''"
+    ).fetchone()[0]
+    ratio = with_email / total if total else 0
+    assert ratio > 0.9, (
+        f"Only {with_email}/{total} fellows have contact_email ({ratio:.0%}). "
+        "Likely rebuilt from the demo-filtered .bak JSON. Re-run "
+        "`python build/restore_from_knack_apr8.py`."
+    )
+
+
 def test_slug_never_falls_back_to_record_id(db):
     """Importer falls back to source_name before record_id; no slug should equal its record_id."""
     cur = db.execute(

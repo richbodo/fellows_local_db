@@ -586,6 +586,99 @@ def test_format_report_allowlist_hit_does_not_misleadingly_explain_empty_events(
     assert "anti-enumeration" not in out
 
 
+def test_fetch_fellow_emails_from_prod_parses_sqlite_json(monkeypatch):
+    class _R:
+        returncode = 0
+        stdout = json.dumps(
+            [
+                {"record_id": "abc", "name": "Alice", "email": "alice@example.com"},
+                {"record_id": "def", "name": "Bob", "email": "bob@example.com"},
+            ]
+        )
+        stderr = ""
+
+    captured = {}
+
+    def fake_run(cmd, **kw):
+        captured["cmd"] = cmd
+        return _R()
+
+    monkeypatch.setattr(ded.subprocess, "run", fake_run)
+    rows = ded.fetch_fellow_emails_from_prod("h", "22", "u")
+    assert len(rows) == 2
+    assert rows[0]["email"] == "alice@example.com"
+    # Remote query uses -json for safe parsing; BatchMode=yes; no sudo.
+    remote = captured["cmd"][-1]
+    assert "sqlite3 -json" in remote
+    assert "sudo" not in remote
+    assert "BatchMode=yes" in " ".join(captured["cmd"])
+
+
+def test_fetch_fellow_emails_from_prod_handles_empty_result(monkeypatch):
+    class _R:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr(ded.subprocess, "run", lambda *a, **kw: _R())
+    assert ded.fetch_fellow_emails_from_prod("h", "22", "u") == []
+
+
+def test_dump_allowlist_in_sync_when_fellows_hashes_match_allowlist(monkeypatch):
+    fellows = [
+        {"record_id": "r1", "name": "Alice", "email": "alice@example.com"},
+        {"record_id": "r2", "name": "Bob", "email": "bob@example.com"},
+    ]
+    allow = {ded.hash_email(f["email"]) for f in fellows}
+
+    monkeypatch.setattr(ded, "fetch_allowlist_from_prod", lambda *a, **kw: allow)
+    monkeypatch.setattr(ded, "fetch_fellow_emails_from_prod", lambda *a, **kw: fellows)
+    summary = ded.dump_allowlist_report("h", "22", "u")
+    assert summary["in_sync"] is True
+    assert summary["allowlist_size"] == 2
+    assert summary["fellows_with_email"] == 2
+    assert summary["missing_from_allowlist"] == []
+    assert summary["orphans_in_allowlist"] == []
+
+
+def test_dump_allowlist_surfaces_fellow_missing_from_allowlist(monkeypatch):
+    """The exact failure mode that broke Rich's testing on Apr 20."""
+    fellows = [
+        {"record_id": "r1", "name": "Richard Bodo", "email": "richbodo@gmail.com"},
+        {"record_id": "r2", "name": "Bob", "email": "bob@example.com"},
+    ]
+    # Only Bob's hash on the allowlist — Rich's missing.
+    allow = {ded.hash_email("bob@example.com")}
+
+    monkeypatch.setattr(ded, "fetch_allowlist_from_prod", lambda *a, **kw: allow)
+    monkeypatch.setattr(ded, "fetch_fellow_emails_from_prod", lambda *a, **kw: fellows)
+    summary = ded.dump_allowlist_report("h", "22", "u")
+    assert summary["in_sync"] is False
+    assert len(summary["missing_from_allowlist"]) == 1
+    assert summary["missing_from_allowlist"][0]["name"] == "Richard Bodo"
+    report = ded.format_dump_report("fellows.example", summary)
+    assert "Drift detected" in report
+    assert "Richard Bodo" in report
+    assert "richbodo@gmail.com" in report
+
+
+def test_dump_allowlist_surfaces_orphan_hashes(monkeypatch):
+    """Hashes on the allowlist that don't correspond to any fellow's email."""
+    fellows = [{"record_id": "r1", "name": "Alice", "email": "alice@example.com"}]
+    allow = {
+        ded.hash_email("alice@example.com"),
+        ded.hash_email("stale@example.com"),  # no fellow with this email
+    }
+
+    monkeypatch.setattr(ded, "fetch_allowlist_from_prod", lambda *a, **kw: allow)
+    monkeypatch.setattr(ded, "fetch_fellow_emails_from_prod", lambda *a, **kw: fellows)
+    summary = ded.dump_allowlist_report("h", "22", "u")
+    assert summary["in_sync"] is False
+    assert len(summary["orphans_in_allowlist"]) == 1
+    report = ded.format_dump_report("fellows.example", summary)
+    assert "no matching fellow email (1)" in report
+
+
 def test_fetch_postmark_token_from_prod_raises_on_ssh_failure(monkeypatch):
     class _R:
         returncode = 255
