@@ -124,6 +124,58 @@ class TestEmailGate:
         finally:
             page.close()
 
+    def test_auth_status_503_falls_through_when_marker_set(self, context, base_url_fixture):
+        """A transient /api/auth/status 503 must NOT show the 'Authentication
+        check failed' panel when this origin has been authenticated before.
+        The offline-resilience fallback (phase-1) demotes the failure to a
+        quiet email gate with the build badge labelled 'server: unreachable'.
+        """
+        page = context.new_page()
+        # Simulate "has been authed here before" (marker persisted via
+        # localStorage), then 503 on auth-status.
+        page.add_init_script(
+            "window.localStorage.setItem('fellows_authenticated_once', '1');"
+        )
+        page.route(
+            AUTH_STATUS_PATH,
+            lambda r: r.fulfill(status=503, body="service unavailable"),
+        )
+        try:
+            page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+            page.wait_for_timeout(300)
+            # The error panel must NOT appear.
+            assert page.locator("#auth-error-panel").is_hidden(), (
+                "Auth-error panel surfaced despite marker being set — fallback failed."
+            )
+            # Email gate is the quiet fallback view.
+            expect(page.locator("#install-gate-private")).to_be_visible()
+            # Build badge reflects server unreachable.
+            server_line = page.locator("#build-badge-server")
+            expect(server_line).to_contain_text("unreachable")
+        finally:
+            page.close()
+
+    def test_auth_status_503_without_marker_still_shows_error_panel(self, context, base_url_fixture):
+        """First-time visitor hitting a 503 still sees the loud error panel.
+        The fallback is opt-in to "we have been here before" — a genuine
+        first-time failure should not silently degrade.
+        """
+        page = context.new_page()
+        # No marker — ensure clean storage.
+        page.add_init_script(
+            "window.localStorage.removeItem('fellows_authenticated_once');"
+        )
+        page.route(
+            AUTH_STATUS_PATH,
+            lambda r: r.fulfill(status=503, body="service unavailable"),
+        )
+        try:
+            page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+            page.wait_for_timeout(300)
+            expect(page.locator("#auth-error-panel")).to_be_visible()
+        finally:
+            page.close()
+
     def test_back_to_gate_link_posts_logout_and_navigates(self, context, base_url_fixture):
         page = context.new_page()
 
