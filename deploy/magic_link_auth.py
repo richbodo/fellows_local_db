@@ -121,21 +121,32 @@ def install_recently_allowed(token_issued_at: Optional[float], now: Optional[flo
     return (now - token_issued_at) < INSTALL_WINDOW
 
 
-def send_postmark_magic_link(to_email: str, magic_url: str) -> dict:
-    api_token = os.environ.get("FELLOWS_POSTMARK_TOKEN", "").strip()
-    if not api_token:
-        raise RuntimeError("FELLOWS_POSTMARK_TOKEN is not set")
-    from_addr = os.environ.get("FELLOWS_MAIL_FROM", "noreply@fellows.globaldonut.com").strip()
+DEFAULT_MAIL_FROM = "admin@fellows.globaldonut.com"
+
+
+def build_postmark_body(to_email: str, magic_url: str) -> dict:
+    """Construct the Postmark /email payload. Pure function; no network.
+
+    From address defaults to admin@fellows.globaldonut.com. Override via
+    FELLOWS_MAIL_FROM. Reply-To is taken from FELLOWS_REPLY_TO when set —
+    useful when admin@ doesn't route to a human mailbox yet and replies
+    should land with the operator directly.
+    """
+    from_addr = os.environ.get("FELLOWS_MAIL_FROM", DEFAULT_MAIL_FROM).strip()
+    reply_to = os.environ.get("FELLOWS_REPLY_TO", "").strip()
     text_body = (
         "Tap or paste this link to open the install page:\n\n"
         f"{magic_url}\n\n"
         "This link will expire in 30 minutes. If it's expired, request a new one.\n"
+        "\n"
+        "— EHF Fellows Directory\n"
     )
     html_body = (
         "<p>Tap or paste this link to open the install page:</p>"
         f'<p><a href="{magic_url}">{magic_url}</a></p>'
         "<p><em>This link will expire in 30 minutes. "
         "If it&rsquo;s expired, request a new one.</em></p>"
+        "<p>&mdash; EHF Fellows Directory</p>"
     )
     body = {
         "From": from_addr,
@@ -145,6 +156,16 @@ def send_postmark_magic_link(to_email: str, magic_url: str) -> dict:
         "HtmlBody": html_body,
         "MessageStream": "outbound",
     }
+    if reply_to:
+        body["ReplyTo"] = reply_to
+    return body
+
+
+def send_postmark_magic_link(to_email: str, magic_url: str) -> dict:
+    api_token = os.environ.get("FELLOWS_POSTMARK_TOKEN", "").strip()
+    if not api_token:
+        raise RuntimeError("FELLOWS_POSTMARK_TOKEN is not set")
+    body = build_postmark_body(to_email, magic_url)
     req = urllib.request.Request(
         "https://api.postmarkapp.com/email",
         data=json.dumps(body).encode("utf-8"),
