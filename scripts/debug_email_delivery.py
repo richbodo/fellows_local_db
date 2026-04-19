@@ -297,23 +297,33 @@ def fetch_fellow_emails_from_prod(
     user: str,
     db_path: str = DEFAULT_FELLOWS_DB,
 ) -> list[dict]:
-    """SSH + remote `sqlite3 -json` to pull fellow records with contact emails.
+    """SSH + remote Python to pull fellow records with contact emails.
+
+    Prod droplet runs the app on Python, so ``python3`` + stdlib ``sqlite3`` is
+    always available. The ``sqlite3`` CLI binary is NOT installed (it's not a
+    fellows-pwa dep) so we use Python directly — one-liner, JSON out.
 
     Same path as the allowlist (group-readable, no sudo needed). Returns a list
     of ``{"record_id", "name", "email"}`` dicts with email lowercased+trimmed,
     matching the build_pwa hashing recipe.
     """
-    query = (
-        "SELECT record_id, name, lower(trim(contact_email)) AS email "
-        "FROM fellows "
-        "WHERE contact_email IS NOT NULL AND trim(contact_email) != '';"
+    py_code = (
+        "import json, sqlite3; "
+        f"c = sqlite3.connect({db_path!r}); "
+        "c.row_factory = sqlite3.Row; "
+        "rows = c.execute("
+        "\"SELECT record_id, name, lower(trim(contact_email)) AS email "
+        "FROM fellows WHERE contact_email IS NOT NULL "
+        "AND trim(contact_email) != ''\""
+        ").fetchall(); "
+        "print(json.dumps([dict(r) for r in rows]))"
     )
-    remote_cmd = f"sqlite3 -json {shlex.quote(db_path)} {shlex.quote(query)}"
+    remote_cmd = f"python3 -c {shlex.quote(py_code)}"
     cmd = ["ssh", "-o", "BatchMode=yes", "-p", str(port), f"{user}@{host}", remote_cmd]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=30, check=False)
     if r.returncode != 0:
         raise RuntimeError(
-            f"ssh/sqlite3 failed (exit {r.returncode}): "
+            f"ssh/python3 query failed (exit {r.returncode}): "
             + (r.stderr.strip() or "no stderr")
         )
     if not r.stdout.strip():
