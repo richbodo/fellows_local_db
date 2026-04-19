@@ -43,6 +43,48 @@ def _send_event_json(**overrides) -> str:
     return json.dumps(payload)
 
 
+def test_build_ssh_cmd_quotes_since_with_spaces():
+    """--since '2 hours ago' must survive SSH-then-remote-shell re-parse.
+
+    Regression: SSH concatenates argv with spaces on the wire, so unquoted
+    remote args get re-split by the remote shell. journalctl rejects the
+    resulting `--since 2` with "Failed to parse timestamp: 2".
+    """
+    cmd = ded.build_ssh_cmd("example.com", "52221", "rsb", "2 hours ago")
+    assert cmd[0] == "ssh"
+    assert cmd[-2] == "rsb@example.com"
+    remote = cmd[-1]
+    # Every remote token that journalctl would re-split must be shell-quoted.
+    assert "'2 hours ago'" in remote
+    assert "journalctl -u fellows-pwa --since '2 hours ago' -o json --no-pager" == remote
+
+
+def test_build_ssh_cmd_quotes_unit_and_simple_since():
+    """Simple args (no spaces) are safe to leave unquoted, but shlex.quote
+    is idempotent so the command shape is still deterministic."""
+    cmd = ded.build_ssh_cmd("h", "22", "u", "24h", unit="foo-pwa")
+    remote = cmd[-1]
+    assert "foo-pwa" in remote
+    assert " 24h " in remote + " "  # 24h appears as its own token
+
+
+def test_build_ssh_cmd_sudo_mode_forces_tty_and_prepends_sudo():
+    cmd = ded.build_ssh_cmd("example.com", "52221", "rsb", "2 hours ago", use_sudo=True)
+    # -tt forces pty so sudo can prompt; BatchMode must NOT be present.
+    assert "-tt" in cmd
+    assert "BatchMode=yes" not in " ".join(cmd)
+    # Remote command starts with sudo journalctl ...
+    assert cmd[-1].startswith("sudo journalctl ")
+    assert "'2 hours ago'" in cmd[-1]
+
+
+def test_build_ssh_cmd_default_uses_batchmode_no_sudo():
+    cmd = ded.build_ssh_cmd("h", "22", "u", "24h")
+    assert "-tt" not in cmd
+    assert "BatchMode=yes" in cmd
+    assert not cmd[-1].startswith("sudo ")
+
+
 def test_hash_email_matches_server_contract():
     a = ded.hash_email("  Test@Example.COM  ")
     b = ded.hash_email("test@example.com")
@@ -280,7 +322,7 @@ def test_main_json_output_round_trips(monkeypatch, capsys):
     monkeypatch.setattr(
         ded,
         "ssh_journal",
-        lambda host, port, user, since: _journal_envelope(_send_event_json()),
+        lambda host, port, user, since, **kw: _journal_envelope(_send_event_json()),
     )
     rc = ded.main(["--json", "--since", "1 hour ago"])
     assert rc == 0
