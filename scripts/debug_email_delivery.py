@@ -398,7 +398,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--postmark",
         action="store_true",
-        help="Resolve Postmark MessageIDs via the Messages API. Requires FELLOWS_POSTMARK_TOKEN.",
+        help="Resolve Postmark MessageIDs via the Messages API. Token comes from "
+        "--postmark-token or FELLOWS_POSTMARK_TOKEN env (in that order).",
+    )
+    ap.add_argument(
+        "--postmark-token",
+        metavar="TOKEN",
+        help="Postmark Server API token. Alternative to FELLOWS_POSTMARK_TOKEN env. "
+        "Implies --postmark.",
     )
     ap.add_argument(
         "--sudo",
@@ -438,11 +445,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.limit > 0:
         events = events[-args.limit :]
 
+    want_postmark = bool(args.postmark or args.postmark_token)
     postmark_lookups: dict[str, dict] = {}
-    if args.postmark:
-        token = os.environ.get("FELLOWS_POSTMARK_TOKEN", "").strip()
+    if want_postmark:
+        token = (args.postmark_token or os.environ.get("FELLOWS_POSTMARK_TOKEN", "")).strip()
         if not token:
-            sys.stderr.write("--postmark requires FELLOWS_POSTMARK_TOKEN in env.\n")
+            sys.stderr.write(
+                "Postmark resolution needs a token: pass --postmark-token <TOKEN> "
+                "or set FELLOWS_POSTMARK_TOKEN in env.\n"
+            )
             return 2
         seen: set[str] = set()
         for e in events:
