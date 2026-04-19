@@ -126,10 +126,8 @@ class TestEmailGate:
 
     def test_back_to_gate_link_posts_logout_and_navigates(self, context, base_url_fixture):
         page = context.new_page()
-        logout_calls = []
 
-        def _intercept_logout(route):
-            logout_calls.append(route.request.method)
+        def _fulfill_logout(route):
             route.fulfill(
                 status=200,
                 content_type="application/json",
@@ -144,7 +142,7 @@ class TestEmailGate:
                 authenticated=True,
                 installRecentlyAllowed=True,
             )
-            page.route("**/api/logout", _intercept_logout)
+            page.route("**/api/logout", _fulfill_logout)
             page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
             expect(page.locator("#install-landing")).to_be_visible()
 
@@ -155,9 +153,14 @@ class TestEmailGate:
                 authenticated=False,
                 installRecentlyAllowed=False,
             )
-            page.locator("#back-to-gate-link").click()
+            # expect_request captures the POST even when the page navigates
+            # via location.replace() immediately after. Avoids the race where
+            # the client-side fetch is in flight but the navigation fires
+            # before the route handler records the call.
+            with page.expect_request("**/api/logout") as req_info:
+                page.locator("#back-to-gate-link").click()
+            assert req_info.value.method == "POST"
             page.wait_for_url("**/?gate=1", timeout=5000)
-            assert logout_calls == ["POST"], logout_calls
             expect(page.locator("#install-gate-private")).to_be_visible()
         finally:
             page.close()
