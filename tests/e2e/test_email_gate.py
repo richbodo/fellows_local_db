@@ -124,17 +124,60 @@ class TestEmailGate:
         finally:
             page.close()
 
-    def test_auth_status_503_falls_through_when_marker_set(self, context, base_url_fixture):
-        """A transient /api/auth/status 503 must NOT show the 'Authentication
-        check failed' panel when this origin has been authenticated before.
-        The offline-resilience fallback (phase-1) demotes the failure to a
-        quiet email gate with the build badge labelled 'server: unreachable'.
+    def test_marker_set_boots_directory_directly(self, context, base_url_fixture):
+        """Browser-tab visits with the marker set skip the install landing and
+        boot the directory via the API — "URL-just-works" (docs/email_gate.md).
+        The marker is the signal that this browser has used the app before,
+        so we act as the app rather than forcing install-landing again.
         """
         page = context.new_page()
-        # Simulate "has been authed here before" (marker persisted via
-        # localStorage), then 503 on auth-status.
         page.add_init_script(
             "window.localStorage.setItem('fellows_authenticated_once', '1');"
+        )
+        try:
+            page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+            page.locator("#loading").wait_for(state="hidden", timeout=10000)
+            # Directory visible, install landing and email gate both hidden.
+            expect(page.locator("#directory")).to_be_visible()
+            expect(page.locator("#install-landing")).to_be_hidden()
+            expect(page.locator("#install-gate-private")).to_be_hidden()
+        finally:
+            page.close()
+
+    def test_marker_set_with_gate_override_still_shows_gate(self, context, base_url_fixture):
+        """?gate=1 always wins, even when the marker is set. Gives the user
+        (or a dev) an explicit escape back to the email gate for a fresh
+        session — e.g., when handing the app off to another fellow on a
+        shared device.
+        """
+        page = context.new_page()
+        page.add_init_script(
+            "window.localStorage.setItem('fellows_authenticated_once', '1');"
+        )
+        try:
+            _mock_auth_status(page, authEnabled=True, authenticated=False)
+            page.goto(base_url_fixture + "/?gate=1", wait_until="domcontentloaded")
+            expect(page.locator("#install-gate-private")).to_be_visible()
+            expect(page.locator("#directory")).to_be_hidden()
+        finally:
+            page.close()
+
+    def test_marker_set_api_unreachable_falls_back_to_gate(self, context, base_url_fixture):
+        """With marker set but the API is completely unreachable, the as-app
+        boot fails and we hand off to startBrowserUx — which, finding auth
+        status also down, shows the quiet email-gate fallback. No scary
+        auth-error panel.
+        """
+        page = context.new_page()
+        page.add_init_script(
+            "window.localStorage.setItem('fellows_authenticated_once', '1');"
+        )
+        # Nuke both endpoints: the as-app boot path AND the gate/install
+        # fallback rely on different endpoints; both must fail for this test
+        # to exercise the "everything 5xx with marker" safety net.
+        page.route(
+            "**/api/fellows*",
+            lambda r: r.fulfill(status=503, body="service unavailable"),
         )
         page.route(
             AUTH_STATUS_PATH,
@@ -142,14 +185,13 @@ class TestEmailGate:
         )
         try:
             page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
-            page.wait_for_timeout(300)
-            # The error panel must NOT appear.
+            page.wait_for_timeout(500)
+            # No scary error panel.
             assert page.locator("#auth-error-panel").is_hidden(), (
-                "Auth-error panel surfaced despite marker being set — fallback failed."
+                "Auth-error panel surfaced despite marker being set."
             )
             # Email gate is the quiet fallback view.
             expect(page.locator("#install-gate-private")).to_be_visible()
-            # Build badge reflects server unreachable.
             server_line = page.locator("#build-badge-server")
             expect(server_line).to_contain_text("unreachable")
         finally:
