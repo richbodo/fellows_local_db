@@ -63,7 +63,7 @@
   /** Bump on every meaningful UI / diagnostics change. Rendered in the
    *  always-visible build badge so a dev can tell at a glance which app.js
    *  is actually running vs what the server was deployed with. */
-  var FELLOWS_UI_DIAG = 'diag-2026-04i-offline-fallback';
+  var FELLOWS_UI_DIAG = 'diag-2026-04k-visible-count-text';
 
   // Persistent marker: "this origin has been authenticated successfully at
   // least once." Preserved across clearAllAppData. Used by startBrowserUx's
@@ -1184,17 +1184,14 @@
       if (installButtonEl) installButtonEl.classList.add('hidden');
     });
 
-    // Unsupported-browser detection: if after ~3s no beforeinstallprompt has
-    // fired AND we're not iOS Safari (which uses Share → Add to Home Screen),
-    // swap the install button for the "your browser doesn't support install"
-    // hint. The timer is long enough to avoid a flash on browsers that fire
-    // late, short enough that a dev doesn't think the page is broken.
-    setTimeout(function () {
-      if (deferredInstallPrompt) return;
-      if (isIosSafari()) return;
-      if (installUnsupportedHintEl) installUnsupportedHintEl.classList.remove('hidden');
-      if (installButtonEl) installButtonEl.classList.add('hidden');
-    }, 3000);
+    // Note: no proactive "unsupported browser" detection timer.
+    //   An earlier version flipped the install landing to an "unsupported"
+    //   warning after 3s if `beforeinstallprompt` hadn't fired. That's a
+    //   false positive on Chrome/Edge when the PWA is already installed on
+    //   the device — Chrome won't re-fire the event in that case (the
+    //   address bar shows "Open in app" instead). We now rely on the
+    //   click-handler fallback below, which shows the hint only if the
+    //   user actually clicks Install and the prompt isn't available.
 
     if (installButtonEl && !installButtonEl._wired) {
       installButtonEl._wired = true;
@@ -1507,10 +1504,13 @@
       renderDirectoryList(filtered);
       displayedList = filtered;
     }
+    // This UI element is defined as "count of fellows visible in the current
+    // view." In directory mode it reflects the `has email` filter; in search
+    // mode it reflects the search + filter together (see renderSearchResults).
     setFilterCount(
       filtered.length === list.length
-        ? list.length + ' fellows'
-        : filtered.length + ' of ' + list.length + ' fellows'
+        ? list.length + ' fellows visible'
+        : filtered.length + ' of ' + list.length + ' fellows visible'
     );
     if (loadingPanelEl) {
       loadingPanelEl.classList.add('hidden');
@@ -1933,7 +1933,12 @@
     var total = results.length;
     var filtered = applyHasEmailFilter(results);
     displayedList = filtered;
-    setFilterCount('');
+    // Keep the visible-count indicator in sync with what's actually shown,
+    // including during search. The denominator stays at list.length (total
+    // fellows in the current data set) so "5 of 515 fellows visible" is
+    // unambiguous even when both a search AND the has-email filter apply.
+    var total_in_data = (list && list.length) || total;
+    setFilterCount(filtered.length + ' of ' + total_in_data + ' fellows visible');
     if (!filtered.length) {
       if (!total) {
         directoryListEl.innerHTML = '<p class="placeholder">No fellows match that search.</p>';
