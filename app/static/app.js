@@ -63,7 +63,7 @@
   /** Bump on every meaningful UI / diagnostics change. Rendered in the
    *  always-visible build badge so a dev can tell at a glance which app.js
    *  is actually running vs what the server was deployed with. */
-  var FELLOWS_UI_DIAG = 'diag-2026-04k-visible-count-text';
+  var FELLOWS_UI_DIAG = 'diag-2026-04l-update-check';
 
   // Persistent marker: "this origin has been authenticated successfully at
   // least once." Preserved across clearAllAppData. Used by startBrowserUx's
@@ -112,6 +112,17 @@
 
   initBuildBadge();
 
+  // Boot snapshot of /build-meta.json. The hourly update check and the
+  // About-page "Check for updates" button both compare against this snapshot
+  // to decide whether the server has shipped a newer build since this page
+  // was loaded. Populated asynchronously; consumers guard on .git_sha.
+  var bootBuildMeta = { git_sha: null, built_at: null, capturedAt: null };
+  var updateCheckState = {
+    lastAttemptAt: null,
+    lastResult: null,
+    lastLatestMeta: null
+  };
+
   // Populate the server-side label independently of the auth flow so a dev
   // reading the badge still gets a signal when /api/auth/status is failing.
   function primeServerBadgeFromBuildMeta() {
@@ -119,12 +130,80 @@
       fetch('/build-meta.json', { cache: 'no-cache', credentials: 'same-origin' })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (meta) {
-          if (meta) setBuildBadgeServer(meta.git_sha, meta.built_at);
+          if (meta) {
+            setBuildBadgeServer(meta.git_sha, meta.built_at);
+            if (!bootBuildMeta.git_sha) {
+              bootBuildMeta = {
+                git_sha: meta.git_sha || null,
+                built_at: meta.built_at || null,
+                capturedAt: new Date().toISOString()
+              };
+            }
+          }
         })
         .catch(function () {});
     } catch (e) {}
   }
   primeServerBadgeFromBuildMeta();
+
+  // Fetch /build-meta.json and compare to the boot snapshot. If the server
+  // has shipped a newer build (different git_sha), surface the existing
+  // sw-update-banner so the user can reload into the new version.
+  //
+  // Returns a Promise resolving to { status, latest?, error? } where status
+  // is one of:
+  //   'update-available' — server build differs from boot snapshot
+  //   'up-to-date'       — server build matches boot snapshot
+  //   'no-boot-snapshot' — never captured a boot snapshot (offline at boot)
+  //   'error'            — fetch failed or response was not ok
+  function checkForServerUpdate() {
+    updateCheckState.lastAttemptAt = new Date().toISOString();
+    return fetch('/build-meta.json', { cache: 'no-store', credentials: 'same-origin' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (meta) {
+        updateCheckState.lastLatestMeta = meta || null;
+        if (!bootBuildMeta.git_sha) {
+          // First successful fetch: adopt it as the boot snapshot so subsequent
+          // polls have something to compare against.
+          bootBuildMeta = {
+            git_sha: (meta && meta.git_sha) || null,
+            built_at: (meta && meta.built_at) || null,
+            capturedAt: new Date().toISOString()
+          };
+          updateCheckState.lastResult = 'no-boot-snapshot';
+          return { status: 'no-boot-snapshot', latest: meta };
+        }
+        var latestSha = meta && meta.git_sha;
+        if (latestSha && latestSha !== bootBuildMeta.git_sha) {
+          showSwUpdateBanner('server-meta-drift');
+          updateCheckState.lastResult = 'update-available';
+          return { status: 'update-available', latest: meta };
+        }
+        updateCheckState.lastResult = 'up-to-date';
+        return { status: 'up-to-date', latest: meta };
+      })
+      .catch(function (err) {
+        updateCheckState.lastResult = 'error';
+        return { status: 'error', error: err && err.message ? err.message : String(err) };
+      });
+  }
+
+  // Hourly background check. Runs only once the document is visible and only
+  // in standalone PWA mode — a browser-mode visit is transient and doesn't
+  // need a poll. Exposed via window for e2e testing.
+  var UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+  var updateCheckIntervalHandle = null;
+  function startUpdateCheckPoll() {
+    if (updateCheckIntervalHandle) return;
+    if (!isStandaloneDisplayMode()) return;
+    updateCheckIntervalHandle = setInterval(function () {
+      if (document.hidden) return;
+      checkForServerUpdate();
+    }, UPDATE_CHECK_INTERVAL_MS);
+  }
 
   function logSwLifecycle(event, detail) {
     swLifecycleLog.push({
@@ -1780,6 +1859,11 @@
     aboutHtml += 'There is no API, login, or web app, so this can only be shared intentionally. ';
     aboutHtml += 'For support, request to join the github repository or just ask on one of the fellows channels.</p>';
     aboutHtml += '<p class="about-support">Having trouble with the app? Contact the EHF Communications Working Group.</p>';
+    aboutHtml += '<p class="about-users-manual"><a href="https://github.com/richbodo/fellows_local_db/blob/main/docs/users_manual.md" target="_blank" rel="noopener">User Guide</a> \u2014 how to install, update, and clear app data.</p>';
+    aboutHtml += '<p class="about-update-check">';
+    aboutHtml += '<button type="button" id="about-check-updates" class="about-check-updates-btn">Check for updates</button>';
+    aboutHtml += '<span id="about-update-status" class="about-update-status" role="status" aria-live="polite"></span>';
+    aboutHtml += '</p>';
     aboutHtml += '<p class="about-repo"><a href="https://github.com/richbodo/fellows_local_db" target="_blank" rel="noopener">';
     aboutHtml += '<svg class="github-icon" viewBox="0 0 16 16" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>';
     aboutHtml += ' richbodo/fellows_local_db</a></p>';
@@ -1791,6 +1875,31 @@
     aboutHtml += '<div class="stats-grid" id="stats-grid"></div>';
     aboutHtml += '</div>';
     detailEl.innerHTML = aboutHtml;
+
+    // Wire the "Check for updates" button. Shares the same checker used by
+    // the hourly poll so the user-visible status stays consistent with what
+    // triggers the sw-update-banner.
+    (function wireUpdateCheckButton() {
+      var btn = document.getElementById('about-check-updates');
+      var statusEl = document.getElementById('about-update-status');
+      if (!btn || !statusEl) return;
+      btn.addEventListener('click', function () {
+        btn.disabled = true;
+        statusEl.textContent = 'Checking\u2026';
+        checkForServerUpdate().then(function (res) {
+          btn.disabled = false;
+          if (res.status === 'update-available') {
+            statusEl.textContent = 'New version available \u2014 reload to apply.';
+          } else if (res.status === 'up-to-date') {
+            statusEl.textContent = 'You\u2019re on the latest version.';
+          } else if (res.status === 'no-boot-snapshot') {
+            statusEl.textContent = 'Version recorded \u2014 future checks will compare against this build.';
+          } else {
+            statusEl.textContent = 'Unable to reach the server right now. Try again later.';
+          }
+        });
+      });
+    })();
 
     // Render the "N / M" cached-photo counter using the existing helper.
     // Snapshotted at page-render time; refreshes on next About visit.
@@ -2271,6 +2380,9 @@
             prewarmProfileImages(full).catch(function () {});
           }, 0);
         }
+        // Start the hourly server-build-drift check. Idempotent; only
+        // arms the interval when running as an installed PWA.
+        startUpdateCheckPoll();
       })
       .catch(function (err) {
         showBootFailure(err);
