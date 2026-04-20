@@ -171,17 +171,40 @@
       if (!f) return null;
       // Same cache-busting suffix as <img src> in renderDetail — keeps the
       // prewarm and the on-demand render aligned so we hit one cache entry.
-      var url = '/images/' + encodeURIComponent(f.slug) + '.jpg?v=' + encodeURIComponent(FELLOWS_UI_DIAG);
-      return fetch(url, { cache: 'default', credentials: 'same-origin' })
+      var jpgUrl = '/images/' + encodeURIComponent(f.slug) + '.jpg?v=' + encodeURIComponent(FELLOWS_UI_DIAG);
+      var pngUrl = '/images/' + encodeURIComponent(f.slug) + '.png?v=' + encodeURIComponent(FELLOWS_UI_DIAG);
+      // Try .jpg first. If 404 / not-ok, fall back to .png — some fellows
+      // have only a .png on disk (they uploaded a PNG on Knack), and
+      // without this fallback the prewarm never caches them. Mirrors the
+      // same .jpg→.png fallback that renderDetail already does when the
+      // on-page <img> errors.
+      return fetch(jpgUrl, { cache: 'default', credentials: 'same-origin' })
         .then(function (r) {
           if (r && r.ok) {
             imagePrewarmState.loaded += 1;
-          } else {
-            imagePrewarmState.errors += 1;
+            return;
           }
+          return fetch(pngUrl, { cache: 'default', credentials: 'same-origin' })
+            .then(function (r2) {
+              if (r2 && r2.ok) {
+                imagePrewarmState.loaded += 1;
+              } else {
+                imagePrewarmState.errors += 1;
+              }
+            })
+            .catch(function () { imagePrewarmState.errors += 1; });
         })
         .catch(function () {
-          imagePrewarmState.errors += 1;
+          // Total network failure on .jpg — try .png anyway.
+          return fetch(pngUrl, { cache: 'default', credentials: 'same-origin' })
+            .then(function (r2) {
+              if (r2 && r2.ok) {
+                imagePrewarmState.loaded += 1;
+              } else {
+                imagePrewarmState.errors += 1;
+              }
+            })
+            .catch(function () { imagePrewarmState.errors += 1; });
         })
         .then(next);
     }
