@@ -22,7 +22,9 @@ Local web app to browse Edmund Hillary Fellowship fellow profiles and run experi
 - [Before Making This Repo Public](#before-making-this-repo-public)
 - [Project Layout](#project-layout)
 
-## Data Note
+## Data Storage
+
+We keep the db out of git.
 
 The app runs against a dump of fellows data (contact emails, mobile numbers, citizenship, location, free-text responses) plus profile photos. **This data is never committed.** The `final_fellows_set/` directory is gitignored; obtain the JSON and image directory out-of-band from the maintainer and drop them in locally:
 
@@ -35,6 +37,8 @@ final_fellows_set/
 Treat the contents as confidential regardless of demo status. Do not paste excerpts into issues, PRs, commit messages, or third-party tools.
 
 ## Architecture
+
+This is a local-only app.  It is also a PWA, but only because that is the best way to distribute and run the app.  It is not possible to run the app online as SaaS.  It is possible to update the app to a new version by getting a new magic link.
 
 See [`docs/Architecture.md`](docs/Architecture.md) for system design, data flow, and schema.
 
@@ -170,39 +174,6 @@ Most common command, from the repo root:
 - **Virtualenv scope:** use `.venv` for dev/test tooling on your workstation; production server runtime uses system Python.
 - **Debugging a stuck PWA / service worker:** when a bug reproduces on your own browser but not on a clean Playwright profile, see [`docs/debugging.md`](docs/debugging.md) for the chrome-devtools-mcp setup that attaches Claude Code to your running Chrome.
 
-## Before Making This Repo Public
-
-**The `final_fellows_set/` data was in git history from the initial commit through this branch point.** Gitignoring it now prevents future commits from leaking PII, but existing history still contains 515+ contact emails, mobile numbers, ethnicity, free-text responses, and 268 profile photos. Any fork or clone made before a history scrub retains that data.
-
-**Do this exactly once, immediately before flipping the repo to public:**
-
-1. **Scrub history:**
-   ```bash
-   # Install if needed: brew install git-filter-repo
-   git filter-repo --path final_fellows_set/ --invert-paths --force
-   ```
-   This rewrites every commit on every branch. All commit SHAs change.
-
-2. **Force-push every branch:**
-   ```bash
-   git push --force-with-lease origin --all
-   git push --force-with-lease origin --tags
-   ```
-   All open PRs, in-flight branches, and clones will break — coordinate before running.
-
-3. **Also scrub** (run `grep -r` before publishing):
-   - Any historical `deploy/dist/` snapshots that might have slipped in (it's gitignored, but double-check).
-   - `ansible/group_vars/fellows.yml` if it ever contained secrets (currently clean — only non-secret config).
-   - Commit messages, author emails, and PR descriptions: GitHub retains these separately from git; audit via `gh pr list --state all` and redact or close anything sensitive.
-
-4. **Rotate any credentials that ever touched the repo**, even if they were only in deleted files:
-   - Postmark server token.
-   - `FELLOWS_SESSION_SECRET` on the droplet.
-   - Any SSH keys whose public parts were committed.
-
-5. **Verify** with `git log --all --full-history -- final_fellows_set/` returning empty, and `git count-objects -v` showing a smaller repo.
-
-6. **Republish the `allowed_emails.json` allowlist** after scrub by re-running `python build/build_pwa.py` and redeploying — the hash file is regenerated from the source JSON so scrubbing history doesn't affect what production serves.
 
 ## Project Layout
 

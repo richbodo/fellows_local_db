@@ -1,5 +1,7 @@
 # Architecture
 
+This is a local-only app.  It is also a PWA, but only because that is the best way to distribute and run the app.  It is not possible to run the app online as SaaS.  It is possible to update the app to a new version by getting a new magic link.
+
 ## Tech Stack
 
 - **Server**: Python stdlib `http.server` — single file, no framework

@@ -38,4 +38,7 @@ ansible/ansible.log
 final_fellows_set/
 
 # Local-only fellows data snapshots (see backup/README.md)
-backup/*.zip
+backup/
+
+# Local environment files
+BECOME*
