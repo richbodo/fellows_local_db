@@ -63,7 +63,7 @@
   /** Bump on every meaningful UI / diagnostics change. Rendered in the
    *  always-visible build badge so a dev can tell at a glance which app.js
    *  is actually running vs what the server was deployed with. */
-  var FELLOWS_UI_DIAG = 'diag-2026-04m-url-is-app';
+  var FELLOWS_UI_DIAG = 'diag-2026-04n-offline-only-mode';
 
   // Persistent marker: "this origin has been authenticated successfully at
   // least once." Preserved across clearAllAppData. Used by startBrowserUx's
@@ -108,6 +108,21 @@
     // cached state.
     var serverEl = document.getElementById('build-badge-server');
     if (serverEl) serverEl.textContent = 'server: unreachable';
+  }
+
+  // True once the app has fallen back to cached local data because the
+  // server refused us (401 / expired session) or was otherwise unreachable
+  // during boot. Surface-only flag; the UI uses it to label the badge and
+  // show a gentle "using cached data" hint. The user stays in the app.
+  var offlineOnlyMode = false;
+
+  function setBuildBadgeOfflineOnly(reason) {
+    var serverEl = document.getElementById('build-badge-server');
+    if (serverEl) {
+      serverEl.textContent = 'server: offline · using cache';
+    }
+    offlineOnlyMode = true;
+    bootDebugPush('entered offline-only mode: ' + (reason || 'unknown'));
   }
 
   initBuildBadge();
@@ -565,22 +580,27 @@
     };
   }
 
+  // Errors thrown by the API provider carry the HTTP status so the boot
+  // chain can react (e.g., fall back to the IndexedDB cache on a 401 instead
+  // of showing a boot-failure panel).
+  function apiError(url, status) {
+    var err = new Error('GET ' + url + ' failed: ' + status);
+    err.status = status;
+    return err;
+  }
+
   function createApiDataProvider() {
     return {
       kind: 'api',
       getList: function () {
         return fetch('/api/fellows').then(function (r) {
-          if (!r.ok) {
-            throw new Error('GET /api/fellows failed: ' + r.status);
-          }
+          if (!r.ok) throw apiError('/api/fellows', r.status);
           return r.json();
         });
       },
       getFull: function () {
         return fetch('/api/fellows?full=1').then(function (r) {
-          if (!r.ok) {
-            throw new Error('GET /api/fellows?full=1 failed: ' + r.status);
-          }
+          if (!r.ok) throw apiError('/api/fellows?full=1', r.status);
           return r.json();
         });
       },
@@ -2351,6 +2371,32 @@
       });
     }
 
+    // If the API refuses us (expired session = 401, rare 403), try the
+    // IndexedDB cache populated by a prior successful boot. Rationale:
+    // "install once, works forever." A stale session must not lock users
+    // out of data they already downloaded.
+    function isAuthFailure(err) {
+      return !!(err && (err.status === 401 || err.status === 403));
+    }
+    function tryListFromCache(originalErr) {
+      return loadFullFellows().then(function (cached) {
+        if (cached && cached.length) {
+          setBuildBadgeOfflineOnly('getList ' + (originalErr && originalErr.status));
+          return cached;
+        }
+        throw originalErr;
+      });
+    }
+    function tryFullFromCache(originalErr) {
+      return loadFullFellows().then(function (cached) {
+        if (cached && cached.length) {
+          setBuildBadgeOfflineOnly('getFull ' + (originalErr && originalErr.status));
+          return cached;
+        }
+        throw originalErr;
+      });
+    }
+
     pickDataProvider()
       .then(function (provider) {
         dataProvider = provider;
@@ -2359,26 +2405,36 @@
           directoryDataSource = 'sqlite';
         }
         setSetupStatus('Loading…');
-        return provider.getList();
+        return provider.getList().catch(function (err) {
+          if (isAuthFailure(err)) return tryListFromCache(err);
+          throw err;
+        });
       })
       .then(function (data) {
         bootDebugPush(
-          'getList: OK count=' + (Array.isArray(data) ? data.length : typeof data)
+          'getList: OK count=' + (Array.isArray(data) ? data.length : typeof data) +
+          (offlineOnlyMode ? ' (from cache)' : '')
         );
-        // Reaching getList success means auth was good (or the local cache
-        // answered). Record the marker so the browser-tab fallback works
-        // for the same user later.
+        // Reaching getList success (fresh API or cached) means this
+        // browser has been authenticated here at least once. Record the
+        // marker so the URL-just-works path works on next visit.
         markAuthenticatedOnce();
         list = Array.isArray(data) ? data : [];
         renderDirectory();
         route();
-        return dataProvider.getFull();
+        return dataProvider.getFull().catch(function (err) {
+          if (isAuthFailure(err)) return tryFullFromCache(err);
+          throw err;
+        });
       })
       .then(function (full) {
-        bootDebugPush('getFull: OK rows=' + (Array.isArray(full) ? full.length : typeof full));
+        bootDebugPush('getFull: OK rows=' + (Array.isArray(full) ? full.length : typeof full) +
+          (offlineOnlyMode ? ' (from cache)' : ''));
         if (Array.isArray(full)) {
           fullFellowsCache = full;
-          if (directoryDataSource === 'api') {
+          // Only persist a fresh API payload. A cache-served full is
+          // already in IndexedDB; re-saving the same blob is wasted IO.
+          if (directoryDataSource === 'api' && !offlineOnlyMode) {
             saveFullFellowsToIndexedDB(full);
           }
           full.forEach(function (f) {
@@ -2388,6 +2444,8 @@
         }
         route();
         // Kick off image prewarm in the background — does not block UI.
+        // Images are served out of the SW cache once prewarmed, so this
+        // stays useful even in offline-only mode.
         if (Array.isArray(full)) {
           setTimeout(function () {
             prewarmProfileImages(full).catch(function () {});
@@ -2398,11 +2456,9 @@
         startUpdateCheckPoll();
       })
       .catch(function (err) {
-        // Browser-tab-acting-as-app path: if the API refuses us (session
-        // expired, etc.), don't show the scary boot-failure panel — hand
-        // off to startBrowserUx, which will show the email gate. A user
-        // who has the app installed can always relaunch the standalone
-        // copy from their desktop/home icon, which uses cached data.
+        // Only reached when the API refused us AND no local cache could
+        // answer. In browser-tab-acting-as-app mode, hand off to the
+        // email gate quietly. Otherwise show the boot-failure panel.
         if (!isStandaloneDisplayMode() && hasAuthenticatedOnce()) {
           bootDebugPush('as-app boot failed; handing off to startBrowserUx: ' +
             (err && err.message ? err.message : String(err)));

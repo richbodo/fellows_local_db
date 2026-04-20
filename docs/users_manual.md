@@ -136,6 +136,12 @@ strand you at the error panel.
 - If the server is temporarily unreachable (flaky connection, deploy
   blip), the build badge at the top of the app flips to **"server:
   unreachable."** This is informational — the app keeps working.
+- If your session has expired (e.g., you haven't opened the app in a
+  long time), the app still opens and shows your cached directory from
+  the last time you loaded it. The build badge reads **"server: offline
+  · using cache."** You can keep browsing normally. To get fresh data
+  (new fellows, updated profiles), visit `/?gate=1` and request a new
+  magic link.
 
 ---
 
