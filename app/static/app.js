@@ -63,7 +63,7 @@
   /** Bump on every meaningful UI / diagnostics change. Rendered in the
    *  always-visible build badge so a dev can tell at a glance which app.js
    *  is actually running vs what the server was deployed with. */
-  var FELLOWS_UI_DIAG = 'diag-2026-04l-update-check';
+  var FELLOWS_UI_DIAG = 'diag-2026-04m-url-is-app';
 
   // Persistent marker: "this origin has been authenticated successfully at
   // least once." Preserved across clearAllAppData. Used by startBrowserUx's
@@ -1113,6 +1113,20 @@
       return true;
     }
     return window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
+  }
+
+  // Treat the current visit as "the app is running" (not "the install
+  // landing") when the page is open as an installed PWA *or* when this
+  // browser profile has already authenticated against this origin before.
+  // The second case covers: user installed once, then later visits the
+  // URL in a regular browser tab. Without this, every tab visit would
+  // force them through the install landing even though the app is ready.
+  // `?gate=1` still bypasses both branches so a dev can always reach the
+  // email gate explicitly.
+  function shouldActAsApp() {
+    if (isStandaloneDisplayMode()) return true;
+    if (parseGateOverride().force) return false;
+    return hasAuthenticatedOnce();
   }
 
   function setInstallStatus(msg) {
@@ -2311,7 +2325,7 @@
   initClearCacheButton();
   initDiagnosticsPanel();
 
-  if (isStandaloneDisplayMode()) {
+  function bootDirectoryAsApp() {
     bootDebugLines.length = 0;
     if (siteHeaderEl) siteHeaderEl.classList.remove('hidden');
     if (loadingPanelEl) {
@@ -2337,8 +2351,7 @@
       });
     }
 
-    tryUnlockFromHash()
-      .then(function () { return pickDataProvider(); })
+    pickDataProvider()
       .then(function (provider) {
         dataProvider = provider;
         bootDebugPush('provider ready kind=' + provider.kind);
@@ -2385,6 +2398,20 @@
         startUpdateCheckPoll();
       })
       .catch(function (err) {
+        // Browser-tab-acting-as-app path: if the API refuses us (session
+        // expired, etc.), don't show the scary boot-failure panel — hand
+        // off to startBrowserUx, which will show the email gate. A user
+        // who has the app installed can always relaunch the standalone
+        // copy from their desktop/home icon, which uses cached data.
+        if (!isStandaloneDisplayMode() && hasAuthenticatedOnce()) {
+          bootDebugPush('as-app boot failed; handing off to startBrowserUx: ' +
+            (err && err.message ? err.message : String(err)));
+          if (siteHeaderEl) siteHeaderEl.classList.add('hidden');
+          if (loadingPanelEl) loadingPanelEl.classList.add('hidden');
+          if (loadingEl) loadingEl.classList.add('hidden');
+          startBrowserUx();
+          return;
+        }
         showBootFailure(err);
       });
 
@@ -2435,11 +2462,15 @@
     window.addEventListener('online', updateConnectionBanner);
     window.addEventListener('offline', updateConnectionBanner);
     updateConnectionBanner();
-  } else {
-    tryUnlockFromHash().then(function () {
-      startBrowserUx();
-    });
   }
+
+  tryUnlockFromHash().then(function () {
+    if (shouldActAsApp()) {
+      bootDirectoryAsApp();
+    } else {
+      startBrowserUx();
+    }
+  });
 
   registerServiceWorker();
 })();

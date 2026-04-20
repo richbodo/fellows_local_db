@@ -28,7 +28,8 @@ Operator procedures (Postmark, env file, Postmark response interpretation) stay 
 7. **Dev escape hatch is always reachable.** Two layers:
    - A **"Back to email gate"** control on the install landing, which `POST`s `/api/logout` (clears the cookie server-side) then navigates to `/?gate=1`.
    - A **hardcoded URL override** `/?gate=1` that forces the gate UI regardless of cookie state. Works even when JS-driven logout fails.
-8. **Unsupported browsers are told so.** If `beforeinstallprompt` doesn't fire within ~3 seconds and the user isn't on iOS Safari (which installs via Share → Add to Home Screen), the install landing swaps to a panel asking them to use Chrome, Edge, Safari, or another browser that supports PWA install. No in-browser fallback to the directory — this is a PWA, not SaaS.
+8. **Unsupported browsers are told so — on click, not eagerly.** If a user clicks "Install app" and `beforeinstallprompt` never fired (and they're not on iOS Safari), the install landing swaps in a panel asking them to use Chrome, Edge, Safari, or another browser that supports PWA install. No auto-timer: Chrome suppresses `beforeinstallprompt` when the PWA is already installed on the device, and an eager timer would false-positive on those users.
+9. **URL-just-works for returning visitors.** A browser-tab visit with `fellows_authenticated_once` set *acts as the app* (directory via API) instead of forcing the install landing. The installed standalone PWA remains the preferred launcher; this is a graceful fallback for users who type/bookmark the URL. `?gate=1` still wins in every case.
 
 ## Browser-mode decision tree
 
@@ -37,29 +38,49 @@ Evaluated on every page render (after auth-status fetch). Order matters — firs
 ```
 1. URL hash == "#/unlock/<token>"?
      POST /api/verify-token {token}
-       → 200 ok        : cookie{token_issued_at=now} set by server; strip hash; fall through to #3
+       → 200 ok        : cookie{token_issued_at=now} set by server; strip hash; fall through to #2
        → 401 expired   : location.replace("/?gate=1&reason=expired")
        → 401 invalid   : location.replace("/?gate=1&reason=invalid")
        → network err   : location.replace("/?gate=1&reason=invalid")
 
-2. ?gate=1 in URL?
+2. localStorage[fellows_authenticated_once] == "1"  AND  ?gate=1 NOT in URL?
+     → ACT AS APP (directory via API, same code path as standalone PWA)
+       - This is "URL-just-works": a returning user who already installed the
+         PWA once sees the directory in a regular browser tab instead of
+         being pushed through the install landing again. The installed
+         standalone copy remains the preferred launcher; this path is a
+         graceful fallback when they type/bookmark the URL.
+       - If the API refuses (session expired, 5xx), fall through to
+         startBrowserUx (item #3+) so the email gate can appear.
+
+3. ?gate=1 in URL?
      → EMAIL GATE
        ?reason=expired → banner "That link expired. Enter your email to get a new one."
        ?reason=invalid → banner "That link isn't valid. Enter your email to get a new one."
        otherwise       → no banner
 
-3. authStatus.authEnabled == false  (local dev passthrough)
+4. authStatus.authEnabled == false  (local dev passthrough)
      → INSTALL LANDING (dev has no real gate; this preserves the developer UX)
 
-4. authStatus.authenticated && authStatus.installRecentlyAllowed
+5. authStatus.authenticated && authStatus.installRecentlyAllowed
      → INSTALL LANDING
        - Install button wired to beforeinstallprompt
-       - After 3s with no prompt and not iOS Safari: swap to unsupported-browser panel
+       - Unsupported-browser hint only shows on click when prompt isn't
+         available (no 3s auto-timer — see PR #47).
        - "Back to email gate" link: POST /api/logout then navigate /?gate=1
 
-5. default
+6. default
      → EMAIL GATE (no banner)
 ```
+
+### `fellows_authenticated_once` marker
+
+Set in two places:
+
+- `startBrowserUx` when `/api/auth/status` returns `authenticated: true` — the browser has a valid session, so even if the install window has closed we know this origin has been cleared before.
+- Successful `getList()` in app-mode boot (standalone PWA, or browser-tab-acting-as-app) — proves the API accepted our session.
+
+Preserved across `clearAllAppData` (the only localStorage key that survives Clear App Cache). Rationale: "Clear App Cache" exists to fix a broken app, not to log users out of an install they were happily using.
 
 ## PWA-mode decision tree
 
