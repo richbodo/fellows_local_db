@@ -339,6 +339,25 @@ def slugify(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", text.lower().strip()).strip("_") or ""
 
 
+# MD5 hashes of the grey-diamond Knack default avatar. Fellows who "have"
+# one of these on their profile never actually uploaded a photo — Knack put
+# it there as a default. Treat them as has_image=0 so the UI says
+# "Not Submitted" (accurate) rather than rendering a meaningless placeholder.
+# Source: build/filter_demo_data.py (where the hashes were first collected).
+PLACEHOLDER_IMAGE_HASHES: frozenset = frozenset({
+    "5aa43d100ed38aabebbd8393338e961d",
+    "d01a4e3bd727674a2e698c18b61a63bb",
+})
+
+
+def _md5_of_file(p: Path) -> str:
+    import hashlib
+    try:
+        return hashlib.md5(p.read_bytes()).hexdigest()
+    except OSError:
+        return ""
+
+
 def build_image_index() -> dict[str, Path]:
     d = IMAGES_DIR_SOURCE if IMAGES_DIR_SOURCE.is_dir() else (IMAGES_DIR_APP if IMAGES_DIR_APP.is_dir() else None)
     if not d:
@@ -346,6 +365,10 @@ def build_image_index() -> dict[str, Path]:
     idx: dict[str, Path] = {}
     for p in d.iterdir():
         if not p.is_file() or p.suffix.lower() not in (".jpg", ".jpeg", ".png"):
+            continue
+        # Skip known-placeholder images so the fellow gets has_image=0
+        # (and the UI correctly shows "Not Submitted").
+        if _md5_of_file(p) in PLACEHOLDER_IMAGE_HASHES:
             continue
         stem_alpha = re.sub(r"[^a-z0-9]", "", p.stem.lower())
         if stem_alpha and stem_alpha not in idx:
