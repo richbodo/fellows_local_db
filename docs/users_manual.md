@@ -38,6 +38,50 @@ Chrome or Edge on desktop, or Safari on iOS.
 
 ---
 
+## Where does the installed app live?
+
+A PWA install drops an icon on your device so you can launch the app like
+any other app — you don't need to type the URL or open a browser to use
+it day-to-day.
+
+- **macOS (Chrome / Edge)**: the app appears in your **Applications** folder
+  and in Spotlight (Cmd-Space, type "EHF"). Also listed under Chrome's
+  **Apps** at [chrome://apps](chrome://apps).
+- **Windows (Chrome / Edge)**: look in the **Start menu** under "EHF Fellows
+  Directory". Edge also offers to add a taskbar shortcut during install.
+- **Linux (Chrome / Edge)**: appears in the application launcher (GNOME
+  Activities, KDE Kickoff) and under `~/.local/share/applications/`.
+- **Android (Chrome)**: added to the **home screen** (unless you declined)
+  and always available in the app drawer.
+- **iOS (Safari)**: added to the **home screen**. iOS has no app drawer.
+
+Clicking/tapping the icon opens the app in its own window — no browser
+chrome, runs offline from cached data.
+
+---
+
+## Two ways to launch
+
+You have two doors to the same app. Pick whichever is easier:
+
+1. **The installed app icon** (preferred). Opens in its own window, runs
+   cleanly offline, and doesn't need a browser to be running. This is the
+   "real" app; treat it like any other desktop / mobile app.
+
+2. **The URL — https://fellows.globaldonut.com — in any browser tab**. If
+   you've already installed the app on this browser profile, the URL opens
+   the directory directly (same data, same UI, inside a regular tab). This
+   is handy when:
+   - You want to open the app on a device where the icon isn't obvious.
+   - You clicked a link from a chat or email.
+   - You bookmarked the URL.
+
+The *first* visit from a browser profile always starts at the install
+landing. Once you've installed and used the app once, later URL visits
+skip the install landing and go straight to the directory.
+
+---
+
 ## Using the directory
 
 - **Search** by name, tagline, or any keyword. Results update as you type.
@@ -74,11 +118,12 @@ data), you can reset it:
 2. Scroll to **Diagnostics** → **Clear app cache**.
 3. Confirm. The app wipes its local storage and reloads.
 
-**Heads-up:** clearing the cache logs you out of the app on that device.
-You'll need the original install link (or a fresh one) to re-enter. The
-app preserves a small "you've been here before" marker so a future
-server outage won't strand you at the loud error panel — that marker is
-also cleared.
+**Heads-up:** clearing the cache also re-downloads the fellow data and
+photos on the next launch. The session cookie is cleared, so if the
+server asks for auth again you'll need your install link (or a fresh
+one). The app preserves a small "you've been here before" marker so the
+URL still opens the directory directly and a future server outage won't
+strand you at the error panel.
 
 ---
 
