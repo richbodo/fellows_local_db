@@ -39,3 +39,6 @@ final_fellows_set/
 
 # Local-only fellows data snapshots (see backup/README.md)
 backup/*.zip
+
+# Ansible become-password temp files — never commit
+BECOME_PASS*
