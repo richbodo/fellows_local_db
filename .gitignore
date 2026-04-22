@@ -13,6 +13,7 @@ env/
 playwright-report/
 test-results/
 .playwright/
+tests/e2e/screenshots/
 
 # OS
 .DS_Store
