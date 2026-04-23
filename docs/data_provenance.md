@@ -25,6 +25,8 @@ data in the repo derives from that extraction.
 python build/restore_from_knack_scrapefile.py
 ```
 
+> `just db-rebuild` wraps this and auto-snapshots via `scripts/backup_fellows_data.sh` first — see [`justfile.md`](justfile.md).
+
 Defaults to `final_fellows_set/knack_api_detail_dump.json` as input. Pass a
 different path if you ever run the scrape again:
 

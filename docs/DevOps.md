@@ -117,6 +117,8 @@ python build/build_pwa.py
 ansible-playbook ansible/site.yml --tags deploy --ask-become-pass
 ```
 
+> `just deploy`, `just ship`, `just smoke`, `just prod-logs`, `just prod-status`, `just drift` wrap these and the ops below — see [`justfile.md`](justfile.md).
+
 The deploy path touches:
 1. `/opt/fellows/deploy/` — `server.py`, `sqlite_api_support.py`, `magic_link_auth.py` (via `ansible.builtin.copy`, become: true).
 2. `/opt/fellows/deploy/dist/` — rsync'd as the operator, no sudo.

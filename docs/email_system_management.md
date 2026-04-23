@@ -2,6 +2,8 @@
 
 The production email system is a magic-link gate on `deploy/server.py`: users submit an email to `POST /api/send-unlock`, the server checks a SHA-256 hash against `deploy/dist/allowed_emails.json`, issues a short-lived token (30 minutes — see [`email_gate.md`](email_gate.md)), and sends a Postmark email with a `/#/unlock/<token>` link. When that token is posted to `POST /api/verify-token`, the server sets a signed session cookie and the browser can access protected directory assets (`/fellows.db`, `/images/*`, directory `/api/*`). The system is stateless at deploy-time except for in-memory tokens/rate buckets, so restarts invalidate outstanding tokens by design.
 
+> Command shortcuts: `just prod-configure-env`, `just prod-env`, `just prod-repair-env`, `just email-debug` wrap the scripts below — see [`justfile.md`](justfile.md).
+
 ## Production Setup
 
 Environment variables used in this section:

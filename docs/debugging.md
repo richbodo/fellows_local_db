@@ -58,4 +58,6 @@ curl -sSI https://fellows.globaldonut.com/api/auth/status | grep -i x-fellows-bu
 
 Compare with `git log --format='%ci %h' -1 origin/main`. Production has shipped with stale `deploy/dist/` before; if the build timestamp trails main, run `./scripts/deploy_pwa.sh --ask-become-pass`.
 
+> `just drift` prints both sides side-by-side in one shot; `just deploy` and `just ship-fast` push new builds — see [`justfile.md`](justfile.md).
+
 Other production debug entry points (service logs, Postmark send flow, Diagnostics panel) live in [`docs/email_system_management.md`](email_system_management.md) and [`docs/DevOps.md`](DevOps.md).
