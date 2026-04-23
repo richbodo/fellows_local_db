@@ -1,6 +1,8 @@
 # EHF Fellows Local Directory
 
-Local web app to browse Edmund Hillary Fellowship fellow profiles and run experiments. Data and assets are local-first (SQLite + static files), served by Python stdlib.
+Local web app to quickly browse Edmund Hillary Fellowship fellow profiles and run experiments. 
+
+Data and assets are local-first (SQLite + static files), served by Python stdlib.
 
 ## Table of Contents
 
@@ -24,7 +26,7 @@ Local web app to browse Edmund Hillary Fellowship fellow profiles and run experi
 
 ## Data Note
 
-The app runs against a dump of fellows data (contact emails, mobile numbers, citizenship, location, free-text responses) plus profile photos. **This data is never committed.** The `final_fellows_set/` directory is gitignored; obtain the JSON and image directory out-of-band from the maintainer and drop them in locally:
+The app runs against a dump of fellows data (contact emails, mobile numbers, citizenship, location, free-text responses) plus profile photos. **This data is never committed.**  If we need to write this from scratch and get all the data again: you will have obtain the JSON and image directory out-of-band from the old directory and drop them in locally:
 
 ```
 final_fellows_set/
@@ -32,52 +34,70 @@ final_fellows_set/
   fellow_profile_images_by_name/*.{jpg,png}
 ```
 
-Treat the contents as confidential regardless of demo status. Do not paste excerpts into issues, PRs, commit messages, or third-party tools.
+The github tree is clean of PII.  Still, treat the contents of your app as confidential - you will be given all the info that you are entiled to by the fellows directory system. Do not paste excerpts of fellows data into issues, PRs, commit messages, or third-party tools.
 
 ## Architecture
 
-See [`docs/Architecture.md`](docs/Architecture.md) for system design, data flow, and schema.
+See `[docs/Architecture.md](docs/Architecture.md)` for system design, data flow, and schema.
 
 ## Setup
 
 ### What To Install
 
-| Goal | Install |
-|------|---------|
-| **Run the app only** | **Python 3.8+** and built **`app/fellows.db`**. No pip deps beyond stdlib. |
-| **Run full test suite** (DB + API + Playwright e2e) | Python 3.8+, **`app/fellows.db`**, **`.venv`**, `pip install -r requirements-dev.txt`, and `playwright install chromium`. |
+
+| Goal                                                | Install                                                                                                                   |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| **Run the app only**                                | **Python 3.8+** and built `**app/fellows.db`**. No pip deps beyond stdlib.                                                |
+| **Run full test suite** (DB + API + Playwright e2e) | Python 3.8+, `**app/fellows.db`**, `**.venv`**, `pip install -r requirements-dev.txt`, and `playwright install chromium`. |
+
 
 `requirements-dev.txt` only covers dev/test tools (pytest, Playwright). The app runtime itself does not need them.
+
+> Commands below use the project's `just` command runner. See [`docs/justfile.md`](docs/justfile.md) for the full recipe list and what each one wraps. The long-form scripts still work — `just` is a shortcut, not a replacement.
 
 ### First-Time Setup (Developers)
 
 From repo root:
 
 ```bash
+just setup
+```
+
+That creates `.venv`, installs dev deps + Playwright Chromium + Ansible collections, and builds `app/fellows.db` from the canonical Knack dump.
+
+Under the hood (run these directly if you don't have `just`):
+
+```bash
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
 playwright install chromium
-python build/import_json_to_sqlite.py
+ansible-galaxy collection install -r ansible/collections/requirements.yml -p ansible/collections
+python build/restore_from_knack_scrapefile.py
 ```
 
-Use `python` from the activated `.venv` when running tests so `pytest` and Playwright are on PATH. `scripts/ensure_port_8765_free.sh` expects `.venv/bin/pytest`.
+Use `python` from the activated `.venv` when running tests so `pytest` and Playwright are on PATH. `scripts/ensure_port_8765_free.sh` expects `.venv/bin/pytest`. Run `just doctor` any time to sanity-check venv / DB / Playwright / collections / port 8765.
 
 ## Run Locally
 
 ### Server
 
 ```bash
-python app/server.py
+just serve              # background + auto-opens browser (default)
+just serve-fg           # foreground, watch request logs live
+just stop               # stop background server
+just status             # is it running?
+just restart            # stop + start
+just reset              # stop, canonical DB rebuild (with auto-backup), start
 ```
 
-Then open `http://localhost:8765/`.
+Then open `http://localhost:8765/` (the `just serve` recipe already does this).
 
-Launcher option:
+Lower-level equivalents — useful for one-off debugging or understanding the plumbing:
 
 ```bash
-chmod +x run.sh
-./run.sh
+python app/server.py    # raw foreground server
+./run.sh                # the shell launcher just serve wraps (backgrounds with a PID file)
 ```
 
 ### API Endpoints
@@ -97,33 +117,32 @@ The UI requests `/api/fellows` first (instant list), then fetches `/api/fellows?
 
 ## Testing
 
-Prereqs: `.venv` active, `requirements-dev.txt` installed, Playwright Chromium installed, and `app/fellows.db` present.
-
-Recommended:
+Prereqs: `.venv` active, `requirements-dev.txt` installed, Playwright Chromium installed, and `app/fellows.db` present. `just doctor` verifies all five in one shot.
 
 ```bash
-chmod +x scripts/ensure_port_8765_free.sh
-./scripts/ensure_port_8765_free.sh tests/ -v
+just test               # full suite (port 8765 auto-freed first)
+just test-fast          # DB + API only, skips Playwright (~10x faster)
+just test-db            # just tests/test_database.py
+just test-api           # just tests/test_api.py
+just test-e2e           # just Playwright e2e
+just test-e2e email     # e2e filtered by pytest -k email
+just port               # free port 8765 without running tests
 ```
 
-Free port only:
+To forward pytest flags through `just test`, separate with `--`:
 
 ```bash
-./scripts/ensure_port_8765_free.sh
+just test -- tests/e2e/ -v -k email_gate
 ```
 
-Direct pytest:
+Under the hood — what each recipe does:
 
 ```bash
-pytest tests/ -v
-```
-
-By category:
-
-```bash
-pytest tests/test_database.py -v
-pytest tests/test_api.py -v
-pytest tests/e2e/ -v
+./scripts/ensure_port_8765_free.sh           # frees port 8765
+./scripts/ensure_port_8765_free.sh tests/ -v # frees port, runs pytest
+pytest tests/test_database.py -v             # no server needed
+pytest tests/test_api.py -v                  # fixture spawns the server
+pytest tests/e2e/ -v                         # Playwright e2e
 ```
 
 ## Build And Data Pipeline
@@ -131,13 +150,23 @@ pytest tests/e2e/ -v
 ### JSON To SQLite + FTS5
 
 ```bash
-python build/import_json_to_sqlite.py
-python build/import_json_to_sqlite.py /path/to/other.json
+just db-rebuild         # canonical Knack rebuild, auto-backup first, prints row counts
+just db-stats           # row / email / image counts
+just db-verify          # bytewise-diff vs app/fellows.db.backup.2026-04-08
+just db-open            # open app/fellows.db in sqlite3
 ```
 
-Writes `app/fellows.db` and backs up existing DB to `app/fellows.db.backup.YYYY-MM-DD`.
+See [`docs/data_provenance.md`](docs/data_provenance.md) for the full data pipeline and why the canonical Knack rebuild is the right choice over the legacy demo importer.
 
-Verify:
+Under the hood (the ETL scripts the recipes call):
+
+```bash
+python build/restore_from_knack_scrapefile.py                # canonical, what just db-rebuild runs
+python build/restore_from_knack_scrapefile.py /path/to/other.json
+python build/import_json_to_sqlite.py                        # legacy demo importer — see data_provenance.md
+```
+
+Raw SQL probes (for FTS5 experimentation beyond `just db-stats`):
 
 ```bash
 sqlite3 app/fellows.db "SELECT COUNT(*) FROM fellows;"
@@ -148,61 +177,36 @@ sqlite3 app/fellows.db "SELECT name FROM fellows_fts WHERE fellows_fts MATCH 'Aa
 ### PWA Static Bundle
 
 ```bash
-python build/build_pwa.py
+just build              # assemble deploy/dist/
+just build-meta         # print the build-meta.json (timestamp + git sha) of the last build
 ```
 
-`build/build_pwa.py` assembles `deploy/dist/` from `app/static/`, adds `fellows.db`, images, and writes `allowed_emails.json` (SHA-256 hashes of normalized `contact_email` values from the DB).
+Under the hood: `python build/build_pwa.py` assembles `deploy/dist/` from `app/static/`, adds `fellows.db`, images, and writes `allowed_emails.json` (SHA-256 hashes of normalized `contact_email` values from the DB).
 
 ## Production / DevOps
 
-Production runs one Ubuntu droplet behind Caddy TLS. The unix architecture (service account, operator sudo model, systemd hardening, filesystem layout) and routine ops (build + deploy, smoke, bootstrap) are in [`docs/DevOps.md`](docs/DevOps.md). Mechanical Ansible details (tags, galaxy install, logs, troubleshooting) are in [`ansible/README.md`](ansible/README.md). Magic-link auth operator steps (Postmark, env file, journald event schema) are in [`docs/email_system_management.md`](docs/email_system_management.md).
+Production runs one Ubuntu droplet behind Caddy TLS. The unix architecture (service account, operator sudo model, systemd hardening, filesystem layout) and routine ops (build + deploy, smoke, bootstrap) are in `[docs/DevOps.md](docs/DevOps.md)`. Mechanical Ansible details (tags, galaxy install, logs, troubleshooting) are in `[ansible/README.md](ansible/README.md)`. Magic-link auth operator steps (Postmark, env file, journald event schema) are in `[docs/email_system_management.md](docs/email_system_management.md)`.
 
-Most common command, from the repo root:
+Most common commands, from the repo root:
 
 ```bash
-./scripts/deploy_pwa.sh --ask-become-pass
+just deploy             # test-agnostic deploy: build + ansible + HTTPS smoke
+just ship               # test-fast → deploy (the full build-test-deploy-test sequence)
+just ship-fast          # deploy-fast → smoke (reuse existing deploy/dist/, skip tests)
+just drift              # prod X-Fellows-Build vs local HEAD + origin/main
+just smoke              # HTTPS smoke check against prod
+just prod-status        # systemctl status fellows-pwa caddy
+just prod-logs          # journalctl -u fellows-pwa -f (over SSH)
 ```
+
+Under the hood: `./scripts/deploy_pwa.sh --ask-become-pass` runs the `ansible/deploy_pwa.yml` playbook (build → rsync → restart → HTTPS smoke).
 
 ## Local Dev Notes
 
-- **Port 8765:** Prefer `./scripts/ensure_port_8765_free.sh` before manual testing when the port is occupied. Equivalent one-liner: `lsof -ti:8765 | xargs kill -9`.
+- **Port 8765:** Prefer `just port` (or `./scripts/ensure_port_8765_free.sh`) before manual testing when the port is occupied. Equivalent one-liner: `lsof -ti:8765 | xargs kill -9`. Every `just test*` recipe frees the port automatically.
 - **Automation hygiene:** test runs should not leave long-lived servers running. If the port is stuck, run the script above or re-run pytest (which also attempts cleanup in fixtures).
 - **Virtualenv scope:** use `.venv` for dev/test tooling on your workstation; production server runtime uses system Python.
-- **Debugging a stuck PWA / service worker:** when a bug reproduces on your own browser but not on a clean Playwright profile, see [`docs/debugging.md`](docs/debugging.md) for the chrome-devtools-mcp setup that attaches Claude Code to your running Chrome.
-
-## Before Making This Repo Public
-
-**The `final_fellows_set/` data was in git history from the initial commit through this branch point.** Gitignoring it now prevents future commits from leaking PII, but existing history still contains 515+ contact emails, mobile numbers, ethnicity, free-text responses, and 268 profile photos. Any fork or clone made before a history scrub retains that data.
-
-**Do this exactly once, immediately before flipping the repo to public:**
-
-1. **Scrub history:**
-   ```bash
-   # Install if needed: brew install git-filter-repo
-   git filter-repo --path final_fellows_set/ --invert-paths --force
-   ```
-   This rewrites every commit on every branch. All commit SHAs change.
-
-2. **Force-push every branch:**
-   ```bash
-   git push --force-with-lease origin --all
-   git push --force-with-lease origin --tags
-   ```
-   All open PRs, in-flight branches, and clones will break — coordinate before running.
-
-3. **Also scrub** (run `grep -r` before publishing):
-   - Any historical `deploy/dist/` snapshots that might have slipped in (it's gitignored, but double-check).
-   - `ansible/group_vars/fellows.yml` if it ever contained secrets (currently clean — only non-secret config).
-   - Commit messages, author emails, and PR descriptions: GitHub retains these separately from git; audit via `gh pr list --state all` and redact or close anything sensitive.
-
-4. **Rotate any credentials that ever touched the repo**, even if they were only in deleted files:
-   - Postmark server token.
-   - `FELLOWS_SESSION_SECRET` on the droplet.
-   - Any SSH keys whose public parts were committed.
-
-5. **Verify** with `git log --all --full-history -- final_fellows_set/` returning empty, and `git count-objects -v` showing a smaller repo.
-
-6. **Republish the `allowed_emails.json` allowlist** after scrub by re-running `python build/build_pwa.py` and redeploying — the hash file is regenerated from the source JSON so scrubbing history doesn't affect what production serves.
+- **Debugging a stuck PWA / service worker:** when a bug reproduces on your own browser but not on a clean Playwright profile, see `[docs/debugging.md](docs/debugging.md)` for the chrome-devtools-mcp setup that attaches Claude Code to your running Chrome.
 
 ## Project Layout
 
@@ -234,3 +238,4 @@ tests/
   test_magic_link_auth.py
   e2e/
 ```
+

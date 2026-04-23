@@ -41,6 +41,16 @@
     groups: "{{ service_user }}"
     append: true
 
+# Read-only access to journald without sudo. The systemd-journal group is the
+# intended primitive for ops read access (cannot write, cannot escalate) and
+# is narrower than per-command NOPASSWD sudoers. Enables `just prod-stats` and
+# plain `journalctl -u fellows-pwa` from a non-sudo SSH session.
+- name: Ensure operator ({{ operator_user }}) is a member of systemd-journal group
+  ansible.builtin.user:
+    name: "{{ operator_user }}"
+    groups: systemd-journal
+    append: true
+
 # Supplementary group membership only takes effect at next login. Force a
 # fresh SSH session so subsequent tasks (and later rsync) see the new group.
 - name: Reset SSH connection so new group membership takes effect

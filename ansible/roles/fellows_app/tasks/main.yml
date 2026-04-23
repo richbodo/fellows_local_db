@@ -88,6 +88,24 @@
     mode: "0644"
   notify: Restart fellows app
 
+# Operator-facing read-only helpers live under {{ app_root }}/bin. The app
+# service itself never invokes these, so no restart notify.
+- name: Ensure operator-helpers bin directory exists
+  ansible.builtin.file:
+    path: "{{ app_root }}/bin"
+    state: directory
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
+    mode: "2775"
+
+- name: Install prod_stats helper
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../scripts/prod_stats.py"
+    dest: "{{ app_root }}/bin/prod_stats"
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
+    mode: "0755"
+
 # Preflight: confirm the operator (ansible_user, not root) can actually write
 # into every dist subdirectory before rsync tries. If normalization above
 # didn't take — filesystem ACLs, mount options, something unexpected — we

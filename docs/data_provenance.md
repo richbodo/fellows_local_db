@@ -22,17 +22,19 @@ data in the repo derives from that extraction.
 ## How to rebuild `app/fellows.db` from source
 
 ```bash
-python build/restore_from_knack_scrapefile.py
+just db-rebuild
 ```
 
-> `just db-rebuild` wraps this and auto-snapshots via `scripts/backup_fellows_data.sh` first — see [`justfile.md`](justfile.md).
+This snapshots the current state via `scripts/backup_fellows_data.sh` first (so a botched rebuild is always recoverable), then runs the canonical ETL, then prints row / email / image counts for a sanity check.
 
-Defaults to `final_fellows_set/knack_api_detail_dump.json` as input. Pass a
-different path if you ever run the scrape again:
+Under the hood — the raw ETL script, if you want to pass a different input file or see exactly what runs:
 
 ```bash
+python build/restore_from_knack_scrapefile.py
 python build/restore_from_knack_scrapefile.py /path/to/newer_detail_dump.json
 ```
+
+Defaults to `final_fellows_set/knack_api_detail_dump.json` as input. Pass a different path if you ever run the scrape again.
 
 The script:
 1. Reads the detail dump (dict keyed by `record_id`).
@@ -44,10 +46,10 @@ The script:
 To verify bytewise equivalence against the reference backup:
 
 ```bash
-python build/diff_fellows_db.py app/fellows.db app/fellows.db.backup.2026-04-08
+just db-verify
 ```
 
-Expected: `✓ bytewise match on all columns`.
+Under the hood: `python build/diff_fellows_db.py app/fellows.db app/fellows.db.backup.2026-04-08`. Expected: `✓ bytewise match on all columns`. Use `just db-diff OTHER` to compare against any other DB file.
 
 ## Column-by-column provenance
 
@@ -109,16 +111,27 @@ you change the mapping, update this table too.
 
 ## Backup workflow
 
-`scripts/backup_fellows_data.sh` snapshots the current state — DB + all
-source JSONs + image dir + manifest — into `backup/fellows_data_<ts>_<sha>.zip`.
+```bash
+just data-backup        # snapshot DB + source JSONs + images into backup/*.zip
+just data-restore       # restore from --latest (interactive y/N after manifest)
+just data-restore-dry   # print manifest + file list, don't touch anything
+```
 
-Run it:
-- Before any rebuild (`restore_from_knack_scrapefile.py`)
-- Before any manual SQL on `app/fellows.db`
-- Before any new scrape
+Under the hood: `scripts/backup_fellows_data.sh` snapshots the current state — DB + all source JSONs + image dir + manifest — into `backup/fellows_data_<ts>_<sha>.zip`. `just db-rebuild` and `just db-rebuild-demo` call it automatically.
 
-Restore from a snapshot with `scripts/restore_fellows_data.sh <zip>` (or
-`--latest`). See [`backup/README.md`](../backup/README.md) for details.
+Run a backup:
+- Before any rebuild (`just db-rebuild` does it for you; do it yourself before raw `restore_from_knack_scrapefile.py`).
+- Before any manual SQL on `app/fellows.db`.
+- Before any new scrape.
+
+Restore lower-level (same script `just data-restore` wraps):
+
+```bash
+./scripts/restore_fellows_data.sh <zip>
+./scripts/restore_fellows_data.sh --latest
+```
+
+See [`backup/README.md`](../backup/README.md) for details.
 
 ## Rollback / recovery
 
@@ -126,7 +139,8 @@ Three recovery paths, in order of safety:
 
 1. **From a recent local snapshot**. Fastest:
    ```bash
-   ./scripts/restore_fellows_data.sh --latest
+   just data-restore
+   # under the hood: ./scripts/restore_fellows_data.sh --latest
    ```
 2. **From the reference backup DB**. If snapshots are gone or corrupted,
    the Apr 8 backup DB is the fixed point in time:
@@ -135,14 +149,15 @@ Three recovery paths, in order of safety:
    ```
    Note: this DB predates the `has_image` column (added in PR #19). The
    ETL adds it on rebuild; if you restore the backup directly, re-run
-   `python build/restore_from_knack_scrapefile.py` afterwards to get the
-   modern schema + image-index backfill.
+   `just db-rebuild` (or `python build/restore_from_knack_scrapefile.py`)
+   afterwards to get the modern schema + image-index backfill.
 3. **From raw Knack dumps**. The full rebuild:
    ```bash
-   python build/restore_from_knack_scrapefile.py
+   just db-rebuild
+   # under the hood: python build/restore_from_knack_scrapefile.py
    ```
    Produces the same DB as the Apr 8 backup, bytewise (verify with
-   `diff_fellows_db.py`).
+   `just db-verify`).
 
 ## Why `build/filter_demo_data.py` and the `.bak` JSON are DANGEROUS
 

@@ -109,15 +109,18 @@ Adhoc commands that don't need root require `ANSIBLE_BECOME=false` (because beco
 From the repo root:
 
 ```bash
-# Rebuild the static bundle and push to the droplet (most common flow).
-./scripts/deploy_pwa.sh --ask-become-pass
+just deploy             # most common: build + push + restart + HTTPS smoke
+just ship               # test-fast → deploy (safest daily push)
+just ship-fast          # deploy-fast + smoke (reuse existing deploy/dist/)
+just deploy-check       # Ansible --check mode: what would change, no writes
+```
 
-# Equivalent manual form:
+Under the hood these call `./scripts/deploy_pwa.sh --ask-become-pass`, which runs the `ansible/deploy_pwa.yml` playbook. Equivalent manual form:
+
+```bash
 python build/build_pwa.py
 ansible-playbook ansible/site.yml --tags deploy --ask-become-pass
 ```
-
-> `just deploy`, `just ship`, `just smoke`, `just prod-logs`, `just prod-status`, `just drift` wrap these and the ops below — see [`justfile.md`](justfile.md).
 
 The deploy path touches:
 1. `/opt/fellows/deploy/` — `server.py`, `sqlite_api_support.py`, `magic_link_auth.py` (via `ansible.builtin.copy`, become: true).
@@ -128,8 +131,17 @@ The deploy path touches:
 Post-deploy smoke:
 
 ```bash
-./scripts/smoke_prod.sh       # /healthz, /manifest.webmanifest
-./scripts/check_deploy_env.sh # DNS + TLS
+just smoke              # /healthz, /manifest.webmanifest, /api/debug/diagnostics
+just check-env          # DNS + TLS + healthz
+just prod-status        # systemctl status fellows-pwa caddy (over SSH)
+just drift              # prod X-Fellows-Build vs local HEAD + origin/main
+```
+
+Lower-level equivalents (what each recipe runs):
+
+```bash
+./scripts/smoke_prod.sh
+./scripts/check_deploy_env.sh
 ssh -p 52221 rsb@fellows.globaldonut.com 'systemctl status fellows-pwa caddy --no-pager'
 ```
 
@@ -139,6 +151,13 @@ ssh -p 52221 rsb@fellows.globaldonut.com 'systemctl status fellows-pwa caddy --n
 # 1. Provision Droplet, assign Reserved IP (170.64.243.67), create DNS A record.
 # 2. Ensure your SSH key is in /home/rsb/.ssh/authorized_keys on the droplet.
 # 3. From the repo root:
+just ansible-collections    # one-time per workstation
+just bootstrap              # ansible site.yml --tags bootstrap --ask-become-pass
+```
+
+Under the hood:
+
+```bash
 ansible-galaxy collection install -r ansible/collections/requirements.yml -p ansible/collections
 ansible-playbook ansible/site.yml --tags bootstrap --ask-become-pass
 ```
@@ -150,17 +169,18 @@ The first run creates the `fellows` system user, adds `rsb` to the `fellows` gro
 After bootstrap, install Postmark + session secrets once:
 
 ```bash
-./scripts/configure_email_auth_env.sh
+just prod-configure-env
 ```
 
-The script prompts for `FELLOWS_MAIL_FROM`, `FELLOWS_PUBLIC_ORIGIN`, `FELLOWS_POSTMARK_TOKEN`, `FELLOWS_SESSION_SECRET`, then SSHes to the droplet and creates `/etc/fellows/fellows-pwa.env` (`root:fellows 0640`) and the systemd drop-in. Re-run only when a secret rotates.
+That wraps `./scripts/configure_email_auth_env.sh`, which prompts for `FELLOWS_MAIL_FROM`, `FELLOWS_PUBLIC_ORIGIN`, `FELLOWS_POSTMARK_TOKEN`, `FELLOWS_SESSION_SECRET`, then SSHes to the droplet and creates `/etc/fellows/fellows-pwa.env` (`root:fellows 0640`) and the systemd drop-in. Re-run only when a secret rotates.
 
 ## Debugging
 
-- **Service**: `journalctl -u fellows-pwa -f` streams structured JSON (`event=auth_status`, `event=send_unlock_email`, `event=build_meta`).
-- **Bundle drift**: the browser has a Diagnostics panel (`?diag=1`) that shows `X-Fellows-Build`, auth state, and Cache API contents. Pair with `journalctl` to confirm client and server are on the same build.
+- **Service**: `just prod-logs` (`journalctl -u fellows-pwa -f`) streams structured JSON (`event=auth_status`, `event=send_unlock_email`, `event=build_meta`). Pass a different unit with `just prod-logs caddy`.
+- **Bundle drift**: `just drift` shows prod's `X-Fellows-Build` alongside local `HEAD` and `origin/main`. The browser's Diagnostics panel (`?diag=1`) shows the same header plus auth state and Cache API contents. Pair with `just prod-logs` to confirm client and server are on the same build.
+- **Send-flow failures**: `just email-debug` mines recent `event=send_unlock_email` entries from journald and optionally resolves Postmark `MessageID`s.
 - **Deploy failures**: `ansible-playbook … -vvv` for SSH/module detail. Log path is `ansible/ansible.log` relative to the repo root.
-- **Permissions on `/opt/fellows`**: if rsync fails with "Permission denied," confirm the operator is in the `fellows` group (`id rsb` should list it) and that a fresh SSH session picked it up (logout/login or the Ansible `reset_connection` step).
+- **Permissions on `/opt/fellows`**: `just prod-diag-perms` (a read-only audit) reports group membership, mode bits, setgid inheritance, and runs rsync write probes. If rsync fails with "Permission denied," confirm the operator is in the `fellows` group (`id rsb` should list it) and that a fresh SSH session picked it up (logout/login or the Ansible `reset_connection` step).
 
 ## What we explicitly did not build
 

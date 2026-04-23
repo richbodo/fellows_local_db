@@ -53,11 +53,11 @@ If you're reproducing a bug on a **fresh** visitor (first-time install, behavior
 When local code and production behavior diverge, check that the droplet is on current `main`:
 
 ```bash
-curl -sSI https://fellows.globaldonut.com/api/auth/status | grep -i x-fellows-build
+just drift              # prod X-Fellows-Build vs local HEAD + origin/main, side-by-side
+just deploy             # rebuild bundle and push if prod is behind
+just ship-fast          # if deploy/dist/ is already current, just re-push + smoke
 ```
 
-Compare with `git log --format='%ci %h' -1 origin/main`. Production has shipped with stale `deploy/dist/` before; if the build timestamp trails main, run `./scripts/deploy_pwa.sh --ask-become-pass`.
-
-> `just drift` prints both sides side-by-side in one shot; `just deploy` and `just ship-fast` push new builds — see [`justfile.md`](justfile.md).
+Under the hood: `just drift` runs `curl -sSI https://fellows.globaldonut.com/api/auth/status | grep -i x-fellows-build` and compares against `git log -1 origin/main` / `HEAD`. Production has shipped with stale `deploy/dist/` before; if the build timestamp trails main, run `just deploy` (or `./scripts/deploy_pwa.sh --ask-become-pass`).
 
 Other production debug entry points (service logs, Postmark send flow, Diagnostics panel) live in [`docs/email_system_management.md`](email_system_management.md) and [`docs/DevOps.md`](DevOps.md).
