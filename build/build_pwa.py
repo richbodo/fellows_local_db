@@ -84,7 +84,7 @@ def main() -> int:
         shutil.copy2(DB_SRC, DIST_DIR / "fellows.db")
         write_allowed_email_hashes(DB_SRC, DIST_DIR / "allowed_emails.json")
     else:
-        print(f"Warning: no database at {DB_SRC} — run build/import_json_to_sqlite.py", file=sys.stderr)
+        print(f"Warning: no database at {DB_SRC} — run build/restore_from_knack_scrapefile.py", file=sys.stderr)
     img_src = IMAGES_SRC if IMAGES_SRC.is_dir() else (IMAGES_FALLBACK if IMAGES_FALLBACK.is_dir() else None)
     if img_src:
         dest = DIST_DIR / "images"

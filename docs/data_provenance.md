@@ -14,7 +14,7 @@ data in the repo derives from that extraction.
 | `final_fellows_set/knack_api_detail_dump.json`          | source  | 515       | **Primary source of truth.** Detail-view records keyed by Knack `record_id`; 86 fields per record (Knack `field_XXX` codes). |
 | `final_fellows_set/knack_api_raw_dump.json`             | source  | 515       | Supplementary. Three Knack list views (`public`, `alumni`, `search`). Used for a handful of fields that the detail view omits (notably `field_649` → `fellow_type` for 8 fellows). |
 | `final_fellows_set/ehf_fellow_profiles_knack_api.json`  | source  | 515       | Flat Knack export; no contact emails. Not used by the current ETL — kept for historical reference. |
-| `final_fellows_set/ehf_fellow_profiles_deduped.json.bak.2026-04-08` | source | 442 | **Lossy demo subset** — fellows with no profile photo stripped, emails stripped from remainder. Retained only as a cautionary tale; never use as a rebuild source. |
+| `final_fellows_set/ehf_fellow_profiles_deduped.json.bak.2026-04-08` | historical | 442 | **Lossy demo subset** from the old HTML-scrape era — fellows without photos dropped, no emails. Not used by any current ETL; kept only as a historical artifact. |
 | `final_fellows_set/fellow_profile_images_by_name/`      | source  | 251 files | Profile photos, filenames `<slug>.jpg`. One per fellow who uploaded a photo. The ~264 fellows without photos never uploaded one. |
 | `app/fellows.db`                                        | built   | 515       | SQLite DB produced from the above. **Gitignored**; rebuild via the script below. |
 | `app/fellows.db.backup.2026-04-08`                      | source-of-last-resort | 515 | A known-good pre-built DB. If the ETL is broken, `scripts/restore_fellows_data.sh` can put it back. |
@@ -117,7 +117,7 @@ just data-restore       # restore from --latest (interactive y/N after manifest)
 just data-restore-dry   # print manifest + file list, don't touch anything
 ```
 
-Under the hood: `scripts/backup_fellows_data.sh` snapshots the current state — DB + all source JSONs + image dir + manifest — into `backup/fellows_data_<ts>_<sha>.zip`. `just db-rebuild` and `just db-rebuild-demo` call it automatically.
+Under the hood: `scripts/backup_fellows_data.sh` snapshots the current state — DB + all source JSONs + image dir + manifest — into `backup/fellows_data_<ts>_<sha>.zip`. `just db-rebuild` calls it automatically.
 
 Run a backup:
 - Before any rebuild (`just db-rebuild` does it for you; do it yourself before raw `restore_from_knack_scrapefile.py`).
@@ -159,18 +159,20 @@ Three recovery paths, in order of safety:
    Produces the same DB as the Apr 8 backup, bytewise (verify with
    `just db-verify`).
 
-## Why `build/filter_demo_data.py` and the `.bak` JSON are DANGEROUS
+## Historical note: the `.bak` JSON
 
-The `.bak.2026-04-08` JSON file in `final_fellows_set/` is the output of
-`build/filter_demo_data.py` — a script that strips fellows without profile
-photos AND loses their contact emails in the process. It was intended for
-generating a sanitised demo dataset but **has accidentally been used as a
-rebuild source at least once**, demoting `fellows.db` from 515 / 515
-(fellows / emails) to 442 / 268. That's the "richbodo@gmail.com not on
-allowlist" bug the user hit the morning of 2026-04-20.
+The `.bak.2026-04-08` JSON file in `final_fellows_set/` is a lossy subset
+from the old HTML-scrape era — fellows without profile photos dropped and
+no contact emails. It was once accidentally used as a rebuild source,
+demoting `fellows.db` from 515 / 515 (fellows / emails) to 442 / 268 —
+the "richbodo@gmail.com not on allowlist" bug on 2026-04-20.
 
-**Never pass the `.bak` JSON to any ETL as the source of truth.** The ETL
-exits with a hard error if it's pointed at a file whose row count drops
-below a sanity threshold — see the regression test
+The two scripts that produced and consumed that dataset
+(`build/filter_demo_data.py` and `build/import_json_to_sqlite.py`) have
+since been removed; the canonical ETL is
+`build/restore_from_knack_scrapefile.py`, reading the Knack API dump. If
+you ever need to look at the old pipeline, pull the scripts from git
+history. The regression test
 `test_email_coverage_ratio_catches_demo_filter_regression` in
-`tests/test_database.py`.
+`tests/test_database.py` still guards against any future ETL regression
+that would re-introduce the same row/email drop.

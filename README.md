@@ -156,14 +156,13 @@ just db-verify          # bytewise-diff vs app/fellows.db.backup.2026-04-08
 just db-open            # open app/fellows.db in sqlite3
 ```
 
-See [`docs/data_provenance.md`](docs/data_provenance.md) for the full data pipeline and why the canonical Knack rebuild is the right choice over the legacy demo importer.
+See [`docs/data_provenance.md`](docs/data_provenance.md) for the full data pipeline.
 
-Under the hood (the ETL scripts the recipes call):
+Under the hood (the ETL script the recipes call):
 
 ```bash
 python build/restore_from_knack_scrapefile.py                # canonical, what just db-rebuild runs
 python build/restore_from_knack_scrapefile.py /path/to/other.json
-python build/import_json_to_sqlite.py                        # legacy demo importer — see data_provenance.md
 ```
 
 Raw SQL probes (for FTS5 experimentation beyond `just db-stats`):
@@ -212,7 +211,7 @@ Under the hood: `./scripts/deploy_pwa.sh --ask-become-pass` runs the `ansible/de
 ## Project Layout
 
 ```text
-build/import_json_to_sqlite.py   # JSON -> SQLite + FTS5
+build/restore_from_knack_scrapefile.py  # Knack JSON -> SQLite + FTS5
 build/build_pwa.py               # app/static -> deploy/dist
 app/
   fellows.db                     # Build artifact (gitignored)

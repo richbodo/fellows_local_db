@@ -52,7 +52,7 @@ do_start() {
   fi
   if [ ! -f "$DB" ]; then
     echo "Database not found. Building from JSON..."
-    python3 build/import_json_to_sqlite.py
+    python3 build/restore_from_knack_scrapefile.py
   fi
   python3 app/server.py &
   echo $! > "$PIDFILE"
@@ -73,7 +73,7 @@ do_status() {
 do_reset() {
   echo "Rebuilding database..."
   do_stop
-  python3 build/import_json_to_sqlite.py
+  python3 build/restore_from_knack_scrapefile.py
   do_start
 }
 

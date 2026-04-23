@@ -406,7 +406,7 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     if not DB_PATH.exists():
         print(f"DB not found: {DB_PATH}")
-        print("Run: python build/import_json_to_sqlite.py")
+        print("Run: python build/restore_from_knack_scrapefile.py")
         return 1
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
     server = HTTPServer(("", PORT), Handler)

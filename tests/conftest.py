@@ -22,7 +22,7 @@ def db():
     """Shared SQLite connection to fellows.db; skip if missing."""
     if not os.path.exists(DB_PATH):
         pytest.skip(
-            f"DB not found at {DB_PATH}. Run: python build/import_json_to_sqlite.py"
+            f"DB not found at {DB_PATH}. Run: python build/restore_from_knack_scrapefile.py"
         )
     conn = sqlite3.connect(DB_PATH)
     yield conn
@@ -80,7 +80,7 @@ def app_server():
     global _server
     from app.server import PORT, HTTPServer, Handler, DB_PATH
     if not os.path.isfile(DB_PATH):
-        pytest.skip(f"DB not found: {DB_PATH}. Run: python build/import_json_to_sqlite.py")
+        pytest.skip(f"DB not found: {DB_PATH}. Run: python build/restore_from_knack_scrapefile.py")
     # Free port 8765 so we can bind (e.g. if a previous server or AI-run server is still running)
     _free_port(PORT)
     _server = HTTPServer(("", PORT), Handler)

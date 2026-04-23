@@ -118,12 +118,6 @@ db-rebuild: data-backup
     python3 build/restore_from_knack_scrapefile.py
     @just db-stats
 
-# Rebuild from deduped demo JSON (usually NOT what you want; see data_provenance.md).
-[confirm('Rebuild from DEMO JSON? Can drop rows/emails. Proceed?')]
-[group('db')]
-db-rebuild-demo: data-backup
-    python3 build/import_json_to_sqlite.py
-
 # Bytewise-diff app/fellows.db against the Apr 8 reference backup.
 [group('db')]
 db-verify:
