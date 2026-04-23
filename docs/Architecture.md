@@ -11,25 +11,15 @@
 ## Data Flow
 
 ```
-JSON source data                Build script                  SQLite DB
-ehf_fellow_profiles_deduped.json  →  import_json_to_sqlite.py  →  fellows.db
-                                                                     ↓
+JSON source data                   Build script                          SQLite DB
+knack_api_detail_dump.json  →  restore_from_knack_scrapefile.py  →  fellows.db
+                                                                         ↓
 Browser (vanilla JS SPA)  ←  HTTP API (server.py)  ←  SQL queries
 ```
 
-### Demo Data Filtering
-
-`build/filter_demo_data.py` filters the full JSON source down to fellows suitable for demo:
-
-1. **Name required** — records without a name are dropped
-2. **Image required** — records without a matching local image file are dropped
-3. **Placeholder detection** — images are checked against known placeholder hashes (MD5). The EHF wiki used a grey diamond logo as a default avatar; fellows with this placeholder are excluded so the demo only shows real profile photos.
-
-The filtered output is written to `ehf_fellow_profiles_demo_data.json`, which can be passed to the import script.
-
 ### Build Phase
 
-`build/import_json_to_sqlite.py` reads the JSON, deduplicates slugs, and writes two tables:
+`build/restore_from_knack_scrapefile.py` reads the Knack API detail dump (with a fallback read of the list-view `raw_dump` for a few fields), deduplicates slugs, detects grey-diamond placeholder avatars by MD5, and writes two tables:
 
 - **`fellows`** — 17 explicit TEXT columns + `extra_json` TEXT for overflow fields
 - **`fellows_fts`** — FTS5 virtual table (external content) indexing name, bio_tagline, cohort, fellow_type, search_tags, key_links
@@ -61,7 +51,7 @@ Hash-based SPA routing with no history API and no router library:
 
 ## Database Schema
 
-Produced by `build/import_json_to_sqlite.py` (matches `sqlite3 app/fellows.db ".schema"` for the app-defined objects). Slug uniqueness is enforced with an index rather than an inline `UNIQUE` column constraint.
+Produced by `build/restore_from_knack_scrapefile.py` (matches `sqlite3 app/fellows.db ".schema"` for the app-defined objects). Slug uniqueness is enforced with an index rather than an inline `UNIQUE` column constraint.
 
 ```sql
 CREATE TABLE fellows (

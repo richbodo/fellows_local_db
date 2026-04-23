@@ -343,7 +343,9 @@ def slugify(text: str) -> str:
 # one of these on their profile never actually uploaded a photo — Knack put
 # it there as a default. Treat them as has_image=0 so the UI says
 # "Not Submitted" (accurate) rather than rendering a meaningless placeholder.
-# Source: build/filter_demo_data.py (where the hashes were first collected).
+# Originally collected by MD5-clustering the images directory: the two
+# grey-diamond variants were the only hashes that repeated across dozens
+# of profiles, which is how the default-avatar pattern was identified.
 PLACEHOLDER_IMAGE_HASHES: frozenset = frozenset({
     "5aa43d100ed38aabebbd8393338e961d",
     "d01a4e3bd727674a2e698c18b61a63bb",

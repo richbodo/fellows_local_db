@@ -58,7 +58,7 @@ python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
 playwright install chromium
-python build/import_json_to_sqlite.py
+python build/restore_from_knack_scrapefile.py
 ```
 
 Use `python` from the activated `.venv` when running tests so `pytest` and Playwright are on PATH. `scripts/ensure_port_8765_free.sh` expects `.venv/bin/pytest`.
@@ -131,11 +131,11 @@ pytest tests/e2e/ -v
 ### JSON To SQLite + FTS5
 
 ```bash
-python build/import_json_to_sqlite.py
-python build/import_json_to_sqlite.py /path/to/other.json
+python build/restore_from_knack_scrapefile.py
+python build/restore_from_knack_scrapefile.py /path/to/other_detail_dump.json
 ```
 
-Writes `app/fellows.db` and backs up existing DB to `app/fellows.db.backup.YYYY-MM-DD`.
+Reads `final_fellows_set/knack_api_detail_dump.json` by default and writes `app/fellows.db`. See `docs/data_provenance.md` for the full pipeline.
 
 Verify:
 
@@ -207,7 +207,7 @@ Most common command, from the repo root:
 ## Project Layout
 
 ```text
-build/import_json_to_sqlite.py   # JSON -> SQLite + FTS5
+build/restore_from_knack_scrapefile.py  # Knack JSON -> SQLite + FTS5
 build/build_pwa.py               # app/static -> deploy/dist
 app/
   fellows.db                     # Build artifact (gitignored)

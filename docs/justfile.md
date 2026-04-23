@@ -18,9 +18,8 @@ Run `just` with no arguments for the live menu.
   shown in the list (e.g. `prod-logs unit="fellows-pwa"`).
 - **Forwarding flags** to pytest needs a `--` separator so `just` itself
   doesn't try to parse them: `just test -- tests/e2e/ -v -k email_gate`.
-- **Confirmations** — `db-rebuild-demo` asks before running (it's the
-  footgun from `data_provenance.md`). Nothing else prompts besides whatever
-  the underlying script already prompts for (e.g. `data-restore`'s y/N,
+- **Confirmations** — nothing prompts besides whatever the underlying
+  script already prompts for (e.g. `data-restore`'s y/N,
   `prod-configure-env`'s entry flow, `--ask-become-pass` for Ansible).
 
 ## Environment overrides
@@ -68,9 +67,6 @@ Export them or inline: `FELLOWS_BASE_URL=https://staging.example.com just smoke`
 - **`db-rebuild`** — canonical rebuild from `final_fellows_set/knack_api_detail_dump.json`,
   **automatically snapshotting** to `backup/` first (via `data-backup`
   dependency). Prints row/email/image counts when done.
-- **`db-rebuild-demo`** — rebuild from the deduped demo JSON. **Asks for
-  confirmation.** See `docs/data_provenance.md` — the demo JSON has dropped
-  rows and stripped emails. Almost never what you want.
 - **`db-verify`** — bytewise-diff `app/fellows.db` against
   `app/fellows.db.backup.2026-04-08` (the reference known-good DB). Expected
   output: `✓ bytewise match on all columns`.
@@ -84,7 +80,7 @@ Export them or inline: `FELLOWS_BASE_URL=https://staging.example.com just smoke`
 
 - **`data-backup`** — snapshot DB + source JSONs + images to
   `backup/fellows_data_<ts>_<sha>.zip`. Wraps `scripts/backup_fellows_data.sh`.
-  Called automatically by `db-rebuild` and `db-rebuild-demo`.
+  Called automatically by `db-rebuild`.
 - **`data-restore ZIP`** — restore from a backup zip. `ZIP` defaults to
   `--latest`. Interactive — the underlying script prompts y/N after showing
   the manifest.
