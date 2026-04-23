@@ -1,6 +1,8 @@
 # EHF Fellows Local Directory
 
-Local web app to browse Edmund Hillary Fellowship fellow profiles and run experiments. Data and assets are local-first (SQLite + static files), served by Python stdlib.
+Local web app to quickly browse Edmund Hillary Fellowship fellow profiles and run experiments. 
+
+Data and assets are local-first (SQLite + static files), served by Python stdlib.
 
 ## Table of Contents
 
@@ -24,7 +26,7 @@ Local web app to browse Edmund Hillary Fellowship fellow profiles and run experi
 
 ## Data Note
 
-The app runs against a dump of fellows data (contact emails, mobile numbers, citizenship, location, free-text responses) plus profile photos. **This data is never committed.** The `final_fellows_set/` directory is gitignored; obtain the JSON and image directory out-of-band from the maintainer and drop them in locally:
+The app runs against a dump of fellows data (contact emails, mobile numbers, citizenship, location, free-text responses) plus profile photos. **This data is never committed.**  If we need to write this from scratch and get all the data again: you will have obtain the JSON and image directory out-of-band from the old directory and drop them in locally:
 
 ```
 final_fellows_set/
@@ -32,22 +34,26 @@ final_fellows_set/
   fellow_profile_images_by_name/*.{jpg,png}
 ```
 
-Treat the contents as confidential regardless of demo status. Do not paste excerpts into issues, PRs, commit messages, or third-party tools.
+The github tree is clean of PII.  Still, treat the contents of your app as confidential - you will be given all the info that you are entiled to by the fellows directory system. Do not paste excerpts of fellows data into issues, PRs, commit messages, or third-party tools.
 
 ## Architecture
 
-See [`docs/Architecture.md`](docs/Architecture.md) for system design, data flow, and schema.
+See `[docs/Architecture.md](docs/Architecture.md)` for system design, data flow, and schema.
 
 ## Setup
 
 ### What To Install
 
-| Goal | Install |
-|------|---------|
-| **Run the app only** | **Python 3.8+** and built **`app/fellows.db`**. No pip deps beyond stdlib. |
-| **Run full test suite** (DB + API + Playwright e2e) | Python 3.8+, **`app/fellows.db`**, **`.venv`**, `pip install -r requirements-dev.txt`, and `playwright install chromium`. |
+
+| Goal                                                | Install                                                                                                                   |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| **Run the app only**                                | **Python 3.8+** and built `**app/fellows.db`**. No pip deps beyond stdlib.                                                |
+| **Run full test suite** (DB + API + Playwright e2e) | Python 3.8+, `**app/fellows.db`**, `**.venv`**, `pip install -r requirements-dev.txt`, and `playwright install chromium`. |
+
 
 `requirements-dev.txt` only covers dev/test tools (pytest, Playwright). The app runtime itself does not need them.
+
+> A `just`-based shortcut layer over the scripts below lives at `justfile` (see [`docs/justfile.md`](docs/justfile.md)). `just setup`, `just serve`, `just test`, `just deploy`, etc. — no new deps; the long forms here still work.
 
 ### First-Time Setup (Developers)
 
@@ -155,7 +161,7 @@ python build/build_pwa.py
 
 ## Production / DevOps
 
-Production runs one Ubuntu droplet behind Caddy TLS. The unix architecture (service account, operator sudo model, systemd hardening, filesystem layout) and routine ops (build + deploy, smoke, bootstrap) are in [`docs/DevOps.md`](docs/DevOps.md). Mechanical Ansible details (tags, galaxy install, logs, troubleshooting) are in [`ansible/README.md`](ansible/README.md). Magic-link auth operator steps (Postmark, env file, journald event schema) are in [`docs/email_system_management.md`](docs/email_system_management.md).
+Production runs one Ubuntu droplet behind Caddy TLS. The unix architecture (service account, operator sudo model, systemd hardening, filesystem layout) and routine ops (build + deploy, smoke, bootstrap) are in `[docs/DevOps.md](docs/DevOps.md)`. Mechanical Ansible details (tags, galaxy install, logs, troubleshooting) are in `[ansible/README.md](ansible/README.md)`. Magic-link auth operator steps (Postmark, env file, journald event schema) are in `[docs/email_system_management.md](docs/email_system_management.md)`.
 
 Most common command, from the repo root:
 
@@ -168,41 +174,7 @@ Most common command, from the repo root:
 - **Port 8765:** Prefer `./scripts/ensure_port_8765_free.sh` before manual testing when the port is occupied. Equivalent one-liner: `lsof -ti:8765 | xargs kill -9`.
 - **Automation hygiene:** test runs should not leave long-lived servers running. If the port is stuck, run the script above or re-run pytest (which also attempts cleanup in fixtures).
 - **Virtualenv scope:** use `.venv` for dev/test tooling on your workstation; production server runtime uses system Python.
-- **Debugging a stuck PWA / service worker:** when a bug reproduces on your own browser but not on a clean Playwright profile, see [`docs/debugging.md`](docs/debugging.md) for the chrome-devtools-mcp setup that attaches Claude Code to your running Chrome.
-
-## Before Making This Repo Public
-
-**The `final_fellows_set/` data was in git history from the initial commit through this branch point.** Gitignoring it now prevents future commits from leaking PII, but existing history still contains 515+ contact emails, mobile numbers, ethnicity, free-text responses, and 268 profile photos. Any fork or clone made before a history scrub retains that data.
-
-**Do this exactly once, immediately before flipping the repo to public:**
-
-1. **Scrub history:**
-   ```bash
-   # Install if needed: brew install git-filter-repo
-   git filter-repo --path final_fellows_set/ --invert-paths --force
-   ```
-   This rewrites every commit on every branch. All commit SHAs change.
-
-2. **Force-push every branch:**
-   ```bash
-   git push --force-with-lease origin --all
-   git push --force-with-lease origin --tags
-   ```
-   All open PRs, in-flight branches, and clones will break — coordinate before running.
-
-3. **Also scrub** (run `grep -r` before publishing):
-   - Any historical `deploy/dist/` snapshots that might have slipped in (it's gitignored, but double-check).
-   - `ansible/group_vars/fellows.yml` if it ever contained secrets (currently clean — only non-secret config).
-   - Commit messages, author emails, and PR descriptions: GitHub retains these separately from git; audit via `gh pr list --state all` and redact or close anything sensitive.
-
-4. **Rotate any credentials that ever touched the repo**, even if they were only in deleted files:
-   - Postmark server token.
-   - `FELLOWS_SESSION_SECRET` on the droplet.
-   - Any SSH keys whose public parts were committed.
-
-5. **Verify** with `git log --all --full-history -- final_fellows_set/` returning empty, and `git count-objects -v` showing a smaller repo.
-
-6. **Republish the `allowed_emails.json` allowlist** after scrub by re-running `python build/build_pwa.py` and redeploying — the hash file is regenerated from the source JSON so scrubbing history doesn't affect what production serves.
+- **Debugging a stuck PWA / service worker:** when a bug reproduces on your own browser but not on a clean Playwright profile, see `[docs/debugging.md](docs/debugging.md)` for the chrome-devtools-mcp setup that attaches Claude Code to your running Chrome.
 
 ## Project Layout
 
@@ -234,3 +206,4 @@ tests/
   test_magic_link_auth.py
   e2e/
 ```
+

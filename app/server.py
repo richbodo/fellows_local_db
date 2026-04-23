@@ -211,7 +211,7 @@ def find_image(slug: str) -> Path | None:
         if p.is_file():
             return p
     # Fallback: compare alphanumeric-only to handle mismatched underscores/hyphens
-    # e.g. slug "shannon_o_leary_joy" matches file "shannon_oleary_joy.jpg"
+    # e.g. slug "a_b_c_d" matches file "abcd.jpg"
     base_alpha = re.sub(r"[^a-z0-9]", "", base.lower())
     if not base_alpha:
         return None
