@@ -53,37 +53,51 @@ See `[docs/Architecture.md](docs/Architecture.md)` for system design, data flow,
 
 `requirements-dev.txt` only covers dev/test tools (pytest, Playwright). The app runtime itself does not need them.
 
-> A `just`-based shortcut layer over the scripts below lives at `justfile` (see [`docs/justfile.md`](docs/justfile.md)). `just setup`, `just serve`, `just test`, `just deploy`, etc. — no new deps; the long forms here still work.
+> Commands below use the project's `just` command runner. See [`docs/justfile.md`](docs/justfile.md) for the full recipe list and what each one wraps. The long-form scripts still work — `just` is a shortcut, not a replacement.
 
 ### First-Time Setup (Developers)
 
 From repo root:
 
 ```bash
+just setup
+```
+
+That creates `.venv`, installs dev deps + Playwright Chromium + Ansible collections, and builds `app/fellows.db` from the canonical Knack dump.
+
+Under the hood (run these directly if you don't have `just`):
+
+```bash
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
 playwright install chromium
-python build/import_json_to_sqlite.py
+ansible-galaxy collection install -r ansible/collections/requirements.yml -p ansible/collections
+python build/restore_from_knack_scrapefile.py
 ```
 
-Use `python` from the activated `.venv` when running tests so `pytest` and Playwright are on PATH. `scripts/ensure_port_8765_free.sh` expects `.venv/bin/pytest`.
+Use `python` from the activated `.venv` when running tests so `pytest` and Playwright are on PATH. `scripts/ensure_port_8765_free.sh` expects `.venv/bin/pytest`. Run `just doctor` any time to sanity-check venv / DB / Playwright / collections / port 8765.
 
 ## Run Locally
 
 ### Server
 
 ```bash
-python app/server.py
+just serve              # background + auto-opens browser (default)
+just serve-fg           # foreground, watch request logs live
+just stop               # stop background server
+just status             # is it running?
+just restart            # stop + start
+just reset              # stop, canonical DB rebuild (with auto-backup), start
 ```
 
-Then open `http://localhost:8765/`.
+Then open `http://localhost:8765/` (the `just serve` recipe already does this).
 
-Launcher option:
+Lower-level equivalents — useful for one-off debugging or understanding the plumbing:
 
 ```bash
-chmod +x run.sh
-./run.sh
+python app/server.py    # raw foreground server
+./run.sh                # the shell launcher just serve wraps (backgrounds with a PID file)
 ```
 
 ### API Endpoints
@@ -103,33 +117,32 @@ The UI requests `/api/fellows` first (instant list), then fetches `/api/fellows?
 
 ## Testing
 
-Prereqs: `.venv` active, `requirements-dev.txt` installed, Playwright Chromium installed, and `app/fellows.db` present.
-
-Recommended:
+Prereqs: `.venv` active, `requirements-dev.txt` installed, Playwright Chromium installed, and `app/fellows.db` present. `just doctor` verifies all five in one shot.
 
 ```bash
-chmod +x scripts/ensure_port_8765_free.sh
-./scripts/ensure_port_8765_free.sh tests/ -v
+just test               # full suite (port 8765 auto-freed first)
+just test-fast          # DB + API only, skips Playwright (~10x faster)
+just test-db            # just tests/test_database.py
+just test-api           # just tests/test_api.py
+just test-e2e           # just Playwright e2e
+just test-e2e email     # e2e filtered by pytest -k email
+just port               # free port 8765 without running tests
 ```
 
-Free port only:
+To forward pytest flags through `just test`, separate with `--`:
 
 ```bash
-./scripts/ensure_port_8765_free.sh
+just test -- tests/e2e/ -v -k email_gate
 ```
 
-Direct pytest:
+Under the hood — what each recipe does:
 
 ```bash
-pytest tests/ -v
-```
-
-By category:
-
-```bash
-pytest tests/test_database.py -v
-pytest tests/test_api.py -v
-pytest tests/e2e/ -v
+./scripts/ensure_port_8765_free.sh           # frees port 8765
+./scripts/ensure_port_8765_free.sh tests/ -v # frees port, runs pytest
+pytest tests/test_database.py -v             # no server needed
+pytest tests/test_api.py -v                  # fixture spawns the server
+pytest tests/e2e/ -v                         # Playwright e2e
 ```
 
 ## Build And Data Pipeline
