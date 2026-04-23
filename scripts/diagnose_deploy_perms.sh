@@ -87,17 +87,5 @@ else
   cat /tmp/probe.err
 fi
 
-say "utime probe: can rsb set mtime on dist/vendor/sqlite3.js ?"
-if [ -f "$DIST/vendor/sqlite3.js" ]; then
-  if touch -d '2024-01-01 00:00' "$DIST/vendor/sqlite3.js" 2>/tmp/probe.err; then
-    echo "OK"
-  else
-    echo "FAIL"
-    cat /tmp/probe.err
-  fi
-else
-  echo "(target file missing; skipping)"
-fi
-
 say "done"
 REMOTE

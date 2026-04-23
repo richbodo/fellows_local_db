@@ -30,8 +30,8 @@ A few recipes respect the same env vars the underlying scripts do:
 | Variable | Default | Affects |
 |---|---|---|
 | `FELLOWS_HOST` | `fellows.globaldonut.com` | `check-env`, SSH targets |
-| `FELLOWS_SSH_PORT` | `52221` | `prod-logs`, `prod-status` |
-| `FELLOWS_SSH_USER` | `rsb` | `prod-logs`, `prod-status` |
+| `FELLOWS_SSH_PORT` | `52221` | `prod-logs`, `prod-status`, `prod-stats` |
+| `FELLOWS_SSH_USER` | `rsb` | `prod-logs`, `prod-status`, `prod-stats` |
 | `FELLOWS_BASE_URL` | `https://fellows.globaldonut.com` | `smoke`, `drift` |
 
 Export them or inline: `FELLOWS_BASE_URL=https://staging.example.com just smoke`.
@@ -175,6 +175,9 @@ Export them or inline: `FELLOWS_BASE_URL=https://staging.example.com just smoke`
 - **Before merging to main**: `just test` (all tests, port-safe).
 - **Ship a PR to prod**: `just ship` (fast tests, then ansible build+deploy+smoke).
 - **Check whether prod is current**: `just drift`.
+- **How is prod doing?** `just prod-stats` (last 24h of page loads,
+  magic-link sends, verifies, 5xx, disk). For a weekly view:
+  `just prod-stats '7 days ago'`.
 - **Investigate a bug a user reported**: `just prod-logs` in one terminal,
   `just email-debug '2 hours ago' bug-reporter@example.com` in another.
 - **Prod seems wrong, want a recent snapshot of its auth env**: `just prod-env`.

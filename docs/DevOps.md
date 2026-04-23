@@ -135,6 +135,7 @@ just smoke              # /healthz, /manifest.webmanifest, /api/debug/diagnostic
 just check-env          # DNS + TLS + healthz
 just prod-status        # systemctl status fellows-pwa caddy (over SSH)
 just drift              # prod X-Fellows-Build vs local HEAD + origin/main
+just prod-stats         # summarise last 24h: page loads, magic-link sends/verifies, 5xx, disk
 ```
 
 Lower-level equivalents (what each recipe runs):
@@ -177,6 +178,7 @@ That wraps `./scripts/configure_email_auth_env.sh`, which prompts for `FELLOWS_M
 ## Debugging
 
 - **Service**: `just prod-logs` (`journalctl -u fellows-pwa -f`) streams structured JSON (`event=auth_status`, `event=send_unlock_email`, `event=build_meta`). Pass a different unit with `just prod-logs caddy`.
+- **Activity summary**: `just prod-stats` reads journald on the droplet and prints a tally of page loads, directory-API hits, DB downloads, magic-link sends/verifies, 5xx errors, and disk usage over a window (default `24 hours ago`; try `just prod-stats '7 days ago'`). The remote binary is `/opt/fellows/bin/prod_stats` (source: `scripts/prod_stats.py`, deployed by the `fellows_app` Ansible role). No sudo needed — the operator is in the `systemd-journal` group.
 - **Bundle drift**: `just drift` shows prod's `X-Fellows-Build` alongside local `HEAD` and `origin/main`. The browser's Diagnostics panel (`?diag=1`) shows the same header plus auth state and Cache API contents. Pair with `just prod-logs` to confirm client and server are on the same build.
 - **Send-flow failures**: `just email-debug` mines recent `event=send_unlock_email` entries from journald and optionally resolves Postmark `MessageID`s.
 - **Deploy failures**: `ansible-playbook … -vvv` for SSH/module detail. Log path is `ansible/ansible.log` relative to the repo root.

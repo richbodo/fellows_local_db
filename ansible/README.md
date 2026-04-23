@@ -2,6 +2,8 @@
 
 Mechanical details for running Ansible against the fellows droplet. For the unix architecture (service account, operator privileges, systemd hardening) see [`docs/DevOps.md`](../docs/DevOps.md). For routine ops (deploy, smoke, bootstrap a new droplet) start there as well — this file only covers Ansible-specific mechanics.
 
+> Most common flows have a shorter form via the project's `just` runner — see [`../docs/justfile.md`](../docs/justfile.md). Highlights: `just bootstrap`, `just deploy`, `just deploy-fast`, `just deploy-check`, `just ansible-collections`, `just ansible-ping`, `just prod-status`, `just prod-stats`, `just prod-diag-perms`. Every recipe falls through to the raw `ansible-playbook` / `ansible-galaxy` / `ssh` invocations documented below.
+
 ## Run from the repository root
 
 Ansible resolves paths from your **current working directory**. The repo has an **`ansible.cfg` at the project root** so inventory is picked up automatically.
@@ -27,7 +29,7 @@ ansible-galaxy collection install -r ansible/collections/requirements.yml -p ans
 
 If the command prints **"Nothing to do. All requested collections are already installed."**, that is normal—you already have the collection and can go straight to **`ansible-playbook`**.
 
-Use the install command again after cloning on a new machine. Installed files live under `ansible/collections/ansible_collections/` (gitignored); only `ansible/collections/requirements.yml` is committed.
+Use the install command again after cloning on a new machine (or run `just ansible-collections`, which invokes the same command). Installed files live under `ansible/collections/ansible_collections/` (gitignored); only `ansible/collections/requirements.yml` is committed.
 
 The **managed node** must have the **`rsync`** package. It is installed on **`--tags bootstrap`**.
 
@@ -45,7 +47,8 @@ Run playbooks from the **repository root** so the path resolves correctly — fo
 - **Adhoc commands** that don't need root (`ping`, `setup`) require `ANSIBLE_BECOME=false` because `ansible.cfg` sets `become = true` globally:
 
   ```bash
-  ANSIBLE_BECOME=false ansible fellows -m ping
+  just ansible-ping
+  # under the hood: ANSIBLE_BECOME=false ansible fellows -m ping
   ```
 
 ## Tags and plays
@@ -61,19 +64,28 @@ Run playbooks from the **repository root** so the path resolves correctly — fo
 cp ansible/inventory/hosts.ini.example ansible/inventory/hosts.ini
 cp ansible/group_vars/fellows.yml.example ansible/group_vars/fellows.yml
 # edit ansible_host, ansible_port, ansible_user, key path, caddy_admin_email
+just ansible-collections
+just bootstrap
+```
+
+Lower-level equivalents (same commands `just` invokes):
+
+```bash
 ansible-galaxy collection install -r ansible/collections/requirements.yml -p ansible/collections
 ansible-playbook ansible/site.yml --tags bootstrap --ask-become-pass
 ```
 
-On first run, the `common` role adds the operator (e.g. `rsb`) to the `fellows` group and then runs `meta: reset_connection` so subsequent tasks in the same playbook see the new group membership. If you ever see rsync errors about permission on `/opt/fellows/deploy/dist/`, the most likely cause is that the operator is not yet in the `fellows` group — run `--tags bootstrap` once.
+On first run, the `common` role adds the operator (e.g. `rsb`) to the `fellows` group and then runs `meta: reset_connection` so subsequent tasks in the same playbook see the new group membership. If you ever see rsync errors about permission on `/opt/fellows/deploy/dist/`, the most likely cause is that the operator is not yet in the `fellows` group — run `just bootstrap` once.
 
 ## Routine deploy
 
 ```bash
-./scripts/deploy_pwa.sh --ask-become-pass
+just deploy             # build + rsync + restart + HTTPS smoke
+just deploy-fast        # skip the build step (reuse deploy/dist/)
+just deploy-check       # ansible --check (dry run)
 ```
 
-Equivalent manual flow:
+Under the hood: `just deploy` runs `./scripts/deploy_pwa.sh --ask-become-pass`, which invokes `ansible/deploy_pwa.yml`. Equivalent manual flow:
 
 ```bash
 python build/build_pwa.py
@@ -84,11 +96,20 @@ Extra-vars supported by `ansible/deploy_pwa.yml`:
 
 | Variable | Purpose |
 |----------|---------|
-| `fellows_skip_build=true` | Skip `build_pwa.py` when `deploy/dist/` is already up to date. |
+| `fellows_skip_build=true` | Skip `build_pwa.py` when `deploy/dist/` is already up to date. `just deploy-fast` sets this. |
 | `fellows_smoke=false` | Skip HTTPS checks (offline controller, or no outbound access). |
 | `fellows_smoke_url=https://…` | Override the default `https://fellows.globaldonut.com` smoke target. |
 
 ## Verify
+
+```bash
+just smoke              # /healthz, /manifest.webmanifest, /api/debug/diagnostics
+just check-env          # DNS + TLS + healthz
+just prod-status        # systemctl status fellows-pwa caddy (over SSH)
+just prod-stats         # 24h tally: page loads, magic-link sends/verifies, 5xx, disk
+```
+
+Lower-level equivalents:
 
 ```bash
 ./scripts/smoke_prod.sh
@@ -96,13 +117,13 @@ Extra-vars supported by `ansible/deploy_pwa.yml`:
 ssh -p 52221 rsb@170.64.243.67 'systemctl status fellows-pwa caddy --no-pager'
 ```
 
-`check_deploy_env.sh` runs `dig` for the `A` record and `curl` against `https://<host>/` and `/healthz` (set `FELLOWS_HOST` if not using `fellows.globaldonut.com`).
+`check_deploy_env.sh` runs `dig` for the `A` record and `curl` against `https://<host>/` and `/healthz` (set `FELLOWS_HOST` if not using `fellows.globaldonut.com`). `just prod-stats` SSHes to `/opt/fellows/bin/prod_stats` on the droplet — that binary is installed by the `fellows_app` role (source: `scripts/prod_stats.py`).
 
 ## Debugging slow or stuck deploys
 
 - **Verbose output:** add `-vvv` to `ansible-playbook` (or `-v` / `-vv`). That shows SSH and module activity on the terminal.
 - **Log file:** see **[Playbook log file (control machine)](#playbook-log-file-control-machine)** above. Override the path for one shell with `export ANSIBLE_LOG_PATH=/tmp/ansible.log`. There is no automatic Ansible log file on the VPS — only on the control machine.
-- **Rsync errors: `Permission denied` / `failed to set times` on `/opt/fellows/deploy/dist`:** operator is not in the `fellows` group, or a fresh SSH session has not picked up the group membership. Confirm with `id rsb` on the droplet (must show `fellows`). Re-run `--tags bootstrap` to (re-)join the group and flush the connection.
+- **Rsync errors: `Permission denied` / `failed to set times` on `/opt/fellows/deploy/dist`:** operator is not in the `fellows` group, or a fresh SSH session has not picked up the group membership. Confirm with `id rsb` on the droplet (must show `fellows`). For a scripted audit, run `just prod-diag-perms` — it reports group membership, mode bits, setgid inheritance, and runs rsync write probes in `dist/` and `dist/vendor/`. Re-run `just bootstrap` to (re-)join the group and flush the connection.
 - **Test rsync outside Ansible** (paths match the playbook; substitute host, port, and user from `ansible/inventory/hosts.ini`):
 
   ```bash
@@ -116,6 +137,6 @@ ssh -p 52221 rsb@170.64.243.67 'systemctl status fellows-pwa caddy --no-pager'
 
 ## Magic-link env
 
-The deploy bundle includes `allowed_emails.json` (from `build/build_pwa.py`). To turn on the browser gate, the `fellows-pwa` service needs env vars `FELLOWS_SESSION_SECRET` and `FELLOWS_POSTMARK_TOKEN`. Run `./scripts/configure_email_auth_env.sh` from the repo root to install `/etc/fellows/fellows-pwa.env` (`root:fellows 0640`) and the systemd `EnvironmentFile=` drop-in. Without these, `deploy/server.py` serves without the email gate.
+The deploy bundle includes `allowed_emails.json` (from `build/build_pwa.py`). To turn on the browser gate, the `fellows-pwa` service needs env vars `FELLOWS_SESSION_SECRET` and `FELLOWS_POSTMARK_TOKEN`. Run `just prod-configure-env` (wraps `./scripts/configure_email_auth_env.sh`) from the repo root to install `/etc/fellows/fellows-pwa.env` (`root:fellows 0640`) and the systemd `EnvironmentFile=` drop-in. Without these, `deploy/server.py` serves without the email gate. Use `just prod-env` to read back what's currently installed, and `just prod-repair-env` for the documented env-file repair playbook.
 
 See [`docs/email_system_management.md`](../docs/email_system_management.md) for full operator runbook, Postmark debugging, and journald event schema.

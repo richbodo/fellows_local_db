@@ -136,6 +136,8 @@ just prod-env           # confirms the change landed (values shown raw — copy/
 
 **Deploy / PWA drift:** `just drift` prints prod's `X-Fellows-Build` alongside local `HEAD` and `origin/main`. After deploy, use the in-app **Diagnostics** panel (`?diag=1` or the Diagnostics button) to compare `/api/auth/status`, `/api/debug/diagnostics`, and `/build-meta.json` with response headers `X-Fellows-Build`. On the app server, `just prod-logs` (which runs `journalctl -u fellows-pwa -f`) shows `event=auth_status` JSON for each auth status request and `event=build_meta` at process start.
 
+**Volume check:** `just prod-stats` prints a 24h tally of `magic_links_sent`, `magic_links_verified`, `magic_links_send_failed` (broken down by failure reason), and `magic_links_rejected`. Run it after any change to the send flow to confirm the numbers match expectations; use `just prod-stats '7 days ago'` for a weekly view.
+
 Postmark debugging reference: [Postmark support and debugging docs](https://postmarkapp.com/support).
 
 What you can debug reliably:

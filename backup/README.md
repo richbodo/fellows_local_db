@@ -20,12 +20,22 @@ fellows_data_<YYYYMMDD-HHMMSS>_<git-sha>.zip
 
 Before any operation that mutates data in the repo:
 
-- Before `python build/restore_from_knack_scrapefile.py` (rebuilds `app/fellows.db` from scratch)
-- Before any manual SQL on `app/fellows.db`
-- Before a new Knack scrape (or anything that writes to `final_fellows_set/`)
-- Before merging a PR that changes the ETL or its inputs
+- Before a DB rebuild (`just db-rebuild` does this for you automatically; snapshot manually before raw `python build/restore_from_knack_scrapefile.py`).
+- Before any manual SQL on `app/fellows.db`.
+- Before a new Knack scrape (or anything that writes to `final_fellows_set/`).
+- Before merging a PR that changes the ETL or its inputs.
 
 ## How to use
+
+```bash
+just data-backup                            # snapshot the current state
+just data-restore-dry                       # list what's in the newest backup, don't touch anything
+just data-restore-dry path/to/backup.zip    # same, for a specific zip
+just data-restore                           # restore from --latest (prompts for confirmation)
+just data-restore path/to/backup.zip        # restore from a specific zip
+```
+
+Under the hood — the scripts each recipe wraps:
 
 ```bash
 # Snapshot the current state.
@@ -40,6 +50,8 @@ Before any operation that mutates data in the repo:
 # Restore the newest backup.
 ./scripts/restore_fellows_data.sh --latest
 ```
+
+See [`../docs/justfile.md`](../docs/justfile.md) for the full recipe reference.
 
 ## Rotation
 
