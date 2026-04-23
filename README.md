@@ -26,6 +26,8 @@ Data and assets are local-first (SQLite + static files), served by Python stdlib
 
 ## Data Note
 
+This document is primarily written for developers.  The end-user documentation is here: [User Guide](docs/users_manual.md)
+
 The app runs against a dump of fellows data (contact emails, mobile numbers, citizenship, location, free-text responses) plus profile photos. **This data is never committed.**  If we need to write this from scratch and get all the data again: you will have obtain the JSON and image directory out-of-band from the old directory and drop them in locally:
 
 ```
@@ -39,6 +41,8 @@ The github tree is clean of PII.  Still, treat the contents of your app as confi
 ## Architecture
 
 See `[docs/Architecture.md](docs/Architecture.md)` for system design, data flow, and schema.
+
+The origin of this app was [prt](https://github.com/richbodo/prt) and the next version of prt that will be able to build apps like this is [personal_network_toolkit](https://github.com/richbodo/personal_network_toolkit)
 
 ## Setup
 
