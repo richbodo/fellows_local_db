@@ -2,7 +2,7 @@
 
 The production email system is a magic-link gate on `deploy/server.py`: users submit an email to `POST /api/send-unlock`, the server checks a SHA-256 hash against `deploy/dist/allowed_emails.json`, issues a short-lived token (30 minutes — see [`email_gate.md`](email_gate.md)), and sends a Postmark email with a `/#/unlock/<token>` link. When that token is posted to `POST /api/verify-token`, the server sets a signed session cookie and the browser can access protected directory assets (`/fellows.db`, `/images/*`, directory `/api/*`). The system is stateless at deploy-time except for in-memory tokens/rate buckets, so restarts invalidate outstanding tokens by design.
 
-> Command shortcuts: `just prod-configure-env`, `just prod-env`, `just prod-repair-env`, `just email-debug` wrap the scripts below — see [`justfile.md`](justfile.md).
+> Commands below use `just` recipes where available. See [`justfile.md`](justfile.md) for the full menu; every recipe falls through to the underlying script shown in each step.
 
 ## Production Setup
 
@@ -19,23 +19,28 @@ Environment variables used in this section:
 1. **[Machine: local dev machine] Build fresh bundle with allowlist**
    ```bash
    cd /path/to/fellows_local_db
-   python build/build_pwa.py
+   just build
+   # under the hood: python build/build_pwa.py
    ```
    Confirm `deploy/dist/allowed_emails.json` exists.
 
 2. **[Machine: local dev machine] Install/update Ansible collection (once per machine)**
    ```bash
-   ansible-galaxy collection install -r ansible/collections/requirements.yml -p ansible/collections
+   just ansible-collections
+   # under the hood: ansible-galaxy collection install -r ansible/collections/requirements.yml -p ansible/collections
    ```
 
 3. **[Machine: local dev machine] Deploy application files**
    ```bash
-   ansible-playbook ansible/site.yml --tags deploy --ask-become-pass
+   just deploy
+   # under the hood: ./scripts/deploy_pwa.sh --ask-become-pass → ansible/deploy_pwa.yml
    ```
+   `just deploy` does build + rsync + restart + HTTPS smoke in one go. If `deploy/dist/` is already fresh from step 1 and you don't want to rebuild, use `just deploy-fast`.
 
 4. **[Machine: local dev machine] Run interactive auth-env setup script (replaces old steps 4-6)**
    ```bash
-   ./scripts/configure_email_auth_env.sh
+   just prod-configure-env
+   # under the hood: ./scripts/configure_email_auth_env.sh
    ```
    This script prompts for the required env vars, then SSHes to the app server to:
    - write `/etc/fellows/fellows-pwa.env` with correct ownership/mode,
@@ -45,6 +50,11 @@ Environment variables used in this section:
    Keep your SSH key and sudo access for the app server available on the machine where you run the script.
 
 5. **[Machine: local dev machine, or any client machine] Smoke test auth APIs**
+   - Overall HTTPS smoke (healthz / manifest / diagnostics):
+     ```bash
+     just smoke
+     # under the hood: ./scripts/smoke_prod.sh
+     ```
    - `GET /api/auth/status` can be opened directly in a browser:
      - `https://fellows.globaldonut.com/api/auth/status`
    - Or via curl:
@@ -68,7 +78,8 @@ Environment variables used in this section:
 
 6. **[Machine: local dev machine] Optional one-command deploy path**
    ```bash
-   ./scripts/deploy_pwa.sh --ask-become-pass
+   just deploy
+   # under the hood: ./scripts/deploy_pwa.sh --ask-become-pass
    ```
    Then repeat steps 4-5 if env changes were made.
 
@@ -105,7 +116,8 @@ sudo systemctl restart fellows-pwa
 Then from your laptop:
 
 ```bash
-scripts/show_server_env.sh          # confirms the change landed (values shown raw — copy/paste-ready)
+just prod-env           # confirms the change landed (values shown raw — copy/paste-ready)
+# under the hood: scripts/show_server_env.sh
 ```
 
 ### D. Smoke-test the new sender
@@ -113,11 +125,16 @@ scripts/show_server_env.sh          # confirms the change landed (values shown r
 1. Open `https://fellows.globaldonut.com/?gate=1` in a fresh incognito window (forces the email gate even if you already have a session cookie).
 2. Submit a known-allowlisted address.
 3. Check the inbox — the `From:` header should read `admin@fellows.globaldonut.com`. If you click Reply, your MUA should pre-fill `FELLOWS_REPLY_TO`.
-4. From your laptop: `scripts/debug_email_delivery.py --sudo --since '10 minutes ago'` should show a `result=sent` event with a Postmark MessageID.
+4. From your laptop:
+   ```bash
+   just email-debug '10 minutes ago'
+   # under the hood: scripts/debug_email_delivery.py --since '10 minutes ago'
+   ```
+   Should show a `result=sent` event with a Postmark MessageID. Pass an email as a second argument to filter: `just email-debug '10 minutes ago' you@example.com`.
 
 ## Email Debugging In Production (Postmark + Server Logs)
 
-**Deploy / PWA drift:** After deploy, use the in-app **Diagnostics** panel (`?diag=1` or the Diagnostics button) to compare `/api/auth/status`, `/api/debug/diagnostics`, and `/build-meta.json` with response headers `X-Fellows-Build`. On the app server, `journalctl -u fellows-pwa -f` shows `event=auth_status` JSON for each auth status request and `event=build_meta` at process start.
+**Deploy / PWA drift:** `just drift` prints prod's `X-Fellows-Build` alongside local `HEAD` and `origin/main`. After deploy, use the in-app **Diagnostics** panel (`?diag=1` or the Diagnostics button) to compare `/api/auth/status`, `/api/debug/diagnostics`, and `/build-meta.json` with response headers `X-Fellows-Build`. On the app server, `just prod-logs` (which runs `journalctl -u fellows-pwa -f`) shows `event=auth_status` JSON for each auth status request and `event=build_meta` at process start.
 
 Postmark debugging reference: [Postmark support and debugging docs](https://postmarkapp.com/support).
 
@@ -142,10 +159,12 @@ Recommended debug workflow:
      -H 'content-type: application/json' \
      -d '{"email":"you@example.com"}'
    ```
-2. **[Machine: app server]** Check logs for send diagnostics:
+2. **[Machine: local dev machine]** Check logs for send diagnostics:
    ```bash
-   journalctl -u fellows-pwa -n 50 --no-pager
+   just email-debug '2 hours ago' you@example.com
+   # under the hood: scripts/debug_email_delivery.py --since '2 hours ago' --email you@example.com
    ```
+   Or tail live from the app server with `just prod-logs` (streams `journalctl -u fellows-pwa -f` over SSH). To read the last 50 lines only, SSH directly and run `journalctl -u fellows-pwa -n 50 --no-pager`.
 3. If `result=sent`, use `MessageID` in Postmark dashboard/API to inspect final delivery events.
 4. If `result=http_error`, fix credentials/domain/sender policy indicated by status/body.
 5. If no log entry appears, verify auth is enabled (`/api/auth/status`) and that requests reach this host (Caddy/systemd logs).

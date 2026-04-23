@@ -150,13 +150,23 @@ pytest tests/e2e/ -v                         # Playwright e2e
 ### JSON To SQLite + FTS5
 
 ```bash
-python build/import_json_to_sqlite.py
-python build/import_json_to_sqlite.py /path/to/other.json
+just db-rebuild         # canonical Knack rebuild, auto-backup first, prints row counts
+just db-stats           # row / email / image counts
+just db-verify          # bytewise-diff vs app/fellows.db.backup.2026-04-08
+just db-open            # open app/fellows.db in sqlite3
 ```
 
-Writes `app/fellows.db` and backs up existing DB to `app/fellows.db.backup.YYYY-MM-DD`.
+See [`docs/data_provenance.md`](docs/data_provenance.md) for the full data pipeline and why the canonical Knack rebuild is the right choice over the legacy demo importer.
 
-Verify:
+Under the hood (the ETL scripts the recipes call):
+
+```bash
+python build/restore_from_knack_scrapefile.py                # canonical, what just db-rebuild runs
+python build/restore_from_knack_scrapefile.py /path/to/other.json
+python build/import_json_to_sqlite.py                        # legacy demo importer — see data_provenance.md
+```
+
+Raw SQL probes (for FTS5 experimentation beyond `just db-stats`):
 
 ```bash
 sqlite3 app/fellows.db "SELECT COUNT(*) FROM fellows;"
@@ -167,24 +177,33 @@ sqlite3 app/fellows.db "SELECT name FROM fellows_fts WHERE fellows_fts MATCH 'Aa
 ### PWA Static Bundle
 
 ```bash
-python build/build_pwa.py
+just build              # assemble deploy/dist/
+just build-meta         # print the build-meta.json (timestamp + git sha) of the last build
 ```
 
-`build/build_pwa.py` assembles `deploy/dist/` from `app/static/`, adds `fellows.db`, images, and writes `allowed_emails.json` (SHA-256 hashes of normalized `contact_email` values from the DB).
+Under the hood: `python build/build_pwa.py` assembles `deploy/dist/` from `app/static/`, adds `fellows.db`, images, and writes `allowed_emails.json` (SHA-256 hashes of normalized `contact_email` values from the DB).
 
 ## Production / DevOps
 
 Production runs one Ubuntu droplet behind Caddy TLS. The unix architecture (service account, operator sudo model, systemd hardening, filesystem layout) and routine ops (build + deploy, smoke, bootstrap) are in `[docs/DevOps.md](docs/DevOps.md)`. Mechanical Ansible details (tags, galaxy install, logs, troubleshooting) are in `[ansible/README.md](ansible/README.md)`. Magic-link auth operator steps (Postmark, env file, journald event schema) are in `[docs/email_system_management.md](docs/email_system_management.md)`.
 
-Most common command, from the repo root:
+Most common commands, from the repo root:
 
 ```bash
-./scripts/deploy_pwa.sh --ask-become-pass
+just deploy             # test-agnostic deploy: build + ansible + HTTPS smoke
+just ship               # test-fast → deploy (the full build-test-deploy-test sequence)
+just ship-fast          # deploy-fast → smoke (reuse existing deploy/dist/, skip tests)
+just drift              # prod X-Fellows-Build vs local HEAD + origin/main
+just smoke              # HTTPS smoke check against prod
+just prod-status        # systemctl status fellows-pwa caddy
+just prod-logs          # journalctl -u fellows-pwa -f (over SSH)
 ```
+
+Under the hood: `./scripts/deploy_pwa.sh --ask-become-pass` runs the `ansible/deploy_pwa.yml` playbook (build → rsync → restart → HTTPS smoke).
 
 ## Local Dev Notes
 
-- **Port 8765:** Prefer `./scripts/ensure_port_8765_free.sh` before manual testing when the port is occupied. Equivalent one-liner: `lsof -ti:8765 | xargs kill -9`.
+- **Port 8765:** Prefer `just port` (or `./scripts/ensure_port_8765_free.sh`) before manual testing when the port is occupied. Equivalent one-liner: `lsof -ti:8765 | xargs kill -9`. Every `just test*` recipe frees the port automatically.
 - **Automation hygiene:** test runs should not leave long-lived servers running. If the port is stuck, run the script above or re-run pytest (which also attempts cleanup in fixtures).
 - **Virtualenv scope:** use `.venv` for dev/test tooling on your workstation; production server runtime uses system Python.
 - **Debugging a stuck PWA / service worker:** when a bug reproduces on your own browser but not on a clean Playwright profile, see `[docs/debugging.md](docs/debugging.md)` for the chrome-devtools-mcp setup that attaches Claude Code to your running Chrome.
