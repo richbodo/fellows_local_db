@@ -309,6 +309,11 @@ drift:
 prod-logs unit="fellows-pwa":
     ssh -p {{ssh_port}} {{ssh_user}}@{{host}} "journalctl -u {{unit}} -f"
 
+# Production stats summary (page views, magic links, disk) for SINCE.
+[group('prod')]
+prod-stats since="24 hours ago":
+    ssh -p {{ssh_port}} {{ssh_user}}@{{host}} "/opt/fellows/bin/prod_stats --since '{{since}}'"
+
 # systemctl status fellows-pwa caddy.
 [group('prod')]
 prod-status:

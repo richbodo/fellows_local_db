@@ -141,6 +141,13 @@ Export them or inline: `FELLOWS_BASE_URL=https://staging.example.com just smoke`
   `HEAD` and `origin/main`. One glance tells you whether prod is current.
 - **`prod-logs [UNIT]`** — SSH + `journalctl -u UNIT -f`. Default unit
   `fellows-pwa`; try `just prod-logs caddy` for the reverse proxy.
+- **`prod-stats [SINCE]`** — summary of page views, magic-link send/verify
+  counts, 5xx errors, and disk usage over the window (default `24 hours
+  ago`). Runs `/opt/fellows/bin/prod_stats` on the droplet via SSH; reads
+  journald directly (no sudo needed — the operator is in the
+  `systemd-journal` group). Examples: `just prod-stats`,
+  `just prod-stats '7 days ago'`. Source: `scripts/prod_stats.py`, deployed
+  by the `fellows_app` Ansible role.
 - **`prod-status`** — SSH + `systemctl status fellows-pwa caddy --no-pager`.
 - **`prod-env`** — dump remote `/etc/fellows/fellows-pwa.env` (prompts for
   sudo password — values shown raw for paste-ready rotation). Wraps
