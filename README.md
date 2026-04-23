@@ -1,6 +1,6 @@
 # EHF Fellows Local Directory
 
-Local web app to quickly browse Edmund Hillary Fellowship fellow profiles and run experiments. 
+Local web app to quickly browse Edmund Hillary Fellowship fellow profiles and run experiments. (data only available to EHF fellows)
 
 Data and assets are local-first (SQLite + static files), served by Python stdlib.
 
