@@ -20,6 +20,17 @@ outside the fellowship.
 
 ## Installing the app
 
+You are going to start by getting a magic link in email.  Once you click on that,
+you will be able to install the app, however:
+
+What follows are some pretty generic instructions.  The reality is that you will want
+to install an application icon for the PWA on your desktop, and because this app
+is not registered with your OS (MacOS, iOS, etc), your OS will complain, most 
+likely, about that.  There will still be a way to get it installed, but you might 
+have to click around and see if there is a "details" or "more info" or a down arrow 
+somewhere that would allow you to make the exception for this app and 
+install it anyway.  Do that.  Ask for help.
+
 1. Click the install link in your email. You'll land on a page titled
    **"Install EHF Fellows Directory."**
 2. Click **Install app**.
