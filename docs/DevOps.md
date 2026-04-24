@@ -136,6 +136,7 @@ just check-env          # DNS + TLS + healthz
 just prod-status        # systemctl status fellows-pwa caddy (over SSH)
 just drift              # prod X-Fellows-Build vs local HEAD + origin/main
 just prod-stats         # summarise last 24h: page loads, magic-link sends/verifies, 5xx, disk
+just prod-stats-long    # full retained journal + plaintext recipient list (every magic-link send)
 ```
 
 Lower-level equivalents (what each recipe runs):

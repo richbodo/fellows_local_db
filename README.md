@@ -197,6 +197,7 @@ just smoke              # HTTPS smoke check against prod
 just prod-status        # systemctl status fellows-pwa caddy
 just prod-logs          # journalctl -u fellows-pwa -f (over SSH)
 just prod-stats         # 24h summary: page loads, magic-link sends/verifies, 5xx, disk
+just prod-stats-long    # full-history tally + plaintext list of every magic-link recipient
 ```
 
 Under the hood: `./scripts/deploy_pwa.sh --ask-become-pass` runs the `ansible/deploy_pwa.yml` playbook (build → rsync → restart → HTTPS smoke).

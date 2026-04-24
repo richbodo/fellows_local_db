@@ -2,7 +2,7 @@
 
 Mechanical details for running Ansible against the fellows droplet. For the unix architecture (service account, operator privileges, systemd hardening) see [`docs/DevOps.md`](../docs/DevOps.md). For routine ops (deploy, smoke, bootstrap a new droplet) start there as well — this file only covers Ansible-specific mechanics.
 
-> Most common flows have a shorter form via the project's `just` runner — see [`../docs/justfile.md`](../docs/justfile.md). Highlights: `just bootstrap`, `just deploy`, `just deploy-fast`, `just deploy-check`, `just ansible-collections`, `just ansible-ping`, `just prod-status`, `just prod-stats`, `just prod-diag-perms`. Every recipe falls through to the raw `ansible-playbook` / `ansible-galaxy` / `ssh` invocations documented below.
+> Most common flows have a shorter form via the project's `just` runner — see [`../docs/justfile.md`](../docs/justfile.md). Highlights: `just bootstrap`, `just deploy`, `just deploy-fast`, `just deploy-check`, `just ansible-collections`, `just ansible-ping`, `just prod-status`, `just prod-stats`, `just prod-stats-long`, `just prod-diag-perms`. Every recipe falls through to the raw `ansible-playbook` / `ansible-galaxy` / `ssh` invocations documented below.
 
 ## Run from the repository root
 
@@ -107,6 +107,7 @@ just smoke              # /healthz, /manifest.webmanifest, /api/debug/diagnostic
 just check-env          # DNS + TLS + healthz
 just prod-status        # systemctl status fellows-pwa caddy (over SSH)
 just prod-stats         # 24h tally: page loads, magic-link sends/verifies, 5xx, disk
+just prod-stats-long    # full-history tally + plaintext list of every magic-link recipient
 ```
 
 Lower-level equivalents:

@@ -29,8 +29,8 @@ A few recipes respect the same env vars the underlying scripts do:
 | Variable | Default | Affects |
 |---|---|---|
 | `FELLOWS_HOST` | `fellows.globaldonut.com` | `check-env`, SSH targets |
-| `FELLOWS_SSH_PORT` | `52221` | `prod-logs`, `prod-status`, `prod-stats` |
-| `FELLOWS_SSH_USER` | `rsb` | `prod-logs`, `prod-status`, `prod-stats` |
+| `FELLOWS_SSH_PORT` | `52221` | `prod-logs`, `prod-status`, `prod-stats`, `prod-stats-long` |
+| `FELLOWS_SSH_USER` | `rsb` | `prod-logs`, `prod-status`, `prod-stats`, `prod-stats-long` |
 | `FELLOWS_BASE_URL` | `https://fellows.globaldonut.com` | `smoke`, `drift` |
 
 Export them or inline: `FELLOWS_BASE_URL=https://staging.example.com just smoke`.
