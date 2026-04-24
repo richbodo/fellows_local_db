@@ -308,6 +308,11 @@ prod-logs unit="fellows-pwa":
 prod-stats since="24 hours ago":
     ssh -p {{ssh_port}} {{ssh_user}}@{{host}} "/opt/fellows/bin/prod_stats --since '{{since}}'"
 
+# Full-history stats + plaintext recipient list for every magic-link send.
+[group('prod')]
+prod-stats-long:
+    ssh -p {{ssh_port}} {{ssh_user}}@{{host}} "/opt/fellows/bin/prod_stats --include-emails"
+
 # systemctl status fellows-pwa caddy.
 [group('prod')]
 prod-status:
