@@ -29,8 +29,8 @@ A few recipes respect the same env vars the underlying scripts do:
 | Variable | Default | Affects |
 |---|---|---|
 | `FELLOWS_HOST` | `fellows.globaldonut.com` | `check-env`, SSH targets |
-| `FELLOWS_SSH_PORT` | `52221` | `prod-logs`, `prod-status`, `prod-stats` |
-| `FELLOWS_SSH_USER` | `rsb` | `prod-logs`, `prod-status`, `prod-stats` |
+| `FELLOWS_SSH_PORT` | `52221` | `prod-logs`, `prod-status`, `prod-stats`, `prod-stats-long` |
+| `FELLOWS_SSH_USER` | `rsb` | `prod-logs`, `prod-status`, `prod-stats`, `prod-stats-long` |
 | `FELLOWS_BASE_URL` | `https://fellows.globaldonut.com` | `smoke`, `drift` |
 
 Export them or inline: `FELLOWS_BASE_URL=https://staging.example.com just smoke`.
@@ -141,9 +141,16 @@ Export them or inline: `FELLOWS_BASE_URL=https://staging.example.com just smoke`
   counts, 5xx errors, and disk usage over the window (default `24 hours
   ago`). Runs `/opt/fellows/bin/prod_stats` on the droplet via SSH; reads
   journald directly (no sudo needed — the operator is in the
-  `systemd-journal` group). Examples: `just prod-stats`,
+  `systemd-journal` and `adm` groups). Examples: `just prod-stats`,
   `just prod-stats '7 days ago'`. Source: `scripts/prod_stats.py`, deployed
   by the `fellows_app` Ansible role.
+- **`prod-stats-long`** — same tally as `prod-stats`, but over the full
+  retained journal (`--since '@0'`), plus a plaintext list of every
+  magic-link recipient (email, name, send count, first/last send time).
+  Plaintext is resolved by hashing each `contact_email` in
+  `/opt/fellows/deploy/dist/fellows.db` and matching against the
+  `email_hash_prefix` the server logs per send event. Treat output as
+  confidential — it contains fellow email addresses.
 - **`prod-status`** — SSH + `systemctl status fellows-pwa caddy --no-pager`.
 - **`prod-env`** — dump remote `/etc/fellows/fellows-pwa.env` (prompts for
   sudo password — values shown raw for paste-ready rotation). Wraps

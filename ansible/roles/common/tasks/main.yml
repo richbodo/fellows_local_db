@@ -41,14 +41,16 @@
     groups: "{{ service_user }}"
     append: true
 
-# Read-only access to journald without sudo. The systemd-journal group is the
-# intended primitive for ops read access (cannot write, cannot escalate) and
-# is narrower than per-command NOPASSWD sudoers. Enables `just prod-stats` and
-# plain `journalctl -u fellows-pwa` from a non-sudo SSH session.
-- name: Ensure operator ({{ operator_user }}) is a member of systemd-journal group
+# Read-only access to journald without sudo. systemd-journal is the intended
+# primitive for ops read access (cannot write, cannot escalate) and is
+# narrower than per-command NOPASSWD sudoers. adm is the traditional Debian
+# log-reader group and is added defensively so a drift in either group still
+# leaves journal reads working. Enables `just prod-stats`, `just prod-stats-long`,
+# and plain `journalctl -u fellows-pwa` from a non-sudo SSH session.
+- name: Ensure operator ({{ operator_user }}) is a member of journal-read groups
   ansible.builtin.user:
     name: "{{ operator_user }}"
-    groups: systemd-journal
+    groups: systemd-journal,adm
     append: true
 
 # Supplementary group membership only takes effect at next login. Force a
