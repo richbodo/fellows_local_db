@@ -67,16 +67,22 @@ def _wait_for_server(port, max_attempts=15):
 
 
 @pytest.fixture(scope="session")
-def app_server():
+def app_server(tmp_path_factory):
     """Start the app server on port 8765 once per test session (for M2 and e2e).
 
     If ``E2E_BASE_URL`` is set (e.g. ``https://fellows.globaldonut.com``), skips starting
     a local server so ``tests/e2e/`` can run against that origin. Use only when running
     ``pytest tests/e2e/``; unset for ``tests/test_api.py`` and full-suite runs.
+
+    Sets ``FELLOWS_RELATIONSHIPS_DB_PATH`` to a session-scoped temp file so the
+    test session never reads or writes the dev ``app/relationships.db``.
+    Resolved at call time inside ``app.relationships.open_db``.
     """
     if os.environ.get("E2E_BASE_URL"):
         yield
         return
+    rel_dir = tmp_path_factory.mktemp("relationships")
+    os.environ["FELLOWS_RELATIONSHIPS_DB_PATH"] = str(rel_dir / "relationships.db")
     global _server
     from app.server import PORT, HTTPServer, Handler, DB_PATH
     if not os.path.isfile(DB_PATH):

@@ -142,25 +142,6 @@ class TestGroupComposer:
         link = page.locator("#directory a.dir-link", has_text="Andy Sack").first
         expect(link).to_be_visible()
 
-    def test_create_button_posts_and_surfaces_501_message(
-        self, standalone_page, base_url_fixture
-    ):
-        page = standalone_page
-        page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
-        _wait_for_directory(page)
-        _aaron_row(page).locator(".dir-mark").click()
-        page.locator("#group-rail-title").fill("Smoke group")
-        page.locator("#group-rail-create").click()
-        # Server returns 501 with the PR 2 explainer; rail surfaces the
-        # message and stays usable.
-        status = page.locator("#group-rail-status")
-        expect(status).to_contain_text("PR 2", timeout=3000)
-        # Draft is NOT cleared on stub failure; create button reflects
-        # current selection (still 1).
-        expect(page.locator("#group-rail-members .group-rail-member-name").first).to_have_text(
-            "Aaron Bird"
-        )
-
     def test_bulk_select_bar_visibility_tracks_filtered_state(
         self, standalone_page, base_url_fixture
     ):
