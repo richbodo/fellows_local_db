@@ -29,12 +29,41 @@
   var nlSearchStatusEl = document.getElementById('nl-search-status');
   var detailEl = document.getElementById('detail');
   var fullFellowsCache = null;
-  // Groups feature (PR 1): right-rail composer + +/✓ markers + draft store.
-  // The schema mirror for relationships.db (PWA / OPFS path) is summarised
-  // here for ctrl-F discoverability; the canonical DDL lives in
-  // app/relationships.py and is bootstrapped server-side. PR 2 wires the
-  // create-group POST + the OPFS open path.
-  var RELATIONSHIPS_TABLES = ['groups', 'group_members', 'fellow_tags', 'fellow_notes', 'settings'];
+  // Groups feature: relationships.db schema mirror. The canonical DDL is in
+  // app/relationships.py; this string must stay in sync. Bootstrap is
+  // idempotent (CREATE TABLE IF NOT EXISTS), so running it on every PWA
+  // boot is cheap. The OPFS-stored DB persists across app updates; the
+  // schema only adds, never destructively migrates.
+  var RELATIONSHIPS_SCHEMA_SQL =
+    'CREATE TABLE IF NOT EXISTS groups (' +
+    '  id INTEGER PRIMARY KEY,' +
+    '  name TEXT NOT NULL,' +
+    '  note TEXT NOT NULL DEFAULT \'\',' +
+    '  created_at TEXT NOT NULL,' +
+    '  updated_at TEXT NOT NULL' +
+    ');' +
+    'CREATE TABLE IF NOT EXISTS group_members (' +
+    '  group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,' +
+    '  fellow_record_id TEXT NOT NULL,' +
+    '  PRIMARY KEY (group_id, fellow_record_id)' +
+    ');' +
+    'CREATE INDEX IF NOT EXISTS idx_group_members_group ON group_members(group_id);' +
+    'CREATE TABLE IF NOT EXISTS fellow_tags (' +
+    '  fellow_record_id TEXT NOT NULL,' +
+    '  tag TEXT NOT NULL,' +
+    '  created_at TEXT NOT NULL,' +
+    '  PRIMARY KEY (fellow_record_id, tag)' +
+    ');' +
+    'CREATE INDEX IF NOT EXISTS idx_fellow_tags_tag ON fellow_tags(tag);' +
+    'CREATE TABLE IF NOT EXISTS fellow_notes (' +
+    '  fellow_record_id TEXT PRIMARY KEY,' +
+    '  body TEXT NOT NULL,' +
+    '  updated_at TEXT NOT NULL' +
+    ');' +
+    'CREATE TABLE IF NOT EXISTS settings (' +
+    '  key TEXT PRIMARY KEY,' +
+    '  value TEXT' +
+    ');';
   var groupRailEl = document.getElementById('group-rail');
   var groupRailEyebrowEl = document.getElementById('group-rail-eyebrow');
   var groupRailTitleEl = document.getElementById('group-rail-title');
@@ -93,7 +122,7 @@
   /** Bump on every meaningful UI / diagnostics change. Rendered in the
    *  always-visible build badge so a dev can tell at a glance which app.js
    *  is actually running vs what the server was deployed with. */
-  var FELLOWS_UI_DIAG = 'diag-2026-04o-groups-pr1';
+  var FELLOWS_UI_DIAG = 'diag-2026-04p-groups-pr2';
 
   // Persistent marker: "this origin has been authenticated successfully at
   // least once." Preserved across clearAllAppData. Used by startBrowserUx's
@@ -451,6 +480,45 @@
     return rows.length ? rows[0] : null;
   }
 
+  /** Run a non-SELECT statement (INSERT/UPDATE/DELETE). Used by the groups
+   *  data layer; the fellows side is read-only and uses dbSelect* only. */
+  function dbRun(db, sql, bind) {
+    var st = db.prepare(sql);
+    try {
+      if (bind !== undefined && bind !== null) {
+        st.bind(bind);
+      }
+      st.step();
+    } finally {
+      st.finalize();
+    }
+  }
+
+  function bootstrapRelationshipsSchema(relDb) {
+    // exec accepts multi-statement scripts; idempotent thanks to IF NOT EXISTS.
+    relDb.exec(RELATIONSHIPS_SCHEMA_SQL);
+    relDb.exec('PRAGMA user_version = 1');
+  }
+
+  function nowIsoSecond() {
+    return new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+  }
+
+  function dedupeRecordIds(ids) {
+    var seen = {};
+    var out = [];
+    if (!ids) return out;
+    for (var i = 0; i < ids.length; i++) {
+      var rid = ids[i];
+      if (typeof rid !== 'string') continue;
+      var s = rid.replace(/^\s+|\s+$/g, '');
+      if (!s || seen[s]) continue;
+      seen[s] = 1;
+      out.push(s);
+    }
+    return out;
+  }
+
   function buildStatsFromDb(db) {
     var total = dbSelectOne(db, 'SELECT COUNT(*) AS c FROM fellows', null);
     var totalN = total ? total.c : 0;
@@ -556,7 +624,39 @@
     };
   }
 
-  function createSqliteDataProvider(db) {
+  function createSqliteDataProvider(db, relDb) {
+    function attachMemberNames(rows) {
+      // OPFS path skips ATTACH between SAH-pool databases; instead we
+      // resolve fellow names from the in-memory cache populated by
+      // getList/getFull on boot. Rows arrive as [{record_id}], leave as
+      // [{record_id, name}].
+      return rows.map(function (m) {
+        var rid = m.record_id;
+        var fellow = fellowsBySlug.get(rid);
+        return { record_id: rid, name: fellow ? fellow.name : rid };
+      });
+    }
+
+    function readGroupWithMembers(gid) {
+      var row = dbSelectOne(relDb, 'SELECT * FROM groups WHERE id = ?', [gid]);
+      if (!row) return null;
+      var members = dbSelectAll(
+        relDb,
+        'SELECT fellow_record_id AS record_id FROM group_members WHERE group_id = ?',
+        [gid]
+      );
+      // Sort members by resolved name (or record_id fallback) so the order
+      // matches the dev API's COALESCE(fl.name, gm.fellow_record_id).
+      var withNames = attachMemberNames(members);
+      withNames.sort(function (a, b) {
+        var an = (a.name || '').toLowerCase();
+        var bn = (b.name || '').toLowerCase();
+        return an < bn ? -1 : (an > bn ? 1 : 0);
+      });
+      row.members = withNames;
+      return row;
+    }
+
     return {
       kind: 'sqlite',
       getList: function () {
@@ -606,6 +706,104 @@
       },
       getStats: function () {
         return Promise.resolve(buildStatsFromDb(db));
+      },
+
+      // ===== Groups =================================================
+      // Mirrors the /api/groups REST shape. relDb is the OPFS-stored
+      // relationships.db opened by initOpfsDataProvider.
+      listGroups: function () {
+        if (!relDb) return Promise.reject(new Error('relationships db not open'));
+        var rows = dbSelectAll(
+          relDb,
+          'SELECT g.id, g.name, g.note, g.created_at, g.updated_at, ' +
+            'COUNT(gm.fellow_record_id) AS count ' +
+            'FROM groups g ' +
+            'LEFT JOIN group_members gm ON gm.group_id = g.id ' +
+            'GROUP BY g.id ' +
+            'ORDER BY g.updated_at DESC, g.id DESC',
+          null
+        );
+        return Promise.resolve(rows);
+      },
+      getGroup: function (id) {
+        if (!relDb) return Promise.reject(new Error('relationships db not open'));
+        return Promise.resolve(readGroupWithMembers(id));
+      },
+      createGroup: function (data) {
+        if (!relDb) return Promise.reject(new Error('relationships db not open'));
+        var name = data && data.name;
+        var note = (data && typeof data.note === 'string') ? data.note : '';
+        var ids = dedupeRecordIds(data && data.fellow_record_ids);
+        var now = nowIsoSecond();
+        relDb.exec('BEGIN');
+        try {
+          dbRun(
+            relDb,
+            'INSERT INTO groups(name, note, created_at, updated_at) VALUES (?, ?, ?, ?)',
+            [name, note, now, now]
+          );
+          var idRow = dbSelectOne(relDb, 'SELECT last_insert_rowid() AS id', null);
+          var gid = idRow && idRow.id;
+          for (var i = 0; i < ids.length; i++) {
+            dbRun(
+              relDb,
+              'INSERT INTO group_members(group_id, fellow_record_id) VALUES (?, ?)',
+              [gid, ids[i]]
+            );
+          }
+          relDb.exec('COMMIT');
+          return Promise.resolve(readGroupWithMembers(gid));
+        } catch (e) {
+          try { relDb.exec('ROLLBACK'); } catch (e2) {}
+          return Promise.reject(e);
+        }
+      },
+      updateGroup: function (id, patch) {
+        if (!relDb) return Promise.reject(new Error('relationships db not open'));
+        var existing = dbSelectOne(relDb, 'SELECT 1 AS x FROM groups WHERE id = ?', [id]);
+        if (!existing) return Promise.resolve(null);
+        var sets = ['updated_at = ?'];
+        var params = [nowIsoSecond()];
+        if (patch && typeof patch.name === 'string') {
+          sets.push('name = ?');
+          params.push(patch.name);
+        }
+        if (patch && typeof patch.note === 'string') {
+          sets.push('note = ?');
+          params.push(patch.note);
+        }
+        params.push(id);
+        relDb.exec('BEGIN');
+        try {
+          dbRun(
+            relDb,
+            'UPDATE groups SET ' + sets.join(', ') + ' WHERE id = ?',
+            params
+          );
+          if (patch && Array.isArray(patch.fellow_record_ids)) {
+            dbRun(relDb, 'DELETE FROM group_members WHERE group_id = ?', [id]);
+            var ids = dedupeRecordIds(patch.fellow_record_ids);
+            for (var i = 0; i < ids.length; i++) {
+              dbRun(
+                relDb,
+                'INSERT INTO group_members(group_id, fellow_record_id) VALUES (?, ?)',
+                [id, ids[i]]
+              );
+            }
+          }
+          relDb.exec('COMMIT');
+          return Promise.resolve(readGroupWithMembers(id));
+        } catch (e) {
+          try { relDb.exec('ROLLBACK'); } catch (e2) {}
+          return Promise.reject(e);
+        }
+      },
+      deleteGroup: function (id) {
+        if (!relDb) return Promise.reject(new Error('relationships db not open'));
+        var existing = dbSelectOne(relDb, 'SELECT 1 AS x FROM groups WHERE id = ?', [id]);
+        if (!existing) return Promise.resolve(false);
+        dbRun(relDb, 'DELETE FROM groups WHERE id = ?', [id]);
+        return Promise.resolve(true);
       }
     };
   }
@@ -620,6 +818,13 @@
   }
 
   function createApiDataProvider() {
+    function jsonOr(url, opts, expectedShapeOnEmpty) {
+      return fetch(url, opts || {}).then(function (r) {
+        if (r.status === 204) return expectedShapeOnEmpty;
+        if (!r.ok) throw apiError(url, r.status);
+        return r.json();
+      });
+    }
     return {
       kind: 'api',
       getList: function () {
@@ -647,6 +852,55 @@
       getStats: function () {
         return fetch('/api/stats').then(function (r) {
           return r.ok ? r.json() : null;
+        });
+      },
+
+      // ===== Groups (HTTP fallback) =================================
+      // Same JSON shape as the SQLite path. Resolves member names via
+      // ATTACHed f.fellows on the dev server. In production (deploy/
+      // server.py), these endpoints don't exist yet — the SQLite path
+      // is the canonical production implementation.
+      listGroups: function () {
+        return jsonOr('/api/groups', null, []);
+      },
+      getGroup: function (id) {
+        return fetch('/api/groups/' + encodeURIComponent(id)).then(function (r) {
+          if (r.status === 404) return null;
+          if (!r.ok) throw apiError('/api/groups/' + id, r.status);
+          return r.json();
+        });
+      },
+      createGroup: function (data) {
+        return fetch('/api/groups', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify(data || {})
+        }).then(function (r) {
+          if (!r.ok) throw apiError('/api/groups', r.status);
+          return r.json();
+        });
+      },
+      updateGroup: function (id, patch) {
+        return fetch('/api/groups/' + encodeURIComponent(id), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify(patch || {})
+        }).then(function (r) {
+          if (r.status === 404) return null;
+          if (!r.ok) throw apiError('/api/groups/' + id, r.status);
+          return r.json();
+        });
+      },
+      deleteGroup: function (id) {
+        return fetch('/api/groups/' + encodeURIComponent(id), {
+          method: 'DELETE',
+          credentials: 'same-origin'
+        }).then(function (r) {
+          if (r.status === 204) return true;
+          if (r.status === 404) return false;
+          throw apiError('/api/groups/' + id, r.status);
         });
       }
     };
@@ -1134,9 +1388,25 @@
         }).then(function (bytes) {
           bootDebugPush('fellows.db download: OK bytes=' + (bytes && bytes.byteLength));
           setSetupStatus('Preparing offline database…');
+          // fellows.db: re-imported from server every boot (replaces any
+          // previous OPFS copy, picking up new fellow data on update).
           poolUtil.importDb('fellows.db', bytes);
           var db = new poolUtil.OpfsSAHPoolDb('fellows.db');
-          return createSqliteDataProvider(db);
+          // relationships.db: created on first use; never replaced by
+          // updates. SAH-pool VFS handles file-not-existing by creating it.
+          // Schema bootstrap is idempotent (CREATE IF NOT EXISTS).
+          var relDb;
+          try {
+            relDb = new poolUtil.OpfsSAHPoolDb('relationships.db');
+            bootstrapRelationshipsSchema(relDb);
+            bootDebugPush('relationships.db: open + schema OK');
+          } catch (relErr) {
+            bootDebugPush(
+              'relationships.db: open failed (' + (relErr && relErr.message || relErr) + ')'
+            );
+            relDb = null;
+          }
+          return createSqliteDataProvider(db, relDb);
         });
       });
   }
@@ -2125,9 +2395,25 @@
     updateBulkBar();
   }
 
+  function clearDraftAfterSave() {
+    groupDraft.members = new Set();
+    groupDraft.memberNames = {};
+    groupDraft.title = '';
+    groupDraft.titleEdited = false;
+    saveGroupDraft();
+    renderRail();
+    refreshAllMarkers();
+    refreshDetailAddLink();
+    updateBulkBar();
+  }
+
   function handleCreateGroupClick() {
     if (!groupRailCreateEl) return;
     if (groupDraft.members.size === 0) return;
+    if (!dataProvider || typeof dataProvider.createGroup !== 'function') {
+      setRailStatus('Groups not available right now.', 'warn');
+      return;
+    }
     var titleVal = groupDraft.titleEdited
       ? groupDraft.title
       : deriveAutoTitle((searchInputEl && searchInputEl.value) || '');
@@ -2138,30 +2424,28 @@
     groupDraft.members.forEach(function (rid) { ids.push(rid); });
     setRailStatus('Saving…', 'info');
     groupRailCreateEl.disabled = true;
-    fetch('/api/groups', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify({
-        name: titleVal,
-        note: '',
-        fellow_record_ids: ids
-      })
+    dataProvider.createGroup({
+      name: titleVal,
+      note: '',
+      fellow_record_ids: ids
     })
-      .then(function (r) {
-        if (r.status === 501) {
-          return r.json().catch(function () { return null; }).then(function (data) {
-            var msg = (data && data.message) || 'Create group not yet wired up.';
-            setRailStatus(msg, 'warn');
-          });
+      .then(function (group) {
+        if (!group || group.id == null) {
+          setRailStatus('Save returned no group; please retry.', 'warn');
+          groupRailCreateEl.disabled = groupDraft.members.size === 0;
+          return;
         }
-        // Reserved for PR 2 — happy path lands then.
-        setRailStatus('Unexpected response: ' + r.status, 'warn');
+        clearDraftAfterSave();
+        setRailStatus('Group saved.', 'info');
+        // Navigate to the new group's detail page. route() runs on
+        // hashchange and renders renderGroupDetailPage.
+        window.location.hash = '#/groups/' + encodeURIComponent(String(group.id));
       })
-      .catch(function () {
-        setRailStatus('Network error while saving.', 'warn');
-      })
-      .then(function () {
+      .catch(function (err) {
+        setRailStatus(
+          'Could not save: ' + (err && err.message ? err.message : 'unknown error'),
+          'warn'
+        );
         groupRailCreateEl.disabled = groupDraft.members.size === 0;
       });
   }
@@ -2301,9 +2585,245 @@
     var hash = window.location.hash || '';
     if (hash === '#/about') {
       renderAboutPage();
-    } else {
-      updateDetailFromHash();
+      return;
     }
+    if (hash === '#/groups') {
+      renderGroupsPage();
+      return;
+    }
+    var groupMatch = hash.match(/^#\/groups\/(\d+)$/);
+    if (groupMatch) {
+      renderGroupDetailPage(parseInt(groupMatch[1], 10));
+      return;
+    }
+    updateDetailFromHash();
+  }
+
+  // ===== Groups index + detail (PR 2) =====================================
+
+  function renderGroupsPage() {
+    if (!detailEl) return;
+    var html =
+      '<div class="groups-page">' +
+        '<h2 class="groups-title">Groups</h2>' +
+        '<p class="groups-meta" id="groups-meta">Loading groups…</p>' +
+        '<div id="groups-list-wrap"></div>' +
+        '<p class="groups-footer-hint">' +
+          'Click a group’s name to open its detail page — that’s ' +
+          'where you’ll contact the whole group, export, or edit. ' +
+          'Deleting only removes the saved group; the fellows themselves are unaffected.' +
+        '</p>' +
+      '</div>';
+    detailEl.innerHTML = html;
+    detailEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (!dataProvider || typeof dataProvider.listGroups !== 'function') {
+      var w0 = document.getElementById('groups-list-wrap');
+      if (w0) w0.innerHTML = '<p class="placeholder">Groups not available in this mode.</p>';
+      return;
+    }
+    dataProvider.listGroups()
+      .then(function (groups) { renderGroupsList(groups || []); })
+      .catch(function () {
+        var wrap = document.getElementById('groups-list-wrap');
+        if (wrap) wrap.innerHTML = '<p class="placeholder">Could not load groups.</p>';
+      });
+  }
+
+  function renderGroupsList(groups) {
+    var wrap = document.getElementById('groups-list-wrap');
+    var meta = document.getElementById('groups-meta');
+    if (!wrap || !meta) return;
+    if (!groups.length) {
+      meta.textContent = '';
+      wrap.innerHTML =
+        '<p class="groups-empty">No groups yet. Build one from the directory by selecting fellows and tapping <b>Create new group</b>.</p>';
+      return;
+    }
+    meta.textContent =
+      groups.length + (groups.length === 1 ? ' saved group' : ' saved groups');
+    var rowsHtml = groups.map(function (g) {
+      var gidStr = String(g.id);
+      var date = (g.created_at || '').slice(0, 10);
+      var note = g.note || '';
+      var noteHtml = note
+        ? '<span class="groups-note">' + escapeHtml(note) + '</span>'
+        : '<span class="groups-note groups-note--empty">—</span>';
+      return (
+        '<tr data-group-id="' + escapeHtml(gidStr) + '">' +
+          '<td class="groups-cell-name">' +
+            '<a class="groups-name-link" href="#/groups/' + escapeHtml(gidStr) + '">' +
+              escapeHtml(g.name || '(untitled)') +
+            '</a>' +
+          '</td>' +
+          '<td class="groups-cell-num">' + escapeHtml(String(g.count || 0)) + '</td>' +
+          '<td class="groups-cell-date">' + escapeHtml(date) + '</td>' +
+          '<td>' + noteHtml + '</td>' +
+          '<td class="groups-cell-actions">' +
+            '<a href="#" class="groups-action groups-action-rename" data-group-id="' + escapeHtml(gidStr) + '">rename</a>' +
+            '<a href="#" class="groups-action groups-action-delete" data-group-id="' + escapeHtml(gidStr) + '">delete</a>' +
+          '</td>' +
+        '</tr>'
+      );
+    }).join('');
+    wrap.innerHTML =
+      '<table class="groups-table">' +
+        '<thead><tr>' +
+          '<th>Name</th>' +
+          '<th class="groups-th-num">Members</th>' +
+          '<th>Created</th>' +
+          '<th>Note</th>' +
+          '<th class="groups-th-actions"></th>' +
+        '</tr></thead>' +
+        '<tbody>' + rowsHtml + '</tbody>' +
+      '</table>';
+    wireGroupsTableActions(wrap);
+  }
+
+  function wireGroupsTableActions(wrap) {
+    var renameLinks = wrap.querySelectorAll('.groups-action-rename');
+    for (var i = 0; i < renameLinks.length; i++) {
+      renameLinks[i].addEventListener('click', function (ev) {
+        ev.preventDefault();
+        startInlineRename(wrap, this.dataset.groupId);
+      });
+    }
+    var deleteLinks = wrap.querySelectorAll('.groups-action-delete');
+    for (var j = 0; j < deleteLinks.length; j++) {
+      deleteLinks[j].addEventListener('click', function (ev) {
+        ev.preventDefault();
+        confirmAndDeleteGroup(wrap, this.dataset.groupId);
+      });
+    }
+  }
+
+  function startInlineRename(wrap, gidStr) {
+    var row = wrap.querySelector('tr[data-group-id="' + gidStr + '"]');
+    if (!row) return;
+    var nameCell = row.querySelector('.groups-cell-name');
+    var nameLink = nameCell.querySelector('.groups-name-link');
+    if (!nameCell || !nameLink) return;
+    var current = nameLink.textContent;
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.value = current;
+    input.className = 'groups-rename-input';
+    input.maxLength = 200;
+    nameCell.innerHTML = '';
+    nameCell.appendChild(input);
+    input.focus();
+    input.select();
+    var done = false;
+    function commit(save) {
+      if (done) return;
+      done = true;
+      var next = (input.value || '').replace(/^\s+|\s+$/g, '');
+      if (!save || !next || next === current) {
+        restoreNameLink(nameCell, gidStr, current);
+        return;
+      }
+      nameCell.innerHTML = '<span class="groups-saving">saving…</span>';
+      dataProvider.updateGroup(parseInt(gidStr, 10), { name: next })
+        .then(function (updated) {
+          restoreNameLink(nameCell, gidStr, (updated && updated.name) || next);
+        })
+        .catch(function () {
+          restoreNameLink(nameCell, gidStr, current);
+        });
+    }
+    input.addEventListener('blur', function () { commit(true); });
+    input.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') { ev.preventDefault(); commit(true); }
+      else if (ev.key === 'Escape') { ev.preventDefault(); commit(false); }
+    });
+  }
+
+  function restoreNameLink(nameCell, gidStr, name) {
+    nameCell.innerHTML = '';
+    var a = document.createElement('a');
+    a.className = 'groups-name-link';
+    a.href = '#/groups/' + encodeURIComponent(gidStr);
+    a.textContent = name;
+    nameCell.appendChild(a);
+  }
+
+  function confirmAndDeleteGroup(wrap, gidStr) {
+    var row = wrap.querySelector('tr[data-group-id="' + gidStr + '"]');
+    var name = row ? row.querySelector('.groups-name-link').textContent : '(untitled)';
+    var ok = window.confirm(
+      'Delete the group "' + name + '"? ' +
+      'This removes only the group, not the fellows themselves.'
+    );
+    if (!ok) return;
+    dataProvider.deleteGroup(parseInt(gidStr, 10)).then(function (deleted) {
+      if (!deleted) return;
+      if (row && row.parentNode) row.parentNode.removeChild(row);
+      if (!wrap.querySelector('tbody tr')) {
+        var meta = document.getElementById('groups-meta');
+        if (meta) meta.textContent = '';
+        wrap.innerHTML =
+          '<p class="groups-empty">No groups yet. Build one from the directory by selecting fellows and tapping <b>Create new group</b>.</p>';
+      } else {
+        // Update the saved-count line.
+        var remaining = wrap.querySelectorAll('tbody tr').length;
+        var meta2 = document.getElementById('groups-meta');
+        if (meta2) {
+          meta2.textContent = remaining + (remaining === 1 ? ' saved group' : ' saved groups');
+        }
+      }
+    });
+  }
+
+  function renderGroupDetailPage(groupId) {
+    if (!detailEl) return;
+    detailEl.innerHTML = '<p class="placeholder">Loading group…</p>';
+    detailEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (!dataProvider || typeof dataProvider.getGroup !== 'function') {
+      detailEl.innerHTML = '<p class="placeholder">Could not load group.</p>';
+      return;
+    }
+    dataProvider.getGroup(groupId).then(function (group) {
+      if (!group) {
+        detailEl.innerHTML =
+          '<p class="placeholder">Group not found. <a href="#/groups">Back to groups</a>.</p>';
+        return;
+      }
+      var name = group.name || '(untitled)';
+      var members = group.members || [];
+      var memberCount = members.length;
+      var memberWord = memberCount === 1 ? ' fellow' : ' fellows';
+      var html = '<div class="group-detail-page">' +
+        '<p class="group-detail-breadcrumb">' +
+          '<a href="#/groups">groups</a> › ' + escapeHtml(name) +
+        '</p>' +
+        '<h2 class="group-detail-title">' + escapeHtml(name) + '</h2>' +
+        '<p class="group-detail-meta">' +
+          escapeHtml(String(memberCount)) + memberWord +
+          ' · created ' + escapeHtml((group.created_at || '').slice(0, 10)) +
+        '</p>';
+      if (group.note) {
+        html += '<p class="group-detail-note">' + escapeHtml(group.note) + '</p>';
+      }
+      if (memberCount) {
+        html +=
+          '<table class="group-detail-members">' +
+            '<thead><tr><th>Member</th></tr></thead><tbody>';
+        members.forEach(function (m) {
+          var rid = m.record_id || '';
+          var fellow = fellowsBySlug.get(rid);
+          var slug = fellow && fellow.slug ? fellow.slug : '';
+          var href = slug ? '#/fellow/' + encodeURIComponent(slug) : '#';
+          html += '<tr><td><a href="' + escapeHtml(href) + '">' +
+            escapeHtml(m.name || rid) + '</a></td></tr>';
+        });
+        html += '</tbody></table>';
+      } else {
+        html += '<p class="placeholder">No members yet.</p>';
+      }
+      html += '</div>';
+      detailEl.innerHTML = html;
+    }).catch(function () {
+      detailEl.innerHTML = '<p class="placeholder">Could not load group.</p>';
+    });
   }
 
   function getSlugFromHash() {

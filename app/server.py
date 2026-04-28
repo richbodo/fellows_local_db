@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 EHF Fellows local directory server.
-Serves static files, /api/fellows, /api/search, and /images/<slug>.<ext>.
+Serves static files, /api/fellows, /api/search, /api/groups, and
+/images/<slug>.<ext>.
 
 Run from repo root: python app/server.py
 Then open http://localhost:8765/
@@ -10,12 +11,20 @@ Then open http://localhost:8765/
 import json
 import re
 import sqlite3
+import sys
 import urllib.parse
 from pathlib import Path
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 APP_DIR = Path(__file__).resolve().parent
 REPO_ROOT = APP_DIR.parent
+# Allow running this as a script (`python app/server.py`) AND as a package
+# member (`from app.server import ...` from tests). The script-mode launcher
+# only puts ``app/`` on sys.path, so we add the repo root explicitly.
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from app import relationships  # noqa: E402  (after sys.path manipulation)
 DB_PATH = APP_DIR / "fellows.db"
 STATIC_DIR = APP_DIR / "static"
 IMAGES_DIR = APP_DIR / "fellow_profile_images_by_name"
@@ -242,24 +251,148 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"Not Found")
 
+    # --- Helpers for /api/groups CRUD --------------------------------------
+
+    def _read_json_body(self, max_bytes=64 * 1024):
+        """Parse a JSON request body. Returns the parsed value or None on error."""
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except (TypeError, ValueError):
+            length = 0
+        if length <= 0 or length > max_bytes:
+            return None
+        try:
+            raw = self.rfile.read(length)
+        except OSError:
+            return None
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return None
+
+    def _send_json_error(self, status, message):
+        self.send_json({"error": message}, status=status)
+
+    @staticmethod
+    def _validate_group_payload(body, *, require_name=True):
+        """Light validation. Returns (clean_dict, error_str)."""
+        if not isinstance(body, dict):
+            return None, "body must be a JSON object"
+        out = {}
+        if "name" in body:
+            name = body["name"]
+            if not isinstance(name, str):
+                return None, "name must be a string"
+            name = name.strip()
+            if not name or len(name) > 200:
+                return None, "name must be 1-200 characters"
+            out["name"] = name
+        elif require_name:
+            return None, "name is required"
+        if "note" in body:
+            note = body["note"]
+            if not isinstance(note, str):
+                return None, "note must be a string"
+            if len(note) > 4000:
+                return None, "note must be at most 4000 characters"
+            out["note"] = note
+        if "fellow_record_ids" in body:
+            ids = body["fellow_record_ids"]
+            if not isinstance(ids, list):
+                return None, "fellow_record_ids must be a list"
+            for rid in ids:
+                if not isinstance(rid, str) or not rid.strip():
+                    return None, "fellow_record_ids must be non-empty strings"
+            out["fellow_record_ids"] = [rid.strip() for rid in ids]
+        return out, None
+
+    def _open_relationships_db(self):
+        """Open relationships.db with fellows.db ATTACHed read-only."""
+        try:
+            return relationships.open_db()
+        except FileNotFoundError:
+            return None
+
+    # --- Method dispatch ---------------------------------------------------
+
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
-        # PR 1 stub: the create-group endpoint exists so the right-rail UI
-        # can POST and surface a clear "not yet implemented" message. PR 2
-        # replaces this with the real handler that writes to
-        # relationships.db. Tests pin the 501 contract.
         if path == "/api/groups":
-            self.send_json(
-                {
-                    "error": "Not Implemented",
-                    "message": (
-                        "POST /api/groups lands in PR 2 of the groups feature. "
-                        "Your draft is preserved; reload the page to keep editing."
-                    ),
-                },
-                status=501,
-            )
+            body = self._read_json_body()
+            if body is None:
+                return self._send_json_error(400, "invalid JSON body")
+            clean, err = self._validate_group_payload(body, require_name=True)
+            if err:
+                return self._send_json_error(400, err)
+            conn = self._open_relationships_db()
+            if conn is None:
+                return self._send_json_error(503, "relationships db unavailable")
+            try:
+                gid = relationships.create_group(
+                    conn,
+                    name=clean["name"],
+                    note=clean.get("note", ""),
+                    fellow_record_ids=clean.get("fellow_record_ids"),
+                )
+                full = relationships.get_group(conn, gid, attached=True)
+            finally:
+                conn.close()
+            return self.send_json(full, status=201)
+        self.send_error_404()
+
+    def do_PATCH(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path.rstrip("/") or "/"
+        if path.startswith("/api/groups/"):
+            try:
+                gid = int(path[len("/api/groups/"):].strip("/"))
+            except ValueError:
+                return self.send_error_404()
+            body = self._read_json_body()
+            if body is None:
+                return self._send_json_error(400, "invalid JSON body")
+            clean, err = self._validate_group_payload(body, require_name=False)
+            if err:
+                return self._send_json_error(400, err)
+            conn = self._open_relationships_db()
+            if conn is None:
+                return self._send_json_error(503, "relationships db unavailable")
+            try:
+                ok = relationships.update_group(
+                    conn,
+                    gid,
+                    name=clean.get("name"),
+                    note=clean.get("note"),
+                    fellow_record_ids=clean.get("fellow_record_ids"),
+                )
+                if not ok:
+                    return self.send_error_404()
+                full = relationships.get_group(conn, gid, attached=True)
+            finally:
+                conn.close()
+            return self.send_json(full)
+        self.send_error_404()
+
+    def do_DELETE(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path.rstrip("/") or "/"
+        if path.startswith("/api/groups/"):
+            try:
+                gid = int(path[len("/api/groups/"):].strip("/"))
+            except ValueError:
+                return self.send_error_404()
+            conn = self._open_relationships_db()
+            if conn is None:
+                return self._send_json_error(503, "relationships db unavailable")
+            try:
+                ok = relationships.delete_group(conn, gid)
+            finally:
+                conn.close()
+            if not ok:
+                return self.send_error_404()
+            self.send_response(204)
+            self.end_headers()
             return
         self.send_error_404()
 
@@ -313,6 +446,41 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(fellows)
             finally:
                 conn.close()
+            return
+
+        # API: groups list
+        if path == "/api/groups":
+            conn = self._open_relationships_db()
+            if conn is None:
+                # No fellows.db on disk yet → empty list, not an error
+                self.send_json([])
+                return
+            try:
+                groups = relationships.list_groups(conn)
+            finally:
+                conn.close()
+            self.send_json(groups)
+            return
+
+        # API: one group by id
+        if path.startswith("/api/groups/"):
+            try:
+                gid = int(path[len("/api/groups/"):].strip("/"))
+            except ValueError:
+                self.send_error_404()
+                return
+            conn = self._open_relationships_db()
+            if conn is None:
+                self.send_error_404()
+                return
+            try:
+                group = relationships.get_group(conn, gid, attached=True)
+            finally:
+                conn.close()
+            if group is None:
+                self.send_error_404()
+                return
+            self.send_json(group)
             return
 
         # API: auth status stub — dev server has no auth, but the PWA client

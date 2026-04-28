@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v9';
+const CACHE_VERSION = 'v10';
 const APP_SHELL_CACHE = `fellows-app-shell-${CACHE_VERSION}`;
 // Separate cache so shell-version bumps don't evict the ~34 MB of profile images.
 const IMAGES_CACHE = 'fellows-images-v1';
