@@ -122,7 +122,7 @@
   /** Bump on every meaningful UI / diagnostics change. Rendered in the
    *  always-visible build badge so a dev can tell at a glance which app.js
    *  is actually running vs what the server was deployed with. */
-  var FELLOWS_UI_DIAG = 'diag-2026-04p-groups-pr2';
+  var FELLOWS_UI_DIAG = 'diag-2026-04q-groups-pr3';
 
   // Persistent marker: "this origin has been authenticated successfully at
   // least once." Preserved across clearAllAppData. Used by startBrowserUx's
@@ -2198,6 +2198,27 @@
     return div.innerHTML;
   }
 
+  // Transient bottom-of-page toast. role="status" so screen readers announce it
+  // without yanking focus. Singleton element re-used across calls.
+  var toastEl = null;
+  var toastTimer = null;
+  function showToast(msg, ttlMs) {
+    if (!toastEl) {
+      toastEl = document.createElement('div');
+      toastEl.className = 'app-toast';
+      toastEl.id = 'app-toast';
+      toastEl.setAttribute('role', 'status');
+      toastEl.setAttribute('aria-live', 'polite');
+      document.body.appendChild(toastEl);
+    }
+    toastEl.textContent = msg || '';
+    toastEl.classList.add('app-toast--visible');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () {
+      if (toastEl) toastEl.classList.remove('app-toast--visible');
+    }, ttlMs || 3000);
+  }
+
   // ===== Groups feature (PR 1): draft state, rail rendering, marker sync ===
 
   function loadGroupDraft() {
@@ -2596,6 +2617,25 @@
       renderGroupDetailPage(parseInt(groupMatch[1], 10));
       return;
     }
+    var editMatch = hash.match(/^#\/edit\/(\d+)$/);
+    if (editMatch) {
+      // PR 3 placeholder. PR 4 replaces this with real edit-mode entry
+      // (snapshot the group, render the directory unrestricted, show the
+      // yellow banner, auto-save on toggle).
+      var editId = editMatch[1];
+      detailEl.innerHTML =
+        '<div class="group-detail-page">' +
+          '<p class="group-detail-breadcrumb">' +
+            '<a href="#/groups">groups</a> › ' +
+            '<a href="#/groups/' + escapeHtml(editId) + '">group</a> › edit' +
+          '</p>' +
+          '<p class="placeholder">' +
+            'Edit mode lands in PR 4. ' +
+            '<a href="#/groups/' + escapeHtml(editId) + '">Back to group</a>.' +
+          '</p>' +
+        '</div>';
+      return;
+    }
     updateDetailFromHash();
   }
 
@@ -2773,6 +2813,63 @@
     });
   }
 
+  // Recipient-count thresholds for the Contact button. mailto: URL length
+  // is the underlying constraint (see docs/persistence_and_upgrades.md and
+  // PR 1 design discussion); recipient count is a friendlier proxy.
+  var GROUPS_CONTACT_WARN_AT = 50;
+  var GROUPS_CONTACT_HARD_AT = 100;
+
+  function collectGroupEmails(group) {
+    var out = [];
+    var missing = 0;
+    if (!group || !group.members) return { emails: out, missing: 0 };
+    group.members.forEach(function (m) {
+      var rid = m.record_id;
+      var fellow = rid && fellowsBySlug.get(rid);
+      var email = fellow && fellow.contact_email;
+      if (email && String(email).trim()) {
+        out.push(String(email).trim());
+      } else {
+        missing += 1;
+      }
+    });
+    return { emails: out, missing: missing };
+  }
+
+  function buildContactMailto(group, mode, emails) {
+    // Email addresses don't need URL-encoding for normal characters; the
+    // mailto: spec accepts them verbatim. encodeURIComponent on the subject
+    // handles spaces / unicode safely.
+    var key = mode === 'bcc' ? 'bcc' : 'cc';
+    var subject = encodeURIComponent(group.name || '');
+    var url = 'mailto:?' + key + '=' + emails.join(',');
+    if (subject) url += '&subject=' + subject;
+    return url;
+  }
+
+  function copyToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    // Fallback: textarea + document.execCommand. Older Safari needs this.
+    return new Promise(function (resolve, reject) {
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        resolve();
+      } catch (e) {
+        reject(e);
+      }
+    });
+  }
+
   function renderGroupDetailPage(groupId) {
     if (!detailEl) return;
     detailEl.innerHTML = '<p class="placeholder">Loading group…</p>';
@@ -2791,7 +2888,11 @@
       var members = group.members || [];
       var memberCount = members.length;
       var memberWord = memberCount === 1 ? ' fellow' : ' fellows';
-      var html = '<div class="group-detail-page">' +
+      var emailInfo = collectGroupEmails(group);
+      var totalEmails = emailInfo.emails.length;
+      var hasNote = !!(group.note && String(group.note).trim());
+      var noteEditLabel = hasNote ? 'edit' : 'add a note';
+      var html = '<div class="group-detail-page" data-group-id="' + escapeHtml(String(group.id)) + '">' +
         '<p class="group-detail-breadcrumb">' +
           '<a href="#/groups">groups</a> › ' + escapeHtml(name) +
         '</p>' +
@@ -2800,9 +2901,90 @@
           escapeHtml(String(memberCount)) + memberWord +
           ' · created ' + escapeHtml((group.created_at || '').slice(0, 10)) +
         '</p>';
-      if (group.note) {
-        html += '<p class="group-detail-note">' + escapeHtml(group.note) + '</p>';
+
+      // Action bar: ✉ Contact (primary, real <a href="mailto:…">) + CC/BCC
+      // pill toggle + ⬇ Export + ✎ Edit. Native <a> means the browser
+      // handles handing the mailto URL off to the user's mail client.
+      // The hard-threshold path intercepts the click and copies addresses
+      // to the clipboard instead.
+      var hasEmails = totalEmails > 0;
+      var hardLimit = totalEmails >= GROUPS_CONTACT_HARD_AT;
+      var initialHref = (hasEmails && !hardLimit)
+        ? buildContactMailto(group, 'cc', emailInfo.emails)
+        : '';
+      var contactClasses = 'group-action-btn group-action-btn--primary' +
+        (hasEmails ? '' : ' group-action-btn--disabled');
+      var contactAttrs = '';
+      if (initialHref) contactAttrs += ' href="' + escapeHtml(initialHref) + '"';
+      if (!hasEmails) contactAttrs += ' aria-disabled="true" title="No email addresses available for this group"';
+      html +=
+        '<div class="group-action-bar">' +
+          '<a class="' + contactClasses + '" id="group-action-contact" role="button"' + contactAttrs + '>' +
+            '✉ Contact the whole group' +
+          '</a>' +
+          '<div class="group-contact-mode" role="group" aria-label="Recipient header">' +
+            '<button type="button" class="group-mode-pill group-mode-pill--active" data-mode="cc" aria-pressed="true">CC</button>' +
+            '<button type="button" class="group-mode-pill" data-mode="bcc" aria-pressed="false">BCC</button>' +
+          '</div>' +
+          '<button type="button" class="group-action-btn" id="group-action-export">⬇ Export a directory</button>' +
+          '<button type="button" class="group-action-btn" id="group-action-edit">✎ Edit group</button>' +
+          '<span class="group-action-helper">opens your mail client with everyone in <span id="group-action-helper-mode">CC</span></span>' +
+        '</div>';
+
+      // Threshold banner. Soft warning between WARN and HARD, hard warning ≥ HARD.
+      if (totalEmails >= GROUPS_CONTACT_HARD_AT) {
+        html +=
+          '<div class="group-contact-banner group-contact-banner--hard" role="status">' +
+            escapeHtml(String(totalEmails)) + ' recipients — too many for one mailto: URL on most clients. ' +
+            '<a href="#" id="group-action-copy-emails">Copy ' + escapeHtml(String(totalEmails)) + ' addresses</a>' +
+            ' and paste them into your mail client manually.' +
+          '</div>';
+      } else if (totalEmails >= GROUPS_CONTACT_WARN_AT) {
+        html +=
+          '<div class="group-contact-banner group-contact-banner--soft" role="status">' +
+            escapeHtml(String(totalEmails)) + ' recipients — long mailto: URLs may be truncated by some clients. ' +
+            '<a href="#" id="group-action-copy-emails">Copy addresses</a> if your client misbehaves.' +
+          '</div>';
+      } else if (emailInfo.missing > 0 && totalEmails > 0) {
+        html +=
+          '<div class="group-contact-banner group-contact-banner--info" role="status">' +
+            escapeHtml(String(emailInfo.missing)) +
+            ' member' + (emailInfo.missing === 1 ? '' : 's') +
+            ' without an email; ' +
+            escapeHtml(String(totalEmails)) +
+            ' will be addressed.' +
+          '</div>';
       }
+
+      // Inline export panel (PR 3 wires the toggle; PR 5 wires Export action).
+      html +=
+        '<div class="group-export-panel hidden" id="group-export-panel" aria-label="Export options">' +
+          '<div class="group-export-head">Export a directory</div>' +
+          '<div class="group-export-options">' +
+            '<label><input type="checkbox" checked> <span><b>PDF directory</b><br><code>' +
+              escapeHtml(slugifyForFilename(name)) + '.pdf</code></span></label>' +
+            '<label><input type="checkbox"> <span><b>HTML directory</b><br><code>' +
+              escapeHtml(slugifyForFilename(name)) + '/</code> · view offline</span></label>' +
+            '<label><input type="checkbox" checked> <span><b>email it to me</b><br>your registered address</span></label>' +
+          '</div>' +
+          '<div class="group-export-actions">' +
+            '<button type="button" class="group-export-cancel">cancel</button>' +
+            '<button type="button" class="group-export-go" disabled title="Export lands in PR 5">Export</button>' +
+          '</div>' +
+          '<p class="group-export-note">Export functionality lands in PR 5 — the panel is wired so you can preview the options.</p>' +
+        '</div>';
+
+      // Cream note callout. Always rendered; "edit" / "add a note" link beside it.
+      html +=
+        '<div class="group-detail-note-wrap" id="group-detail-note-wrap">' +
+          (hasNote
+            ? '<span class="group-detail-note-text" id="group-detail-note-text">' + escapeHtml(group.note) + '</span>'
+            : '<span class="group-detail-note-empty" id="group-detail-note-text">No note yet.</span>') +
+          ' <a href="#" class="group-detail-note-edit" id="group-detail-note-edit">' +
+            escapeHtml(noteEditLabel) +
+          '</a>' +
+        '</div>';
+
       if (memberCount) {
         html +=
           '<table class="group-detail-members">' +
@@ -2821,8 +3003,194 @@
       }
       html += '</div>';
       detailEl.innerHTML = html;
+      wireGroupDetailPage(group, emailInfo);
     }).catch(function () {
       detailEl.innerHTML = '<p class="placeholder">Could not load group.</p>';
+    });
+  }
+
+  function slugifyForFilename(name) {
+    return String(name || '')
+      .toLowerCase()
+      .replace(/^#/, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'group';
+  }
+
+  function wireGroupDetailPage(group, emailInfo) {
+    var contactMode = 'cc';
+    var contactBtn = document.getElementById('group-action-contact');
+    var modePills = document.querySelectorAll('.group-mode-pill');
+    var helperModeEl = document.getElementById('group-action-helper-mode');
+    var exportBtn = document.getElementById('group-action-export');
+    var editBtn = document.getElementById('group-action-edit');
+    var exportPanel = document.getElementById('group-export-panel');
+    var exportCancel = document.querySelector('.group-export-cancel');
+    var copyEmailsLink = document.getElementById('group-action-copy-emails');
+    var noteEditLink = document.getElementById('group-detail-note-edit');
+
+    function setMode(next) {
+      contactMode = next;
+      for (var i = 0; i < modePills.length; i++) {
+        var p = modePills[i];
+        var on = p.dataset.mode === next;
+        if (on) p.classList.add('group-mode-pill--active');
+        else p.classList.remove('group-mode-pill--active');
+        p.setAttribute('aria-pressed', on ? 'true' : 'false');
+      }
+      if (helperModeEl) helperModeEl.textContent = next.toUpperCase();
+      refreshContactHref();
+    }
+
+    for (var i = 0; i < modePills.length; i++) {
+      modePills[i].addEventListener('click', function () {
+        setMode(this.dataset.mode);
+      });
+    }
+
+    if (contactBtn) {
+      contactBtn.addEventListener('click', function (ev) {
+        // Disabled state: no emails. Block click so the empty href doesn't
+        // jump to top of page.
+        if (!emailInfo.emails.length) {
+          ev.preventDefault();
+          return;
+        }
+        // Hard threshold: don't navigate. Copy addresses to clipboard.
+        if (emailInfo.emails.length >= GROUPS_CONTACT_HARD_AT) {
+          ev.preventDefault();
+          copyToClipboard(emailInfo.emails.join(', '))
+            .then(function () {
+              showToast(emailInfo.emails.length + ' addresses copied. Paste into the ' +
+                contactMode.toUpperCase() + ' field of a new message.');
+            })
+            .catch(function () {
+              showToast('Could not copy addresses. Open the page console to grab them manually.');
+            });
+          return;
+        }
+        // Normal path: <a href="mailto:..."> handles itself; nothing to do.
+      });
+    }
+
+    // When CC/BCC mode flips, rebuild the mailto: href so the link reflects
+    // the chosen header. Skipped when the button is disabled or in
+    // hard-threshold copy-fallback mode.
+    function refreshContactHref() {
+      if (!contactBtn) return;
+      if (!emailInfo.emails.length) return;
+      if (emailInfo.emails.length >= GROUPS_CONTACT_HARD_AT) return;
+      contactBtn.setAttribute(
+        'href',
+        buildContactMailto(group, contactMode, emailInfo.emails)
+      );
+    }
+
+    if (copyEmailsLink) {
+      copyEmailsLink.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        copyToClipboard(emailInfo.emails.join(', '))
+          .then(function () {
+            showToast(emailInfo.emails.length + ' addresses copied to clipboard.');
+          })
+          .catch(function () {
+            showToast('Could not copy addresses.');
+          });
+      });
+    }
+
+    if (exportBtn && exportPanel) {
+      exportBtn.addEventListener('click', function () {
+        exportPanel.classList.toggle('hidden');
+      });
+    }
+    if (exportCancel && exportPanel) {
+      exportCancel.addEventListener('click', function () {
+        exportPanel.classList.add('hidden');
+      });
+    }
+
+    if (editBtn) {
+      editBtn.addEventListener('click', function () {
+        // PR 3 navigates; PR 4 will replace the placeholder route handler
+        // with the real "directory in edit mode" entry behavior.
+        window.location.hash = '#/edit/' + encodeURIComponent(String(group.id));
+      });
+    }
+
+    if (noteEditLink) {
+      noteEditLink.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        startInlineNoteEdit(group);
+      });
+    }
+  }
+
+  function startInlineNoteEdit(group) {
+    var wrap = document.getElementById('group-detail-note-wrap');
+    if (!wrap) return;
+    var current = group.note || '';
+    wrap.innerHTML = '';
+    wrap.classList.add('group-detail-note-wrap--editing');
+    var textarea = document.createElement('textarea');
+    textarea.className = 'group-detail-note-input';
+    textarea.value = current;
+    textarea.maxLength = 4000;
+    textarea.rows = 3;
+    var actions = document.createElement('div');
+    actions.className = 'group-detail-note-actions';
+    var saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.className = 'group-detail-note-save';
+    saveBtn.textContent = 'Save';
+    var cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'group-detail-note-cancel';
+    cancelBtn.textContent = 'Cancel';
+    actions.appendChild(saveBtn);
+    actions.appendChild(cancelBtn);
+    wrap.appendChild(textarea);
+    wrap.appendChild(actions);
+    textarea.focus();
+    textarea.select();
+
+    function restore(noteText) {
+      wrap.classList.remove('group-detail-note-wrap--editing');
+      var hasNote = !!(noteText && String(noteText).trim());
+      wrap.innerHTML =
+        (hasNote
+          ? '<span class="group-detail-note-text" id="group-detail-note-text">' + escapeHtml(noteText) + '</span>'
+          : '<span class="group-detail-note-empty" id="group-detail-note-text">No note yet.</span>') +
+        ' <a href="#" class="group-detail-note-edit" id="group-detail-note-edit">' +
+          (hasNote ? 'edit' : 'add a note') +
+        '</a>';
+      // Re-bind the new edit link.
+      var newLink = document.getElementById('group-detail-note-edit');
+      if (newLink) {
+        newLink.addEventListener('click', function (ev) {
+          ev.preventDefault();
+          startInlineNoteEdit(group);
+        });
+      }
+    }
+
+    cancelBtn.addEventListener('click', function () { restore(current); });
+    saveBtn.addEventListener('click', function () {
+      var next = textarea.value;
+      saveBtn.disabled = true;
+      cancelBtn.disabled = true;
+      dataProvider.updateGroup(group.id, { note: next })
+        .then(function (updated) {
+          var savedNote = (updated && typeof updated.note === 'string') ? updated.note : next;
+          group.note = savedNote;
+          restore(savedNote);
+          showToast('Note saved.');
+        })
+        .catch(function () {
+          saveBtn.disabled = false;
+          cancelBtn.disabled = false;
+          showToast('Could not save note.');
+        });
     });
   }
 
