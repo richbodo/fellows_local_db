@@ -1791,3 +1791,43 @@ a.group-action-btn--primary {
   opacity: 1;
   transform: translate(-50%, 0);
 }
+
+/* =========================================================================
+ * Groups feature — PR 4: edit-mode yellow banner.
+ * ========================================================================= */
+
+.edit-mode-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.75rem;
+  margin-top: 0.5rem;
+  background: #fff3cd;
+  border: 1px solid #ffe69c;
+  border-radius: 2px;
+  color: #664d03;
+  font-size: 0.85rem;
+}
+
+.edit-mode-banner.hidden {
+  display: none;
+}
+
+.edit-mode-banner-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.edit-mode-banner-cancel {
+  margin-left: auto;
+  flex: 0 0 auto;
+  color: #664d03;
+  text-decoration: underline;
+  font-weight: 500;
+}
+
+.edit-mode-banner-cancel:hover {
+  color: #4d3902;
+}

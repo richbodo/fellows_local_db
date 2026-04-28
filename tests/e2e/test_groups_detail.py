@@ -263,9 +263,13 @@ class TestGroupDetailExportPanel:
 
 
 class TestGroupDetailEditNav:
-    def test_edit_button_navigates_to_edit_route_placeholder(
+    def test_edit_button_navigates_and_enters_edit_mode(
         self, standalone_page, base_url_fixture
     ):
+        """Click ✎ Edit group on the detail page → URL flips to
+        #/edit/<id> and the yellow edit-mode banner appears.
+        Deeper edit-mode behaviour (auto-save, cancel-edits, etc.)
+        is covered in tests/e2e/test_groups_edit.py."""
         page = standalone_page
         fellows = _real_fellows(base_url_fixture)
         g = _create_group(
@@ -277,9 +281,9 @@ class TestGroupDetailEditNav:
         _wait_for_directory(page)
         page.locator("#group-action-edit").click()
         page.wait_for_url(lambda u: f"#/edit/{g['id']}" in u, timeout=3000)
-        # PR 3 placeholder visible until PR 4 lands real edit-mode entry.
-        placeholder = page.locator(".group-detail-page .placeholder")
-        expect(placeholder).to_contain_text("Edit mode lands in PR 4")
+        banner = page.locator("#edit-mode-banner")
+        expect(banner).to_be_visible(timeout=3000)
+        expect(page.locator("#edit-mode-banner-name")).to_have_text("Edit nav")
 
 
 class TestGroupDetailNoteEdit:
