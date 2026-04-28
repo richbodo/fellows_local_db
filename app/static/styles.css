@@ -1493,3 +1493,301 @@ h1 {
   color: #0066cc;
   text-decoration: underline;
 }
+
+/* =========================================================================
+ * Groups feature — PR 3: detail action bar, contact + export panel,
+ * inline note edit, toast.
+ * ========================================================================= */
+
+.group-action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  margin: 0.5rem 0;
+  background: #faf8fc;
+  border: 1px solid #dcd6e8;
+  border-radius: 2px;
+}
+
+.group-action-btn {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 3px;
+  border: 1px solid #ccc;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+}
+
+.group-action-btn:hover:not(:disabled) {
+  background: #f4eef9;
+}
+
+.group-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.group-action-btn--primary {
+  background: #4a2c6a;
+  color: #fff;
+  border-color: #4a2c6a;
+  font-weight: 600;
+}
+
+.group-action-btn--primary:hover:not(:disabled):not(.group-action-btn--disabled) {
+  background: #3b2355;
+}
+
+/* <a>-as-button needs explicit defaults to look like a button. */
+a.group-action-btn {
+  text-decoration: none;
+  display: inline-block;
+}
+
+a.group-action-btn:hover {
+  text-decoration: none;
+}
+
+.group-action-btn--disabled,
+.group-action-btn--disabled:hover {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: #fff !important;
+  color: #333 !important;
+  border-color: #ccc !important;
+}
+
+a.group-action-btn--primary {
+  color: #fff;
+}
+
+.group-contact-mode {
+  display: inline-flex;
+  border: 1px solid #dcd6e8;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.group-mode-pill {
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.2rem 0.55rem;
+  border: 0;
+  background: transparent;
+  color: #3b2355;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+}
+
+.group-mode-pill--active {
+  background: #4a2c6a;
+  color: #fff;
+}
+
+.group-mode-pill:focus {
+  outline: 2px solid #4a2c6a;
+  outline-offset: -2px;
+}
+
+.group-action-helper {
+  font-size: 0.72rem;
+  color: #7a6f91;
+  margin-left: auto;
+  align-self: center;
+}
+
+.group-contact-banner {
+  margin: 0.4rem 0;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.82rem;
+  border-radius: 2px;
+  border: 1px solid;
+}
+
+.group-contact-banner--soft {
+  background: #fff3cd;
+  border-color: #ffe69c;
+  color: #664d03;
+}
+
+.group-contact-banner--hard {
+  background: #fde2e2;
+  border-color: #f0bcbc;
+  color: #6b1f1f;
+}
+
+.group-contact-banner--info {
+  background: #ede7f3;
+  border-color: #dcd6e8;
+  color: #3b2355;
+}
+
+.group-contact-banner a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+/* Inline export panel beneath the action bar (PR 5 wires Export action). */
+.group-export-panel {
+  margin: 0.4rem 0;
+  background: #fff;
+  border: 1px solid #dcd6e8;
+  font-size: 0.85rem;
+}
+
+.group-export-head {
+  background: #4a2c6a;
+  color: #fff;
+  padding: 0.35em 0.5em;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.group-export-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1.2rem;
+  padding: 0.55rem 0.7rem;
+}
+
+.group-export-options label {
+  display: flex;
+  gap: 0.4rem;
+  align-items: flex-start;
+  cursor: pointer;
+  line-height: 1.35;
+}
+
+.group-export-options code {
+  font-size: 0.78rem;
+  color: #7a6f91;
+}
+
+.group-export-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  padding: 0 0.7rem 0.5rem;
+}
+
+.group-export-cancel,
+.group-export-go {
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 3px;
+  border: 1px solid #ccc;
+  background: #fff;
+  cursor: pointer;
+}
+
+.group-export-go:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.group-export-note {
+  margin: 0;
+  padding: 0 0.7rem 0.6rem;
+  font-size: 0.72rem;
+  color: #7a6f91;
+}
+
+/* Cream note callout — replaces the simpler PR 2 paragraph. */
+.group-detail-note-wrap {
+  margin: 0.4rem 0 0.75rem 0;
+  padding: 0.4em 0.6em;
+  font-size: 0.85rem;
+  color: #444;
+  background: #fffbe6;
+  border: 1px dashed #e8d77a;
+}
+
+.group-detail-note-text {
+  font-style: italic;
+}
+
+.group-detail-note-empty {
+  color: #888;
+}
+
+.group-detail-note-edit {
+  margin-left: 0.5rem;
+  font-size: 0.78rem;
+  color: #0066cc;
+  text-decoration: underline;
+  font-style: normal;
+}
+
+.group-detail-note-wrap--editing {
+  background: #fffdf2;
+}
+
+.group-detail-note-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.3rem 0.4rem;
+  font: inherit;
+  font-size: 0.88rem;
+  border: 1px solid #4a2c6a;
+  border-radius: 2px;
+  resize: vertical;
+}
+
+.group-detail-note-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 0.4rem;
+}
+
+.group-detail-note-save,
+.group-detail-note-cancel {
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.2rem 0.65rem;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.group-detail-note-save {
+  background: #4a2c6a;
+  color: #fff;
+  border: 1px solid #4a2c6a;
+}
+
+.group-detail-note-cancel {
+  background: #fff;
+  color: #333;
+  border: 1px solid #ccc;
+}
+
+/* Transient toast — bottom-center, fades. */
+.app-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.25rem;
+  transform: translate(-50%, 1rem);
+  z-index: 9990;
+  padding: 0.55rem 0.85rem;
+  font-size: 0.85rem;
+  color: #fff;
+  background: #2d1f3d;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  max-width: 90vw;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+
+.app-toast--visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
