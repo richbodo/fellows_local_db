@@ -86,8 +86,24 @@
     members: new Set(),       // record_id values picked
     memberNames: {},          // record_id -> display name (for chips)
     title: '',
-    titleEdited: false
+    titleEdited: false,
+    // PR 4: when non-null, the rail is editing an existing saved group
+    // instead of composing a new one. editEntrySnapshot is what
+    // "cancel edits" restores.
+    editingGroupId: null,
+    editEntrySnapshot: null   // {name, note, fellow_record_ids: []}
   };
+  // In-memory backup of the compose-mode draft while edit mode is active.
+  // Restored to groupDraft + localStorage when edit mode exits, so the
+  // user's in-progress new group survives a detour into editing an
+  // existing one. NOT persisted itself; reload during edit mode re-derives
+  // this from the localStorage compose draft (which was last written
+  // before edit mode was entered).
+  var composeDraftBackup = null;
+  var editModeBannerEl = document.getElementById('edit-mode-banner');
+  var editModeBannerNameEl = document.getElementById('edit-mode-banner-name');
+  var editModeBannerCancelEl = document.getElementById('edit-mode-banner-cancel');
+  var editTitlePatchTimer = null;
   var installLandingEl = document.getElementById('install-landing');
   var installGatePrivateEl = document.getElementById('install-gate-private');
   var unlockEmailFormEl = document.getElementById('unlock-email-form');
@@ -122,7 +138,7 @@
   /** Bump on every meaningful UI / diagnostics change. Rendered in the
    *  always-visible build badge so a dev can tell at a glance which app.js
    *  is actually running vs what the server was deployed with. */
-  var FELLOWS_UI_DIAG = 'diag-2026-04q-groups-pr3';
+  var FELLOWS_UI_DIAG = 'diag-2026-04r-groups-pr4';
 
   // Persistent marker: "this origin has been authenticated successfully at
   // least once." Preserved across clearAllAppData. Used by startBrowserUx's
@@ -2275,13 +2291,19 @@
 
   function renderRailHeader() {
     if (!groupRailTitleEl || !groupRailHelperEl || !groupRailCreateEl) return;
+    var editing = isEditing();
+    var eyebrowEl = groupRailEyebrowEl;
+    if (eyebrowEl) {
+      eyebrowEl.textContent = editing ? 'editing group' : 'add to a group';
+    }
     var query = (searchInputEl && searchInputEl.value || '').trim();
     var autoTitle = deriveAutoTitle(query);
-    var displayed = groupDraft.titleEdited ? groupDraft.title : autoTitle;
+    var displayed = (editing || groupDraft.titleEdited) ? groupDraft.title : autoTitle;
     if (document.activeElement !== groupRailTitleEl) {
       groupRailTitleEl.value = displayed;
     }
-    if (groupDraft.titleEdited) {
+    // Edit mode: never show the cream auto-state. Compose mode behaves as before.
+    if (editing || groupDraft.titleEdited) {
       groupRailTitleEl.classList.remove('group-rail-title--auto');
     } else {
       groupRailTitleEl.classList.add('group-rail-title--auto');
@@ -2289,7 +2311,9 @@
     var n = groupDraft.members.size;
     var fellows = n + ' fellow' + (n === 1 ? '' : 's');
     var helper;
-    if (groupDraft.titleEdited) {
+    if (editing) {
+      helper = fellows;
+    } else if (groupDraft.titleEdited) {
       helper = fellows;
     } else if (autoTitle) {
       helper = 'auto-named — click to rename · ' + fellows;
@@ -2297,7 +2321,15 @@
       helper = 'type a name, or search to auto-fill · ' + fellows;
     }
     groupRailHelperEl.textContent = helper;
-    groupRailCreateEl.disabled = n === 0;
+    // Edit mode: always enabled (Done editing). Compose mode: disabled when no members.
+    groupRailCreateEl.disabled = !editing && n === 0;
+    groupRailCreateEl.textContent = editing ? 'Done editing' : 'Create new group';
+    var footnoteEl = document.querySelector('.group-rail-footnote');
+    if (footnoteEl) {
+      footnoteEl.textContent = editing
+        ? 'changes save automatically as you add or remove.'
+        : 'saves immediately to your groups. You can rename and edit it later.';
+    }
   }
 
   function renderRailMembers() {
@@ -2370,7 +2402,7 @@
         groupDraft.memberNames[rid] = name;
       }
     }
-    saveGroupDraft();
+    persistDraft();
     renderRail();
     refreshAllMarkers();
     refreshDetailAddLink();
@@ -2409,7 +2441,7 @@
         groupDraft.memberNames[f.record_id] = f.name || f.record_id;
       }
     });
-    saveGroupDraft();
+    persistDraft();
     renderRail();
     refreshAllMarkers();
     refreshDetailAddLink();
@@ -2426,6 +2458,207 @@
     refreshAllMarkers();
     refreshDetailAddLink();
     updateBulkBar();
+  }
+
+  // --- PR 4: edit mode -------------------------------------------------
+
+  function persistDraft() {
+    // Compose mode: the draft IS the saved state, so localStorage is the
+    // store. Edit mode: localStorage is left alone (it holds the user's
+    // backed-up compose draft); persistence happens via PATCH against the
+    // saved group instead.
+    if (groupDraft.editingGroupId == null) {
+      saveGroupDraft();
+    } else {
+      patchEditedGroupMembership();
+    }
+  }
+
+  function patchEditedGroupMembership() {
+    if (groupDraft.editingGroupId == null) return;
+    if (!dataProvider || typeof dataProvider.updateGroup !== 'function') return;
+    var ids = [];
+    groupDraft.members.forEach(function (rid) { ids.push(rid); });
+    dataProvider
+      .updateGroup(groupDraft.editingGroupId, { fellow_record_ids: ids })
+      .catch(function () {
+        showToast('Could not save change');
+      });
+  }
+
+  function patchEditedGroupName(name) {
+    if (groupDraft.editingGroupId == null) return;
+    if (!dataProvider || typeof dataProvider.updateGroup !== 'function') return;
+    var trimmed = (name || '').replace(/^\s+|\s+$/g, '');
+    if (!trimmed) return;
+    dataProvider
+      .updateGroup(groupDraft.editingGroupId, { name: trimmed })
+      .then(function () {
+        // Update banner text in case the user paused editing.
+        if (editModeBannerNameEl) editModeBannerNameEl.textContent = trimmed;
+      })
+      .catch(function () {
+        showToast('Could not save name');
+      });
+  }
+
+  function showEditBanner(name) {
+    if (!editModeBannerEl || !editModeBannerNameEl) return;
+    editModeBannerNameEl.textContent = name || '';
+    editModeBannerEl.classList.remove('hidden');
+  }
+
+  function hideEditBanner() {
+    if (editModeBannerEl) editModeBannerEl.classList.add('hidden');
+  }
+
+  function snapshotComposeDraft() {
+    // Plain object so it isn't tangled with the live Set / mutations.
+    var members = [];
+    groupDraft.members.forEach(function (rid) { members.push(rid); });
+    return {
+      members: members,
+      memberNames: Object.assign({}, groupDraft.memberNames),
+      title: groupDraft.title,
+      titleEdited: groupDraft.titleEdited
+    };
+  }
+
+  function restoreComposeDraft(snap) {
+    if (!snap) snap = { members: [], memberNames: {}, title: '', titleEdited: false };
+    groupDraft.members = new Set(snap.members || []);
+    groupDraft.memberNames = snap.memberNames || {};
+    groupDraft.title = snap.title || '';
+    groupDraft.titleEdited = !!snap.titleEdited;
+    groupDraft.editingGroupId = null;
+    groupDraft.editEntrySnapshot = null;
+  }
+
+  function enterEditMode(groupId) {
+    if (!dataProvider || typeof dataProvider.getGroup !== 'function') {
+      showToast('Edit mode is unavailable in this mode');
+      window.location.hash = '#/groups';
+      return;
+    }
+    // Preserve the user's compose draft so the detour into edit mode
+    // doesn't clobber their in-progress new group.
+    if (groupDraft.editingGroupId == null) {
+      composeDraftBackup = snapshotComposeDraft();
+    }
+    dataProvider.getGroup(groupId)
+      .then(function (group) {
+        if (!group) {
+          showToast('Group not found');
+          window.location.hash = '#/groups';
+          return;
+        }
+        var memberIds = (group.members || []).map(function (m) { return m.record_id; });
+        // Snapshot for cancel-edits.
+        groupDraft.editEntrySnapshot = {
+          name: group.name || '',
+          note: group.note || '',
+          fellow_record_ids: memberIds.slice()
+        };
+        groupDraft.editingGroupId = group.id;
+        // Replace draft with the group's current state. memberNames are
+        // best-effort: members[].name comes from the dev-server JOIN; on
+        // OPFS we resolved them from fellowsBySlug at getGroup time.
+        groupDraft.members = new Set(memberIds);
+        groupDraft.memberNames = {};
+        (group.members || []).forEach(function (m) {
+          if (m.record_id) {
+            groupDraft.memberNames[m.record_id] = m.name || m.record_id;
+          }
+        });
+        groupDraft.title = group.name || '';
+        // In edit mode the title field shows the live group name (no cream
+        // auto-state) — set titleEdited so renderRailHeader treats it as
+        // user-authored.
+        groupDraft.titleEdited = true;
+
+        // Clear search and uncheck has-email so the directory is unrestricted.
+        if (searchInputEl) {
+          searchInputEl.value = '';
+        }
+        if (hasEmailFilterEl) {
+          hasEmailFilterEl.checked = false;
+        }
+        hasEmailOnly = false;
+        showEditBanner(group.name || '(untitled)');
+        // The detail pane during edit mode shows the current fellow detail
+        // (or the group's detail page that brought us here, depending on
+        // hash). We render the directory afresh and let the existing route
+        // handler resolve the detail.
+        if (Array.isArray(list) && list.length) {
+          renderDirectory();
+        }
+        renderRail();
+        refreshAllMarkers();
+        refreshDetailAddLink();
+        updateBulkBar();
+      })
+      .catch(function () {
+        showToast('Could not load group');
+        window.location.hash = '#/groups';
+      });
+  }
+
+  function exitEditMode() {
+    if (groupDraft.editingGroupId == null) return;
+    // Cancel any pending name PATCH; it would race against the snapshot.
+    if (editTitlePatchTimer) {
+      clearTimeout(editTitlePatchTimer);
+      editTitlePatchTimer = null;
+    }
+    hideEditBanner();
+    restoreComposeDraft(composeDraftBackup);
+    composeDraftBackup = null;
+    saveGroupDraft();
+    // Re-derive has-email filter from localStorage so we restore whatever
+    // the user had set before edit mode.
+    hasEmailOnly = loadHasEmailFilter();
+    if (hasEmailFilterEl) hasEmailFilterEl.checked = hasEmailOnly;
+    if (Array.isArray(list) && list.length) {
+      renderDirectory();
+    }
+    renderRail();
+    refreshAllMarkers();
+    refreshDetailAddLink();
+    updateBulkBar();
+  }
+
+  function isEditing() {
+    return groupDraft.editingGroupId != null;
+  }
+
+  function handleCancelEdits() {
+    if (!isEditing()) return;
+    var snapshot = groupDraft.editEntrySnapshot;
+    var gid = groupDraft.editingGroupId;
+    if (!snapshot) {
+      // Nothing to revert to (unexpected — should never happen since
+      // edit-mode-entry only ever fires for saved groups).
+      window.location.hash = '#/groups/' + encodeURIComponent(String(gid));
+      return;
+    }
+    // Cancel any pending name-debounce so it doesn't overwrite the revert.
+    if (editTitlePatchTimer) {
+      clearTimeout(editTitlePatchTimer);
+      editTitlePatchTimer = null;
+    }
+    dataProvider
+      .updateGroup(gid, {
+        name: snapshot.name,
+        note: snapshot.note,
+        fellow_record_ids: snapshot.fellow_record_ids
+      })
+      .then(function () {
+        showToast('Edits reverted.');
+        window.location.hash = '#/groups/' + encodeURIComponent(String(gid));
+      })
+      .catch(function () {
+        showToast('Could not revert edits.');
+      });
   }
 
   function handleCreateGroupClick() {
@@ -2604,6 +2837,14 @@
 
   function route() {
     var hash = window.location.hash || '';
+    var editMatch = hash.match(/^#\/edit\/(\d+)$/);
+    var nextEditId = editMatch ? parseInt(editMatch[1], 10) : null;
+    // Transition out of edit mode if the URL no longer points there. (Same
+    // group still in editingGroupId? Different group? Either way, exit
+    // first; if we're entering a new edit-mode session we re-enter below.)
+    if (isEditing() && nextEditId !== groupDraft.editingGroupId) {
+      exitEditMode();
+    }
     if (hash === '#/about') {
       renderAboutPage();
       return;
@@ -2617,23 +2858,15 @@
       renderGroupDetailPage(parseInt(groupMatch[1], 10));
       return;
     }
-    var editMatch = hash.match(/^#\/edit\/(\d+)$/);
     if (editMatch) {
-      // PR 3 placeholder. PR 4 replaces this with real edit-mode entry
-      // (snapshot the group, render the directory unrestricted, show the
-      // yellow banner, auto-save on toggle).
-      var editId = editMatch[1];
-      detailEl.innerHTML =
-        '<div class="group-detail-page">' +
-          '<p class="group-detail-breadcrumb">' +
-            '<a href="#/groups">groups</a> › ' +
-            '<a href="#/groups/' + escapeHtml(editId) + '">group</a> › edit' +
-          '</p>' +
-          '<p class="placeholder">' +
-            'Edit mode lands in PR 4. ' +
-            '<a href="#/groups/' + escapeHtml(editId) + '">Back to group</a>.' +
-          '</p>' +
-        '</div>';
+      // Edit mode is rail-driven, not detail-pane-driven. The directory
+      // and rail flip into edit mode; the detail pane shows whatever was
+      // there (or a placeholder via updateDetailFromHash). Enter once per
+      // hash visit; re-entering for the same id is a no-op.
+      if (groupDraft.editingGroupId !== nextEditId) {
+        enterEditMode(nextEditId);
+      }
+      updateDetailFromHash();
       return;
     }
     updateDetailFromHash();
@@ -2699,6 +2932,7 @@
           '<td class="groups-cell-date">' + escapeHtml(date) + '</td>' +
           '<td>' + noteHtml + '</td>' +
           '<td class="groups-cell-actions">' +
+            '<a href="#/edit/' + escapeHtml(gidStr) + '" class="groups-action groups-action-edit" data-group-id="' + escapeHtml(gidStr) + '">edit</a>' +
             '<a href="#" class="groups-action groups-action-rename" data-group-id="' + escapeHtml(gidStr) + '">rename</a>' +
             '<a href="#" class="groups-action groups-action-delete" data-group-id="' + escapeHtml(gidStr) + '">delete</a>' +
           '</td>' +
@@ -3759,12 +3993,36 @@
         groupDraft.title = groupRailTitleEl.value;
         groupDraft.titleEdited = true;
         groupRailTitleEl.classList.remove('group-rail-title--auto');
-        saveGroupDraft();
+        if (isEditing()) {
+          // Edit mode: debounce a PATCH so we don't spam the server on
+          // every keystroke. Banner reflects the saved name on success.
+          if (editTitlePatchTimer) clearTimeout(editTitlePatchTimer);
+          editTitlePatchTimer = setTimeout(function () {
+            patchEditedGroupName(groupRailTitleEl.value);
+          }, 600);
+        } else {
+          saveGroupDraft();
+        }
         renderRailHeader();
       });
     }
     if (groupRailCreateEl) {
-      groupRailCreateEl.addEventListener('click', handleCreateGroupClick);
+      groupRailCreateEl.addEventListener('click', function () {
+        if (isEditing()) {
+          // Done editing: bounce back to the detail page. The hashchange
+          // triggers exitEditMode in route().
+          window.location.hash =
+            '#/groups/' + encodeURIComponent(String(groupDraft.editingGroupId));
+        } else {
+          handleCreateGroupClick();
+        }
+      });
+    }
+    if (editModeBannerCancelEl) {
+      editModeBannerCancelEl.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        handleCancelEdits();
+      });
     }
     if (bulkSelectInputEl) {
       bulkSelectInputEl.addEventListener('change', bulkToggleVisible);

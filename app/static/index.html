@@ -122,6 +122,19 @@
     </nav>
   </header>
   <div id="connection-banner" class="connection-banner hidden" aria-live="polite"></div>
+  <div id="edit-mode-banner" class="edit-mode-banner hidden" role="status" aria-live="polite">
+    <span class="edit-mode-banner-text">
+      <span aria-hidden="true">✎ </span><b>editing</b>
+      &ldquo;<span id="edit-mode-banner-name"></span>&rdquo;
+      &mdash; search and tap <b>+</b> to add more, tap <b>✓</b> to remove.
+    </span>
+    <a
+      href="#"
+      id="edit-mode-banner-cancel"
+      class="edit-mode-banner-cancel"
+      title="revert this group to the state it was in when you opened edit mode"
+    >cancel edits</a>
+  </div>
   <div id="loading-panel" class="loading-panel hidden">
     <p id="loading">Loading…</p>
     <div id="boot-error-panel" class="boot-error-panel hidden" role="alert">
