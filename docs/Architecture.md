@@ -32,6 +32,21 @@ The server opens a new SQLite connection per request (no connection pool — unn
 
 **HTTP API** (see README for the full list): besides fellows list/detail/search, `GET /api/stats` returns aggregate statistics for the About page: total fellow count, breakdowns by fellow type and cohort, per-region counts (splitting comma-separated `global_regions_currently_based_in`), and field completeness (non-empty column counts plus selected keys in `extra_json` via `json_extract`). Heavier than a simple row fetch; still fine at local scale.
 
+### Persistence and upgrades
+
+User-authored data (groups, tags, notes, settings) lives in
+`app/relationships.db`, a separate SQLite file from `fellows.db`.
+Cross-DB joins use SQLite `ATTACH DATABASE ... ?mode=ro`, which keeps
+contact data read-only at the SQLite level. `relationships.db` is
+durable across both app updates and Clear App Cache; `fellows.db` is
+re-imported on every boot.
+
+The full state-survival matrix (which storage layers survive which
+events, plus the standard upgrade flow) lives in
+[`docs/persistence_and_upgrades.md`](persistence_and_upgrades.md).
+Read that when adding a feature that touches storage, or when
+triaging a "why did my X disappear?" report.
+
 ## Two-Phase Load
 
 The frontend uses two sequential fetches to minimize time-to-interactive:

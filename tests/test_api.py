@@ -28,6 +28,23 @@ def get(path, query=None):
     return r.status, ctype, raw.decode("utf-8")
 
 
+def post(path, body=None, content_type="application/json"):
+    conn = HTTPConnection("127.0.0.1", PORT, timeout=5)
+    if body is None:
+        payload = b""
+    elif isinstance(body, (bytes, bytearray)):
+        payload = bytes(body)
+    else:
+        payload = json.dumps(body).encode("utf-8")
+    headers = {"Content-Type": content_type, "Content-Length": str(len(payload))}
+    conn.request("POST", path, body=payload, headers=headers)
+    r = conn.getresponse()
+    raw = r.read()
+    conn.close()
+    ctype = r.getheader("Content-Type") or ""
+    return r.status, ctype, raw.decode("utf-8")
+
+
 @pytest.mark.usefixtures("app_server")
 class TestAPI:
     """API endpoint tests. Server started by session-scoped app_server fixture."""
@@ -157,3 +174,17 @@ class TestAPI:
         assert "octet-stream" in ctype
         assert raw[:15] == b"SQLite format 3"
         assert len(raw) > 512
+
+    def test_post_groups_returns_501_until_pr2(self):
+        """The right-rail UI POSTs to /api/groups; PR 1 ships only the stub.
+        The contract: 501 + JSON body with `error` and `message`. PR 2
+        replaces this handler with the real create-group implementation."""
+        status, ctype, body = post(
+            "/api/groups",
+            {"name": "smoke", "note": "", "fellow_record_ids": []},
+        )
+        assert status == 501
+        assert "application/json" in ctype
+        data = json.loads(body)
+        assert data.get("error") == "Not Implemented"
+        assert "PR 2" in (data.get("message") or "")
