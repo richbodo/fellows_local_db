@@ -341,6 +341,32 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(full, status=201)
         self.send_error_404()
 
+    def do_PUT(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path.rstrip("/") or "/"
+        # PUT /api/settings/<key> {value: "..."} — upsert one setting.
+        if path.startswith("/api/settings/"):
+            key = path[len("/api/settings/"):].strip("/")
+            if not key:
+                return self.send_error_404()
+            body = self._read_json_body()
+            if body is None or not isinstance(body, dict):
+                return self._send_json_error(400, "invalid JSON body")
+            val = body.get("value")
+            if val is not None and not isinstance(val, str):
+                return self._send_json_error(400, "value must be a string")
+            if isinstance(val, str) and len(val) > 4000:
+                return self._send_json_error(400, "value must be at most 4000 chars")
+            conn = self._open_relationships_db()
+            if conn is None:
+                return self._send_json_error(503, "relationships db unavailable")
+            try:
+                relationships.set_setting(conn, key, val)
+            finally:
+                conn.close()
+            return self.send_json({"key": key, "value": val})
+        self.send_error_404()
+
     def do_PATCH(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
@@ -460,6 +486,39 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 conn.close()
             self.send_json(groups)
+            return
+
+        # API: settings — full bag, GET only. PUT lands the value (see do_PUT).
+        if path == "/api/settings":
+            conn = self._open_relationships_db()
+            if conn is None:
+                self.send_json({})
+                return
+            try:
+                bag = relationships.list_settings(conn)
+            finally:
+                conn.close()
+            self.send_json(bag)
+            return
+
+        # API: settings — one key. Returns 404 if not set, else {key, value}.
+        if path.startswith("/api/settings/"):
+            key = path[len("/api/settings/"):].strip("/")
+            if not key:
+                self.send_error_404()
+                return
+            conn = self._open_relationships_db()
+            if conn is None:
+                self.send_error_404()
+                return
+            try:
+                val = relationships.get_setting(conn, key)
+            finally:
+                conn.close()
+            if val is None:
+                self.send_error_404()
+                return
+            self.send_json({"key": key, "value": val})
             return
 
         # API: one group by id

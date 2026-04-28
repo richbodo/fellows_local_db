@@ -250,6 +250,31 @@ def delete_group(conn: sqlite3.Connection, group_id: int) -> bool:
     return cur.rowcount > 0
 
 
+def get_setting(conn: sqlite3.Connection, key: str) -> str | None:
+    row = conn.execute(
+        "SELECT value FROM settings WHERE key = ?", (key,)
+    ).fetchone()
+    return row[0] if row else None
+
+
+def list_settings(conn: sqlite3.Connection) -> dict:
+    rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    return {r[0]: r[1] for r in rows}
+
+
+def set_setting(conn: sqlite3.Connection, key: str, value: str | None) -> None:
+    """Upsert a key/value setting. Empty value clears the row."""
+    if value is None or value == "":
+        conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+    else:
+        conn.execute(
+            "INSERT INTO settings(key, value) VALUES (?, ?)"
+            " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+    conn.commit()
+
+
 def open_db(
     *,
     rel_db_path: Path | None = None,

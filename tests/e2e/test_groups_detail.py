@@ -237,9 +237,11 @@ class TestGroupDetailActionBar:
 
 
 class TestGroupDetailExportPanel:
-    def test_export_panel_toggles_and_export_disabled_with_pr5_hint(
+    def test_export_panel_toggles_open_and_closed(
         self, standalone_page, base_url_fixture
     ):
+        """Panel show/hide. Actual export downloads are exercised in
+        tests/e2e/test_groups_export.py once PR 5 wires the action."""
         page = standalone_page
         fellows = _real_fellows(base_url_fixture)
         g = _create_group(
@@ -253,10 +255,9 @@ class TestGroupDetailExportPanel:
         expect(panel).to_be_hidden()
         page.locator("#group-action-export").click()
         expect(panel).to_be_visible()
-        # Export button disabled with PR 5 hint.
-        export_go = page.locator(".group-export-go")
-        expect(export_go).to_be_disabled()
-        expect(export_go).to_have_attribute("title", re.compile(r"PR 5"))
+        # PR 5 wires the Export button — it must be enabled (downloads
+        # are tested separately).
+        expect(page.locator(".group-export-go")).to_be_enabled()
         # Cancel hides it again.
         page.locator(".group-export-cancel").click()
         expect(panel).to_be_hidden()

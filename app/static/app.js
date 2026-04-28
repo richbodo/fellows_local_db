@@ -138,7 +138,7 @@
   /** Bump on every meaningful UI / diagnostics change. Rendered in the
    *  always-visible build badge so a dev can tell at a glance which app.js
    *  is actually running vs what the server was deployed with. */
-  var FELLOWS_UI_DIAG = 'diag-2026-04r-groups-pr4';
+  var FELLOWS_UI_DIAG = 'diag-2026-04s-groups-pr5';
 
   // Persistent marker: "this origin has been authenticated successfully at
   // least once." Preserved across clearAllAppData. Used by startBrowserUx's
@@ -146,6 +146,26 @@
   // deploy, or flaky mobile data) does NOT block a previously-authed user
   // behind the scary 'Authentication check failed' panel.
   var AUTH_ONCE_KEY = 'fellows_authenticated_once';
+
+  // The user's "me" email — captured from the magic-link gate submit so
+  // the export "email it to me" feature can pre-populate mailto?to=…. Also
+  // lives in relationships.settings for durability across Clear App Cache;
+  // localStorage is just a fast-read cache that boot mirrors from settings.
+  var FELLOWS_SELF_EMAIL_KEY = 'fellows_self_email';
+
+  function getSelfEmail() {
+    try { return localStorage.getItem(FELLOWS_SELF_EMAIL_KEY) || ''; }
+    catch (e) { return ''; }
+  }
+  function setSelfEmailLocal(value) {
+    try {
+      if (value && value.trim()) {
+        localStorage.setItem(FELLOWS_SELF_EMAIL_KEY, value.trim());
+      } else {
+        localStorage.removeItem(FELLOWS_SELF_EMAIL_KEY);
+      }
+    } catch (e) {}
+  }
 
   function markAuthenticatedOnce() {
     try { localStorage.setItem(AUTH_ONCE_KEY, '1'); } catch (e) {}
@@ -820,6 +840,32 @@
         if (!existing) return Promise.resolve(false);
         dbRun(relDb, 'DELETE FROM groups WHERE id = ?', [id]);
         return Promise.resolve(true);
+      },
+      getSetting: function (key) {
+        if (!relDb) return Promise.resolve(null);
+        var row = dbSelectOne(relDb, 'SELECT value FROM settings WHERE key = ?', [key]);
+        return Promise.resolve(row ? row.value : null);
+      },
+      getSettings: function () {
+        if (!relDb) return Promise.resolve({});
+        var rows = dbSelectAll(relDb, 'SELECT key, value FROM settings', null);
+        var bag = {};
+        rows.forEach(function (r) { bag[r.key] = r.value; });
+        return Promise.resolve(bag);
+      },
+      setSetting: function (key, value) {
+        if (!relDb) return Promise.reject(new Error('relationships db not open'));
+        if (value === null || value === undefined || value === '') {
+          dbRun(relDb, 'DELETE FROM settings WHERE key = ?', [key]);
+        } else {
+          dbRun(
+            relDb,
+            'INSERT INTO settings(key, value) VALUES (?, ?)' +
+            ' ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+            [key, value]
+          );
+        }
+        return Promise.resolve({ key: key, value: value });
       }
     };
   }
@@ -917,6 +963,30 @@
           if (r.status === 204) return true;
           if (r.status === 404) return false;
           throw apiError('/api/groups/' + id, r.status);
+        });
+      },
+      getSetting: function (key) {
+        return fetch('/api/settings/' + encodeURIComponent(key)).then(function (r) {
+          if (r.status === 404) return null;
+          if (!r.ok) throw apiError('/api/settings/' + key, r.status);
+          return r.json().then(function (d) { return d && d.value; });
+        });
+      },
+      getSettings: function () {
+        return fetch('/api/settings').then(function (r) {
+          if (!r.ok) return {};
+          return r.json();
+        });
+      },
+      setSetting: function (key, value) {
+        return fetch('/api/settings/' + encodeURIComponent(key), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ value: value })
+        }).then(function (r) {
+          if (!r.ok) throw apiError('/api/settings/' + key, r.status);
+          return r.json();
         });
       }
     };
@@ -1723,6 +1793,9 @@
       unlockEmailFormEl.addEventListener('submit', function (ev) {
         ev.preventDefault();
         var email = (unlockEmailInputEl && unlockEmailInputEl.value) || '';
+        // Capture the user's own email for the export "email it to me"
+        // feature (PR 5). Mirrors to relationships.settings on next boot.
+        setSelfEmailLocal(email);
         if (unlockStatusEl) unlockStatusEl.textContent = 'Sending…';
         setGateReasonBanner('');
         fetch('/api/send-unlock', {
@@ -2849,8 +2922,17 @@
       renderAboutPage();
       return;
     }
+    if (hash === '#/settings') {
+      renderSettingsPage();
+      return;
+    }
     if (hash === '#/groups') {
       renderGroupsPage();
+      return;
+    }
+    var directoryMatch = hash.match(/^#\/groups\/(\d+)\/directory$/);
+    if (directoryMatch) {
+      renderGroupDirectoryPage(parseInt(directoryMatch[1], 10));
       return;
     }
     var groupMatch = hash.match(/^#\/groups\/(\d+)$/);
@@ -2932,6 +3014,7 @@
           '<td class="groups-cell-date">' + escapeHtml(date) + '</td>' +
           '<td>' + noteHtml + '</td>' +
           '<td class="groups-cell-actions">' +
+            '<a href="#/groups/' + escapeHtml(gidStr) + '/directory" class="groups-action groups-action-view" data-group-id="' + escapeHtml(gidStr) + '">view directory</a>' +
             '<a href="#/edit/' + escapeHtml(gidStr) + '" class="groups-action groups-action-edit" data-group-id="' + escapeHtml(gidStr) + '">edit</a>' +
             '<a href="#" class="groups-action groups-action-rename" data-group-id="' + escapeHtml(gidStr) + '">rename</a>' +
             '<a href="#" class="groups-action groups-action-delete" data-group-id="' + escapeHtml(gidStr) + '">delete</a>' +
@@ -3190,22 +3273,26 @@
           '</div>';
       }
 
-      // Inline export panel (PR 3 wires the toggle; PR 5 wires Export action).
+      // Inline export panel — checkboxes drive what the Export button emits.
+      var slugFn = slugifyForFilename(name);
       html +=
         '<div class="group-export-panel hidden" id="group-export-panel" aria-label="Export options">' +
           '<div class="group-export-head">Export a directory</div>' +
           '<div class="group-export-options">' +
-            '<label><input type="checkbox" checked> <span><b>PDF directory</b><br><code>' +
-              escapeHtml(slugifyForFilename(name)) + '.pdf</code></span></label>' +
-            '<label><input type="checkbox"> <span><b>HTML directory</b><br><code>' +
-              escapeHtml(slugifyForFilename(name)) + '/</code> · view offline</span></label>' +
-            '<label><input type="checkbox" checked> <span><b>email it to me</b><br>your registered address</span></label>' +
+            '<label><input type="checkbox" id="export-pdf" checked> <span><b>PDF directory</b><br><code>' +
+              escapeHtml(slugFn) + '.pdf</code></span></label>' +
+            '<label><input type="checkbox" id="export-html"> <span><b>HTML directory</b><br><code>' +
+              escapeHtml(slugFn) + '.zip</code> · view offline, all relative paths</span></label>' +
+            '<label><input type="checkbox" id="export-self-email" checked> <span><b>email it to me</b><br><span id="export-self-email-hint">opens your mail client</span></span></label>' +
           '</div>' +
           '<div class="group-export-actions">' +
             '<button type="button" class="group-export-cancel">cancel</button>' +
-            '<button type="button" class="group-export-go" disabled title="Export lands in PR 5">Export</button>' +
+            '<button type="button" class="group-export-go" id="group-export-go">Export</button>' +
           '</div>' +
-          '<p class="group-export-note">Export functionality lands in PR 5 — the panel is wired so you can preview the options.</p>' +
+          '<p class="group-export-note" id="group-export-note">' +
+            'Files land in your <b>Downloads</b> folder (or via the system share sheet on iOS). ' +
+            'The PDF includes clickable mailto: links; the HTML zip is a self-contained portable directory.' +
+          '</p>' +
         '</div>';
 
       // Cream note callout. Always rendered; "edit" / "add a note" link beside it.
@@ -3249,6 +3336,499 @@
       .replace(/^#/, '')
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '') || 'group';
+  }
+
+  // ===== Visual directory + export helpers (PR 5) ===========================
+
+  // Inline SVG placeholder, same one as the design's screen-output mock.
+  // Used both in-app (when an image is missing) and in the standalone
+  // export (so the ZIP doesn't need a separate placeholder asset).
+  var PORTRAIT_SVG_PLACEHOLDER =
+    "data:image/svg+xml;utf8," + encodeURIComponent(
+      "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'>" +
+      "<rect width='80' height='80' fill='%23d9cfc1'/>" +
+      "<circle cx='40' cy='32' r='14' fill='%23a89682'/>" +
+      "<path d='M14 76c4-16 18-22 26-22s22 6 26 22z' fill='%23a89682'/>" +
+      "</svg>"
+    );
+
+  /** Trigger a Blob download. On platforms that support
+   *  navigator.share with files (iOS 16.4+, modern Android), prefer the
+   *  share sheet — gives the user Save to Files / AirDrop / Mail
+   *  options. Fall back to <a download> for desktop and older mobile.
+   *  Per the PR 1 mitigation plan in docs/persistence_and_upgrades.md. */
+  function downloadBlob(blob, filename) {
+    try {
+      if (navigator.canShare && typeof File === 'function') {
+        var file = new File([blob], filename, { type: blob.type || 'application/octet-stream' });
+        if (navigator.canShare({ files: [file] })) {
+          return navigator.share({ files: [file], title: filename });
+        }
+      }
+    } catch (e) { /* fall through to <a download> */ }
+    return new Promise(function (resolve) {
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () {
+        try { document.body.removeChild(a); } catch (e) {}
+        try { URL.revokeObjectURL(url); } catch (e) {}
+        resolve();
+      }, 100);
+    });
+  }
+
+  /** For each member, look up the full fellow record from fellowsBySlug.
+   *  Returns array of {record_id, name, slug, contact_email, mobile_number,
+   *  has_image, key_links, key_links_urls} — best effort, missing fields
+   *  default to empty. */
+  function resolveMembersForView(group) {
+    var out = [];
+    (group.members || []).forEach(function (m) {
+      var rid = m.record_id;
+      var fellow = rid ? fellowsBySlug.get(rid) : null;
+      out.push({
+        record_id: rid,
+        name: (fellow && fellow.name) || m.name || rid || '',
+        slug: (fellow && fellow.slug) || '',
+        contact_email: (fellow && fellow.contact_email) || '',
+        mobile_number: (fellow && fellow.mobile_number) || '',
+        has_image: fellow ? (fellow.has_image === 1 || fellow.has_image === true) : false,
+        key_links: (fellow && fellow.key_links) || '',
+        key_links_urls: (fellow && fellow.key_links_urls) || []
+      });
+    });
+    out.sort(function (a, b) {
+      var an = (a.name || '').toLowerCase();
+      var bn = (b.name || '').toLowerCase();
+      return an < bn ? -1 : (an > bn ? 1 : 0);
+    });
+    return out;
+  }
+
+  function buildContactBarMailto(group, members) {
+    var emails = members.map(function (m) {
+      return (m.contact_email || '').trim();
+    }).filter(Boolean);
+    var subject = encodeURIComponent(group.name || '');
+    var url = 'mailto:?cc=' + emails.join(',');
+    if (subject) url += '&subject=' + subject;
+    return { url: url, count: emails.length };
+  }
+
+  function renderGroupDirectoryPage(groupId) {
+    if (!detailEl) return;
+    detailEl.innerHTML = '<p class="placeholder">Loading group directory…</p>';
+    detailEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (!dataProvider || typeof dataProvider.getGroup !== 'function') {
+      detailEl.innerHTML = '<p class="placeholder">Could not load group.</p>';
+      return;
+    }
+    dataProvider.getGroup(groupId).then(function (group) {
+      if (!group) {
+        detailEl.innerHTML =
+          '<p class="placeholder">Group not found. <a href="#/groups">Back to groups</a>.</p>';
+        return;
+      }
+      var members = resolveMembersForView(group);
+      var contact = buildContactBarMailto(group, members);
+      var name = group.name || '(untitled)';
+      var html = '<div class="group-directory-page" data-group-id="' + escapeHtml(String(group.id)) + '">' +
+        '<p class="group-detail-breadcrumb">' +
+          '<a href="#/groups">groups</a> › ' +
+          '<a href="#/groups/' + escapeHtml(String(group.id)) + '">' + escapeHtml(name) + '</a> › directory' +
+        '</p>' +
+        '<h2 class="group-directory-title">' + escapeHtml(name) + '</h2>' +
+        '<p class="group-directory-meta">' +
+          escapeHtml(String(members.length)) + ' fellow' + (members.length === 1 ? '' : 's') +
+          ' · created ' + escapeHtml((group.created_at || '').slice(0, 10)) +
+          (group.note ? ' · ' + escapeHtml(group.note) : '') +
+        '</p>';
+      if (contact.count) {
+        html +=
+          '<div class="group-directory-contact-bar">' +
+            '<a href="' + escapeHtml(contact.url) + '" class="group-directory-contact-link">✉ Contact the whole group</a>' +
+            '<span class="group-directory-contact-helper">' +
+              'opens your mail client with all ' + escapeHtml(String(contact.count)) + ' addresses in CC' +
+            '</span>' +
+          '</div>';
+      }
+      html += '<div class="group-directory-grid">';
+      members.forEach(function (m) {
+        var slug = m.slug;
+        var imgSrc;
+        if (m.has_image && slug) {
+          imgSrc = '/images/' + encodeURIComponent(slug) + '.jpg?v=' + escapeHtml(FELLOWS_UI_DIAG);
+        } else {
+          imgSrc = PORTRAIT_SVG_PLACEHOLDER;
+        }
+        var fellowHref = slug ? ('#/fellow/' + encodeURIComponent(slug)) : '#';
+        html += '<a class="group-directory-cell" href="' + escapeHtml(fellowHref) + '">' +
+          '<div class="group-directory-portrait">' +
+            '<img src="' + escapeHtml(imgSrc) + '" alt="' + escapeHtml(m.name) +
+            '" loading="lazy" onerror="this.onerror=null;this.src=\'' + PORTRAIT_SVG_PLACEHOLDER + '\';">' +
+          '</div>' +
+          '<div class="group-directory-name">' + escapeHtml(m.name) + '</div>' +
+        '</a>';
+      });
+      html += '</div></div>';
+      detailEl.innerHTML = html;
+    }).catch(function () {
+      detailEl.innerHTML = '<p class="placeholder">Could not load group directory.</p>';
+    });
+  }
+
+  // ===== Standalone HTML export (PR 5) ======================================
+
+  /** Minimal CSS shipped inside the exported ZIP. Inlined into one
+   *  file so each HTML page in the bundle is human-readable on its own. */
+  var EXPORT_CSS =
+    'body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;' +
+    'background:#fafafa;color:#222;margin:0;padding:1.4rem 1.6rem;}' +
+    'h1{margin:0 0 0.2rem;font-size:1.4rem;}' +
+    '.meta{font-size:0.85rem;color:#666;margin-bottom:0.6rem;}' +
+    '.contact-bar{display:flex;align-items:center;gap:0.75rem;padding:0.5rem 0.7rem;' +
+    'margin-bottom:1rem;background:#f0ecf5;border:1px solid #dcd6e8;border-radius:3px;' +
+    'font-size:0.85rem;}' +
+    '.contact-bar a{color:#0066cc;text-decoration:underline;font-weight:500;}' +
+    '.helper{color:#7a6f91;font-size:0.78rem;}' +
+    '.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:0.9rem;}' +
+    '.cell{display:block;text-decoration:none;color:inherit;text-align:center;}' +
+    '.portrait{width:100%;aspect-ratio:1/1;border-radius:50%;border:1px solid #ccc;' +
+    'overflow:hidden;background:#eee;}' +
+    '.portrait img{width:100%;height:100%;object-fit:cover;display:block;}' +
+    '.cell-name{font-size:0.78rem;margin-top:4px;line-height:1.2;}' +
+    '.back-link{display:inline-block;margin-bottom:1rem;color:#0066cc;font-size:0.85rem;}' +
+    '.fellow-card{max-width:420px;margin:0 auto;background:#fff;border:1px solid #ccc;' +
+    'border-radius:4px;padding:1.2rem 1.4rem;}' +
+    '.fellow-card h2{margin:0 0 0.4rem;}' +
+    '.fellow-portrait{width:120px;height:120px;border-radius:50%;border:1px solid #ccc;' +
+    'overflow:hidden;margin:0 auto 0.8rem;background:#eee;}' +
+    '.fellow-portrait img{width:100%;height:100%;object-fit:cover;}' +
+    '.field-table{width:100%;border-collapse:separate;border-spacing:0 0.3em;font-size:0.9rem;}' +
+    '.field-table td{padding:0.3em 0.5em;}' +
+    '.field-table td.label{background:#f0f0f0;font-weight:600;width:32%;}' +
+    '.field-table a{color:#0066cc;}';
+
+  function buildExportIndexHtml(group, members) {
+    var contact = buildContactBarMailto(group, members);
+    var html =
+      '<!doctype html>\n' +
+      '<html lang="en"><head><meta charset="utf-8">' +
+      '<title>' + escapeHtml(group.name || 'Group directory') + '</title>' +
+      '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+      '<link rel="stylesheet" href="styles.css">' +
+      '</head><body>' +
+      '<h1>' + escapeHtml(group.name || '(untitled)') + '</h1>' +
+      '<p class="meta">' +
+        escapeHtml(String(members.length)) + ' fellow' + (members.length === 1 ? '' : 's') +
+        ' · exported ' + escapeHtml(new Date().toISOString().slice(0, 10)) +
+        (group.note ? ' · ' + escapeHtml(group.note) : '') +
+      '</p>';
+    if (contact.count) {
+      html +=
+        '<div class="contact-bar">' +
+          '<a href="' + escapeHtml(contact.url) + '">✉ Contact the whole group</a>' +
+          '<span class="helper">opens your mail client with all ' +
+            escapeHtml(String(contact.count)) + ' addresses in CC</span>' +
+        '</div>';
+    }
+    html += '<div class="grid">';
+    members.forEach(function (m) {
+      var slug = m.slug || slugifyForFilename(m.name);
+      var imgRel = m.has_image && m.slug ? 'images/' + m.slug + '.jpg' : '';
+      var imgSrc = imgRel || PORTRAIT_SVG_PLACEHOLDER;
+      html += '<a class="cell" href="fellow-' + escapeHtml(slug) + '.html">' +
+        '<div class="portrait"><img src="' + escapeHtml(imgSrc) +
+        '" alt="' + escapeHtml(m.name) + '" loading="lazy"></div>' +
+        '<div class="cell-name">' + escapeHtml(m.name) + '</div>' +
+      '</a>';
+    });
+    html += '</div></body></html>\n';
+    return html;
+  }
+
+  function buildExportFellowHtml(group, m) {
+    var slug = m.slug || slugifyForFilename(m.name);
+    var imgRel = m.has_image && m.slug ? 'images/' + m.slug + '.jpg' : '';
+    var imgSrc = imgRel || PORTRAIT_SVG_PLACEHOLDER;
+    var rows = [];
+    if (m.contact_email) {
+      rows.push('<tr><td class="label">email</td><td><a href="mailto:' +
+        escapeHtml(m.contact_email) + '">' + escapeHtml(m.contact_email) + '</a></td></tr>');
+    }
+    if (m.mobile_number) {
+      rows.push('<tr><td class="label">phone</td><td><a href="tel:' +
+        escapeHtml(String(m.mobile_number).replace(/[^+\d]/g, '')) + '">' +
+        escapeHtml(String(m.mobile_number)) + '</a></td></tr>');
+    }
+    if (Array.isArray(m.key_links_urls) && m.key_links_urls.length) {
+      var labels = (m.key_links || '').split(',');
+      var links = m.key_links_urls.map(function (url, i) {
+        var label = (labels[i] || url || '').trim() || url;
+        return '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' +
+          escapeHtml(label) + '</a>';
+      }).join(', ');
+      rows.push('<tr><td class="label">links</td><td>' + links + '</td></tr>');
+    }
+    return '<!doctype html>\n' +
+      '<html lang="en"><head><meta charset="utf-8">' +
+      '<title>' + escapeHtml(m.name) + ' — ' + escapeHtml(group.name || '') + '</title>' +
+      '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+      '<link rel="stylesheet" href="styles.css">' +
+      '</head><body>' +
+      '<a class="back-link" href="index.html">‹ back to ' + escapeHtml(group.name || 'directory') + '</a>' +
+      '<div class="fellow-card">' +
+        '<div class="fellow-portrait"><img src="' + escapeHtml(imgSrc) +
+          '" alt="' + escapeHtml(m.name) + '"></div>' +
+        '<h2>' + escapeHtml(m.name) + '</h2>' +
+        (rows.length
+          ? '<table class="field-table"><tbody>' + rows.join('') + '</tbody></table>'
+          : '<p>(No public contact info on file.)</p>') +
+      '</div></body></html>\n';
+  }
+
+  /** Fetch the JPG bytes for a member's portrait, returning a Uint8Array
+   *  or null if the image isn't available. Tries .jpg first, then .png. */
+  function fetchMemberPortrait(slug) {
+    var jpgUrl = '/images/' + encodeURIComponent(slug) + '.jpg';
+    var pngUrl = '/images/' + encodeURIComponent(slug) + '.png';
+    return fetch(jpgUrl, { credentials: 'same-origin' })
+      .then(function (r) {
+        if (r.ok) {
+          return r.arrayBuffer().then(function (buf) {
+            return { ext: 'jpg', bytes: new Uint8Array(buf) };
+          });
+        }
+        return fetch(pngUrl, { credentials: 'same-origin' }).then(function (r2) {
+          if (r2.ok) {
+            return r2.arrayBuffer().then(function (buf) {
+              return { ext: 'png', bytes: new Uint8Array(buf) };
+            });
+          }
+          return null;
+        });
+      })
+      .catch(function () { return null; });
+  }
+
+  /** Build a Blob containing the exported ZIP for a group:
+   *    <slug>/index.html, styles.css, fellow-<slug>.html *, images/*
+   *  using fflate's zipSync (synchronous, well-suited for small bundles). */
+  function exportGroupAsHtmlZip(group) {
+    if (typeof fflate === 'undefined') {
+      return Promise.reject(new Error('fflate not loaded'));
+    }
+    var members = resolveMembersForView(group);
+    var encoder = new TextEncoder();
+    var files = {};
+    files['index.html'] = encoder.encode(buildExportIndexHtml(group, members));
+    files['styles.css'] = encoder.encode(EXPORT_CSS);
+    members.forEach(function (m) {
+      var slug = m.slug || slugifyForFilename(m.name);
+      files['fellow-' + slug + '.html'] = encoder.encode(buildExportFellowHtml(group, m));
+    });
+    // Fetch portraits in parallel. Members without an image get nothing in
+    // images/; the standalone HTML falls back to the inline SVG placeholder.
+    var imageJobs = members
+      .filter(function (m) { return m.has_image && m.slug; })
+      .map(function (m) {
+        return fetchMemberPortrait(m.slug).then(function (res) {
+          if (res) {
+            files['images/' + m.slug + '.' + res.ext] = res.bytes;
+          }
+        });
+      });
+    return Promise.all(imageJobs).then(function () {
+      var zipped = fflate.zipSync(files, { level: 6 });
+      // ArrayBuffer view → Blob; explicit MIME so Save dialogs and iOS
+      // Web Share both recognise it as a zip.
+      return new Blob([zipped], { type: 'application/zip' });
+    });
+  }
+
+  // ===== PDF export via jsPDF (PR 5) ========================================
+
+  function exportGroupAsPdf(group) {
+    if (typeof window.jspdf === 'undefined' || !window.jspdf.jsPDF) {
+      return Promise.reject(new Error('jsPDF not loaded'));
+    }
+    var members = resolveMembersForView(group);
+    var doc = new window.jspdf.jsPDF({ unit: 'pt', format: 'a4' });
+    var pageW = doc.internal.pageSize.getWidth();
+    var pageH = doc.internal.pageSize.getHeight();
+    var marginX = 36;
+    var marginY = 48;
+
+    // Header
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(18);
+    doc.text(group.name || '(untitled)', marginX, marginY);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(102);
+    var meta = members.length + (members.length === 1 ? ' fellow' : ' fellows') +
+      ' · exported ' + new Date().toISOString().slice(0, 10);
+    if (group.note) meta += ' · ' + group.note;
+    doc.text(meta, marginX, marginY + 16);
+    doc.setTextColor(34);
+
+    // Fetch all portraits up front so the layout pass is sync.
+    var imageJobs = members.map(function (m) {
+      if (!m.has_image || !m.slug) return Promise.resolve({ member: m, image: null });
+      return fetchMemberPortrait(m.slug).then(function (res) {
+        return { member: m, image: res };
+      });
+    });
+    return Promise.all(imageJobs).then(function (resolved) {
+      // Grid: 4 columns, ~120pt cells.
+      var cols = 4;
+      var cellW = (pageW - marginX * 2) / cols;
+      var portraitSize = 70;
+      var nameLineH = 12;
+      var emailLineH = 10;
+      var rowH = portraitSize + nameLineH + emailLineH + 18;
+      var startY = marginY + 36;
+      var x = marginX;
+      var y = startY;
+      var col = 0;
+      resolved.forEach(function (entry) {
+        var m = entry.member;
+        var image = entry.image;
+        if (y + rowH > pageH - marginY) {
+          doc.addPage();
+          y = marginY;
+        }
+        var cx = x + (cellW - portraitSize) / 2;
+        if (image) {
+          try {
+            var fmt = image.ext === 'png' ? 'PNG' : 'JPEG';
+            doc.addImage(image.bytes, fmt, cx, y, portraitSize, portraitSize);
+          } catch (e) { /* malformed image bytes; fall through */ }
+        } else {
+          // Draw a soft circle placeholder.
+          doc.setDrawColor(204);
+          doc.setFillColor(238);
+          doc.circle(cx + portraitSize / 2, y + portraitSize / 2, portraitSize / 2, 'FD');
+        }
+        // Name (centered)
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'bold');
+        var nameY = y + portraitSize + nameLineH;
+        var nameTextW = doc.getStringUnitWidth(m.name) * 9;
+        doc.text(m.name, x + (cellW - nameTextW) / 2, nameY);
+        // Email (clickable mailto annotation)
+        if (m.contact_email) {
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8);
+          doc.setTextColor(0, 102, 204);
+          var emailY = nameY + emailLineH;
+          var emailW = doc.getStringUnitWidth(m.contact_email) * 8;
+          var emailX = x + (cellW - emailW) / 2;
+          doc.text(m.contact_email, emailX, emailY);
+          if (typeof doc.link === 'function') {
+            doc.link(emailX, emailY - 8, emailW, 10, { url: 'mailto:' + m.contact_email });
+          }
+          doc.setTextColor(34);
+        }
+        col += 1;
+        if (col >= cols) {
+          col = 0;
+          x = marginX;
+          y += rowH;
+        } else {
+          x += cellW;
+        }
+      });
+      var blob = doc.output('blob');
+      return blob;
+    });
+  }
+
+  // ===== Settings page (PR 5) ==============================================
+
+  function renderSettingsPage() {
+    if (!detailEl) return;
+    var html = '<div class="settings-page">' +
+      '<h2 class="settings-title">Settings</h2>' +
+      '<p class="settings-intro">' +
+        'These settings live on this device only, in <code>relationships.db</code>. ' +
+        'They survive app updates and Clear App Cache.' +
+      '</p>' +
+      '<form id="settings-form" class="settings-form" autocomplete="off">' +
+        '<label class="settings-field">' +
+          '<span class="settings-label">Your email (for &ldquo;email it to me&rdquo; on group exports)</span>' +
+          '<input type="email" id="settings-self-email" class="settings-input" placeholder="you@example.com" />' +
+          '<span class="settings-hint">' +
+            'Captured automatically when you used the magic-link gate. ' +
+            'Override here to send exports to a different mailbox.' +
+          '</span>' +
+        '</label>' +
+        '<div class="settings-actions">' +
+          '<button type="submit" class="settings-save">Save</button>' +
+          '<span id="settings-status" class="settings-status" aria-live="polite"></span>' +
+        '</div>' +
+      '</form>' +
+      '</div>';
+    detailEl.innerHTML = html;
+    var input = document.getElementById('settings-self-email');
+    var status = document.getElementById('settings-status');
+    var form = document.getElementById('settings-form');
+
+    // Seed from localStorage immediately for snappy paint, then refresh
+    // from relationships.settings (the durable source) when it returns.
+    if (input) input.value = getSelfEmail();
+    if (dataProvider && typeof dataProvider.getSetting === 'function') {
+      dataProvider.getSetting('self_email').then(function (val) {
+        if (val && input && document.activeElement !== input) {
+          input.value = val;
+          setSelfEmailLocal(val);
+        }
+      }).catch(function () { /* ignore */ });
+    }
+
+    if (form) {
+      form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        var next = (input && input.value || '').trim();
+        if (status) status.textContent = 'Saving…';
+        var write = (dataProvider && typeof dataProvider.setSetting === 'function')
+          ? dataProvider.setSetting('self_email', next)
+          : Promise.resolve();
+        write
+          .then(function () {
+            setSelfEmailLocal(next);
+            if (status) status.textContent = 'Saved.';
+          })
+          .catch(function () {
+            if (status) status.textContent = 'Could not save.';
+          });
+      });
+    }
+  }
+
+  /** Boot-time: if relationships.settings is empty for self_email but
+   *  localStorage has it (typical after first magic-link submit, or
+   *  after a Clear App Cache that wiped settings but preserved
+   *  localStorage — actually localStorage gets cleared too, so this
+   *  primarily handles "first ever boot with PR 5"), seed the settings
+   *  table. Conversely, if settings has a value but localStorage
+   *  doesn't (Clear App Cache cleared localStorage, OPFS survived),
+   *  rehydrate the localStorage cache. */
+  function reconcileSelfEmailOnBoot() {
+    if (!dataProvider || typeof dataProvider.getSetting !== 'function') return;
+    dataProvider.getSetting('self_email').then(function (settingVal) {
+      var localVal = getSelfEmail();
+      if (settingVal && !localVal) {
+        setSelfEmailLocal(settingVal);
+      } else if (localVal && !settingVal && typeof dataProvider.setSetting === 'function') {
+        dataProvider.setSetting('self_email', localVal).catch(function () { /* ignore */ });
+      }
+    }).catch(function () { /* ignore */ });
   }
 
   function wireGroupDetailPage(group, emailInfo) {
@@ -3336,11 +3916,26 @@
     if (exportBtn && exportPanel) {
       exportBtn.addEventListener('click', function () {
         exportPanel.classList.toggle('hidden');
+        // Refresh the "email it to me" hint with the user's current self_email
+        // each time the panel opens — it can change via Settings between visits.
+        var hint = document.getElementById('export-self-email-hint');
+        if (hint) {
+          var self = getSelfEmail();
+          hint.textContent = self
+            ? ('opens your mail client to send to ' + self)
+            : 'set your email in Settings first';
+        }
       });
     }
     if (exportCancel && exportPanel) {
       exportCancel.addEventListener('click', function () {
         exportPanel.classList.add('hidden');
+      });
+    }
+    var exportGoBtn = document.getElementById('group-export-go');
+    if (exportGoBtn) {
+      exportGoBtn.addEventListener('click', function () {
+        runGroupExport(group, exportGoBtn);
       });
     }
 
@@ -3358,6 +3953,77 @@
         startInlineNoteEdit(group);
       });
     }
+  }
+
+  function runGroupExport(group, button) {
+    var name = group.name || 'group';
+    var slug = slugifyForFilename(name);
+    var wantPdf = !!document.getElementById('export-pdf') &&
+      document.getElementById('export-pdf').checked;
+    var wantHtml = !!document.getElementById('export-html') &&
+      document.getElementById('export-html').checked;
+    var wantSelf = !!document.getElementById('export-self-email') &&
+      document.getElementById('export-self-email').checked;
+    if (!wantPdf && !wantHtml && !wantSelf) {
+      showToast('Pick at least one export option.');
+      return;
+    }
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Exporting…';
+    }
+    var jobs = [];
+    var produced = [];
+    if (wantPdf) {
+      jobs.push(
+        exportGroupAsPdf(group)
+          .then(function (blob) {
+            produced.push(slug + '.pdf');
+            return downloadBlob(blob, slug + '.pdf');
+          })
+          .catch(function (err) {
+            showToast('PDF export failed: ' + (err && err.message || err));
+          })
+      );
+    }
+    if (wantHtml) {
+      jobs.push(
+        exportGroupAsHtmlZip(group)
+          .then(function (blob) {
+            produced.push(slug + '.zip');
+            return downloadBlob(blob, slug + '.zip');
+          })
+          .catch(function (err) {
+            showToast('HTML export failed: ' + (err && err.message || err));
+          })
+      );
+    }
+    Promise.all(jobs).then(function () {
+      if (wantSelf) {
+        var self = getSelfEmail();
+        if (!self) {
+          showToast('Set your email in Settings to use “email it to me”.');
+        } else {
+          // Build a mailto: with body listing the files we just produced.
+          var lines = produced.length
+            ? produced.map(function (f) { return '• ' + f; }).join('\r\n')
+            : '(no files were produced)';
+          var body = encodeURIComponent(
+            'Files saved to your Downloads folder:\r\n' + lines
+          );
+          var subject = encodeURIComponent(name);
+          window.location.href = 'mailto:?to=' + encodeURIComponent(self) +
+            '&subject=' + subject + '&body=' + body;
+        }
+      }
+      if (button) {
+        button.disabled = false;
+        button.textContent = 'Export';
+      }
+      if (produced.length) {
+        showToast('Exported: ' + produced.join(', '));
+      }
+    });
   }
 
   function startInlineNoteEdit(group) {
@@ -3859,6 +4525,10 @@
         if (provider.kind === 'sqlite') {
           directoryDataSource = 'sqlite';
         }
+        // Reconcile self_email between localStorage (fast cache) and
+        // relationships.settings (durable). PR 5: needed by the export
+        // "email it to me" feature; safe to fire-and-forget.
+        reconcileSelfEmailOnBoot();
         setSetupStatus('Loading…');
         return provider.getList().catch(function (err) {
           if (isAuthFailure(err)) return tryListFromCache(err);

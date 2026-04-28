@@ -179,6 +179,30 @@ def test_settings_round_trip(rel_path: Path):
         conn.close()
 
 
+def test_settings_helpers(rel_path: Path):
+    """relationships.{get,set,list}_setting wraps the table."""
+    from app.relationships import get_setting, set_setting, list_settings
+
+    conn = open_db(rel_db_path=rel_path, attach_fellows=False)
+    try:
+        assert get_setting(conn, "self_email") is None
+        set_setting(conn, "self_email", "me@example.com")
+        assert get_setting(conn, "self_email") == "me@example.com"
+        # Upsert overwrites.
+        set_setting(conn, "self_email", "new@example.com")
+        assert get_setting(conn, "self_email") == "new@example.com"
+        # Empty string clears the row (canonical "unset" form).
+        set_setting(conn, "self_email", "")
+        assert get_setting(conn, "self_email") is None
+        # list_settings returns a flat dict.
+        set_setting(conn, "k1", "v1")
+        set_setting(conn, "k2", "v2")
+        bag = list_settings(conn)
+        assert bag == {"k1": "v1", "k2": "v2"}
+    finally:
+        conn.close()
+
+
 def test_constants_match_repo_layout():
     """Path constants in the module point inside the app/ dir of this repo."""
     assert relationships.RELATIONSHIPS_DB_PATH.parent.name == "app"
