@@ -242,6 +242,27 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"Not Found")
 
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path.rstrip("/") or "/"
+        # PR 1 stub: the create-group endpoint exists so the right-rail UI
+        # can POST and surface a clear "not yet implemented" message. PR 2
+        # replaces this with the real handler that writes to
+        # relationships.db. Tests pin the 501 contract.
+        if path == "/api/groups":
+            self.send_json(
+                {
+                    "error": "Not Implemented",
+                    "message": (
+                        "POST /api/groups lands in PR 2 of the groups feature. "
+                        "Your draft is preserved; reload the page to keep editing."
+                    ),
+                },
+                status=501,
+            )
+            return
+        self.send_error_404()
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"

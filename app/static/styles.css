@@ -1028,3 +1028,273 @@ h1 {
   font-size: 0.9rem;
   color: #5a5a5a;
 }
+
+/* =========================================================================
+ * Groups feature — PR 1: right-rail composer, +/✓ markers, bulk-select bar
+ * Tokens taken from plans/group_feature/design_handoff_groups_feature/
+ * (lavender-soft #faf8fc, lavender-border #dcd6e8, pill #ede7f3/#3b2355,
+ * auto-title bg #fff7d6 / icon #a8923a / text #7a6326, purple #4a2c6a).
+ * ========================================================================= */
+
+/* The right rail joins the existing two-pane layout. Allow it to shrink to
+ * its 240px basis on desktop; stack below the detail on narrow viewports. */
+.group-rail {
+  flex: 0 0 240px;
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  max-height: 75vh;
+  background: #faf8fc;
+  border: 1px solid #dcd6e8;
+  padding: 0.55rem 0.6rem;
+  box-sizing: border-box;
+  font-size: 0.9rem;
+}
+
+.group-rail-eyebrow {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #7a6f91;
+  margin-bottom: 0.25rem;
+}
+
+.group-rail-title-wrap {
+  position: relative;
+  margin-bottom: 0.25rem;
+}
+
+.group-rail-title {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0.3rem 0.45rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-family: inherit;
+  color: #222;
+  background: #fff;
+  border: 1px solid #dcd6e8;
+  border-radius: 2px;
+}
+
+.group-rail-title:focus {
+  outline: 2px solid #4a2c6a;
+  outline-offset: 1px;
+}
+
+/* Auto-following state: cream tint + ✎ glyph, padding-left to clear the icon. */
+.group-rail-title--auto {
+  padding-left: 1.5rem;
+  background: #fff7d6;
+  color: #7a6326;
+}
+
+.group-rail-title-icon {
+  position: absolute;
+  left: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.9rem;
+  color: #a8923a;
+  pointer-events: none;
+}
+
+/* Hide the cream cue glyph once the user has typed their own title. */
+.group-rail-title:not(.group-rail-title--auto) + .group-rail-title-icon {
+  display: none;
+}
+
+.group-rail-helper {
+  font-size: 0.72rem;
+  color: #7a6f91;
+  margin-bottom: 0.4rem;
+}
+
+.group-rail-members {
+  list-style: none;
+  margin: 0 0 0.5rem 0;
+  padding: 0.2rem 0.4rem;
+  flex: 1 1 auto;
+  min-height: 4rem;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #dcd6e8;
+}
+
+.group-rail-members:empty::before {
+  content: 'tap + next to a name to add. Search again to add more.';
+  display: block;
+  padding: 0.4rem 0;
+  font-size: 0.78rem;
+  color: #888;
+}
+
+.group-rail-member {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 1px 0;
+  font-size: 0.8rem;
+}
+
+.group-rail-member-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-rail-member-remove {
+  background: transparent;
+  border: 0;
+  color: #999;
+  cursor: pointer;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.78rem;
+  padding: 0 0.25rem;
+  line-height: 1;
+}
+
+.group-rail-member-remove:hover {
+  color: #7a1f1f;
+}
+
+.group-rail-create {
+  width: 100%;
+  padding: 0.35rem 0.7rem;
+  font: inherit;
+  font-weight: 600;
+  color: #fff;
+  background: #4a2c6a;
+  border: 1px solid #4a2c6a;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.group-rail-create:hover:not(:disabled) {
+  background: #3b2355;
+}
+
+.group-rail-create:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.group-rail-footnote {
+  font-size: 0.72rem;
+  color: #7a6f91;
+  margin-top: 0.35rem;
+  line-height: 1.4;
+}
+
+.group-rail-status {
+  margin: 0.4rem 0 0;
+  padding: 0.3rem 0.4rem;
+  font-size: 0.78rem;
+  min-height: 1.2em;
+  border-radius: 2px;
+  color: #444;
+}
+
+.group-rail-status--info {
+  background: #ede7f3;
+  color: #3b2355;
+}
+
+.group-rail-status--warn {
+  background: #fff3cd;
+  border: 1px solid #ffe69c;
+  color: #664d03;
+}
+
+/* +/✓ margin marker on each directory row. */
+.dir-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.dir-mark {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  font-size: 0.95rem;
+  line-height: 1;
+  font-weight: 700;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: #bbb;
+  text-align: center;
+  font-family: inherit;
+}
+
+.dir-mark:hover {
+  color: #4a2c6a;
+}
+
+.dir-mark--on {
+  color: #4a2c6a;
+}
+
+.dir-mark:focus {
+  outline: 2px solid #4a2c6a;
+  outline-offset: 1px;
+}
+
+#directory .dir-link {
+  display: inline-block;
+  padding: 0.25em 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Bulk select-all bar — only visible while filtered. */
+.bulk-select-bar {
+  margin: 0 0 0.4rem;
+  padding: 0.25rem 0.4rem;
+  background: #faf8fc;
+  border: 1px solid #dcd6e8;
+  border-radius: 2px;
+  font-size: 0.78rem;
+  color: #3b2355;
+}
+
+.bulk-select-bar.hidden {
+  display: none;
+}
+
+.bulk-select-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* "add to group" / "remove from group" link beside the detail-card name. */
+.detail-add-to-group {
+  display: inline-block;
+  margin-left: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 400;
+  color: #0066cc;
+  text-decoration: underline;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.detail-add-to-group:hover {
+  color: #004499;
+}
+
+/* Mobile: stack the rail below the detail (existing 700px breakpoint
+ * already collapses the directory; keep the same stacking rhythm). */
+@media (max-width: 700px) {
+  .group-rail {
+    flex: none;
+    width: 100%;
+    max-height: none;
+  }
+}

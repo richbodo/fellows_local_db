@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Group selection — hi-fi prototype</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  html, body { margin: 0; padding: 0; background: #ece8e0; height: 100%; }
+  body { font-family: system-ui, sans-serif; color: #222; }
+  * { box-sizing: border-box; }
+  code { font-family: ui-monospace, Menlo, monospace; font-size: 0.82em;
+    background: #f0ecf5; padding: 0 3px; border-radius: 2px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="prototype-shared.jsx"></script>
+<script type="text/babel" src="screen-browse.jsx"></script>
+<script type="text/babel" src="screen-groups.jsx"></script>
+<script type="text/babel" src="screen-group-detail.jsx"></script>
+<script type="text/babel" src="screen-output.jsx"></script>
+
+<script type="text/babel" data-presets="react">
+function App() {
+  return (
+    <DesignCanvas
+      title="Group selection — hi-fi prototype"
+      subtitle='Walkthrough: build "Environment walking club" from scratch, then review and edit it.'
+      defaultZoom={0.55}
+    >
+      <DCSection
+        id="flow"
+        title='Building "Environment walking club" — temporal flow'
+        description='Search → add a couple → rename the auto-title → search again → add more → Create new group → open the saved group → edit it later.'
+      >
+        <DCArtboard id="s1" label='① search "environment", added Tilla & Tina — title auto-fills "Environment"' width={1280} height={760}>
+          <ScreenBrowse
+            mode="new"
+            initialQuery="environment"
+            initialPicked={["Tilla Abbitt", "Tina Jennen"]}
+            activeName="Tilla Abbitt"
+          />
+        </DCArtboard>
+
+        <DCArtboard id="s2" label='② user renames the title to "Environment walking club" (cream highlight is gone)' width={1280} height={760}>
+          <ScreenBrowse
+            mode="new"
+            initialQuery="environment"
+            initialPicked={["Tilla Abbitt", "Tina Jennen"]}
+            customTitle="Environment walking club"
+            activeName="Tilla Abbitt"
+          />
+        </DCArtboard>
+
+        <DCArtboard id="s3" label='③ second search: "#walking" — real results — adding Tim Derrick, Tim Moor, Trevor Squier' width={1280} height={760}>
+          <ScreenBrowse
+            mode="new"
+            initialQuery="#walking"
+            initialPicked={["Tilla Abbitt", "Tina Jennen", "Tim Derrick", "Tim Moor", "Trevor Squier"]}
+            customTitle="Environment walking club"
+            activeName="Tim Derrick"
+          />
+        </DCArtboard>
+
+        <DCArtboard id="s4a" label='④ click "Create new group" → group detail page — three peer actions, single-pane' width={1280} height={760}>
+          <ScreenGroupDetail name="Environment walking club" count={5} />
+        </DCArtboard>
+
+        <DCArtboard id="s4b" label='④ᵇ same page after clicking "Export a directory" — checkbox panel expands inline' width={1280} height={760}>
+          <ScreenGroupDetail name="Environment walking club" count={5} mode="export" />
+        </DCArtboard>
+
+        <DCArtboard id="s5" label='⑤ later — click "Edit group". Returns to directory unrestricted, yellow banner.' width={1280} height={760}>
+          <ScreenBrowse
+            mode="edit"
+            initialQuery=""
+            initialHasEmail={false}
+            customTitle="Environment walking club"
+            initialPicked={["Tilla Abbitt", "Tina Jennen", "Tim Derrick", "Tim Moor", "Trevor Squier"]}
+            activeName="Tilla Abbitt"
+          />
+        </DCArtboard>
+
+        <DCArtboard id="s6" label='⑥ groups page — saved groups list (click name = open)' width={1280} height={760}>
+          <ScreenGroups />
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection
+        id="output"
+        title='What "View directory" produces'
+        description="Visual directory: alphabetical portrait grid + popup with email/phone/linkedin. 'Send email to all' link at the top opens your mail client with everyone in BCC."
+      >
+        <DCArtboard id="o1" label="visual directory output" width={1100} height={760}>
+          <ScreenOutputPreview />
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection
+        id="notes"
+        title="Decisions baked in"
+        description="From your last round of feedback."
+      >
+        <DCArtboard id="n1" label="notes" width={1100} height={680}>
+          <div style={{ padding: "1.4rem 1.8rem", background: "#fff", height: "100%",
+            fontFamily: "system-ui, sans-serif", fontSize: "0.95rem", lineHeight: 1.55,
+            overflow: "auto" }}>
+            <h2 style={{ margin: 0, fontSize: "1.15rem" }}>Resolved this round</h2>
+            <ul>
+              <li><b>Local-only PWA, no server send.</b> <code>mailto:</code> is the canonical channel — there's no SaaS backend. Same logic for "email it to me" on export. Contact data is read-only by design; only relationship data (groups, tags, notes) is mutable.</li>
+              <li><b>Groups page row actions</b>, in order: <b>view directory</b> · <b>rename</b> · <b>delete</b> · <b>edit</b>. Clicking the group <i>name</i> still opens the detail page (members + Contact / Export / Edit action bar).</li>
+              <li><b>Cancel-edits semantics</b> — banner button is <b>cancel edits</b>. Auto-save stays. On entering edit mode, snapshot the group's current membership; <b>cancel edits</b> reverts the group (DB + rail) to that snapshot. For a never-saved new group, <b>cancel edits</b> clears the right-rail draft and navigates back to the directory front page; nothing is created.</li>
+              <li><b>Group detail is single-pane</b> — one lavender action bar, three peer buttons: <b>✉ Contact the whole group</b> (primary, <code>mailto:?cc=</code>) · <b>⬇ Export a directory</b> · <b>✎ Edit group</b>. Reads identically on mobile.</li>
+              <li><b>BCC → CC</b> for group mails (intentional within-group conversations).</li>
+              <li><b>"View directory" button removed</b> from the detail page — top-left "EHF Fellows" is the canonical home affordance, and "view directory" is now a row action on the groups page.</li>
+              <li><b>Edit mode</b> starts unrestricted (no query, no <i>has email only</i>) and shows the full fellow record in the detail pane.</li>
+              <li><b>Title field cue:</b> soft cream + ✎ while auto-following the search; flips to plain white on first user keystroke.</li>
+              <li><b>Removals are instant</b>; keep <code>#</code> in saved tag-group names; export slugifies (<code>#walking</code> → <code>walking.pdf</code>).</li>
+            </ul>
+
+            <h2 style={{ margin: "1rem 0 0.3rem", fontSize: "1.1rem" }}>What I'd build first</h2>
+            <ol>
+              <li>Schema: <code>groups(id, name, note, created_at, updated_at)</code> + <code>group_members(group_id, fellow_record_id)</code>. Two extra tables, no migration to existing fellows.</li>
+              <li>Right rail in directory + <code>+/✓</code> margin marker. Persist the in-progress draft to localStorage only.</li>
+              <li>Groups page (list + rename + delete) and group detail page (with the email-all bar).</li>
+              <li>Edit mode wiring (open with all members in the rail, yellow banner, auto-save on change).</li>
+              <li><i>Then</i> the visual directory + export.</li>
+            </ol>
+          </div>
+        </DCArtboard>
+      </DCSection>
+    </DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>

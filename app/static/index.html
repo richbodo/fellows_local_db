@@ -154,11 +154,36 @@
         <button id="nl-search-button" class="nl-search-button" type="button">Ask AI</button>
         <p id="nl-search-status" class="search-status" aria-live="polite"></p>
       </div>
+      <div id="bulk-select-bar" class="bulk-select-bar hidden">
+        <label class="bulk-select-label">
+          <input type="checkbox" id="bulk-select-input" />
+          <span id="bulk-select-text">select all results</span>
+        </label>
+      </div>
       <div id="directory-list"></div>
     </aside>
     <main id="detail" class="detail" aria-label="Fellow detail">
       <p class="placeholder">Select a fellow from the list.</p>
     </main>
+    <aside id="group-rail" class="group-rail" aria-label="Group composer">
+      <div class="group-rail-eyebrow" id="group-rail-eyebrow">add to a group</div>
+      <div class="group-rail-title-wrap">
+        <input
+          type="text"
+          id="group-rail-title"
+          class="group-rail-title group-rail-title--auto"
+          placeholder="name your group…"
+          autocomplete="off"
+          aria-label="Group name"
+        />
+        <span class="group-rail-title-icon" id="group-rail-title-icon" aria-hidden="true">✎</span>
+      </div>
+      <div class="group-rail-helper" id="group-rail-helper">type a name, or search to auto-fill · 0 fellows</div>
+      <ul class="group-rail-members" id="group-rail-members" aria-label="Selected fellows"></ul>
+      <button type="button" id="group-rail-create" class="group-rail-create" disabled>Create new group</button>
+      <div class="group-rail-footnote">saves immediately to your groups. You can rename and edit it later.</div>
+      <p id="group-rail-status" class="group-rail-status" aria-live="polite"></p>
+    </aside>
   </div>
   <script src="/vendor/sqlite3.js"></script>
   <script src="/app.js"></script>

@@ -29,6 +29,36 @@
   var nlSearchStatusEl = document.getElementById('nl-search-status');
   var detailEl = document.getElementById('detail');
   var fullFellowsCache = null;
+  // Groups feature (PR 1): right-rail composer + +/✓ markers + draft store.
+  // The schema mirror for relationships.db (PWA / OPFS path) is summarised
+  // here for ctrl-F discoverability; the canonical DDL lives in
+  // app/relationships.py and is bootstrapped server-side. PR 2 wires the
+  // create-group POST + the OPFS open path.
+  var RELATIONSHIPS_TABLES = ['groups', 'group_members', 'fellow_tags', 'fellow_notes', 'settings'];
+  var groupRailEl = document.getElementById('group-rail');
+  var groupRailEyebrowEl = document.getElementById('group-rail-eyebrow');
+  var groupRailTitleEl = document.getElementById('group-rail-title');
+  var groupRailTitleIconEl = document.getElementById('group-rail-title-icon');
+  var groupRailHelperEl = document.getElementById('group-rail-helper');
+  var groupRailMembersEl = document.getElementById('group-rail-members');
+  var groupRailCreateEl = document.getElementById('group-rail-create');
+  var groupRailStatusEl = document.getElementById('group-rail-status');
+  var bulkSelectBarEl = document.getElementById('bulk-select-bar');
+  var bulkSelectInputEl = document.getElementById('bulk-select-input');
+  var bulkSelectTextEl = document.getElementById('bulk-select-text');
+  var GROUP_DRAFT_KEY = 'ehf.group_draft';
+  // Drafts persist to localStorage so they survive page reloads and app
+  // updates. They are NOT preserved across Clear App Cache (the red button
+  // calls localStorage.clear() and only preserves fellows_authenticated_once).
+  // That's acceptable: drafts are unsaved by definition. Saved groups go to
+  // relationships.db (PR 2+), which lives in OPFS and survives every reset.
+  // See docs/persistence_and_upgrades.md for the full state-survival matrix.
+  var groupDraft = {
+    members: new Set(),       // record_id values picked
+    memberNames: {},          // record_id -> display name (for chips)
+    title: '',
+    titleEdited: false
+  };
   var installLandingEl = document.getElementById('install-landing');
   var installGatePrivateEl = document.getElementById('install-gate-private');
   var unlockEmailFormEl = document.getElementById('unlock-email-form');
@@ -63,7 +93,7 @@
   /** Bump on every meaningful UI / diagnostics change. Rendered in the
    *  always-visible build badge so a dev can tell at a glance which app.js
    *  is actually running vs what the server was deployed with. */
-  var FELLOWS_UI_DIAG = 'diag-2026-04n-offline-only-mode';
+  var FELLOWS_UI_DIAG = 'diag-2026-04o-groups-pr1';
 
   // Persistent marker: "this origin has been authenticated successfully at
   // least once." Preserved across clearAllAppData. Used by startBrowserUx's
@@ -1615,10 +1645,28 @@
     var ul = document.createElement('ul');
     items.forEach(function (f) {
       var li = document.createElement('li');
+      li.className = 'dir-row';
+      var rid = f.record_id || '';
+      var on = !!(rid && groupDraft.members.has(rid));
+      var displayName = (f.name && String(f.name).trim()) ? f.name : 'Unknown';
+      var mark = document.createElement('button');
+      mark.type = 'button';
+      mark.className = 'dir-mark' + (on ? ' dir-mark--on' : '');
+      mark.dataset.recordId = rid;
+      mark.setAttribute('aria-pressed', on ? 'true' : 'false');
+      mark.title = on ? 'remove from group' : 'add to group';
+      mark.textContent = on ? '✓' : '+';
+      mark.addEventListener('click', function (ev) {
+        // Marker is inside the row but must NOT trigger row navigation.
+        ev.stopPropagation();
+        ev.preventDefault();
+        toggleDraftMember(rid, displayName);
+      });
       var a = document.createElement('a');
       a.href = '#/fellow/' + encodeURIComponent(f.slug || '');
-      var displayName = (f.name && String(f.name).trim()) ? f.name : 'Unknown';
+      a.className = 'dir-link';
       a.textContent = displayName;
+      li.appendChild(mark);
       li.appendChild(a);
       ul.appendChild(li);
     });
@@ -1630,6 +1678,7 @@
     if (!list.length) {
       directoryListEl.innerHTML = '<p class="placeholder">No fellows loaded.</p>';
       setFilterCount('');
+      updateBulkBar();
       return;
     }
     var filtered = applyHasEmailFilter(list);
@@ -1653,6 +1702,7 @@
     }
     showLoading(false);
     showApp(true);
+    updateBulkBar();
   }
 
   function setSearchStatus(msg) {
@@ -1706,11 +1756,20 @@
     }
     var name = fellow.name || fellow.slug || 'Unknown';
     var slug = fellow.slug || '';
+    var rid = fellow.record_id || '';
+    var inDraft = !!(rid && groupDraft.members.has(rid));
     var leftTop = '';
     var leftRest = '';
 
     var demo = [fellow.gender_pronouns, fellow.ethnicity].filter(Boolean).join(' | ');
-    leftTop += '<h2 class="detail-name">' + escapeHtml(name) + '</h2>';
+    leftTop += '<h2 class="detail-name">' + escapeHtml(name);
+    if (rid) {
+      leftTop += ' <a href="#" class="detail-add-to-group" data-record-id="' +
+        escapeHtml(rid) + '">' +
+        (inDraft ? 'remove from group' : 'add to group') +
+        '</a>';
+    }
+    leftTop += '</h2>';
     if (demo) leftTop += '<p class="detail-demographics">' + escapeHtml(demo) + '</p>';
     var hasImage = fellow.has_image === 1 || fellow.has_image === true;
     if (hasImage && slug) {
@@ -1809,6 +1868,16 @@
     detailEl.innerHTML = html;
     detailEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
+    var addLink = detailEl.querySelector('.detail-add-to-group');
+    if (addLink) {
+      addLink.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        var linkRid = addLink.dataset.recordId;
+        if (!linkRid) return;
+        toggleDraftMember(linkRid, fellow.name || fellow.slug || linkRid);
+      });
+    }
+
     var img = detailEl.querySelector('.profile-image');
     if (img) {
       var wrap = img.parentNode;
@@ -1858,6 +1927,246 @@
     div.textContent = s;
     return div.innerHTML;
   }
+
+  // ===== Groups feature (PR 1): draft state, rail rendering, marker sync ===
+
+  function loadGroupDraft() {
+    try {
+      var raw = localStorage.getItem(GROUP_DRAFT_KEY);
+      if (!raw) return;
+      var d = JSON.parse(raw);
+      if (Array.isArray(d.members)) {
+        groupDraft.members = new Set(d.members);
+      }
+      if (d.memberNames && typeof d.memberNames === 'object') {
+        groupDraft.memberNames = d.memberNames;
+      }
+      groupDraft.title = typeof d.title === 'string' ? d.title : '';
+      groupDraft.titleEdited = !!d.titleEdited;
+    } catch (e) {
+      // Corrupt draft; ignore — user can rebuild the selection.
+    }
+  }
+
+  function saveGroupDraft() {
+    try {
+      var snapshot = {
+        members: [],
+        memberNames: groupDraft.memberNames,
+        title: groupDraft.title,
+        titleEdited: groupDraft.titleEdited
+      };
+      groupDraft.members.forEach(function (rid) { snapshot.members.push(rid); });
+      localStorage.setItem(GROUP_DRAFT_KEY, JSON.stringify(snapshot));
+    } catch (e) {
+      // Quota or disabled storage — silent. The rail still works in-memory.
+    }
+  }
+
+  function deriveAutoTitle(query) {
+    var q = (query || '').trim();
+    if (!q) return '';
+    if (q.charAt(0) === '#') return q;
+    return q.charAt(0).toUpperCase() + q.slice(1);
+  }
+
+  function setRailStatus(msg, kind) {
+    if (!groupRailStatusEl) return;
+    groupRailStatusEl.textContent = msg || '';
+    groupRailStatusEl.classList.remove(
+      'group-rail-status--info',
+      'group-rail-status--warn'
+    );
+    if (kind) {
+      groupRailStatusEl.classList.add('group-rail-status--' + kind);
+    }
+  }
+
+  function renderRailHeader() {
+    if (!groupRailTitleEl || !groupRailHelperEl || !groupRailCreateEl) return;
+    var query = (searchInputEl && searchInputEl.value || '').trim();
+    var autoTitle = deriveAutoTitle(query);
+    var displayed = groupDraft.titleEdited ? groupDraft.title : autoTitle;
+    if (document.activeElement !== groupRailTitleEl) {
+      groupRailTitleEl.value = displayed;
+    }
+    if (groupDraft.titleEdited) {
+      groupRailTitleEl.classList.remove('group-rail-title--auto');
+    } else {
+      groupRailTitleEl.classList.add('group-rail-title--auto');
+    }
+    var n = groupDraft.members.size;
+    var fellows = n + ' fellow' + (n === 1 ? '' : 's');
+    var helper;
+    if (groupDraft.titleEdited) {
+      helper = fellows;
+    } else if (autoTitle) {
+      helper = 'auto-named — click to rename · ' + fellows;
+    } else {
+      helper = 'type a name, or search to auto-fill · ' + fellows;
+    }
+    groupRailHelperEl.textContent = helper;
+    groupRailCreateEl.disabled = n === 0;
+  }
+
+  function renderRailMembers() {
+    if (!groupRailMembersEl) return;
+    groupRailMembersEl.innerHTML = '';
+    groupDraft.members.forEach(function (rid) {
+      var li = document.createElement('li');
+      li.className = 'group-rail-member';
+      var name = document.createElement('span');
+      name.className = 'group-rail-member-name';
+      name.textContent = groupDraft.memberNames[rid] || rid;
+      var rm = document.createElement('button');
+      rm.type = 'button';
+      rm.className = 'group-rail-member-remove';
+      rm.title = 'remove';
+      rm.textContent = '×';
+      rm.addEventListener('click', function () {
+        toggleDraftMember(rid, name.textContent);
+      });
+      li.appendChild(name);
+      li.appendChild(rm);
+      groupRailMembersEl.appendChild(li);
+    });
+  }
+
+  function renderRail() {
+    renderRailHeader();
+    renderRailMembers();
+  }
+
+  function setMarkerEl(markEl, on) {
+    if (!markEl) return;
+    markEl.textContent = on ? '✓' : '+';
+    markEl.title = on ? 'remove from group' : 'add to group';
+    markEl.setAttribute('aria-pressed', on ? 'true' : 'false');
+    if (on) {
+      markEl.classList.add('dir-mark--on');
+    } else {
+      markEl.classList.remove('dir-mark--on');
+    }
+  }
+
+  function refreshAllMarkers() {
+    if (!directoryListEl) return;
+    var marks = directoryListEl.querySelectorAll('.dir-mark');
+    for (var i = 0; i < marks.length; i++) {
+      var m = marks[i];
+      var rid = m.dataset.recordId;
+      setMarkerEl(m, !!(rid && groupDraft.members.has(rid)));
+    }
+  }
+
+  function refreshDetailAddLink() {
+    if (!detailEl) return;
+    var link = detailEl.querySelector('.detail-add-to-group');
+    if (!link) return;
+    var rid = link.dataset.recordId;
+    var on = !!(rid && groupDraft.members.has(rid));
+    link.textContent = on ? 'remove from group' : 'add to group';
+  }
+
+  function toggleDraftMember(rid, name) {
+    if (!rid) return;
+    if (groupDraft.members.has(rid)) {
+      groupDraft.members.delete(rid);
+      delete groupDraft.memberNames[rid];
+    } else {
+      groupDraft.members.add(rid);
+      if (name) {
+        groupDraft.memberNames[rid] = name;
+      }
+    }
+    saveGroupDraft();
+    renderRail();
+    refreshAllMarkers();
+    refreshDetailAddLink();
+    updateBulkBar();
+  }
+
+  function updateBulkBar() {
+    if (!bulkSelectBarEl || !bulkSelectInputEl || !bulkSelectTextEl) return;
+    var query = (searchInputEl && searchInputEl.value || '').trim();
+    var filtered = !!query || hasEmailOnly;
+    if (!filtered || !displayedList || !displayedList.length) {
+      bulkSelectBarEl.classList.add('hidden');
+      return;
+    }
+    bulkSelectBarEl.classList.remove('hidden');
+    var allSelected = displayedList.every(function (f) {
+      return f.record_id && groupDraft.members.has(f.record_id);
+    });
+    bulkSelectInputEl.checked = allSelected;
+    bulkSelectTextEl.textContent =
+      (allSelected ? 'deselect' : 'select') + ' all ' + displayedList.length + ' results';
+  }
+
+  function bulkToggleVisible() {
+    if (!displayedList || !displayedList.length) return;
+    var allSelected = displayedList.every(function (f) {
+      return f.record_id && groupDraft.members.has(f.record_id);
+    });
+    displayedList.forEach(function (f) {
+      if (!f.record_id) return;
+      if (allSelected) {
+        groupDraft.members.delete(f.record_id);
+        delete groupDraft.memberNames[f.record_id];
+      } else {
+        groupDraft.members.add(f.record_id);
+        groupDraft.memberNames[f.record_id] = f.name || f.record_id;
+      }
+    });
+    saveGroupDraft();
+    renderRail();
+    refreshAllMarkers();
+    refreshDetailAddLink();
+    updateBulkBar();
+  }
+
+  function handleCreateGroupClick() {
+    if (!groupRailCreateEl) return;
+    if (groupDraft.members.size === 0) return;
+    var titleVal = groupDraft.titleEdited
+      ? groupDraft.title
+      : deriveAutoTitle((searchInputEl && searchInputEl.value) || '');
+    if (!titleVal || !titleVal.trim()) {
+      titleVal = 'Untitled group';
+    }
+    var ids = [];
+    groupDraft.members.forEach(function (rid) { ids.push(rid); });
+    setRailStatus('Saving…', 'info');
+    groupRailCreateEl.disabled = true;
+    fetch('/api/groups', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        name: titleVal,
+        note: '',
+        fellow_record_ids: ids
+      })
+    })
+      .then(function (r) {
+        if (r.status === 501) {
+          return r.json().catch(function () { return null; }).then(function (data) {
+            var msg = (data && data.message) || 'Create group not yet wired up.';
+            setRailStatus(msg, 'warn');
+          });
+        }
+        // Reserved for PR 2 — happy path lands then.
+        setRailStatus('Unexpected response: ' + r.status, 'warn');
+      })
+      .catch(function () {
+        setRailStatus('Network error while saving.', 'warn');
+      })
+      .then(function () {
+        groupRailCreateEl.disabled = groupDraft.members.size === 0;
+      });
+  }
+
+  // ===== End groups feature ============================================
 
   function statsSection(title, items, color) {
     if (!items || !items.length) return '';
@@ -2040,10 +2349,19 @@
       renderDirectory();
       return;
     }
+    // #tag prefix → scope FTS5 to the search_tags column. The tokens are
+    // stored in fellows.search_tags as plain CSV-ish text and the FTS5
+    // virtual table indexes that column, so column-scoped MATCH works.
+    // Local-fallback search keeps the leading '#' and decodes it inside
+    // filterFellowsLocally.
+    var ftsQ = q;
+    if (q.charAt(0) === '#' && q.length > 1) {
+      ftsQ = 'search_tags:' + q.slice(1);
+    }
     if (directoryDataSource === 'sqlite' && dataProvider) {
       setSearchStatus('Searching…');
       dataProvider
-        .search(q)
+        .search(ftsQ)
         .then(function (results) {
           if (!Array.isArray(results)) {
             results = [];
@@ -2069,7 +2387,7 @@
       return;
     }
     setSearchStatus('Searching…');
-    var url = '/api/search?q=' + encodeURIComponent(q);
+    var url = '/api/search?q=' + encodeURIComponent(ftsQ);
     fetch(url)
       .then(function (r) {
         if (!r.ok) return [];
@@ -2122,6 +2440,7 @@
       msg += ' (' + total + ' before filter)';
     }
     setSearchStatus(msg);
+    updateBulkBar();
   }
 
   function runLocalSearch(q) {
@@ -2150,6 +2469,16 @@
   function filterFellowsLocally(fellows, q) {
     var query = (q || '').toLowerCase();
     if (!query) return fellows.slice();
+    // #tag prefix → match against the search_tags column only. Mirrors
+    // the FTS5 column-scoped path in runSearch so on/offline behaviour
+    // stays consistent.
+    if (query.charAt(0) === '#' && query.length > 1) {
+      var tag = query.slice(1);
+      return fellows.filter(function (f) {
+        var st = (f.search_tags == null ? '' : String(f.search_tags)).toLowerCase();
+        return st.indexOf(tag) !== -1;
+      });
+    }
     var tokens = query.split(/\s+/).filter(Boolean);
     return fellows.filter(function (f) {
       var parts = [
@@ -2354,6 +2683,10 @@
     if (loadingEl) {
       loadingEl.classList.remove('hidden');
     }
+    // Restore the in-progress group draft (members + auto-title state)
+    // before any rendering so the rail and markers come up consistent.
+    loadGroupDraft();
+    renderRail();
 
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.addEventListener('message', function (ev) {
@@ -2420,6 +2753,25 @@
         // marker so the URL-just-works path works on next visit.
         markAuthenticatedOnce();
         list = Array.isArray(data) ? data : [];
+        // Backfill display names for any draft members loaded before
+        // we had data (record_id was saved, name wasn't, or the saved
+        // name has since changed in fellows.db). Saves the rail from
+        // showing raw record_ids in chips.
+        var draftDirty = false;
+        list.forEach(function (f) {
+          if (
+            f.record_id &&
+            groupDraft.members.has(f.record_id) &&
+            groupDraft.memberNames[f.record_id] !== f.name
+          ) {
+            groupDraft.memberNames[f.record_id] = f.name || f.record_id;
+            draftDirty = true;
+          }
+        });
+        if (draftDirty) {
+          saveGroupDraft();
+          renderRail();
+        }
         renderDirectory();
         route();
         return dataProvider.getFull().catch(function (err) {
@@ -2486,6 +2838,9 @@
 
     if (searchInputEl) {
       searchInputEl.addEventListener('input', function () {
+        // Auto-following rail title is meant to feel instant; update it
+        // before the debounced search fires.
+        renderRailHeader();
         if (searchDebounceId) {
           clearTimeout(searchDebounceId);
         }
@@ -2507,6 +2862,24 @@
           renderDirectory();
         }
       });
+    }
+
+    if (groupRailTitleEl) {
+      groupRailTitleEl.addEventListener('input', function () {
+        // Once the user types in the title field, the auto-follow flip is
+        // permanent for this draft (even if they clear it back to empty).
+        groupDraft.title = groupRailTitleEl.value;
+        groupDraft.titleEdited = true;
+        groupRailTitleEl.classList.remove('group-rail-title--auto');
+        saveGroupDraft();
+        renderRailHeader();
+      });
+    }
+    if (groupRailCreateEl) {
+      groupRailCreateEl.addEventListener('click', handleCreateGroupClick);
+    }
+    if (bulkSelectInputEl) {
+      bulkSelectInputEl.addEventListener('change', bulkToggleVisible);
     }
 
     if (document.readyState === 'loading') {
