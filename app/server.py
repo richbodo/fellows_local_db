@@ -11,8 +11,10 @@ Then open http://localhost:8765/
 import json
 import re
 import sqlite3
+import subprocess
 import sys
 import urllib.parse
+from datetime import datetime, timezone
 from pathlib import Path
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -31,6 +33,39 @@ IMAGES_DIR = APP_DIR / "fellow_profile_images_by_name"
 # Fallback: images may live in final_fellows_set when not copied into app/
 IMAGES_DIR_FALLBACK = REPO_ROOT / "final_fellows_set" / "fellow_profile_images_by_name"
 PORT = 8765
+
+
+def _dev_build_meta() -> dict:
+    """Synthesize a build-meta blob for the dev server.
+
+    Mirrors the shape of `deploy/dist/build-meta.json` (written by
+    `build/build_pwa.py`) so the PWA's drift-check, diagnostics panel,
+    and build badge work identically in dev. The `git_sha` reflects
+    the currently checked-out commit when the server was started;
+    `built_at` is the server start time.
+    """
+    git_sha = None
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if r.returncode == 0 and (r.stdout or "").strip():
+            git_sha = (r.stdout or "").strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return {
+        "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "git_sha": git_sha,
+        "generator": "app/server.py (dev)",
+    }
+
+
+BUILD_META: dict = _dev_build_meta()
 
 # Columns in fellows table (exclude extra_json for row dict)
 FELLOW_COLUMNS = [
@@ -553,6 +588,35 @@ class Handler(BaseHTTPRequestHandler):
                     "authenticated": False,
                     "hasSessionCookie": False,
                     "installRecentlyAllowed": False,
+                }
+            )
+            return
+
+        # Build fingerprint stub. Prod (`deploy/server.py`) serves the
+        # `dist/build-meta.json` file written by `build/build_pwa.py`;
+        # dev synthesizes the same shape from the live git HEAD so the
+        # build badge, drift check, and diagnostics panel all work
+        # locally. Without this the SW + diag panel both 404 and the
+        # browser console logs `Unexpected token 'N'` parse errors.
+        if path == "/build-meta.json":
+            self.send_json(BUILD_META)
+            return
+
+        # Diagnostics stub for the in-app `?diag=1` panel and the SW
+        # health probe. The dev server has no auth, no allowlist, and no
+        # Postmark wiring, so most fields are inert; this exists purely
+        # so the panel renders cleanly in dev instead of showing a
+        # network error. Mirrors the prod shape in `deploy/server.py`.
+        if path == "/api/debug/diagnostics":
+            self.send_json(
+                {
+                    "authActive": False,
+                    "allowlistHashCount": 0,
+                    "sessionSecretConfigured": False,
+                    "postmarkTokenConfigured": False,
+                    "fellowsDbPresent": DB_PATH.is_file(),
+                    "build": BUILD_META,
+                    "distRoot": str(APP_DIR),
                 }
             )
             return

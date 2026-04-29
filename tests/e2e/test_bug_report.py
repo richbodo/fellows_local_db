@@ -66,7 +66,25 @@ class TestBugReportInstallLanding:
     """Pre-app surface: install landing exposes an inline 'report a problem' button."""
 
     def test_install_landing_inline_button_opens_dialog(self, page, base_url_fixture):
-        # Browser-tab mode (no standalone fixture) lands on install-landing.
+        # Mock prod-shaped auth status so the install landing renders even
+        # on the localhost dev server. Without this, issue #58 LOW #2's
+        # localhost passthrough boots straight into the directory and the
+        # install landing is never shown.
+        import json
+
+        def _fulfill(route):
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "authEnabled": True,
+                    "authenticated": True,
+                    "hasSessionCookie": True,
+                    "installRecentlyAllowed": True,
+                }),
+                headers={"X-Fellows-Build": "e2e-mock"},
+            )
+        page.route("**/api/auth/status", _fulfill)
         page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
         expect(page.locator("#install-landing")).to_be_visible()
 

@@ -1831,6 +1831,17 @@
     return hasAuthenticatedOnce();
   }
 
+  // True when the current page is being served from the maintainer's
+  // local dev server. Used to fork the `authEnabled === false` branch
+  // of the email-gate decision tree: a dev session should land on the
+  // directory, not on the install landing (issue #58 LOW #2). Tests
+  // that simulate the prod auth flow on localhost mock authEnabled to
+  // true, bypassing this fork.
+  function isLocalhostHostname() {
+    var h = (window.location && window.location.hostname) || '';
+    return h === 'localhost' || h === '127.0.0.1' || h === '::1';
+  }
+
   function setInstallStatus(msg) {
     if (!installStatusEl) return;
     installStatusEl.textContent = msg || '';
@@ -2219,6 +2230,21 @@
           return;
         }
         if (!data.authEnabled) {
+          // Dev passthrough. On localhost we boot the directory directly —
+          // the install landing every time a maintainer hits Clear App
+          // Cache was confusing in practice (issue #58 LOW #2). Boot
+          // shell elements (#site-header, #app-wrap) all start hidden,
+          // so deferring to bootDirectoryAsApp is safe — it reveals
+          // the header itself and renderDirectory shows app-wrap.
+          // On any other host with authEnabled=false (a misconfigured
+          // prod, a staging box without secrets), keep the historical
+          // install-landing behavior so the misconfiguration is
+          // visible.
+          if (isLocalhostHostname()) {
+            authDebugPush('auth disabled on localhost: booting directory directly');
+            bootDirectoryAsApp();
+            return;
+          }
           authDebugPush('auth disabled on server: using install mode');
           initBrowserInstallMode(data, httpStatus);
           return;
