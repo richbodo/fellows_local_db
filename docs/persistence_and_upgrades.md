@@ -29,6 +29,17 @@ touch are durable. Cross-DB joins use SQLite `ATTACH DATABASE
 contact data at the SQLite level (any stray write into `f.*` raises
 `OperationalError`).
 
+The OPFS path is used in **both** standalone PWA mode and browser-tab
+mode. Production's `deploy/server.py` does not serve `/api/groups` or
+`/api/settings`, so OPFS is the only place groups and settings can
+live for prod visitors regardless of how they opened the app. Browsers
+that can't run OPFS + `FileSystemSyncAccessHandle` (Safari < 16.4,
+Chrome/Edge < 102, Firefox < 111, insecure contexts) see the
+unsupported-browser panel for those features instead — the rest of
+the app still works (directory, search, profiles). See
+[`browser_support.md`](browser_support.md) for the full version
+floors and triage policy.
+
 ## Standard app update flow
 
 1. Operator runs `just ship`. Bundle goes out to the droplet.

@@ -2472,3 +2472,53 @@ a.group-action-btn--primary {
   font-size: 0.85rem;
   color: #5a5a5a;
 }
+
+/* ===== Local-data-unavailable panel ===================================
+   Shown when groups/settings can't be reached locally — typically a
+   browser too old for OPFS+SyncAccessHandle on the production server
+   (where there is no /api/groups fallback). Built by
+   renderLocalDataUnavailablePanel() in app.js. See docs/browser_support.md.
+*/
+.local-data-unavailable {
+  margin: 1.5rem auto;
+  max-width: 42rem;
+  padding: 1.25rem 1.5rem;
+  background: #fff8e1;
+  border: 1px solid #e7c873;
+  border-radius: 6px;
+  color: #3a3a3a;
+  line-height: 1.5;
+}
+
+.local-data-unavailable h3 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.1rem;
+  color: #5a4200;
+}
+
+.local-data-unavailable p {
+  margin: 0.5rem 0;
+  font-size: 0.95rem;
+}
+
+.local-data-unavailable .local-data-unavailable-lede {
+  font-weight: 500;
+  color: #444;
+}
+
+.local-data-unavailable code {
+  background: #fff3c7;
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+
+.local-data-unavailable a {
+  color: #4a2c6a;
+}
+
+.local-data-unavailable .local-data-unavailable-foot {
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  color: #6a5800;
+}
