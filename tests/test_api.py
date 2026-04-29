@@ -36,6 +36,10 @@ def patch(path, body=None, content_type="application/json"):
     return _send("PATCH", path, body, content_type)
 
 
+def put(path, body=None, content_type="application/json"):
+    return _send("PUT", path, body, content_type)
+
+
 def delete(path):
     return _send("DELETE", path, None, "application/json")
 
@@ -333,3 +337,52 @@ class TestGroupsCRUD:
         )
         g = json.loads(body)
         assert len(g["members"]) == 1
+
+
+@pytest.mark.usefixtures("app_server")
+class TestSettingsAPI:
+    """Settings round-trip via /api/settings — used by the PR 5 Settings
+    page and the export "email it to me" feature."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_relationships_db(self):
+        path = os.environ.get("FELLOWS_RELATIONSHIPS_DB_PATH")
+        if path and os.path.exists(path):
+            os.unlink(path)
+        yield
+
+    def test_list_empty_initially(self):
+        status, ctype, body = get("/api/settings")
+        assert status == 200
+        assert "application/json" in ctype
+        assert json.loads(body) == {}
+
+    def test_get_unset_key_returns_404(self):
+        status, _, _ = get("/api/settings/self_email")
+        assert status == 404
+
+    def test_put_then_get_round_trip(self):
+        status, _, body = put("/api/settings/self_email", {"value": "me@example.com"})
+        assert status == 200
+        assert json.loads(body) == {"key": "self_email", "value": "me@example.com"}
+        status2, _, body2 = get("/api/settings/self_email")
+        assert status2 == 200
+        assert json.loads(body2) == {"key": "self_email", "value": "me@example.com"}
+
+    def test_put_empty_value_deletes(self):
+        put("/api/settings/k", {"value": "v"})
+        put("/api/settings/k", {"value": ""})
+        status, _, _ = get("/api/settings/k")
+        assert status == 404
+
+    def test_list_returns_all_keys(self):
+        put("/api/settings/a", {"value": "1"})
+        put("/api/settings/b", {"value": "2"})
+        _, _, body = get("/api/settings")
+        bag = json.loads(body)
+        assert bag == {"a": "1", "b": "2"}
+
+    def test_put_validates_value_type(self):
+        status, _, body = put("/api/settings/x", {"value": 42})
+        assert status == 400
+        assert "string" in (json.loads(body).get("error") or "").lower()

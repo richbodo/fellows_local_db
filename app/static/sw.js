@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v12';
+const CACHE_VERSION = 'v14';
 const APP_SHELL_CACHE = `fellows-app-shell-${CACHE_VERSION}`;
 // Separate cache so shell-version bumps don't evict the ~34 MB of profile images.
 const IMAGES_CACHE = 'fellows-images-v1';
@@ -15,7 +15,8 @@ const APP_SHELL_ASSETS = [
   '/icons/icon-512.png',
   '/icons/icon-maskable-512.png',
   '/vendor/sqlite3.js',
-  '/vendor/sqlite3.wasm'
+  '/vendor/sqlite3.wasm',
+  '/vendor/jspdf-2.5.1.umd.min.js'
 ];
 
 function postCacheProgress(payload) {

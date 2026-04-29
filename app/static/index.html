@@ -27,6 +27,40 @@
   <button type="button" id="diag-toggle" class="diag-toggle" title="Show bundle and auth diagnostics">
     Diagnostics
   </button>
+  <button type="button" id="bug-report-button" class="bug-report-button" title="Send a bug report to the maintainer">
+    <span class="bug-report-button-icon" aria-hidden="true">🐞</span>
+    <span class="bug-report-button-text">Report bug</span>
+  </button>
+
+  <div
+    id="bug-report-dialog"
+    class="bug-report-dialog hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="bug-report-title"
+    aria-hidden="true"
+  >
+    <div class="bug-report-dialog-inner" role="document">
+      <h2 id="bug-report-title" class="bug-report-title">Send a bug report</h2>
+      <p class="bug-report-lead">
+        This will email the maintainer at <strong>richbodo@gmail.com</strong>. Please answer the
+        questions at the top, then review what's being sent and edit anything you'd like to remove.
+      </p>
+      <textarea
+        id="bug-report-textarea"
+        class="bug-report-textarea"
+        rows="20"
+        spellcheck="false"
+        aria-label="Bug report contents"
+      ></textarea>
+      <p id="bug-report-status" class="bug-report-status" aria-live="polite"></p>
+      <div class="bug-report-actions">
+        <button type="button" id="bug-report-send" class="bug-report-send">Send via email</button>
+        <button type="button" id="bug-report-copy" class="bug-report-copy">Copy to clipboard</button>
+        <button type="button" id="bug-report-close" class="bug-report-close">Cancel</button>
+      </div>
+    </div>
+  </div>
 
   <div id="diag-panel" class="diag-panel hidden" role="region" aria-label="Diagnostics" aria-hidden="true">
     <div class="diag-panel-toolbar">
@@ -67,7 +101,14 @@
       <p id="unlock-status" class="install-status" aria-live="polite"></p>
       <p class="install-ttl-hint">Magic links expire in 30 minutes. Request a new one if yours has expired.</p>
       <p class="install-support">
-        Having trouble with the app? Contact the EHF Communications Working Group.
+        Having trouble with the app? Contact the EHF Communications Working Group, or
+        <button
+          type="button"
+          id="bug-report-button-gate"
+          class="bug-report-link"
+          data-bug-report-context="gate"
+          data-sync-only="1"
+        >report a problem to the maintainer</button>.
       </p>
     </div>
   </div>
@@ -92,7 +133,14 @@
         <a href="/?gate=1" id="back-to-gate-link" class="install-back-gate-link">Back to email gate</a>
       </p>
       <p class="install-support">
-        Having trouble with the app? Contact the EHF Communications Working Group.
+        Having trouble with the app? Contact the EHF Communications Working Group, or
+        <button
+          type="button"
+          id="bug-report-button-install"
+          class="bug-report-link"
+          data-bug-report-context="install"
+          data-sync-only="1"
+        >report a problem to the maintainer</button>.
       </p>
     </div>
   </div>
@@ -118,6 +166,7 @@
     </div>
     <nav class="site-nav">
       <a href="#/groups" class="site-nav-link" id="nav-groups-link">Groups</a>
+      <a href="#/settings" class="site-nav-link" id="nav-settings-link">Settings</a>
       <a href="#/about" class="site-nav-link">About</a>
     </nav>
   </header>
@@ -145,6 +194,15 @@
         or OPFS / SQLite blocked in this context.
       </p>
       <pre id="boot-error-pre" class="boot-error-pre"></pre>
+      <p class="boot-error-actions">
+        <button
+          type="button"
+          id="bug-report-button-boot-error"
+          class="bug-report-inline-button"
+          data-bug-report-context="boot-error"
+          data-sync-only="1"
+        >Send this report to the maintainer</button>
+      </p>
     </div>
   </div>
   <div id="auth-error-panel" class="auth-error-panel hidden" role="alert">
@@ -154,6 +212,15 @@
       Use the report below, then clear cache and retry.
     </p>
     <pre id="auth-error-pre" class="boot-error-pre"></pre>
+    <p class="boot-error-actions">
+      <button
+        type="button"
+        id="bug-report-button-auth-error"
+        class="bug-report-inline-button"
+        data-bug-report-context="auth-error"
+        data-sync-only="1"
+      >Send this report to the maintainer</button>
+    </p>
   </div>
   <div id="app-wrap" class="hidden">
     <aside id="directory" aria-label="Fellows list">
@@ -200,6 +267,7 @@
     </aside>
   </div>
   <script src="/vendor/sqlite3.js"></script>
+  <script src="/vendor/jspdf-2.5.1.umd.min.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>
