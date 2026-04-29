@@ -63,6 +63,18 @@ contact data read-only at the SQLite level. `relationships.db` is
 durable across both app updates and Clear App Cache; `fellows.db` is
 re-imported on every boot.
 
+In the browser this lives in OPFS (`sqlite3.wasm` + `relationships.db`)
+in **both** standalone PWA mode and browser-tab mode. Production's
+`deploy/server.py` does not serve `/api/groups` or `/api/settings`;
+OPFS is the canonical store there. The dev server's HTTP routes for
+groups and settings exist only to support the dev round-trip — they
+are not part of the production API surface. When a visitor's browser
+can't run OPFS (older Safari, missing `FileSystemSyncAccessHandle`,
+insecure context), the API provider tags those endpoints unreachable
+and the UI surfaces an unsupported-browser panel via
+`renderLocalDataUnavailablePanel()` — see
+[`docs/browser_support.md`](browser_support.md).
+
 The full state-survival matrix (which storage layers survive which
 events, plus the standard upgrade flow) lives in
 [`docs/persistence_and_upgrades.md`](persistence_and_upgrades.md).

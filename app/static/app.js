@@ -883,12 +883,233 @@
     return err;
   }
 
+  // Thrown by the API provider when groups/settings endpoints don't exist
+  // on this server (production deploy/server.py) AND the OPFS path was
+  // unavailable (browser too old, missing sqlite3.wasm, insecure context,
+  // …). Render paths catch this and show the unsupported-browser panel
+  // built by renderLocalDataUnavailablePanel(). See docs/browser_support.md.
+  function localDataUnavailableError(reason) {
+    var err = new Error('local user data unavailable: ' + (reason || 'unknown'));
+    err.localDataUnavailable = true;
+    err.reason = reason || 'unknown';
+    return err;
+  }
+
+  // OPFS + SQLite-WASM (FileSystemSyncAccessHandle) version floors. Used by
+  // renderLocalDataUnavailablePanel to tell the user exactly what version
+  // they need. If you bump sqlite3.wasm and the floors shift, update these
+  // and docs/browser_support.md together.
+  var OPFS_MIN_VERSIONS = {
+    chrome: 102,   // FileSystemSyncAccessHandle landed Chrome 102 (May 2022)
+    edge: 102,     // Same engine as Chrome
+    safari: 16.4,  // iOS/macOS Safari 16.4 (Mar 2023) — first OPFS+SAH release
+    firefox: 111   // Firefox 111 (Mar 2023)
+  };
+
+  // Best-effort UA parsing. Modern UA-CH would be cleaner but is not
+  // available in Safari. We use the parsed values only to build a helpful
+  // message — never to gate features (the OPFS capability gates do that
+  // directly via shouldTryOpfsProvider). Returns:
+  //   { name: 'chrome'|'edge'|'safari'|'firefox'|'opera'|'samsung'|'unknown',
+  //     version: number|null,  // major.minor as float for safari, integer otherwise
+  //     versionString: string,  // raw version captured from UA
+  //     onIos: boolean,         // iPhone/iPad/iPod, including iPadOS desktop UA
+  //     minVersion: number|null // floor for this browser, or null if unknown
+  //   }
+  function detectBrowserSupport() {
+    var ua = (navigator.userAgent || '');
+    var onIos = /iPad|iPhone|iPod/.test(ua) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    var name = 'unknown';
+    var versionString = '';
+    var version = null;
+    var m;
+    // Order matters — Edge/Opera/Samsung UA strings also contain "Chrome".
+    if ((m = ua.match(/EdgiOS\/([\d.]+)/)) || (m = ua.match(/Edg(?:e|A|iOS)?\/([\d.]+)/))) {
+      name = 'edge';
+      versionString = m[1];
+    } else if ((m = ua.match(/OPR\/([\d.]+)/)) || (m = ua.match(/Opera\/([\d.]+)/))) {
+      name = 'opera';
+      versionString = m[1];
+    } else if ((m = ua.match(/SamsungBrowser\/([\d.]+)/))) {
+      name = 'samsung';
+      versionString = m[1];
+    } else if ((m = ua.match(/FxiOS\/([\d.]+)/)) || (m = ua.match(/Firefox\/([\d.]+)/))) {
+      name = 'firefox';
+      versionString = m[1];
+    } else if ((m = ua.match(/CriOS\/([\d.]+)/)) || (m = ua.match(/Chrome\/([\d.]+)/))) {
+      name = 'chrome';
+      versionString = m[1];
+    } else if ((m = ua.match(/Version\/([\d.]+).*Safari/))) {
+      name = 'safari';
+      versionString = m[1];
+    }
+    if (versionString) {
+      // For Safari, capture major.minor (e.g. 16.4); for others, the major
+      // is enough — but parseFloat handles both consistently.
+      version = parseFloat(versionString);
+      if (isNaN(version)) version = null;
+    }
+    return {
+      name: name,
+      version: version,
+      versionString: versionString,
+      onIos: onIos,
+      minVersion: OPFS_MIN_VERSIONS[name] != null ? OPFS_MIN_VERSIONS[name] : null
+    };
+  }
+
+  // Build the "your browser can't store groups locally" panel. Returns an
+  // HTML string. Caller decides which container to drop it into.
+  // `feature` is what the user was trying to do — "groups", "this group",
+  // "settings", "save this group". Used in the headline only.
+  function renderLocalDataUnavailablePanel(feature) {
+    var b = detectBrowserSupport();
+    var label = feature || 'this feature';
+    var browserHuman =
+      b.name === 'chrome' ? 'Chrome' :
+      b.name === 'edge' ? 'Edge' :
+      b.name === 'safari' ? 'Safari' :
+      b.name === 'firefox' ? 'Firefox' :
+      b.name === 'opera' ? 'Opera' :
+      b.name === 'samsung' ? 'Samsung Internet' :
+      'your browser';
+    var versionTxt = b.versionString ? (' ' + b.versionString) : '';
+    var detailLines = [];
+    if (b.onIos) {
+      // iOS forces every browser engine to WebKit, so the only fix is to
+      // upgrade iOS itself (iOS 16.4+ ships Safari 16.4+).
+      detailLines.push(
+        'You\'re on an iPhone or iPad. iOS uses Safari\'s engine for every browser, ' +
+        'so changing browsers won\'t help — only an iOS upgrade will. ' +
+        'Update to <b>iOS 16.4 or newer</b> in <i>Settings → General → Software Update</i>, ' +
+        'then reload this page. (iPhone 8 and newer support iOS 16.4+; iPhone 7 and older do not.)'
+      );
+      detailLines.push(
+        'If you can\'t upgrade iOS on this device, open this app on a desktop or laptop ' +
+        'using Chrome 102+, Edge 102+, Safari 16.4+, or Firefox 111+.'
+      );
+    } else if (b.name === 'safari') {
+      detailLines.push(
+        'You\'re running ' + browserHuman + versionTxt + '. ' +
+        'This app needs <b>Safari 16.4 or newer</b> on macOS 13.3+ ' +
+        '(<i>Apple menu → System Settings → General → Software Update</i>).'
+      );
+      detailLines.push(
+        'If you can\'t upgrade macOS, install the latest <b>Chrome</b>, <b>Edge</b>, or <b>Firefox</b> ' +
+        'on this Mac and open the app there instead.'
+      );
+    } else if (b.name === 'chrome' || b.name === 'edge') {
+      detailLines.push(
+        'You\'re running ' + browserHuman + versionTxt + '. ' +
+        'This app needs <b>' + browserHuman + ' 102 or newer</b> ' +
+        '(open the menu → Help → About ' + browserHuman + ' to update).'
+      );
+      detailLines.push(
+        'If your operating system can\'t run a current ' + browserHuman + ', try installing the latest <b>Firefox</b> ' +
+        '— or use a different device with a current browser.'
+      );
+    } else if (b.name === 'firefox') {
+      detailLines.push(
+        'You\'re running ' + browserHuman + versionTxt + '. ' +
+        'This app needs <b>Firefox 111 or newer</b> ' +
+        '(menu → Help → About Firefox to update).'
+      );
+      detailLines.push(
+        'You can also use the latest <b>Chrome</b>, <b>Edge</b>, or <b>Safari 16.4+</b>.'
+      );
+    } else if (b.name === 'opera' || b.name === 'samsung') {
+      detailLines.push(
+        'You\'re running ' + browserHuman + versionTxt + '. ' +
+        'This app hasn\'t been verified on ' + browserHuman + '; even up-to-date versions may not support ' +
+        'the local-storage feature it needs.'
+      );
+      detailLines.push(
+        'Open the app in <b>Chrome 102+</b>, <b>Edge 102+</b>, <b>Safari 16.4+</b>, or <b>Firefox 111+</b> instead.'
+      );
+    } else {
+      detailLines.push(
+        'Couldn\'t identify your browser, but the local-storage feature this app needs ' +
+        '(<a href="https://caniuse.com/native-filesystem-api" target="_blank" rel="noopener">OPFS with SyncAccessHandle</a>) ' +
+        'isn\'t available here.'
+      );
+      detailLines.push(
+        'Open the app in <b>Chrome 102+</b>, <b>Edge 102+</b>, <b>Safari 16.4+</b>, or <b>Firefox 111+</b>.'
+      );
+    }
+    if (!globalThis.isSecureContext) {
+      detailLines.unshift(
+        'This page isn\'t in a secure context, which the local-storage feature requires. ' +
+        'Open <code>https://fellows.globaldonut.com/</code> directly (not over an http:// link or a file:// path).'
+      );
+    }
+    var detailHtml = detailLines.map(function (l) { return '<p>' + l + '</p>'; }).join('');
+    return (
+      '<div class="local-data-unavailable">' +
+        '<h3>Can\'t open ' + escapeHtml(label) + ' on this browser</h3>' +
+        '<p class="local-data-unavailable-lede">' +
+          'Saved groups and per-device settings live in your browser\'s local storage. ' +
+          'On this device, that storage isn\'t available — so the rest of the app works, but ' +
+          escapeHtml(label) + ' can\'t.' +
+        '</p>' +
+        detailHtml +
+        '<p class="local-data-unavailable-foot">' +
+          'If none of these options work for you, please reach out — we\'re happy to help.' +
+        '</p>' +
+      '</div>'
+    );
+  }
+
   function createApiDataProvider() {
     function jsonOr(url, opts, expectedShapeOnEmpty) {
       return fetch(url, opts || {}).then(function (r) {
         if (r.status === 204) return expectedShapeOnEmpty;
         if (!r.ok) throw apiError(url, r.status);
         return r.json();
+      });
+    }
+
+    // Production (deploy/server.py) does not serve /api/groups or
+    // /api/settings — OPFS is the canonical store for those. When OPFS
+    // capability gates fail (older browser, insecure context, …) we
+    // land on this provider on prod and need to surface a helpful
+    // unsupported-browser panel rather than a generic "Could not load
+    // groups." error. The collection endpoint /api/groups is the
+    // unambiguous probe: dev returns 200 (`[]` if empty), prod returns
+    // 404 (no route). Cache the result so per-id 404s on getGroup,
+    // updateGroup, etc. can be disambiguated correctly:
+    //  - groupsRouteSupported === true  → 404 means "id not found"
+    //  - groupsRouteSupported === false → all groups/settings calls
+    //                                     reject with localDataUnavailable
+    //  - groupsRouteSupported === null  → not yet probed; settings
+    //                                     methods do their own probe
+    //                                     before the first call
+    var groupsRouteSupported = null; // null | true | false
+    function probeGroupsRoute() {
+      if (groupsRouteSupported !== null) {
+        return Promise.resolve(groupsRouteSupported);
+      }
+      return fetch('/api/groups').then(function (r) {
+        if (r.status === 404) {
+          groupsRouteSupported = false;
+        } else {
+          groupsRouteSupported = true;
+        }
+        return groupsRouteSupported;
+      }).catch(function () {
+        // Network error: don't lock the user out. Treat as "supported"
+        // and let the actual call surface a real error.
+        groupsRouteSupported = true;
+        return true;
+      });
+    }
+    function rejectIfUnsupported() {
+      if (groupsRouteSupported === false) {
+        return Promise.reject(localDataUnavailableError('server-no-local-data'));
+      }
+      return probeGroupsRoute().then(function (ok) {
+        if (!ok) throw localDataUnavailableError('server-no-local-data');
+        return true;
       });
     }
     return {
@@ -923,83 +1144,117 @@
 
       // ===== Groups (HTTP fallback) =================================
       // Same JSON shape as the SQLite path. Resolves member names via
-      // ATTACHed f.fellows on the dev server. In production (deploy/
-      // server.py), these endpoints don't exist yet — the SQLite path
-      // is the canonical production implementation.
+      // ATTACHed f.fellows on the dev server. On production
+      // (deploy/server.py) these routes don't exist; the OPFS path is
+      // the canonical production implementation. When OPFS is also
+      // unavailable, every call here rejects with
+      // localDataUnavailableError so the UI can render the unsupported-
+      // browser panel.
       listGroups: function () {
-        return jsonOr('/api/groups', null, []);
-      },
-      getGroup: function (id) {
-        return fetch('/api/groups/' + encodeURIComponent(id)).then(function (r) {
-          if (r.status === 404) return null;
-          if (!r.ok) throw apiError('/api/groups/' + id, r.status);
-          return r.json();
-        });
-      },
-      createGroup: function (data) {
-        return fetch('/api/groups', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin',
-          body: JSON.stringify(data || {})
-        }).then(function (r) {
+        // listGroups doubles as the route probe — its 404 is the
+        // signal that prod doesn't serve groups.
+        return fetch('/api/groups').then(function (r) {
+          if (r.status === 404) {
+            groupsRouteSupported = false;
+            throw localDataUnavailableError('server-no-local-data');
+          }
+          groupsRouteSupported = true;
+          if (r.status === 204) return [];
           if (!r.ok) throw apiError('/api/groups', r.status);
           return r.json();
         });
       },
+      getGroup: function (id) {
+        return rejectIfUnsupported().then(function () {
+          return fetch('/api/groups/' + encodeURIComponent(id)).then(function (r) {
+            if (r.status === 404) return null; // legitimate "id not found"
+            if (!r.ok) throw apiError('/api/groups/' + id, r.status);
+            return r.json();
+          });
+        });
+      },
+      createGroup: function (data) {
+        return rejectIfUnsupported().then(function () {
+          return fetch('/api/groups', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify(data || {})
+          }).then(function (r) {
+            if (!r.ok) throw apiError('/api/groups', r.status);
+            return r.json();
+          });
+        });
+      },
       updateGroup: function (id, patch) {
-        return fetch('/api/groups/' + encodeURIComponent(id), {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin',
-          body: JSON.stringify(patch || {})
-        }).then(function (r) {
-          if (r.status === 404) return null;
-          if (!r.ok) throw apiError('/api/groups/' + id, r.status);
-          return r.json();
+        return rejectIfUnsupported().then(function () {
+          return fetch('/api/groups/' + encodeURIComponent(id), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify(patch || {})
+          }).then(function (r) {
+            if (r.status === 404) return null;
+            if (!r.ok) throw apiError('/api/groups/' + id, r.status);
+            return r.json();
+          });
         });
       },
       deleteGroup: function (id) {
-        return fetch('/api/groups/' + encodeURIComponent(id), {
-          method: 'DELETE',
-          credentials: 'same-origin'
-        }).then(function (r) {
-          if (r.status === 204) return true;
-          if (r.status === 404) return false;
-          throw apiError('/api/groups/' + id, r.status);
+        return rejectIfUnsupported().then(function () {
+          return fetch('/api/groups/' + encodeURIComponent(id), {
+            method: 'DELETE',
+            credentials: 'same-origin'
+          }).then(function (r) {
+            if (r.status === 204) return true;
+            if (r.status === 404) return false;
+            throw apiError('/api/groups/' + id, r.status);
+          });
         });
       },
       getSetting: function (key) {
-        return fetch('/api/settings/' + encodeURIComponent(key)).then(function (r) {
-          if (r.status === 404) return null;
-          if (!r.ok) throw apiError('/api/settings/' + key, r.status);
-          return r.json().then(function (d) { return d && d.value; });
+        return rejectIfUnsupported().then(function () {
+          return fetch('/api/settings/' + encodeURIComponent(key)).then(function (r) {
+            if (r.status === 404) return null;
+            if (!r.ok) throw apiError('/api/settings/' + key, r.status);
+            return r.json().then(function (d) { return d && d.value; });
+          });
         });
       },
       getSettings: function () {
-        return fetch('/api/settings').then(function (r) {
-          if (!r.ok) return {};
-          return r.json();
+        return rejectIfUnsupported().then(function () {
+          return fetch('/api/settings').then(function (r) {
+            if (!r.ok) return {};
+            return r.json();
+          });
         });
       },
       setSetting: function (key, value) {
-        return fetch('/api/settings/' + encodeURIComponent(key), {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin',
-          body: JSON.stringify({ value: value })
-        }).then(function (r) {
-          if (!r.ok) throw apiError('/api/settings/' + key, r.status);
-          return r.json();
+        return rejectIfUnsupported().then(function () {
+          return fetch('/api/settings/' + encodeURIComponent(key), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ value: value })
+          }).then(function (r) {
+            if (!r.ok) throw apiError('/api/settings/' + key, r.status);
+            return r.json();
+          });
         });
       }
     };
   }
 
   function shouldTryOpfsProvider() {
-    if (!isStandaloneDisplayMode()) {
-      return false;
-    }
+    // OPFS is the canonical store for user-authored data (groups,
+    // settings) in BOTH standalone PWA and browser-tab modes.
+    // Production's deploy/server.py does not serve /api/groups or
+    // /api/settings; OPFS is what makes those features work end-to-end
+    // for browser-tab visitors. The capability gates below decide
+    // whether the visitor's browser can run the OPFS path; if any
+    // fails, the API provider takes over (which works on dev) and the
+    // groups/settings UI surfaces an unsupported-browser panel on prod
+    // via localDataUnavailableError. See docs/browser_support.md.
     if (typeof globalThis.sqlite3InitModule !== 'function') {
       return false;
     }
@@ -1022,7 +1277,7 @@
 
   function describeOpfsGates() {
     var lines = [];
-    lines.push('standalone display-mode: ' + isStandaloneDisplayMode());
+    lines.push('standalone display-mode: ' + isStandaloneDisplayMode() + ' (informational; not a gate)');
     lines.push('globalThis.sqlite3InitModule: ' + typeof globalThis.sqlite3InitModule);
     lines.push('navigator.storage: ' + (navigator.storage ? 'present' : 'missing'));
     lines.push(
@@ -2966,7 +3221,12 @@
         refreshDetailAddLink();
         updateBulkBar();
       })
-      .catch(function () {
+      .catch(function (err) {
+        if (err && err.localDataUnavailable) {
+          // listGroups will surface the full panel on the destination page.
+          window.location.hash = '#/groups';
+          return;
+        }
         showToast('Could not load group');
         window.location.hash = '#/groups';
       });
@@ -3065,6 +3325,15 @@
         window.location.hash = '#/groups/' + encodeURIComponent(String(group.id));
       })
       .catch(function (err) {
+        if (err && err.localDataUnavailable) {
+          setRailStatus(
+            'This browser can\'t save groups locally. Open Groups for details.',
+            'warn'
+          );
+          groupRailCreateEl.disabled = groupDraft.members.size === 0;
+          window.location.hash = '#/groups';
+          return;
+        }
         setRailStatus(
           'Could not save: ' + (err && err.message ? err.message : 'unknown error'),
           'warn'
@@ -3287,9 +3556,16 @@
     }
     dataProvider.listGroups()
       .then(function (groups) { renderGroupsList(groups || []); })
-      .catch(function () {
+      .catch(function (err) {
         var wrap = document.getElementById('groups-list-wrap');
-        if (wrap) wrap.innerHTML = '<p class="placeholder">Could not load groups.</p>';
+        var meta = document.getElementById('groups-meta');
+        if (meta) meta.textContent = '';
+        if (!wrap) return;
+        if (err && err.localDataUnavailable) {
+          wrap.innerHTML = renderLocalDataUnavailablePanel('groups');
+        } else {
+          wrap.innerHTML = '<p class="placeholder">Could not load groups.</p>';
+        }
       });
   }
 
@@ -3671,8 +3947,12 @@
       html += '</div>';
       detailEl.innerHTML = html;
       wireGroupDetailPage(group, emailInfo);
-    }).catch(function () {
-      detailEl.innerHTML = '<p class="placeholder">Could not load group.</p>';
+    }).catch(function (err) {
+      if (err && err.localDataUnavailable) {
+        detailEl.innerHTML = renderLocalDataUnavailablePanel('this group');
+      } else {
+        detailEl.innerHTML = '<p class="placeholder">Could not load group.</p>';
+      }
     });
   }
 
@@ -3823,8 +4103,12 @@
       html += '</div></div>';
       detailEl.innerHTML = html;
       wireGroupDirectoryCells(detailEl, members);
-    }).catch(function () {
-      detailEl.innerHTML = '<p class="placeholder">Could not load group directory.</p>';
+    }).catch(function (err) {
+      if (err && err.localDataUnavailable) {
+        detailEl.innerHTML = renderLocalDataUnavailablePanel('this group directory');
+      } else {
+        detailEl.innerHTML = '<p class="placeholder">Could not load group directory.</p>';
+      }
     });
   }
 
@@ -4247,6 +4531,10 @@
     var status = document.getElementById('settings-status');
     var form = document.getElementById('settings-form');
 
+    function showUnsupportedAndDisable() {
+      detailEl.innerHTML = renderLocalDataUnavailablePanel('settings');
+    }
+
     // Seed from localStorage immediately for snappy paint, then refresh
     // from relationships.settings (the durable source) when it returns.
     if (input) input.value = getSelfEmail();
@@ -4256,7 +4544,10 @@
           input.value = val;
           setSelfEmailLocal(val);
         }
-      }).catch(function () { /* ignore */ });
+      }).catch(function (err) {
+        if (err && err.localDataUnavailable) showUnsupportedAndDisable();
+        // else: ignore — localStorage seed still gives them something useful
+      });
     }
 
     if (form) {
@@ -4272,7 +4563,11 @@
             setSelfEmailLocal(next);
             if (status) status.textContent = 'Saved.';
           })
-          .catch(function () {
+          .catch(function (err) {
+            if (err && err.localDataUnavailable) {
+              showUnsupportedAndDisable();
+              return;
+            }
             if (status) status.textContent = 'Could not save.';
           });
       });

@@ -316,6 +316,35 @@ in-progress group draft *is* lost — drafts are by definition unsaved.
 
 ---
 
+## Supported browsers
+
+Saved groups and settings are stored locally on your device using a
+browser feature called OPFS. Most modern browsers support it, but a
+few older ones don't — you'll still be able to browse the directory,
+search, and read fellow profiles, but creating groups or saving
+settings will show an "Can't open groups on this browser" panel
+explaining what to do.
+
+If you can, run one of these or newer:
+
+- **Chrome 102+** (May 2022 or later)
+- **Edge 102+** (May 2022 or later)
+- **Safari 16.4+** on **macOS 13.3+** or **iOS 16.4+** (March 2023 or later)
+- **Firefox 111+** (March 2023 or later)
+
+A note about iPhone and iPad: every browser on iOS uses Safari's
+underlying engine, so installing Chrome or Firefox on an iPhone won't
+help. The fix is to update iOS itself (iPhone 8 and newer support
+iOS 16.4+). If your device can't be updated, you can still use the
+directory and profiles — just open the app on a desktop or laptop
+when you want to use groups.
+
+If you hit the "Can't open groups on this browser" panel and the
+suggestions there don't work for you, please reach out — we're happy
+to help.
+
+---
+
 ## Getting help
 
 - **General questions**: ask on one of the fellows channels, or contact
