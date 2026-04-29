@@ -32,37 +32,44 @@ class TestDetailView:
         # Contract: a .profile-image-wrap is rendered for every fellow detail.
         assert standalone_page.locator("#detail .profile-image-wrap").count() == 1
 
-    def test_image_fetch_error_does_not_show_not_submitted(self, standalone_page, base_url_fixture):
-        """A fellow with has_image=1 whose image 404s must NOT show "Not Submitted".
+    @pytest.mark.parametrize("status", [404, 403])
+    def test_image_fetch_error_does_not_show_not_submitted(
+        self, standalone_page, base_url_fixture, status
+    ):
+        """A fellow with has_image=1 whose image fetch fails must NOT show
+        "Not Submitted", regardless of failure mode.
 
         "Not Submitted" is reserved for fellows who never uploaded a photo
         (has_image=0). When the fellow did submit but we can't fetch the file
         (network, auth, cache miss), the UI must keep a loading/pending
         visual — lying would misattribute the problem to the fellow.
+
+        Parametrised over 404 (file missing on disk) and 403 (prod's
+        auth gate on /images/* without a valid session — see issue #38).
         """
         page = standalone_page
         # Denise Chen has has_image=1 in the rebuilt DB.
-        page.route("**/images/denise_chen.jpg", lambda r: r.fulfill(status=404, body=""))
-        page.route("**/images/denise_chen.png", lambda r: r.fulfill(status=404, body=""))
+        page.route("**/images/denise_chen.jpg", lambda r: r.fulfill(status=status, body=""))
+        page.route("**/images/denise_chen.png", lambda r: r.fulfill(status=status, body=""))
         page.goto(base_url_fixture + "/#/fellow/denise_chen", wait_until="networkidle")
         page.locator("#loading").wait_for(state="hidden", timeout=10000)
         detail = page.locator("#detail")
         detail.wait_for(state="visible", timeout=5000)
-        # Wait for both 404s to resolve (jpg then png fallback), plus a beat
-        # for the final error handler to update the status text.
+        # Wait for both error responses to resolve (jpg then png fallback),
+        # plus a beat for the final error handler to update the status text.
         page.wait_for_timeout(500)
         wrap = page.locator("#detail .profile-image-wrap")
         wrap_class = wrap.get_attribute("class") or ""
         # Must NOT have flipped to --none.
         assert "profile-image-wrap--none" not in wrap_class, (
             f"expected pending state, got class={wrap_class!r}. "
-            "Fellow had has_image=1; fetch error should not surface as 'Not Submitted'."
+            f"Fellow had has_image=1; status={status} should not surface as 'Not Submitted'."
         )
         # Status text must not include 'Not Submitted'.
         status_text = page.locator("#detail .profile-image-status").inner_text()
         assert "Not Submitted" not in status_text, (
             f"Status text: {status_text!r}. 'Not Submitted' is wrong for a fellow "
-            "who did upload a photo but whose file we can't fetch."
+            f"who did upload a photo but whose file we can't fetch (status={status})."
         )
         # It should still indicate a pending/loading state.
         assert "Loading" in status_text or "loading" in status_text, (
