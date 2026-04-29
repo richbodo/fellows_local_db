@@ -221,6 +221,10 @@
   }
 
   initBuildBadge();
+  // Install early so the ring buffer captures errors thrown during the rest
+  // of the IIFE setup. Function declaration is hoisted; definition lives
+  // further down with the rest of the bug-report module.
+  initBugReportErrorCapture();
 
   // Boot snapshot of /build-meta.json. The hourly update check and the
   // About-page "Check for updates" button both compare against this snapshot
@@ -1376,6 +1380,298 @@
         refresh();
       }
     } catch (e5) {}
+  }
+
+  // ===== Bug-report module ===============================================
+  // Lets a user email a diagnostics-rich bug report to the maintainer in two
+  // clicks: top-level "Report bug" button → preview-with-edit dialog → Send.
+  // Also surfaces inline triggers on the install / gate / boot-error / auth-
+  // error panels (the "couldn't even get into the app" surfaces) where the
+  // sync-only diagnostics path is the most we can reliably gather.
+  //
+  // Future: a gmail-to-issues bridge would let us point this at an address
+  // that creates a GitHub issue; for now the destination is hardcoded.
+  var BUG_REPORT_TO = 'richbodo@gmail.com';
+  var BUG_REPORT_RING_MAX = 20;
+  var BUG_REPORT_BODY_CAP = 1500;
+  var bugReportErrorRing = [];
+
+  function pushBugReportError(kind, msg, extra) {
+    try {
+      var entry = {
+        t: new Date().toISOString(),
+        kind: String(kind),
+        msg: String(msg == null ? '' : msg).slice(0, 500)
+      };
+      if (extra != null) entry.extra = String(extra).slice(0, 200);
+      bugReportErrorRing.push(entry);
+      if (bugReportErrorRing.length > BUG_REPORT_RING_MAX) {
+        bugReportErrorRing.shift();
+      }
+    } catch (e) {}
+  }
+
+  function initBugReportErrorCapture() {
+    // Wrap console.error so the original logger still runs — we just tee a
+    // copy into the ring buffer. Wrapped in try/catch so a failure in the
+    // tee can never break console.error itself.
+    try {
+      var origError = console.error.bind(console);
+      console.error = function () {
+        try {
+          var parts = [];
+          for (var i = 0; i < arguments.length; i++) {
+            var a = arguments[i];
+            if (a == null) {
+              parts.push(String(a));
+            } else if (a instanceof Error) {
+              parts.push(a.message + (a.stack ? '\n' + a.stack : ''));
+            } else if (typeof a === 'object') {
+              try { parts.push(JSON.stringify(a)); }
+              catch (je) { parts.push(String(a)); }
+            } else {
+              parts.push(String(a));
+            }
+          }
+          pushBugReportError('console.error', parts.join(' '));
+        } catch (e) {}
+        return origError.apply(null, arguments);
+      };
+    } catch (e) {}
+    try {
+      window.addEventListener('error', function (event) {
+        var msg = (event && event.message) ||
+          (event && event.error && event.error.message) || 'window error';
+        var loc = (event.filename || '') + ':' +
+          (event.lineno != null ? event.lineno : '?') + ':' +
+          (event.colno != null ? event.colno : '?');
+        pushBugReportError('window.error', msg, loc);
+      });
+    } catch (e) {}
+    try {
+      window.addEventListener('unhandledrejection', function (event) {
+        var reason = event && event.reason;
+        var msg;
+        if (reason instanceof Error) {
+          msg = reason.message + (reason.stack ? '\n' + reason.stack : '');
+        } else {
+          msg = String(reason);
+        }
+        pushBugReportError('unhandledrejection', msg);
+      });
+    } catch (e) {}
+  }
+
+  function buildBugReportSyncBody() {
+    var lines = [];
+    lines.push('--- diagnostics (please leave attached) ---');
+    lines.push('time: ' + new Date().toISOString());
+    lines.push('app: ' + FELLOWS_UI_DIAG);
+    var serverLabel = '(unknown)';
+    if (bootBuildMeta && (bootBuildMeta.git_sha || bootBuildMeta.built_at)) {
+      serverLabel = (bootBuildMeta.git_sha || '') +
+        (bootBuildMeta.built_at ? ' @ ' + bootBuildMeta.built_at : '');
+    }
+    lines.push('server: ' + serverLabel);
+    lines.push('url: ' + String(location.href));
+    lines.push('route: ' + String(location.hash || '(none)'));
+    lines.push('display: ' + (isStandaloneDisplayMode() ? 'standalone' : 'browser-tab'));
+    try { lines.push('online: ' + Boolean(navigator.onLine)); } catch (e) {}
+    lines.push('userAgent: ' + String(navigator.userAgent || ''));
+    try { lines.push('platform: ' + String(navigator.platform || '')); } catch (e) {}
+    try { lines.push('language: ' + String(navigator.language || '')); } catch (e) {}
+    try {
+      lines.push('viewport: ' + window.innerWidth + 'x' + window.innerHeight);
+    } catch (e) {}
+    try { lines.push('auth_once: ' + hasAuthenticatedOnce()); } catch (e) {}
+    try { lines.push('offline_only_mode: ' + offlineOnlyMode); } catch (e) {}
+    try {
+      lines.push('directoryDataSource: ' +
+        (typeof directoryDataSource !== 'undefined' ? directoryDataSource : '(unset)'));
+    } catch (e) {}
+    if (bugReportErrorRing.length === 0) {
+      lines.push('recent errors: (none captured)');
+    } else {
+      lines.push('recent errors (' + bugReportErrorRing.length + '):');
+      for (var i = 0; i < bugReportErrorRing.length; i++) {
+        var ev = bugReportErrorRing[i];
+        var firstLine = ev.msg.split('\n')[0];
+        lines.push('  - [' + ev.t + '] ' + ev.kind + ': ' + firstLine);
+        if (ev.extra) {
+          lines.push('      at ' + ev.extra);
+        }
+      }
+    }
+    return lines.join('\n');
+  }
+
+  function buildBugReportTemplateBody(syncDiag) {
+    var lines = [];
+    lines.push('Hi! Thanks for reporting a bug. Please answer what you can — leave anything you don\'t know:');
+    lines.push('');
+    lines.push('1) What were you trying to do?');
+    lines.push('   ');
+    lines.push('2) What did you expect to happen?');
+    lines.push('   ');
+    lines.push('3) What actually happened?');
+    lines.push('   ');
+    lines.push('');
+    lines.push(syncDiag);
+    return lines.join('\n');
+  }
+
+  function buildBugReportMailtoHref(subject, body) {
+    // mailto: URLs get truncated by some mail clients past ~2000 chars
+    // post-encoding, so we cap the unencoded body. The full body lives in
+    // the textarea and the Copy button — this is just the convenience path.
+    var capped = body;
+    if (body.length > BUG_REPORT_BODY_CAP) {
+      capped = body.slice(0, BUG_REPORT_BODY_CAP) +
+        '\n\n[truncated for mailto: — paste the full report from the dialog]';
+    }
+    return 'mailto:' + encodeURIComponent(BUG_REPORT_TO) +
+      '?subject=' + encodeURIComponent(subject) +
+      '&body=' + encodeURIComponent(capped);
+  }
+
+  function openBugReportDialog(opts) {
+    opts = opts || {};
+    var dialog = document.getElementById('bug-report-dialog');
+    var textarea = document.getElementById('bug-report-textarea');
+    var sendBtn = document.getElementById('bug-report-send');
+    var copyBtn = document.getElementById('bug-report-copy');
+    var closeBtn = document.getElementById('bug-report-close');
+    var statusEl = document.getElementById('bug-report-status');
+    if (!dialog || !textarea) return;
+
+    var subjectId = (bootBuildMeta && bootBuildMeta.git_sha) || FELLOWS_UI_DIAG;
+    if (subjectId && subjectId.length > 24) subjectId = subjectId.slice(0, 24);
+    var subject = 'EHF Directory bug — ' + subjectId;
+    var syncDiag = buildBugReportSyncBody();
+    var fullBody = buildBugReportTemplateBody(syncDiag);
+
+    textarea.value = fullBody;
+    if (statusEl) statusEl.textContent = '';
+    dialog.classList.remove('hidden');
+    dialog.setAttribute('aria-hidden', 'false');
+
+    // Focus the first answer line so the user can start typing immediately.
+    try {
+      textarea.focus();
+      var idx = textarea.value.indexOf('1) ');
+      if (idx >= 0) {
+        var nl = textarea.value.indexOf('\n', idx);
+        var caret = nl > 0 ? nl + 4 : textarea.value.length;
+        textarea.setSelectionRange(caret, caret);
+      }
+    } catch (e) {}
+
+    function onSend() {
+      var body = textarea.value;
+      var href = buildBugReportMailtoHref(subject, body);
+      try {
+        window.location.href = href;
+        if (statusEl) {
+          statusEl.textContent =
+            'If your mail app didn\'t open, click "Copy to clipboard" and paste into a new email to ' +
+            BUG_REPORT_TO + '.';
+        }
+      } catch (e) {
+        if (statusEl) {
+          statusEl.textContent = 'Could not open mail app — use Copy to clipboard.';
+        }
+      }
+    }
+
+    function onCopy() {
+      var body = textarea.value;
+      function fallback() {
+        try {
+          textarea.select();
+          if (document.execCommand && document.execCommand('copy')) {
+            if (statusEl) {
+              statusEl.textContent = 'Copied. Email it to ' + BUG_REPORT_TO + '.';
+            }
+            return;
+          }
+        } catch (e) {}
+        if (statusEl) {
+          statusEl.textContent =
+            'Copy failed — select all in the box above and copy manually, then email to ' +
+            BUG_REPORT_TO + '.';
+        }
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(body).then(function () {
+          if (statusEl) {
+            statusEl.textContent = 'Copied. Email it to ' + BUG_REPORT_TO + '.';
+          }
+        }, fallback);
+      } else {
+        fallback();
+      }
+    }
+
+    function onClose() {
+      dialog.classList.add('hidden');
+      dialog.setAttribute('aria-hidden', 'true');
+      sendBtn && sendBtn.removeEventListener('click', onSend);
+      copyBtn && copyBtn.removeEventListener('click', onCopy);
+      closeBtn && closeBtn.removeEventListener('click', onClose);
+      dialog.removeEventListener('click', onBackdrop);
+      document.removeEventListener('keydown', onKey);
+    }
+
+    function onBackdrop(ev) {
+      if (ev.target === dialog) onClose();
+    }
+
+    function onKey(ev) {
+      if (ev.key === 'Escape') onClose();
+    }
+
+    sendBtn && sendBtn.addEventListener('click', onSend);
+    copyBtn && copyBtn.addEventListener('click', onCopy);
+    closeBtn && closeBtn.addEventListener('click', onClose);
+    dialog.addEventListener('click', onBackdrop);
+    document.addEventListener('keydown', onKey);
+
+    // In-app surfaces (no syncOnly flag) try to enrich with the heavier
+    // diagnostics gather (SW state, /api/auth/status, /api/debug/diagnostics,
+    // cache keys) once it returns. Pre-app surfaces skip this because their
+    // surrounding context (boot failure, gate, install) means those probes
+    // are likely to hang or 5xx.
+    if (!opts.syncOnly) {
+      var marker = '\n\n--- additional diagnostics ---\n';
+      Promise.resolve(collectDiagnosticsText()).then(function (extra) {
+        if (dialog.classList.contains('hidden')) return;
+        var current = textarea.value;
+        if (current.indexOf(syncDiag) === -1) return;  // user replaced it
+        if (current.indexOf(marker) !== -1) return;     // already enriched
+        textarea.value = current.replace(syncDiag, syncDiag + marker + extra);
+      }).catch(function () {
+        // Best-effort enrichment; silent failure is fine.
+      });
+    }
+  }
+
+  function initBugReportButtons() {
+    var ids = [
+      'bug-report-button',
+      'bug-report-button-install',
+      'bug-report-button-gate',
+      'bug-report-button-boot-error',
+      'bug-report-button-auth-error'
+    ];
+    ids.forEach(function (id) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        var syncOnly = btn.getAttribute('data-sync-only') === '1';
+        openBugReportDialog({ syncOnly: syncOnly });
+      });
+    });
   }
 
   function showAuthFailure(reason, extra) {
@@ -3014,7 +3310,7 @@
           '<td class="groups-cell-date">' + escapeHtml(date) + '</td>' +
           '<td>' + noteHtml + '</td>' +
           '<td class="groups-cell-actions">' +
-            '<a href="#/groups/' + escapeHtml(gidStr) + '/directory" class="groups-action groups-action-view" data-group-id="' + escapeHtml(gidStr) + '">view directory</a>' +
+            '<a href="#/groups/' + escapeHtml(gidStr) + '/directory" class="groups-action groups-action-view" data-group-id="' + escapeHtml(gidStr) + '">visual directory</a>' +
             '<a href="#/edit/' + escapeHtml(gidStr) + '" class="groups-action groups-action-edit" data-group-id="' + escapeHtml(gidStr) + '">edit</a>' +
             '<a href="#" class="groups-action groups-action-rename" data-group-id="' + escapeHtml(gidStr) + '">rename</a>' +
             '<a href="#" class="groups-action groups-action-delete" data-group-id="' + escapeHtml(gidStr) + '">delete</a>' +
@@ -3273,25 +3569,50 @@
           '</div>';
       }
 
-      // Inline export panel — checkboxes drive what the Export button emits.
+      // Inline export panel. PDF/HTML are mutually exclusive (radios). The
+      // email input is always visible — prefilled from getSelfEmail() when
+      // the user has one in localStorage / settings, else blank with a cue.
       var slugFn = slugifyForFilename(name);
+      var initialSelfEmail = getSelfEmail();
       html +=
         '<div class="group-export-panel hidden" id="group-export-panel" aria-label="Export options">' +
           '<div class="group-export-head">Export a directory</div>' +
           '<div class="group-export-options">' +
-            '<label><input type="checkbox" id="export-pdf" checked> <span><b>PDF directory</b><br><code>' +
-              escapeHtml(slugFn) + '.pdf</code></span></label>' +
-            '<label><input type="checkbox" id="export-html"> <span><b>HTML directory</b><br><code>' +
-              escapeHtml(slugFn) + '.zip</code> · view offline, all relative paths</span></label>' +
-            '<label><input type="checkbox" id="export-self-email" checked> <span><b>email it to me</b><br><span id="export-self-email-hint">opens your mail client</span></span></label>' +
+            '<label class="group-export-format">' +
+              '<input type="radio" name="export-format" id="export-format-pdf" value="pdf" checked> ' +
+              '<span><b>PDF directory</b><br><code>' + escapeHtml(slugFn) + '.pdf</code></span>' +
+            '</label>' +
+            '<label class="group-export-format">' +
+              '<input type="radio" name="export-format" id="export-format-html" value="html"> ' +
+              '<span><b>HTML directory</b><br><code>' + escapeHtml(slugFn) + '.html</code> · self-contained, view in any browser</span>' +
+            '</label>' +
+          '</div>' +
+          '<div class="group-export-email-row">' +
+            '<label class="group-export-email-label">' +
+              '<input type="checkbox" id="export-self-email" checked> ' +
+              '<span><b>email it to me</b></span>' +
+            '</label>' +
+            '<input type="email" id="export-self-email-addr" class="group-export-email-input' +
+              (initialSelfEmail ? '' : ' group-export-email-input--empty') + '" ' +
+              'placeholder="your@email.com" autocomplete="email" ' +
+              'value="' + escapeHtml(initialSelfEmail) + '">' +
+            '<span class="group-export-email-cue" id="export-self-email-cue">' +
+              (initialSelfEmail ? 'override here to send to a different address' : 'enter your email — you can save it in Settings later') +
+            '</span>' +
           '</div>' +
           '<div class="group-export-actions">' +
             '<button type="button" class="group-export-cancel">cancel</button>' +
             '<button type="button" class="group-export-go" id="group-export-go">Export</button>' +
           '</div>' +
+          '<div class="group-export-result hidden" id="group-export-result" aria-live="polite">' +
+            '<span class="group-export-result-text" id="group-export-result-text"></span> ' +
+            '<a href="#" class="group-export-view" id="group-export-view" target="_blank" rel="noopener">View</a> ' +
+            '<button type="button" class="group-export-email-btn hidden" id="group-export-email-btn">Email it to me</button>' +
+          '</div>' +
+          '<div class="group-contact-banner hidden" id="group-export-banner" role="status"></div>' +
           '<p class="group-export-note" id="group-export-note">' +
             'Files land in your <b>Downloads</b> folder (or via the system share sheet on iOS). ' +
-            'The PDF includes clickable mailto: links; the HTML zip is a self-contained portable directory.' +
+            'PDF includes clickable mailto: links; the HTML directory is one self-contained file.' +
           '</p>' +
         '</div>';
 
@@ -3458,7 +3779,7 @@
           '</div>';
       }
       html += '<div class="group-directory-grid">';
-      members.forEach(function (m) {
+      members.forEach(function (m, idx) {
         var slug = m.slug;
         var imgSrc;
         if (m.has_image && slug) {
@@ -3466,26 +3787,149 @@
         } else {
           imgSrc = PORTRAIT_SVG_PLACEHOLDER;
         }
-        var fellowHref = slug ? ('#/fellow/' + encodeURIComponent(slug)) : '#';
-        html += '<a class="group-directory-cell" href="' + escapeHtml(fellowHref) + '">' +
+        html += '<button type="button" class="group-directory-cell" data-member-idx="' + escapeHtml(String(idx)) + '">' +
           '<div class="group-directory-portrait">' +
             '<img src="' + escapeHtml(imgSrc) + '" alt="' + escapeHtml(m.name) +
             '" loading="lazy" onerror="this.onerror=null;this.src=\'' + PORTRAIT_SVG_PLACEHOLDER + '\';">' +
           '</div>' +
           '<div class="group-directory-name">' + escapeHtml(m.name) + '</div>' +
-        '</a>';
+        '</button>';
       });
       html += '</div></div>';
       detailEl.innerHTML = html;
+      wireGroupDirectoryCells(detailEl, members);
     }).catch(function () {
       detailEl.innerHTML = '<p class="placeholder">Could not load group directory.</p>';
     });
   }
 
+  /** Click handler for visual-directory portraits/names: open the
+   *  contact-card modal. Single delegated listener, lookup by index. */
+  function wireGroupDirectoryCells(wrap, members) {
+    var grid = wrap.querySelector('.group-directory-grid');
+    if (!grid) return;
+    grid.addEventListener('click', function (ev) {
+      var cell = ev.target.closest('.group-directory-cell');
+      if (!cell) return;
+      ev.preventDefault();
+      var idx = parseInt(cell.getAttribute('data-member-idx'), 10);
+      if (isNaN(idx) || !members[idx]) return;
+      openFellowContactModal(members[idx]);
+    });
+  }
+
+  /** Inline contact-info modal launched from the visual-directory grid.
+   *  Shows name, email (mailto:), phone (tel:), key links, and a link
+   *  to the fellow's full profile. Closes on backdrop click, X button,
+   *  or Escape key. */
+  function openFellowContactModal(m) {
+    closeFellowContactModal();
+    var slug = m.slug;
+    var imgSrc;
+    if (m.has_image && slug) {
+      imgSrc = '/images/' + encodeURIComponent(slug) + '.jpg?v=' + escapeHtml(FELLOWS_UI_DIAG);
+    } else {
+      imgSrc = PORTRAIT_SVG_PLACEHOLDER;
+    }
+
+    var rowsHtml = '';
+    if (m.contact_email) {
+      var email = String(m.contact_email);
+      rowsHtml +=
+        '<li class="fellow-modal-row">' +
+          '<span class="fellow-modal-label">email</span>' +
+          '<a class="fellow-modal-value" href="mailto:' + escapeHtml(email) + '">' +
+            escapeHtml(email) +
+          '</a>' +
+        '</li>';
+    }
+    if (m.mobile_number) {
+      var phoneText = String(m.mobile_number).trim();
+      var phoneTel = phoneText.replace(/[^+\d]/g, '');
+      rowsHtml +=
+        '<li class="fellow-modal-row">' +
+          '<span class="fellow-modal-label">phone</span>' +
+          '<a class="fellow-modal-value" href="tel:' + escapeHtml(phoneTel) + '">' +
+            escapeHtml(phoneText) +
+          '</a>' +
+        '</li>';
+    }
+    if (Array.isArray(m.key_links_urls) && m.key_links_urls.length) {
+      var labels = (m.key_links || '').split(',');
+      var links = m.key_links_urls.map(function (url, i) {
+        var label = (labels[i] || url || '').trim() || url;
+        return '<a class="fellow-modal-value" href="' + escapeHtml(url) +
+          '" target="_blank" rel="noopener">' + escapeHtml(label) + '</a>';
+      }).join('<br>');
+      rowsHtml +=
+        '<li class="fellow-modal-row">' +
+          '<span class="fellow-modal-label">links</span>' +
+          '<span class="fellow-modal-value">' + links + '</span>' +
+        '</li>';
+    }
+    if (!rowsHtml) {
+      rowsHtml =
+        '<li class="fellow-modal-row fellow-modal-row--empty">' +
+          'No public contact info on file.' +
+        '</li>';
+    }
+
+    var profileHref = slug ? ('#/fellow/' + encodeURIComponent(slug)) : '';
+    var profileHtml = profileHref
+      ? '<a class="fellow-modal-profile-link" href="' + escapeHtml(profileHref) + '">View full profile →</a>'
+      : '';
+
+    var overlay = document.createElement('div');
+    overlay.className = 'fellow-modal-overlay';
+    overlay.setAttribute('role', 'presentation');
+    overlay.innerHTML =
+      '<div class="fellow-modal-card" role="dialog" aria-modal="true" aria-labelledby="fellow-modal-name">' +
+        '<button type="button" class="fellow-modal-close" aria-label="Close">×</button>' +
+        '<div class="fellow-modal-portrait">' +
+          '<img src="' + escapeHtml(imgSrc) + '" alt="' + escapeHtml(m.name) +
+          '" onerror="this.onerror=null;this.src=\'' + PORTRAIT_SVG_PLACEHOLDER + '\';">' +
+        '</div>' +
+        '<h3 class="fellow-modal-name" id="fellow-modal-name">' + escapeHtml(m.name || '') + '</h3>' +
+        '<ul class="fellow-modal-rows">' + rowsHtml + '</ul>' +
+        profileHtml +
+      '</div>';
+
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', function (ev) {
+      if (ev.target === overlay || ev.target.closest('.fellow-modal-close')) {
+        closeFellowContactModal();
+      }
+    });
+    // Profile-link click is a hash navigation; close the modal so it
+    // doesn't sit on top of the detail view.
+    var profileLink = overlay.querySelector('.fellow-modal-profile-link');
+    if (profileLink) {
+      profileLink.addEventListener('click', function () {
+        closeFellowContactModal();
+      });
+    }
+    document.addEventListener('keydown', fellowContactModalKeydown);
+    var closeBtn = overlay.querySelector('.fellow-modal-close');
+    if (closeBtn) closeBtn.focus();
+  }
+
+  function fellowContactModalKeydown(ev) {
+    if (ev.key === 'Escape' || ev.key === 'Esc') {
+      closeFellowContactModal();
+    }
+  }
+
+  function closeFellowContactModal() {
+    var overlay = document.querySelector('.fellow-modal-overlay');
+    if (overlay && overlay.parentNode) {
+      overlay.parentNode.removeChild(overlay);
+    }
+    document.removeEventListener('keydown', fellowContactModalKeydown);
+  }
+
   // ===== Standalone HTML export (PR 5) ======================================
 
-  /** Minimal CSS shipped inside the exported ZIP. Inlined into one
-   *  file so each HTML page in the bundle is human-readable on its own. */
+  /** Minimal CSS inlined into the single-file HTML export. */
   var EXPORT_CSS =
     'body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;' +
     'background:#fafafa;color:#222;margin:0;padding:1.4rem 1.6rem;}' +
@@ -3496,14 +3940,15 @@
     'font-size:0.85rem;}' +
     '.contact-bar a{color:#0066cc;text-decoration:underline;font-weight:500;}' +
     '.helper{color:#7a6f91;font-size:0.78rem;}' +
-    '.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:0.9rem;}' +
+    '.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:0.9rem;' +
+    'margin-bottom:1.6rem;}' +
     '.cell{display:block;text-decoration:none;color:inherit;text-align:center;}' +
     '.portrait{width:100%;aspect-ratio:1/1;border-radius:50%;border:1px solid #ccc;' +
     'overflow:hidden;background:#eee;}' +
     '.portrait img{width:100%;height:100%;object-fit:cover;display:block;}' +
     '.cell-name{font-size:0.78rem;margin-top:4px;line-height:1.2;}' +
-    '.back-link{display:inline-block;margin-bottom:1rem;color:#0066cc;font-size:0.85rem;}' +
-    '.fellow-card{max-width:420px;margin:0 auto;background:#fff;border:1px solid #ccc;' +
+    '.back-link{display:inline-block;margin:1.2rem 0 0.4rem;color:#0066cc;font-size:0.85rem;}' +
+    '.fellow-card{max-width:420px;margin:0 auto 1rem;background:#fff;border:1px solid #ccc;' +
     'border-radius:4px;padding:1.2rem 1.4rem;}' +
     '.fellow-card h2{margin:0 0 0.4rem;}' +
     '.fellow-portrait{width:120px;height:120px;border-radius:50%;border:1px solid #ccc;' +
@@ -3512,50 +3957,36 @@
     '.field-table{width:100%;border-collapse:separate;border-spacing:0 0.3em;font-size:0.9rem;}' +
     '.field-table td{padding:0.3em 0.5em;}' +
     '.field-table td.label{background:#f0f0f0;font-weight:600;width:32%;}' +
-    '.field-table a{color:#0066cc;}';
+    '.field-table a{color:#0066cc;}' +
+    '.fellow-anchor{display:block;height:0;overflow:hidden;}';
 
-  function buildExportIndexHtml(group, members) {
-    var contact = buildContactBarMailto(group, members);
-    var html =
-      '<!doctype html>\n' +
-      '<html lang="en"><head><meta charset="utf-8">' +
-      '<title>' + escapeHtml(group.name || 'Group directory') + '</title>' +
-      '<meta name="viewport" content="width=device-width,initial-scale=1">' +
-      '<link rel="stylesheet" href="styles.css">' +
-      '</head><body>' +
-      '<h1>' + escapeHtml(group.name || '(untitled)') + '</h1>' +
-      '<p class="meta">' +
-        escapeHtml(String(members.length)) + ' fellow' + (members.length === 1 ? '' : 's') +
-        ' · exported ' + escapeHtml(new Date().toISOString().slice(0, 10)) +
-        (group.note ? ' · ' + escapeHtml(group.note) : '') +
-      '</p>';
-    if (contact.count) {
-      html +=
-        '<div class="contact-bar">' +
-          '<a href="' + escapeHtml(contact.url) + '">✉ Contact the whole group</a>' +
-          '<span class="helper">opens your mail client with all ' +
-            escapeHtml(String(contact.count)) + ' addresses in CC</span>' +
-        '</div>';
+  function bytesToBase64(bytes) {
+    // Chunk to keep String.fromCharCode argument list bounded.
+    var CHUNK = 0x8000;
+    var binary = '';
+    for (var i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
     }
-    html += '<div class="grid">';
+    return window.btoa(binary);
+  }
+
+  function buildExportIndexGrid(members, imgMap) {
+    var html = '<div class="grid">';
     members.forEach(function (m) {
       var slug = m.slug || slugifyForFilename(m.name);
-      var imgRel = m.has_image && m.slug ? 'images/' + m.slug + '.jpg' : '';
-      var imgSrc = imgRel || PORTRAIT_SVG_PLACEHOLDER;
-      html += '<a class="cell" href="fellow-' + escapeHtml(slug) + '.html">' +
+      var imgSrc = imgMap[m.slug] || PORTRAIT_SVG_PLACEHOLDER;
+      html += '<a class="cell" href="#fellow-' + escapeHtml(slug) + '">' +
         '<div class="portrait"><img src="' + escapeHtml(imgSrc) +
-        '" alt="' + escapeHtml(m.name) + '" loading="lazy"></div>' +
+        '" alt="' + escapeHtml(m.name) + '"></div>' +
         '<div class="cell-name">' + escapeHtml(m.name) + '</div>' +
       '</a>';
     });
-    html += '</div></body></html>\n';
-    return html;
+    return html + '</div>';
   }
 
-  function buildExportFellowHtml(group, m) {
+  function buildExportFellowSection(group, m, imgMap) {
     var slug = m.slug || slugifyForFilename(m.name);
-    var imgRel = m.has_image && m.slug ? 'images/' + m.slug + '.jpg' : '';
-    var imgSrc = imgRel || PORTRAIT_SVG_PLACEHOLDER;
+    var imgSrc = imgMap[m.slug] || PORTRAIT_SVG_PLACEHOLDER;
     var rows = [];
     if (m.contact_email) {
       rows.push('<tr><td class="label">email</td><td><a href="mailto:' +
@@ -3575,13 +4006,8 @@
       }).join(', ');
       rows.push('<tr><td class="label">links</td><td>' + links + '</td></tr>');
     }
-    return '<!doctype html>\n' +
-      '<html lang="en"><head><meta charset="utf-8">' +
-      '<title>' + escapeHtml(m.name) + ' — ' + escapeHtml(group.name || '') + '</title>' +
-      '<meta name="viewport" content="width=device-width,initial-scale=1">' +
-      '<link rel="stylesheet" href="styles.css">' +
-      '</head><body>' +
-      '<a class="back-link" href="index.html">‹ back to ' + escapeHtml(group.name || 'directory') + '</a>' +
+    return '<a class="fellow-anchor" id="fellow-' + escapeHtml(slug) + '"></a>' +
+      '<a class="back-link" href="#top">‹ back to ' + escapeHtml(group.name || 'directory') + '</a>' +
       '<div class="fellow-card">' +
         '<div class="fellow-portrait"><img src="' + escapeHtml(imgSrc) +
           '" alt="' + escapeHtml(m.name) + '"></div>' +
@@ -3589,7 +4015,7 @@
         (rows.length
           ? '<table class="field-table"><tbody>' + rows.join('') + '</tbody></table>'
           : '<p>(No public contact info on file.)</p>') +
-      '</div></body></html>\n';
+      '</div>';
   }
 
   /** Fetch the JPG bytes for a member's portrait, returning a Uint8Array
@@ -3616,38 +4042,55 @@
       .catch(function () { return null; });
   }
 
-  /** Build a Blob containing the exported ZIP for a group:
-   *    <slug>/index.html, styles.css, fellow-<slug>.html *, images/*
-   *  using fflate's zipSync (synchronous, well-suited for small bundles). */
-  function exportGroupAsHtmlZip(group) {
-    if (typeof fflate === 'undefined') {
-      return Promise.reject(new Error('fflate not loaded'));
-    }
+  /** Build a Blob containing a single self-contained HTML file:
+   *  inline <style>, the index portrait grid, then per-fellow cards as
+   *  anchored sections (#fellow-<slug>). Portraits are inlined as data:
+   *  URIs so the file is portable and viewable in any browser without
+   *  extracting an archive. */
+  function exportGroupAsHtml(group) {
     var members = resolveMembersForView(group);
-    var encoder = new TextEncoder();
-    var files = {};
-    files['index.html'] = encoder.encode(buildExportIndexHtml(group, members));
-    files['styles.css'] = encoder.encode(EXPORT_CSS);
-    members.forEach(function (m) {
-      var slug = m.slug || slugifyForFilename(m.name);
-      files['fellow-' + slug + '.html'] = encoder.encode(buildExportFellowHtml(group, m));
-    });
-    // Fetch portraits in parallel. Members without an image get nothing in
-    // images/; the standalone HTML falls back to the inline SVG placeholder.
     var imageJobs = members
       .filter(function (m) { return m.has_image && m.slug; })
       .map(function (m) {
         return fetchMemberPortrait(m.slug).then(function (res) {
-          if (res) {
-            files['images/' + m.slug + '.' + res.ext] = res.bytes;
-          }
+          if (!res) return null;
+          var mime = res.ext === 'png' ? 'image/png' : 'image/jpeg';
+          return { slug: m.slug, url: 'data:' + mime + ';base64,' + bytesToBase64(res.bytes) };
         });
       });
-    return Promise.all(imageJobs).then(function () {
-      var zipped = fflate.zipSync(files, { level: 6 });
-      // ArrayBuffer view → Blob; explicit MIME so Save dialogs and iOS
-      // Web Share both recognise it as a zip.
-      return new Blob([zipped], { type: 'application/zip' });
+    return Promise.all(imageJobs).then(function (results) {
+      var imgMap = {};
+      results.forEach(function (r) { if (r) imgMap[r.slug] = r.url; });
+      var contact = buildContactBarMailto(group, members);
+      var name = group.name || '(untitled)';
+      var html =
+        '<!doctype html>\n' +
+        '<html lang="en"><head><meta charset="utf-8">' +
+        '<title>' + escapeHtml(name) + '</title>' +
+        '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+        '<style>' + EXPORT_CSS + '</style>' +
+        '</head><body>' +
+        '<a id="top"></a>' +
+        '<h1>' + escapeHtml(name) + '</h1>' +
+        '<p class="meta">' +
+          escapeHtml(String(members.length)) + ' fellow' + (members.length === 1 ? '' : 's') +
+          ' · exported ' + escapeHtml(new Date().toISOString().slice(0, 10)) +
+          (group.note ? ' · ' + escapeHtml(group.note) : '') +
+        '</p>';
+      if (contact.count) {
+        html +=
+          '<div class="contact-bar">' +
+            '<a href="' + escapeHtml(contact.url) + '">✉ Contact the whole group</a>' +
+            '<span class="helper">opens your mail client with all ' +
+              escapeHtml(String(contact.count)) + ' addresses in CC</span>' +
+          '</div>';
+      }
+      html += buildExportIndexGrid(members, imgMap);
+      members.forEach(function (m) {
+        html += buildExportFellowSection(group, m, imgMap);
+      });
+      html += '</body></html>\n';
+      return new Blob([html], { type: 'text/html;charset=utf-8' });
     });
   }
 
@@ -3916,14 +4359,32 @@
     if (exportBtn && exportPanel) {
       exportBtn.addEventListener('click', function () {
         exportPanel.classList.toggle('hidden');
-        // Refresh the "email it to me" hint with the user's current self_email
-        // each time the panel opens — it can change via Settings between visits.
-        var hint = document.getElementById('export-self-email-hint');
-        if (hint) {
+        // Refresh the email input / cue with the user's current self_email
+        // each time the panel opens — Settings may have changed between visits.
+        // Don't clobber an in-progress edit: only restore from settings when
+        // the input is currently empty (i.e., not user-entered).
+        var addrInput = document.getElementById('export-self-email-addr');
+        var cue = document.getElementById('export-self-email-cue');
+        if (addrInput && cue) {
           var self = getSelfEmail();
-          hint.textContent = self
-            ? ('opens your mail client to send to ' + self)
-            : 'set your email in Settings first';
+          if (!addrInput.value && self) {
+            addrInput.value = self;
+          }
+          var hasValue = !!(addrInput.value || '').trim();
+          addrInput.classList.toggle('group-export-email-input--empty', !hasValue);
+          cue.textContent = hasValue
+            ? 'override here to send to a different address'
+            : 'enter your email — you can save it in Settings later';
+        }
+        // Reset any prior post-export state when reopening so the panel
+        // doesn't confusingly show a stale "View" link.
+        var result = document.getElementById('group-export-result');
+        var banner = document.getElementById('group-export-banner');
+        if (result) result.classList.add('hidden');
+        if (banner) {
+          banner.classList.add('hidden');
+          banner.classList.remove('group-contact-banner--soft', 'group-contact-banner--hard', 'group-contact-banner--info');
+          banner.innerHTML = '';
         }
       });
     }
@@ -3936,6 +4397,23 @@
     if (exportGoBtn) {
       exportGoBtn.addEventListener('click', function () {
         runGroupExport(group, exportGoBtn);
+      });
+    }
+    var exportAddrInput = document.getElementById('export-self-email-addr');
+    var exportAddrCue = document.getElementById('export-self-email-cue');
+    if (exportAddrInput && exportAddrCue) {
+      exportAddrInput.addEventListener('input', function () {
+        var hasValue = !!(exportAddrInput.value || '').trim();
+        exportAddrInput.classList.toggle('group-export-email-input--empty', !hasValue);
+        exportAddrCue.textContent = hasValue
+          ? 'override here to send to a different address'
+          : 'enter your email — you can save it in Settings later';
+      });
+    }
+    var exportEmailBtn = document.getElementById('group-export-email-btn');
+    if (exportEmailBtn) {
+      exportEmailBtn.addEventListener('click', function () {
+        runExportEmail();
       });
     }
 
@@ -3955,75 +4433,161 @@
     }
   }
 
+  // Mailto: URL length thresholds for the export "Email it to me" button.
+  // Recipient count is always 1 here, so URL length — the underlying
+  // constraint behind GROUPS_CONTACT_*_AT — is the right measure directly.
+  // Most clients tolerate ~2000 chars; Outlook truncates around 2048.
+  var EXPORT_EMAIL_WARN_AT_LEN = 1500;
+  var EXPORT_EMAIL_HARD_AT_LEN = 2000;
+
+  // The most-recently-produced export's revocable object URL + filename,
+  // kept around so the post-export "View" link and "Email it to me" button
+  // work after Export completes. Replaced (and the old URL revoked) on each
+  // successful export.
+  var lastExportObjectUrl = null;
+  var lastExportFilename = null;
+  var lastExportGroup = null;
+
+  function buildExportEmailMailto(groupName, addr, filename) {
+    var subject = encodeURIComponent(groupName || '');
+    var body = encodeURIComponent(
+      'Files saved to your Downloads folder:\r\n• ' + filename
+    );
+    return 'mailto:?to=' + encodeURIComponent(addr) +
+      '&subject=' + subject + '&body=' + body;
+  }
+
+  function buildExportEmailCopyText(groupName, addr, filename) {
+    return 'To: ' + addr + '\nSubject: ' + (groupName || '') +
+      '\n\nFiles saved to your Downloads folder:\n• ' + filename + '\n';
+  }
+
+  function runExportEmail() {
+    var group = lastExportGroup;
+    var filename = lastExportFilename;
+    if (!group || !filename) return;
+    var addrInput = document.getElementById('export-self-email-addr');
+    var addr = addrInput ? (addrInput.value || '').trim() : '';
+    if (!addr || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) {
+      if (addrInput) addrInput.focus();
+      showToast('Enter your email above.');
+      return;
+    }
+    // Cache for next time so a fresh panel render prefills it.
+    setSelfEmailLocal(addr);
+    var groupName = group.name || '';
+    var url = buildExportEmailMailto(groupName, addr, filename);
+    var copyText = buildExportEmailCopyText(groupName, addr, filename);
+    var banner = document.getElementById('group-export-banner');
+    if (banner) {
+      banner.classList.remove(
+        'group-contact-banner--soft',
+        'group-contact-banner--hard',
+        'group-contact-banner--info'
+      );
+      banner.classList.add('hidden');
+      banner.innerHTML = '';
+    }
+    function showBanner(modifier, html) {
+      if (!banner) return;
+      banner.classList.remove('hidden');
+      banner.classList.add(modifier);
+      banner.innerHTML = html;
+      var copyLink = banner.querySelector('.group-export-banner-copy');
+      if (copyLink) {
+        copyLink.addEventListener('click', function (e) {
+          e.preventDefault();
+          copyToClipboard(copyText).then(
+            function () { showToast('Email contents copied — paste into a new message.'); },
+            function () { showToast('Copy failed; select and copy manually.'); }
+          );
+        });
+      }
+    }
+    if (url.length >= EXPORT_EMAIL_HARD_AT_LEN) {
+      showBanner(
+        'group-contact-banner--hard',
+        'Email URL too long for most mail clients. ' +
+          '<a href="#" class="group-export-banner-copy">Copy email contents</a> and paste into a new message.'
+      );
+      return;
+    }
+    if (url.length >= EXPORT_EMAIL_WARN_AT_LEN) {
+      showBanner(
+        'group-contact-banner--soft',
+        'Email URL is long — some mail clients may truncate. ' +
+          '<a href="#" class="group-export-banner-copy">Copy email contents</a> if your client misbehaves.'
+      );
+    }
+    window.location.href = url;
+  }
+
   function runGroupExport(group, button) {
     var name = group.name || 'group';
     var slug = slugifyForFilename(name);
-    var wantPdf = !!document.getElementById('export-pdf') &&
-      document.getElementById('export-pdf').checked;
-    var wantHtml = !!document.getElementById('export-html') &&
-      document.getElementById('export-html').checked;
-    var wantSelf = !!document.getElementById('export-self-email') &&
-      document.getElementById('export-self-email').checked;
-    if (!wantPdf && !wantHtml && !wantSelf) {
-      showToast('Pick at least one export option.');
+    var formatPdf = !!document.getElementById('export-format-pdf') &&
+      document.getElementById('export-format-pdf').checked;
+    var formatHtml = !!document.getElementById('export-format-html') &&
+      document.getElementById('export-format-html').checked;
+    if (!formatPdf && !formatHtml) {
+      showToast('Pick PDF or HTML.');
       return;
     }
+    var ext = formatPdf ? 'pdf' : 'html';
+    var filename = slug + '.' + ext;
+    var emailWanted = !!document.getElementById('export-self-email') &&
+      document.getElementById('export-self-email').checked;
     if (button) {
       button.disabled = true;
       button.textContent = 'Exporting…';
     }
-    var jobs = [];
-    var produced = [];
-    if (wantPdf) {
-      jobs.push(
-        exportGroupAsPdf(group)
-          .then(function (blob) {
-            produced.push(slug + '.pdf');
-            return downloadBlob(blob, slug + '.pdf');
-          })
-          .catch(function (err) {
-            showToast('PDF export failed: ' + (err && err.message || err));
-          })
-      );
+    var resultEl = document.getElementById('group-export-result');
+    var resultText = document.getElementById('group-export-result-text');
+    var viewLink = document.getElementById('group-export-view');
+    var banner = document.getElementById('group-export-banner');
+    if (resultEl) resultEl.classList.add('hidden');
+    if (banner) {
+      banner.classList.add('hidden');
+      banner.classList.remove('group-contact-banner--soft', 'group-contact-banner--hard', 'group-contact-banner--info');
+      banner.innerHTML = '';
     }
-    if (wantHtml) {
-      jobs.push(
-        exportGroupAsHtmlZip(group)
-          .then(function (blob) {
-            produced.push(slug + '.zip');
-            return downloadBlob(blob, slug + '.zip');
-          })
-          .catch(function (err) {
-            showToast('HTML export failed: ' + (err && err.message || err));
-          })
-      );
-    }
-    Promise.all(jobs).then(function () {
-      if (wantSelf) {
-        var self = getSelfEmail();
-        if (!self) {
-          showToast('Set your email in Settings to use “email it to me”.');
-        } else {
-          // Build a mailto: with body listing the files we just produced.
-          var lines = produced.length
-            ? produced.map(function (f) { return '• ' + f; }).join('\r\n')
-            : '(no files were produced)';
-          var body = encodeURIComponent(
-            'Files saved to your Downloads folder:\r\n' + lines
-          );
-          var subject = encodeURIComponent(name);
-          window.location.href = 'mailto:?to=' + encodeURIComponent(self) +
-            '&subject=' + subject + '&body=' + body;
+    var producer = formatPdf ? exportGroupAsPdf(group) : exportGroupAsHtml(group);
+    producer
+      .then(function (blob) {
+        return downloadBlob(blob, filename).then(function () { return blob; });
+      })
+      .then(function (blob) {
+        if (lastExportObjectUrl) {
+          try { URL.revokeObjectURL(lastExportObjectUrl); } catch (e) {}
         }
-      }
-      if (button) {
-        button.disabled = false;
-        button.textContent = 'Export';
-      }
-      if (produced.length) {
-        showToast('Exported: ' + produced.join(', '));
-      }
-    });
+        lastExportObjectUrl = URL.createObjectURL(blob);
+        lastExportFilename = filename;
+        lastExportGroup = group;
+        if (viewLink) viewLink.setAttribute('href', lastExportObjectUrl);
+        if (resultText) {
+          resultText.textContent = 'Created ' + filename + '.';
+        }
+        // Re-query the live email button — the initial-render reference
+        // would be the same node anyway, but re-query keeps this resilient
+        // against future mutations of the post-export row.
+        var liveEmailBtn = document.getElementById('group-export-email-btn');
+        if (liveEmailBtn) {
+          liveEmailBtn.classList.toggle('hidden', !emailWanted);
+        }
+        if (resultEl) resultEl.classList.remove('hidden');
+        showToast('Exported: ' + filename);
+      })
+      .catch(function (err) {
+        showToast(
+          (formatPdf ? 'PDF' : 'HTML') + ' export failed: ' + (err && err.message || err)
+        );
+      })
+      .then(function () {
+        if (button) {
+          button.disabled = false;
+          button.textContent = 'Export';
+        }
+      });
   }
 
   function startInlineNoteEdit(group) {
@@ -4461,6 +5025,7 @@
   initSwReloadButton();
   initClearCacheButton();
   initDiagnosticsPanel();
+  initBugReportButtons();
 
   function bootDirectoryAsApp() {
     bootDebugLines.length = 0;

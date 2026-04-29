@@ -145,6 +145,182 @@ body {
   background: #fafafa;
 }
 
+.bug-report-button {
+  position: fixed;
+  left: 0.75rem;
+  bottom: 0.75rem;
+  z-index: 9998;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #5a3a00;
+  background: #fde7a8;
+  border: 1px solid #e0b94a;
+  border-radius: 6px;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+}
+
+.bug-report-button:hover {
+  background: #f9d77a;
+}
+
+.bug-report-button:focus {
+  outline: 2px solid #e0b94a;
+  outline-offset: 2px;
+}
+
+.bug-report-button-icon {
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.bug-report-link {
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  color: #4a2c6a;
+  background: none;
+  border: 0;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.bug-report-link:hover {
+  color: #2d1f3d;
+}
+
+.bug-report-inline-button {
+  margin-top: 0.25rem;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #5a3a00;
+  background: #fde7a8;
+  border: 1px solid #e0b94a;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.bug-report-inline-button:hover {
+  background: #f9d77a;
+}
+
+.bug-report-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(20, 16, 30, 0.55);
+}
+
+.bug-report-dialog.hidden {
+  display: none;
+}
+
+.bug-report-dialog-inner {
+  width: min(640px, 100%);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem 1.1rem;
+  background: #fff;
+  border: 1px solid #c9c2d4;
+  border-radius: 8px;
+  box-shadow: 0 6px 30px rgba(0, 0, 0, 0.25);
+}
+
+.bug-report-title {
+  margin: 0 0 0.35rem;
+  font-size: 1.1rem;
+  color: #2d1f3d;
+}
+
+.bug-report-lead {
+  margin: 0 0 0.6rem;
+  font-size: 0.88rem;
+  color: #444;
+}
+
+.bug-report-textarea {
+  flex: 1;
+  min-height: 12rem;
+  padding: 0.6rem 0.7rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  font-family: ui-monospace, "Cascadia Code", Menlo, Monaco, Consolas, monospace;
+  color: #1e1e1e;
+  background: #fafafa;
+  border: 1px solid #c9c2d4;
+  border-radius: 4px;
+  resize: vertical;
+}
+
+.bug-report-textarea:focus {
+  outline: 2px solid #4a2c6a;
+  outline-offset: 1px;
+}
+
+.bug-report-status {
+  margin: 0.4rem 0 0.5rem;
+  min-height: 1.1rem;
+  font-size: 0.8rem;
+  color: #2d1f3d;
+}
+
+.bug-report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.bug-report-send,
+.bug-report-copy,
+.bug-report-close {
+  padding: 0.5rem 0.85rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.bug-report-send {
+  color: #fff;
+  background: #4a2c6a;
+  border: 1px solid #361f4d;
+}
+
+.bug-report-send:hover {
+  background: #3a1f54;
+}
+
+.bug-report-copy {
+  color: #4a2c6a;
+  background: #fff;
+  border: 1px solid #4a2c6a;
+}
+
+.bug-report-copy:hover {
+  background: #f0ecf6;
+}
+
+.bug-report-close {
+  color: #555;
+  background: #fff;
+  border: 1px solid #bbb;
+}
+
+.bug-report-close:hover {
+  background: #f4f4f4;
+}
+
 .connection-banner {
   margin-top: 0.5rem;
   padding: 0.4rem 0.6rem;
@@ -1653,10 +1829,12 @@ a.group-action-btn--primary {
   display: flex;
   flex-wrap: wrap;
   gap: 0.6rem 1.2rem;
-  padding: 0.55rem 0.7rem;
+  padding: 0.55rem 0.7rem 0.4rem;
 }
 
-.group-export-options label {
+.group-export-options label,
+.group-export-format,
+.group-export-email-label {
   display: flex;
   gap: 0.4rem;
   align-items: flex-start;
@@ -1669,6 +1847,34 @@ a.group-action-btn--primary {
   color: #7a6f91;
 }
 
+.group-export-email-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.9rem;
+  padding: 0 0.7rem 0.55rem;
+}
+
+.group-export-email-input {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.25rem 0.45rem;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  background: #fff;
+  min-width: 14rem;
+}
+
+.group-export-email-input--empty {
+  border-color: #c98a2c;
+  background: #fff8eb;
+}
+
+.group-export-email-cue {
+  font-size: 0.72rem;
+  color: #7a6f91;
+}
+
 .group-export-actions {
   display: flex;
   gap: 6px;
@@ -1677,7 +1883,8 @@ a.group-action-btn--primary {
 }
 
 .group-export-cancel,
-.group-export-go {
+.group-export-go,
+.group-export-email-btn {
   font: inherit;
   font-size: 0.82rem;
   padding: 0.25rem 0.65rem;
@@ -1692,11 +1899,45 @@ a.group-action-btn--primary {
   cursor: not-allowed;
 }
 
+.group-export-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.7rem;
+  border-top: 1px solid #ece6f3;
+  background: #f7f4fb;
+  font-size: 0.85rem;
+}
+
+.group-export-result-text {
+  margin-right: 0.3rem;
+}
+
+.group-export-view {
+  font-size: 0.82rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 3px;
+  border: 1px solid #4a2c6a;
+  background: #4a2c6a;
+  color: #fff;
+  text-decoration: none;
+}
+
+.group-export-view:hover,
+.group-export-view:focus {
+  background: #3a2050;
+}
+
 .group-export-note {
   margin: 0;
   padding: 0 0.7rem 0.6rem;
   font-size: 0.72rem;
   color: #7a6f91;
+}
+
+#group-export-banner {
+  margin: 0 0.7rem 0.55rem;
 }
 
 /* Cream note callout — replaces the simpler PR 2 paragraph. */
@@ -1882,14 +2123,26 @@ a.group-action-btn--primary {
 
 .group-directory-cell {
   display: block;
+  width: 100%;
   text-decoration: none;
   color: inherit;
   text-align: center;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
 }
 
-.group-directory-cell:hover .group-directory-name {
+.group-directory-cell:hover .group-directory-name,
+.group-directory-cell:focus-visible .group-directory-name {
   text-decoration: underline;
   color: #4a2c6a;
+}
+
+.group-directory-cell:focus-visible .group-directory-portrait {
+  outline: 2px solid #4a2c6a;
+  outline-offset: 2px;
 }
 
 .group-directory-portrait {
@@ -1913,6 +2166,123 @@ a.group-action-btn--primary {
   margin-top: 4px;
   line-height: 1.2;
   color: #222;
+}
+
+/* Visual-directory contact-card modal (opened by clicking a portrait/name) */
+
+.fellow-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 16, 30, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 9000;
+}
+
+.fellow-modal-card {
+  position: relative;
+  background: #fff;
+  border-radius: 6px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  width: 100%;
+  max-width: 360px;
+  padding: 1.2rem 1.4rem 1rem;
+  text-align: center;
+}
+
+.fellow-modal-close {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.6rem;
+  background: transparent;
+  border: 0;
+  font-size: 1.4rem;
+  line-height: 1;
+  color: #666;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+}
+
+.fellow-modal-close:hover,
+.fellow-modal-close:focus-visible {
+  color: #222;
+}
+
+.fellow-modal-portrait {
+  width: 96px;
+  height: 96px;
+  margin: 0 auto 0.6rem;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 1px solid #ccc;
+  background: #eee;
+}
+
+.fellow-modal-portrait img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.fellow-modal-name {
+  margin: 0 0 0.8rem;
+  font-size: 1.1rem;
+}
+
+.fellow-modal-rows {
+  list-style: none;
+  margin: 0 0 0.8rem;
+  padding: 0;
+  text-align: left;
+}
+
+.fellow-modal-row {
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.35rem 0;
+  border-top: 1px solid #eee;
+  font-size: 0.9rem;
+  align-items: baseline;
+}
+
+.fellow-modal-row:first-child {
+  border-top: 0;
+}
+
+.fellow-modal-row--empty {
+  display: block;
+  color: #888;
+  font-style: italic;
+  text-align: center;
+}
+
+.fellow-modal-label {
+  flex: 0 0 4.5em;
+  color: #666;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.fellow-modal-value {
+  flex: 1 1 auto;
+  word-break: break-word;
+}
+
+.fellow-modal-value[href] {
+  color: #0066cc;
+  text-decoration: underline;
+}
+
+.fellow-modal-profile-link {
+  display: inline-block;
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
+  color: #4a2c6a;
+  text-decoration: underline;
 }
 
 /* Settings page */

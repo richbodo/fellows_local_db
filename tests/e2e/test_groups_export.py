@@ -1,22 +1,25 @@
-"""E2E for PR 5 visual directory + HTML/ZIP export + PDF export.
+"""E2E for the visual directory + group export panel.
 
 Pins:
 - #/groups/<id>/directory renders a portrait grid + Contact bar.
-- "view directory" row action on /#/groups goes there.
-- Clicking a portrait navigates to #/fellow/<slug>.
-- The Export panel's Export button:
-  - generates a PDF (downloads, magic bytes %PDF-);
-  - generates an HTML zip (downloads, ZIP magic PK\x03\x04, contains
-    index.html + at least one fellow-*.html);
-  - opens a mailto:?to=<self> when "email it to me" is checked AND
-    the user has a self_email saved (otherwise toasts a hint).
+- "visual directory" row action on /#/groups goes there.
+- Clicking a portrait opens a contact-info modal (name, mailto:, tel:,
+  links, "View full profile" link).
+- The Export panel:
+  - PDF/HTML are mutually-exclusive radios; selecting HTML produces a
+    single self-contained .html file (HTML5 doctype, contains the
+    member's name, contact-bar mailto:);
+  - selecting PDF produces a .pdf file (magic bytes %PDF-);
+  - the email input is always present, prefilled from settings when set
+    and showing a cue when empty;
+  - Export only creates the file — it does not navigate to mailto: by
+    itself; a post-export result row exposes a View link (always) and
+    an Email button (when "email it to me" was checked).
 """
 from __future__ import annotations
 
-import io
 import json
 import re
-import zipfile
 from http.client import HTTPConnection
 from urllib.parse import urlparse
 
@@ -153,7 +156,7 @@ class TestVisualDirectoryPage:
         page.wait_for_url(lambda u: f"#/groups/{g['id']}/directory" in u, timeout=3000)
         expect(page.locator(".group-directory-grid")).to_be_visible()
 
-    def test_portrait_click_navigates_to_fellow_detail(
+    def test_portrait_click_opens_contact_modal(
         self, standalone_page, base_url_fixture
     ):
         page = standalone_page
@@ -166,11 +169,41 @@ class TestVisualDirectoryPage:
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}/directory", wait_until="domcontentloaded")
         _wait_for_directory(page)
         page.locator(".group-directory-cell").first.click()
+        # Modal appears with the fellow's name and a mailto: link to
+        # their contact_email (members are filtered to with_email=True).
+        modal = page.locator(".fellow-modal-card")
+        expect(modal).to_be_visible()
+        expect(modal.locator(".fellow-modal-name")).to_have_text(first[1])
+        expect(modal.locator(f"a[href='mailto:{first[2]}']")).to_be_visible()
+        # The "View full profile" link is what navigates — clicking the
+        # cell itself no longer does.
+        profile_link = modal.locator(".fellow-modal-profile-link")
+        expect(profile_link).to_have_attribute("href", f"#/fellow/{first[3]}")
+        profile_link.click()
         page.wait_for_url(lambda u: f"#/fellow/{first[3]}" in u, timeout=3000)
+        # Modal is dismissed after navigation.
+        expect(page.locator(".fellow-modal-overlay")).to_have_count(0)
+
+    def test_portrait_modal_close_button_dismisses(
+        self, standalone_page, base_url_fixture
+    ):
+        page = standalone_page
+        fellows = _real_fellows(base_url_fixture)
+        first = fellows[0]
+        g = _create_group(
+            base_url_fixture, name="Close test",
+            fellow_record_ids=[first[0]],
+        )
+        page.goto(f"{base_url_fixture}/#/groups/{g['id']}/directory", wait_until="domcontentloaded")
+        _wait_for_directory(page)
+        page.locator(".group-directory-cell").first.click()
+        expect(page.locator(".fellow-modal-card")).to_be_visible()
+        page.locator(".fellow-modal-close").click()
+        expect(page.locator(".fellow-modal-overlay")).to_have_count(0)
 
 
 class TestExportDownloads:
-    def test_html_zip_export_downloads_with_expected_structure(
+    def test_html_export_downloads_single_self_contained_file(
         self, standalone_page, base_url_fixture
     ):
         page = standalone_page
@@ -182,32 +215,39 @@ class TestExportDownloads:
         )
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
         _wait_for_directory(page)
-        # Open the export panel; uncheck PDF + email-it-to-me; check HTML.
         page.locator("#group-action-export").click()
-        page.locator("#export-pdf").uncheck()
+        # Pick HTML; uncheck the auto-email checkbox so Export is the only
+        # navigation we expect.
+        page.locator("#export-format-html").check()
         page.locator("#export-self-email").uncheck()
-        page.locator("#export-html").check()
-        with page.expect_download(timeout=15000) as dl_info:
+        with page.expect_download(timeout=20000) as dl_info:
             page.locator("#group-export-go").click()
         download = dl_info.value
-        assert download.suggested_filename.endswith(".zip")
+        assert download.suggested_filename.endswith(".html")
         path = download.path()
         with open(path, "rb") as f:
             data = f.read()
-        # ZIP magic bytes.
-        assert data[:4] == b"PK\x03\x04", "expected zip magic PK\\x03\\x04"
-        # Inspect the archive: index.html + at least one fellow-*.html + styles.css.
-        zf = zipfile.ZipFile(io.BytesIO(data))
-        names = zf.namelist()
-        assert "index.html" in names
-        assert "styles.css" in names
-        fellow_pages = [n for n in names if n.startswith("fellow-") and n.endswith(".html")]
-        assert len(fellow_pages) >= 1, f"expected fellow-*.html files; got {names}"
-        # index.html should reference one of the fellow pages.
-        index_html = zf.read("index.html").decode("utf-8")
-        assert any(p in index_html for p in fellow_pages), (
-            "index.html should link to a fellow page"
+        # Single-file HTML, with the member's name and an inlined <style>.
+        assert data[:len(b"<!doctype html>")].lower() == b"<!doctype html>"
+        text = data.decode("utf-8")
+        assert "<style>" in text and "</style>" in text, "expected inlined CSS"
+        assert chosen[0][1] in text, f"expected fellow name in HTML: {chosen[0][1]!r}"
+        # Contact-the-whole-group bar references the first fellow's email.
+        assert f"mailto:?cc=" in text and chosen[0][2] in text
+        # Post-export result row is visible with the View link.
+        result = page.locator("#group-export-result")
+        expect(result).to_be_visible()
+        view = page.locator("#group-export-view")
+        expect(view).to_be_visible()
+        # The .then() that wires up the blob: href runs ~100ms after the
+        # download starts (downloadBlob's setTimeout), so wait for it.
+        page.wait_for_function(
+            "() => { const v = document.querySelector('#group-export-view');"
+            " return v && (v.getAttribute('href') || '').startsWith('blob:'); }",
+            timeout=5000,
         )
+        href = view.get_attribute("href") or ""
+        assert href.startswith("blob:"), f"expected blob: URL, got {href!r}"
 
     def test_pdf_export_downloads_with_pdf_magic_bytes(
         self, standalone_page, base_url_fixture
@@ -221,9 +261,8 @@ class TestExportDownloads:
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
         _wait_for_directory(page)
         page.locator("#group-action-export").click()
-        page.locator("#export-html").uncheck()
+        page.locator("#export-format-pdf").check()
         page.locator("#export-self-email").uncheck()
-        page.locator("#export-pdf").check()
         with page.expect_download(timeout=20000) as dl_info:
             page.locator("#group-export-go").click()
         download = dl_info.value
@@ -233,23 +272,107 @@ class TestExportDownloads:
             head = f.read(8)
         assert head[:5] == b"%PDF-", f"expected %PDF- magic, got {head!r}"
 
-    def test_export_email_it_to_me_with_no_self_email_toasts_hint(
+    def test_pdf_and_html_radios_are_mutually_exclusive(
         self, standalone_page, base_url_fixture
     ):
         page = standalone_page
         fellows = _real_fellows(base_url_fixture)
         g = _create_group(
-            base_url_fixture, name="Hint test",
+            base_url_fixture, name="Radio test",
             fellow_record_ids=[f[0] for f in fellows[:1]],
         )
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
         _wait_for_directory(page)
         page.locator("#group-action-export").click()
-        # Uncheck both files; only "email it to me" remains.
-        page.locator("#export-pdf").uncheck()
-        page.locator("#export-html").uncheck()
-        # No self_email is saved (the autouse fixture wipes settings).
-        page.locator("#group-export-go").click()
-        toast = page.locator("#app-toast")
-        expect(toast).to_be_visible(timeout=3000)
-        expect(toast).to_contain_text("Set your email in Settings")
+        # Default: PDF selected, HTML not.
+        expect(page.locator("#export-format-pdf")).to_be_checked()
+        expect(page.locator("#export-format-html")).not_to_be_checked()
+        # Pick HTML; PDF auto-deselects.
+        page.locator("#export-format-html").check()
+        expect(page.locator("#export-format-html")).to_be_checked()
+        expect(page.locator("#export-format-pdf")).not_to_be_checked()
+
+    def test_email_input_prefilled_from_settings_when_set(
+        self, standalone_page, base_url_fixture
+    ):
+        page = standalone_page
+        # Seed a self_email in settings before opening the page.
+        c = _conn(base_url_fixture)
+        payload = json.dumps({"value": "user@example.com"}).encode("utf-8")
+        c.request(
+            "PUT", "/api/settings/self_email", body=payload,
+            headers={"Content-Type": "application/json", "Content-Length": str(len(payload))},
+        )
+        c.getresponse().read()
+        c.close()
+        fellows = _real_fellows(base_url_fixture)
+        g = _create_group(
+            base_url_fixture, name="Prefill test",
+            fellow_record_ids=[f[0] for f in fellows[:1]],
+        )
+        page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
+        _wait_for_directory(page)
+        page.locator("#group-action-export").click()
+        addr = page.locator("#export-self-email-addr")
+        expect(addr).to_have_value("user@example.com")
+        cue = page.locator("#export-self-email-cue")
+        expect(cue).to_contain_text("override")
+
+    def test_email_input_empty_with_cue_when_no_settings(
+        self, standalone_page, base_url_fixture
+    ):
+        page = standalone_page
+        fellows = _real_fellows(base_url_fixture)
+        g = _create_group(
+            base_url_fixture, name="No-prefill test",
+            fellow_record_ids=[f[0] for f in fellows[:1]],
+        )
+        page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
+        _wait_for_directory(page)
+        page.locator("#group-action-export").click()
+        addr = page.locator("#export-self-email-addr")
+        expect(addr).to_have_value("")
+        cue = page.locator("#export-self-email-cue")
+        expect(cue).to_contain_text("enter your email")
+
+    def test_export_unchecked_email_hides_post_export_email_button(
+        self, standalone_page, base_url_fixture
+    ):
+        page = standalone_page
+        fellows = _real_fellows(base_url_fixture)
+        g = _create_group(
+            base_url_fixture, name="Email button gating",
+            fellow_record_ids=[f[0] for f in fellows[:1]],
+        )
+        page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
+        _wait_for_directory(page)
+        page.locator("#group-action-export").click()
+        page.locator("#export-self-email").uncheck()
+        page.locator("#export-format-pdf").check()
+        with page.expect_download(timeout=20000):
+            page.locator("#group-export-go").click()
+        # Result row + View are always present; the Email button is hidden
+        # because the checkbox was off — Export does not navigate to mailto:
+        # by itself, so we're still on the same page and able to query the DOM.
+        expect(page.locator("#group-export-result")).to_be_visible()
+        expect(page.locator("#group-export-view")).to_be_visible()
+        expect(page.locator("#group-export-email-btn")).to_be_hidden()
+
+    def test_export_checked_email_shows_post_export_email_button(
+        self, standalone_page, base_url_fixture
+    ):
+        page = standalone_page
+        fellows = _real_fellows(base_url_fixture)
+        g = _create_group(
+            base_url_fixture, name="Email button visible",
+            fellow_record_ids=[f[0] for f in fellows[:1]],
+        )
+        page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
+        _wait_for_directory(page)
+        page.locator("#group-action-export").click()
+        # Default: PDF radio + email checkbox both on. Export creates the
+        # file but does not navigate to mailto: — that's a separate click.
+        with page.expect_download(timeout=20000):
+            page.locator("#group-export-go").click()
+        expect(page.locator("#group-export-result")).to_be_visible()
+        expect(page.locator("#group-export-email-btn")).to_be_visible()
