@@ -2739,8 +2739,23 @@
       }).join(', ');
       howRows.push(fieldRow('Key Links', linkHtml));
     }
-    if (fellow.contact_email) howRows.push(fieldRow('Contact Email', '<a href="mailto:' + escapeHtml(fellow.contact_email) + '">' + escapeHtml(fellow.contact_email) + '</a>'));
-    if (fellow.mobile_number) howRows.push(fieldRow('Mobile Number', escapeHtml(String(fellow.mobile_number))));
+    if (fellow.contact_email) {
+      var emailVal = String(fellow.contact_email);
+      howRows.push(fieldRow(
+        'Contact Email',
+        '<a href="mailto:' + escapeHtml(emailVal) + '">' + escapeHtml(emailVal) + '</a>' +
+          copyButton(emailVal, 'email')
+      ));
+    }
+    if (fellow.mobile_number) {
+      var phoneText = String(fellow.mobile_number).trim();
+      var phoneTel = phoneText.replace(/[^+\d]/g, '');
+      howRows.push(fieldRow(
+        'Mobile Number',
+        '<a href="tel:' + escapeHtml(phoneTel) + '">' + escapeHtml(phoneText) + '</a>' +
+          copyButton(phoneText, 'phone number')
+      ));
+    }
     if (fellow.cohort) howRows.push(fieldRow('Cohort', escapeHtml(fellow.cohort)));
     leftRest += section('How to Connect', tableFromRows(howRows));
 
@@ -3798,6 +3813,42 @@
     });
   }
 
+  // Inline 📋 button rendered next to mailto:/tel: links. The label is the
+  // noun ("email", "phone number") used for both the hover/aria title and
+  // the toast on success. A single delegated handler (wireCopyButtons,
+  // installed once at boot) reads data-copy and copies it.
+  function copyButton(value, label) {
+    if (value == null || String(value) === '') return '';
+    return ' <button type="button" class="copy-btn" data-copy="' +
+      escapeHtml(String(value)) + '" data-copy-label="' + escapeHtml(label) +
+      '" aria-label="Copy ' + escapeHtml(label) + '" title="Copy ' +
+      escapeHtml(label) + '">📋</button>';
+  }
+
+  // Single document-level click delegate for every .copy-btn the app
+  // renders (per-fellow rows, modal rows, group action bar). Idempotent —
+  // wireCopyButtons() is called once during init.
+  var copyButtonsWired = false;
+  function wireCopyButtons() {
+    if (copyButtonsWired) return;
+    copyButtonsWired = true;
+    document.addEventListener('click', function (ev) {
+      var btn = ev.target.closest && ev.target.closest('.copy-btn');
+      if (!btn) return;
+      ev.preventDefault();
+      var value = btn.getAttribute('data-copy') || '';
+      var label = btn.getAttribute('data-copy-label') || 'value';
+      if (!value) return;
+      copyToClipboard(value).then(
+        function () {
+          var ucfirst = label.charAt(0).toUpperCase() + label.slice(1);
+          showToast(ucfirst + ' copied');
+        },
+        function () { showToast('Copy failed'); }
+      );
+    });
+  }
+
   function renderGroupDetailPage(groupId) {
     if (!detailEl) return;
     detailEl.innerHTML = '<p class="placeholder">Loading group…</p>';
@@ -3852,6 +3903,17 @@
       var contactAttrs = '';
       if (initialHref) contactAttrs += ' href="' + escapeHtml(initialHref) + '"';
       if (!hasEmails) contactAttrs += ' aria-disabled="true" title="No email addresses available for this group"';
+      // Always-on "Copy email addresses" affordance. Sits on Row 1 next
+      // to the CC/BCC pill so users whose mailto: handler is broken or
+      // missing have an unconditional path to the addresses (no need to
+      // hit the recipient threshold to discover it).
+      var copyAttrs = '';
+      if (!hasEmails) {
+        copyAttrs += ' disabled aria-disabled="true" title="No email addresses available for this group"';
+      } else {
+        copyAttrs += ' title="Copy ' + escapeHtml(String(totalEmails)) +
+          ' email address' + (totalEmails === 1 ? '' : 'es') + ' to the clipboard"';
+      }
       html +=
         '<div class="group-action-bar">' +
           '<div class="group-action-row">' +
@@ -3862,6 +3924,9 @@
               '<button type="button" class="group-mode-pill group-mode-pill--active" data-mode="cc" aria-pressed="true">CC</button>' +
               '<button type="button" class="group-mode-pill" data-mode="bcc" aria-pressed="false">BCC</button>' +
             '</div>' +
+            '<button type="button" class="group-action-btn" id="group-action-copy-emails"' + copyAttrs + '>' +
+              '📋 Copy email addresses' +
+            '</button>' +
           '</div>' +
           '<div class="group-action-row">' +
             '<button type="button" class="group-action-btn" id="group-action-edit">✎ Edit members</button>' +
@@ -3870,18 +3935,19 @@
         '</div>';
 
       // Threshold banner. Soft warning between WARN and HARD, hard warning ≥ HARD.
+      // The "Copy email addresses" button on the action bar is always present;
+      // the banners now point users to it rather than carrying their own copy link.
       if (totalEmails >= GROUPS_CONTACT_HARD_AT) {
         html +=
           '<div class="group-contact-banner group-contact-banner--hard" role="status">' +
             escapeHtml(String(totalEmails)) + ' recipients — too many for one mailto: URL on most clients. ' +
-            '<a href="#" id="group-action-copy-emails">Copy ' + escapeHtml(String(totalEmails)) + ' addresses</a>' +
-            ' and paste them into your mail client manually.' +
+            'Use <b>Copy email addresses</b> above and paste into a new message.' +
           '</div>';
       } else if (totalEmails >= GROUPS_CONTACT_WARN_AT) {
         html +=
           '<div class="group-contact-banner group-contact-banner--soft" role="status">' +
             escapeHtml(String(totalEmails)) + ' recipients — long mailto: URLs may be truncated by some clients. ' +
-            '<a href="#" id="group-action-copy-emails">Copy addresses</a> if your client misbehaves.' +
+            'Use <b>Copy email addresses</b> above if your client misbehaves.' +
           '</div>';
       } else if (emailInfo.missing > 0 && totalEmails > 0) {
         html +=
@@ -4173,9 +4239,12 @@
       rowsHtml +=
         '<li class="fellow-modal-row">' +
           '<span class="fellow-modal-label">email</span>' +
-          '<a class="fellow-modal-value" href="mailto:' + escapeHtml(email) + '">' +
-            escapeHtml(email) +
-          '</a>' +
+          '<span class="fellow-modal-value">' +
+            '<a href="mailto:' + escapeHtml(email) + '">' +
+              escapeHtml(email) +
+            '</a>' +
+            copyButton(email, 'email') +
+          '</span>' +
         '</li>';
     }
     if (m.mobile_number) {
@@ -4184,9 +4253,12 @@
       rowsHtml +=
         '<li class="fellow-modal-row">' +
           '<span class="fellow-modal-label">phone</span>' +
-          '<a class="fellow-modal-value" href="tel:' + escapeHtml(phoneTel) + '">' +
-            escapeHtml(phoneText) +
-          '</a>' +
+          '<span class="fellow-modal-value">' +
+            '<a href="tel:' + escapeHtml(phoneTel) + '">' +
+              escapeHtml(phoneText) +
+            '</a>' +
+            copyButton(phoneText, 'phone number') +
+          '</span>' +
         '</li>';
     }
     if (Array.isArray(m.key_links_urls) && m.key_links_urls.length) {
@@ -5461,6 +5533,7 @@
   initClearCacheButton();
   initDiagnosticsPanel();
   initBugReportButtons();
+  wireCopyButtons();
 
   function bootDirectoryAsApp() {
     bootDebugLines.length = 0;
