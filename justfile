@@ -210,10 +210,10 @@ test-e2e filter="":
         ./scripts/ensure_port_8765_free.sh tests/e2e/ -v -k "{{filter}}"
     fi
 
-# DB + API only (skip Playwright; ~10x faster).
+# DB + API + prod-stats only (skip Playwright; ~10x faster).
 [group('test')]
 test-fast:
-    ./scripts/ensure_port_8765_free.sh tests/test_database.py tests/test_api.py -v
+    ./scripts/ensure_port_8765_free.sh tests/test_database.py tests/test_api.py tests/test_prod_stats.py -v
 
 
 # ---- build / deploy ------------------------------------------------------
