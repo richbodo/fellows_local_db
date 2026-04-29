@@ -7,16 +7,26 @@ class TestDetailView:
     """Detail view: hash shows fellow detail; image or placeholder."""
 
     def test_click_aaron_bird_shows_detail(self, standalone_page, base_url_fixture):
+        """Click "Aaron Bird" in the directory list — URL updates to that fellow's
+        hash and the detail pane renders the heading, at least one field, and
+        the profile-image wrap."""
         standalone_page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
         standalone_page.locator("#loading").wait_for(state="hidden", timeout=10000)
-        standalone_page.get_by_role("link", name="Aaron Bird").first.click()
+        standalone_page.locator("#directory").wait_for(state="visible", timeout=5000)
+        aaron_link = standalone_page.get_by_role("link", name="Aaron Bird").first
+        expect(aaron_link).to_be_visible()
+        aaron_link.click()
         standalone_page.wait_for_url("**/#/fellow/aaron_bird", timeout=5000)
         detail = standalone_page.locator("#detail")
         detail.wait_for(state="visible", timeout=5000)
-        assert "Aaron Bird" in detail.inner_text()
-        has_image = standalone_page.locator("#detail .profile-image").count() >= 1
-        has_placeholder = "No image" in detail.inner_text() or "Select a fellow" in detail.inner_text()
-        assert has_image or has_placeholder or "Aaron Bird" in detail.inner_text()
+        detail.get_by_role("heading", name="Aaron Bird").wait_for(
+            state="visible", timeout=5000
+        )
+        text = detail.inner_text()
+        assert any(
+            label in text for label in ["Tagline", "Cohort", "Type", "Email", "Based in", "Links"]
+        ), "Detail should show at least one field (Tagline, Cohort, Type, etc.)"
+        assert standalone_page.locator("#detail .profile-image-wrap").count() == 1
 
     def test_direct_hash_shows_fellow_detail(self, standalone_page, base_url_fixture):
         """Navigate to #/fellow/aaron_bird — name, at least one other field, image box present."""
