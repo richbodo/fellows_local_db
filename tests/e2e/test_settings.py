@@ -65,7 +65,10 @@ def _wipe_settings(base_url):
 
 def _wait_for_directory(page):
     page.locator("#loading").wait_for(state="hidden", timeout=10000)
-    page.locator("#directory").wait_for(state="visible", timeout=5000)
+    # #app-wrap rather than #directory: the directory rail is now
+    # display:none on group routes, so it's no longer a route-independent
+    # readiness signal.
+    page.locator("#app-wrap").wait_for(state="visible", timeout=5000)
 
 
 @pytest.fixture(autouse=True)

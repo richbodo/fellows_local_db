@@ -86,9 +86,11 @@ class TestGroupsIndex:
         _aaron_row(page).locator(".dir-mark").click()
         page.locator("#group-rail-title").fill("Smoke group")
         page.locator("#group-rail-create").click()
-        # Hash changes to #/groups/<n>; detail page renders.
+        # Hash changes to #/groups/<n>; detail page renders. Target the
+        # inner title text so the pencil-rename ✎ link beside it doesn't
+        # trip the exact match.
         page.wait_for_url(lambda u: "#/groups/" in u, timeout=5000)
-        title = page.locator(".group-detail-title")
+        title = page.locator("#group-detail-title-text")
         expect(title).to_have_text("Smoke group", timeout=3000)
         # Member count + name resolved via cross-DB JOIN on the dev server.
         expect(page.locator(".group-detail-meta")).to_contain_text("1 fellow")

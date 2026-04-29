@@ -1671,20 +1671,47 @@ h1 {
 }
 
 /* =========================================================================
+ * Groups feature — focus modes for the group routes. Once you've drilled
+ * into a group, the global directory rail and the "add to a group"
+ * composer rail are noise; the route() handler tags <body> so we can
+ * collapse them out of the way and let the central content take the
+ * room. Edit mode is the inverse — both rails matter (left to pick
+ * fellows, right to manage the editing session) and the central pane
+ * has nothing useful to show.
+ * ========================================================================= */
+
+body.route-group-detail #directory,
+body.route-group-detail #group-rail,
+body.route-group-directory #directory,
+body.route-group-directory #group-rail {
+  display: none;
+}
+
+body.route-group-edit #detail {
+  display: none;
+}
+
+/* =========================================================================
  * Groups feature — PR 3: detail action bar, contact + export panel,
  * inline note edit, toast.
  * ========================================================================= */
 
 .group-action-bar {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  flex-direction: column;
   gap: 0.5rem;
   padding: 0.5rem 0.6rem;
   margin: 0.5rem 0;
   background: #faf8fc;
   border: 1px solid #dcd6e8;
   border-radius: 2px;
+}
+
+.group-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .group-action-btn {
@@ -1771,11 +1798,62 @@ a.group-action-btn--primary {
   outline-offset: -2px;
 }
 
-.group-action-helper {
-  font-size: 0.72rem;
+/* Inline rename: ✎ pencil follows the title; clicking it swaps the
+ * <h2> contents for an <input>+save+cancel triplet. Save PATCHes the
+ * group; the breadcrumb above is re-rendered so it doesn't drift. */
+.group-detail-title-edit {
+  font-size: 0.85rem;
   color: #7a6f91;
-  margin-left: auto;
-  align-self: center;
+  text-decoration: none;
+  margin-left: 0.5rem;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.group-detail-title-edit:hover,
+.group-detail-title-edit:focus {
+  color: #4a2c6a;
+}
+
+.group-detail-title-input {
+  font: inherit;
+  font-size: 1.1rem;
+  font-weight: 600;
+  padding: 0.15rem 0.4rem;
+  border: 1px solid #b9add0;
+  border-radius: 2px;
+  min-width: 16ch;
+  max-width: 28rem;
+}
+
+.group-detail-title-actions {
+  display: inline-flex;
+  gap: 0.35rem;
+  margin-left: 0.4rem;
+  vertical-align: middle;
+}
+
+.group-detail-title-save,
+.group-detail-title-cancel {
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 2px;
+  border: 1px solid #ccc;
+  background: #fff;
+  cursor: pointer;
+}
+
+.group-detail-title-save {
+  background: #4a2c6a;
+  color: #fff;
+  border-color: #4a2c6a;
+}
+
+.group-detail-title-save:disabled,
+.group-detail-title-cancel:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .group-contact-banner {
@@ -1901,17 +1979,36 @@ a.group-action-btn--primary {
 
 .group-export-result {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
+  flex-direction: column;
+  gap: 0.4rem;
   padding: 0.5rem 0.7rem;
   border-top: 1px solid #ece6f3;
   background: #f7f4fb;
   font-size: 0.85rem;
 }
 
+/* The .hidden utility wins on specificity ties by source order, but it's
+ * declared earlier in this file than .group-export-result — so the flex
+ * display would otherwise override `display: none`. Pin the override. */
+.group-export-result.hidden {
+  display: none;
+}
+
+.group-export-result-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .group-export-result-text {
   margin-right: 0.3rem;
+}
+
+/* The email-row inside .group-export-result has its own padding default
+ * elsewhere; reset it here so it sits flush within the result block. */
+.group-export-result .group-export-email-row {
+  padding: 0;
 }
 
 .group-export-view {

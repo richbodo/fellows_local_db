@@ -1,7 +1,7 @@
 """E2E for PR 4 edit mode.
 
 Pins:
-- Clicking ✎ Edit group on the detail page enters edit mode: yellow
+- Clicking ✎ Edit members on the detail page enters edit mode: yellow
   banner appears, rail flips to "editing group" / "Done editing",
   members are pre-selected, has-email filter is unchecked, search is
   cleared.
@@ -99,7 +99,10 @@ def _fetch_group(base_url, gid):
 
 def _wait_for_directory(page):
     page.locator("#loading").wait_for(state="hidden", timeout=10000)
-    page.locator("#directory").wait_for(state="visible", timeout=5000)
+    # #app-wrap rather than #directory: the directory rail is now
+    # display:none on the bare group-detail route. Edit mode itself
+    # restores the rail, but readiness needs to fire either way.
+    page.locator("#app-wrap").wait_for(state="visible", timeout=5000)
 
 
 def _aaron_row(page):
@@ -223,8 +226,9 @@ class TestDoneEditing:
         # Rail back to compose mode.
         expect(page.locator("#group-rail-eyebrow")).to_have_text("add to a group")
         expect(page.locator("#group-rail-create")).to_have_text("Create new group")
-        # Detail page renders the group.
-        expect(page.locator(".group-detail-title")).to_have_text("Done flow")
+        # Detail page renders the group. Target the inner title text so
+        # the pencil-rename ✎ link beside it doesn't trip the exact match.
+        expect(page.locator("#group-detail-title-text")).to_have_text("Done flow")
 
 
 class TestCancelEdits:
