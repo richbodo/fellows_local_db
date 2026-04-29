@@ -10,7 +10,9 @@ technical tour, see [`Architecture.md`](Architecture.md).
 A private, installable directory of Edmund Hillary Fellowship fellow
 profiles. Once installed, the app runs locally on your device — the fellow
 data lives in a local database inside your browser's app storage, so you
-can browse the directory even when you're offline.
+can browse the directory even when you're offline. You can also save your
+own **groups** of fellows for quick contact and export, and store a few
+small **settings** (like the email you want exports addressed from).
 
 The app is only distributed to EHF fellows, by emailed magic link. Please
 keep the data confidential and do not share the link or screenshots
@@ -103,6 +105,135 @@ skip the install landing and go straight to the directory.
 - The visible-count text (e.g. **"142 of 515 fellows visible"**) shows how
   many fellows match your current search + filter.
 
+<!-- screenshot: directory view with search active and visible-count text -->
+
+---
+
+## Groups
+
+Groups let you save a set of fellows for repeat workflows: contacting a
+cohort, exporting a sub-directory, or just keeping track of who you've
+already reached out to. Groups live entirely on your device — they're
+per-browser, never synced to a server, and survive **Clear App Cache**.
+
+### Composing a group
+
+The directory page has a right-side **selection rail** that builds up the
+group you're working on.
+
+1. Browse or search the directory.
+2. Click a fellow to open their profile, then use **Add to selection** to
+   put them on the rail. (Or use the toggle on the directory list itself,
+   if visible.)
+3. The rail shows everyone currently selected, plus a running count.
+4. When you're happy with the set, type a name into the rail and click
+   **Save group**. You're taken to the group's detail page.
+
+Drafts in progress are kept in browser storage, so you can close the tab
+and come back to the same selection later. (The draft is cleared when you
+click **Clear App Cache**, since it's by definition unsaved.)
+
+<!-- screenshot: directory page with right-rail composer mid-selection -->
+
+### Browsing your groups
+
+Open `#/groups` (or use the **Groups** link in the navigation). You'll see
+all your saved groups, newest-touched first, with a member count beside
+each. Click a group's name to open its detail page; click **visual
+directory** to jump straight to its portrait grid (see below).
+
+<!-- screenshot: groups index with two or three saved groups -->
+
+### Group detail
+
+The detail page (`#/groups/<id>`) gives you everything you do *with* the
+group:
+
+- **Member list**, with each fellow's name. Clicking a name opens the
+  fellow's profile.
+- **Note** — a free-text field below the member list. Edit inline; saves
+  automatically.
+- **Action bar** (lavender) with three buttons:
+  - **✉ Contact the whole group** — opens your default mail client with
+    every member's email address pre-filled. By default emails go in
+    **CC** so each member sees the others; toggle the CC/BCC pill to
+    BCC instead. Long member lists may be split across multiple draft
+    emails to fit your mail client's address-line limit.
+  - **Export** — opens the export panel inline (see below).
+  - **Edit** — switches into edit mode (see below).
+
+<!-- screenshot: group detail page with action bar visible -->
+
+### Visual directory
+
+`#/groups/<id>/directory` (or the **visual directory** row link from the
+groups index) shows the group as an alphabetical grid of portrait tiles
+— closer to a yearbook layout than a list. Click any portrait or name to
+open that fellow's profile. The lavender bar at the top has the same
+**Contact the group** action as the detail page, so you can email the
+whole group from this view too.
+
+Portraits that didn't download fall back to a silhouette placeholder.
+
+<!-- screenshot: visual portrait directory -->
+
+### Editing a group
+
+Click **Edit** on the detail page (or visit `#/edit/<id>`). You'll see:
+
+- A **yellow banner** across the top of the app reading "editing group: …".
+- The selection rail flips into **editing group / Done editing** mode and
+  pre-fills with the group's current members.
+- Every add/remove **auto-saves** immediately. There's no separate "save"
+  button.
+- Two ways to exit:
+  - **Done editing** — keeps everything you changed.
+  - **Cancel edits** — reverts to the membership you started this edit
+    session with. Anything you toggled in this session is undone; earlier
+    saves are unaffected.
+
+<!-- screenshot: edit mode with yellow banner and rail in edit state -->
+
+### Deleting a group
+
+From the group detail page, use the **Delete** action. You'll be asked to
+confirm. Only the saved group is removed; the fellows themselves are
+untouched, and any other groups they belong to are untouched.
+
+### Exporting a group
+
+Click **Export** on the group detail page. The export panel offers:
+
+- **HTML / ZIP** — a self-contained directory bundle (one HTML file per
+  fellow, plus the photos that have downloaded). Useful for archiving or
+  forwarding offline.
+- **PDF** — a printable directory generated locally.
+
+Both exports run entirely in your browser. The "from" address used for
+any embedded `mailto:` links is the **"me" email** from Settings (see
+below); if it isn't set yet, the panel will nudge you to set it first.
+
+<!-- screenshot: export panel open on group detail -->
+
+---
+
+## Settings
+
+Open `#/settings` (linked from the navigation). Today there's one
+setting:
+
+- **Your email ("me" email)** — used by group export, "email it to me"
+  links, and any other place the app needs to address something *to you*.
+  It's auto-captured the first time you sign in via a magic link, so most
+  users will never need to touch this page. Override it here if you'd
+  rather receive exports at a different mailbox than the one you sign in
+  with.
+
+The setting is stored in the app's local user-data store and survives
+both app updates and **Clear App Cache**.
+
+<!-- screenshot: settings page with self-email field -->
+
 ---
 
 ## Updates
@@ -135,6 +266,11 @@ server asks for auth again you'll need your install link (or a fresh
 one). The app preserves a small "you've been here before" marker so the
 URL still opens the directory directly and a future server outage won't
 strand you at the error panel.
+
+**What survives a cache clear:** your saved groups, your group notes,
+and your Settings (e.g. your "me" email). These live in a separate
+local store from the app cache and aren't touched by this button. An
+in-progress group draft *is* lost — drafts are by definition unsaved.
 
 ---
 

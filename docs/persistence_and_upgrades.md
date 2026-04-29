@@ -13,21 +13,21 @@ shared mental model when triaging "why did my X disappear?" reports.
 | Cache API `fellows-images-v1` | Profile photos | No (separate cache name) — re-fetched as needed | Yes |
 | IndexedDB `fellows-local-db` | Offline-fallback full fellow rows | Regenerated on every successful boot | Yes |
 | OPFS `fellows.db` | Imported Knack contact data | **Re-imported** every boot from `/fellows.db` | **No** (gap; see "Open questions") |
-| OPFS `relationships.db` (PR 2+) | Groups, group members, fellow_tags, fellow_notes, settings — all user-authored | **Never** — that's the whole point of this file | **No** |
+| OPFS `relationships.db` | Groups, group members, fellow_tags, fellow_notes, settings — all user-authored | **Never** — that's the whole point of this file | **No** |
 | localStorage `fellows_authenticated_once` | "this origin has authenticated at least once" marker | Untouched | **Preserved by name** in `clearAllAppData` |
 | localStorage `ehf_has_email_only` | Has-email filter pref | Untouched | Cleared |
-| localStorage `ehf.group_draft` (PR 1+) | In-progress group composer state | Untouched | Cleared (acceptable: drafts are unsaved) |
-| localStorage `fellows_self_email` (PR 5+) | User's "me" email for `mailto:?to=…` | Untouched | Cleared, but rehydrated from `relationships.settings` on next boot |
+| localStorage `ehf.group_draft` | In-progress group composer state | Untouched | Cleared (acceptable: drafts are unsaved) |
+| localStorage `fellows_self_email` | User's "me" email for `mailto:?to=…` | Untouched | Cleared, but rehydrated from `relationships.settings` on next boot |
 | Cookie `fellows_session` (HttpOnly) | HMAC'd session, 7-day TTL, contains `token_issued_at` | Untouched (still valid until TTL) | Cleared (best effort — see `clearCookiesBestEffort`) |
 
-The key architectural decision behind PR 1: **`relationships.db` is a
-separate OPFS file from `fellows.db`** rather than a set of new tables
-inside `fellows.db`. That's because `fellows.db` is bundled with the
-build and re-imported on every boot, while OPFS files we don't
-explicitly touch are durable. Cross-DB joins use SQLite `ATTACH
-DATABASE 'fellows.db' AS f ?mode=ro`, which also enforces read-only
-access to contact data at the SQLite level (any stray write into `f.*`
-raises `OperationalError`).
+The key architectural decision: **`relationships.db` is a separate
+OPFS file from `fellows.db`** rather than a set of new tables inside
+`fellows.db`. That's because `fellows.db` is bundled with the build
+and re-imported on every boot, while OPFS files we don't explicitly
+touch are durable. Cross-DB joins use SQLite `ATTACH DATABASE
+'fellows.db' AS f ?mode=ro`, which also enforces read-only access to
+contact data at the SQLite level (any stray write into `f.*` raises
+`OperationalError`).
 
 ## Standard app update flow
 
@@ -63,13 +63,13 @@ recipient.
 What looks "custom per user" is purely client-side state:
 
 - The user's email is captured into `localStorage[fellows_self_email]`
-  the first time they submit the magic-link gate (PR 5).
+  the first time they submit the magic-link gate.
 - It is also written to the `relationships.settings` table so it
   survives Clear App Cache. On boot, `app.js` mirrors the settings
   value back into localStorage for fast read.
-- The Settings page (`#/settings`, PR 5) lets the user override —
-  useful when someone wants exports addressed to a different
-  mailbox than the one they sign in with.
+- The Settings page (`#/settings`) lets the user override — useful
+  when someone wants exports addressed to a different mailbox than
+  the one they sign in with.
 
 A user moving between browsers / devices re-enters their email at
 sign-in (the magic-link form already requires it). After verify, the
@@ -78,14 +78,15 @@ beyond what the magic-link allowlist already requires.
 
 ## Edge cases
 
-### A user upgrades to PR 5 with no `self_email` stashed
+### A user has no `self_email` set yet
 
-On first PR 5 boot, `relationships.settings` has no `self_email`
-row. Surface a one-line nudge on the group-detail Export panel:
-"Set your email in Settings to enable 'email it to me'." Or
-auto-prompt on first export attempt. No data loss; just a one-time
-setup step. Users who installed before PR 5 will all hit this
-exactly once.
+A fresh install (or a returning user from before the Settings page
+shipped) opens the app with no `self_email` in
+`relationships.settings`. The group-detail Export panel surfaces a
+one-line nudge ("Set your email in Settings to enable 'email it to
+me'"). No data loss; just a one-time setup step. After the user
+signs in via the magic-link gate the value is auto-captured, so
+most users hit this only once or never.
 
 ### A user clicks Clear App Cache
 
@@ -141,11 +142,6 @@ either:
   to wipe just that file. If this surfaces, add a separate "wipe local
   data and re-download" hook that deletes `fellows.db` from OPFS but
   leaves `relationships.db` intact.
-- **PR 5 self-email migration.** When `fellows_self_email` is
-  introduced, decide: preserve it across `clearAllAppData` like
-  `fellows_authenticated_once`, or rely on the boot-time mirror from
-  `relationships.settings`. The latter is simpler (one less special
-  case in `clearAllAppData`) and the user-facing behavior is identical.
 - **Future cross-device sync.** Out of scope today, but the layering
   here keeps the door open: `relationships.db` is a single
   self-contained file with stable schemas, suitable for an

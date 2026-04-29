@@ -1,8 +1,8 @@
 # EHF Fellows Local Directory
 
-Local web app to quickly browse Edmund Hillary Fellowship fellow profiles and run experiments. (data only available to EHF fellows)
+Local web app to quickly browse Edmund Hillary Fellowship fellow profiles, organize them into saved groups, and export sub-directories — and to run experiments. (data only available to EHF fellows)
 
-Data and assets are local-first (SQLite + static files), served by Python stdlib.
+Data and assets are local-first (SQLite + static files), served by Python stdlib. User-authored data (groups, notes, settings) lives in a separate per-user SQLite file (`app/relationships.db`) that's durable across app updates.
 
 ## Table of Contents
 
@@ -106,14 +106,35 @@ python app/server.py    # raw foreground server
 
 ### API Endpoints
 
-- `GET /api/fellows` — list only (`record_id`, `slug`, `name`) for fast directory load.
+Fellow data (read-only, served from `app/fellows.db`):
+
+- `GET /api/fellows` — list only (`record_id`, `slug`, `name`, `has_contact_email`) for fast directory load.
 - `GET /api/fellows?full=1` — full fellow rows.
 - `GET /api/fellows/<slug>` — one fellow by slug or `record_id`.
 - `GET /api/search?q=...` — FTS5 search.
 - `GET /api/stats` — aggregates for About page.
+
+Groups (read-write, served from `app/relationships.db` with `app/fellows.db` ATTACHed read-only):
+
+- `GET /api/groups` — list of saved groups with member counts (newest-touched first).
+- `POST /api/groups` — create a group (`{name, note?, fellow_record_ids?}`); 201.
+- `GET /api/groups/<id>` — one group with members joined to fellow names.
+- `PATCH /api/groups/<id>` — partial update (any subset of `name`, `note`, `fellow_record_ids`).
+- `DELETE /api/groups/<id>` — delete; cascades to `group_members`. 204.
+
+Settings (read-write, key/value bag in `app/relationships.db`):
+
+- `GET /api/settings` — full bag.
+- `GET /api/settings/<key>` — one setting; 404 if unset.
+- `PUT /api/settings/<key>` — upsert (`{value: "…"}`); empty value clears.
+
+Static / bootstrap:
+
 - `GET /fellows.db` — raw SQLite file for installed PWA bootstrap.
 - `GET /images/<slug>.jpg|.png` — profile image lookup by slug/name fallback.
 - `GET /` — static app shell.
+
+Production (`deploy/server.py`) adds magic-link auth (`/api/send-unlock`, `/api/verify-token`, `/api/logout`) and build/diagnostics endpoints (`/healthz`, `/build-meta.json`, `/api/debug/diagnostics`); see [`docs/email_gate.md`](docs/email_gate.md).
 
 ### Two-Phase Load
 
