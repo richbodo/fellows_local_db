@@ -91,7 +91,10 @@ def _create_group(base_url, *, name, fellow_record_ids, note=""):
 
 def _wait_for_directory(page):
     page.locator("#loading").wait_for(state="hidden", timeout=10000)
-    page.locator("#directory").wait_for(state="visible", timeout=5000)
+    # #app-wrap rather than #directory: the directory rail is now
+    # display:none on group routes, so it's no longer a route-independent
+    # readiness signal.
+    page.locator("#app-wrap").wait_for(state="visible", timeout=5000)
 
 
 @pytest.fixture(autouse=True)
@@ -117,9 +120,9 @@ class TestGroupDetailActionBar:
         expect(bar).to_be_visible(timeout=5000)
         contact = page.locator("#group-action-contact")
         expect(contact).to_be_visible()
-        expect(contact).to_contain_text("Contact the whole group")
+        expect(contact).to_contain_text("Mail to the whole group")
         expect(page.locator("#group-action-export")).to_contain_text("Export a directory")
-        expect(page.locator("#group-action-edit")).to_contain_text("Edit group")
+        expect(page.locator("#group-action-edit")).to_contain_text("Edit members")
         # CC pill is active by default.
         cc_pill = page.locator('.group-mode-pill[data-mode="cc"]')
         expect(cc_pill).to_have_class(re.compile(r"\bgroup-mode-pill--active\b"))
@@ -144,7 +147,7 @@ class TestGroupDetailActionBar:
             "href", re.compile(r"^mailto:\?cc=.+&subject=Mailto%20small$")
         )
 
-    def test_cc_bcc_toggle_rewrites_href_and_helper(
+    def test_cc_bcc_toggle_rewrites_href(
         self, standalone_page, base_url_fixture
     ):
         page = standalone_page
@@ -156,13 +159,10 @@ class TestGroupDetailActionBar:
         )
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
         _wait_for_directory(page)
-        helper_mode = page.locator("#group-action-helper-mode")
-        expect(helper_mode).to_have_text("CC")
         expect(page.locator("#group-action-contact")).to_have_attribute(
             "href", re.compile(r"^mailto:\?cc=")
         )
         page.locator('.group-mode-pill[data-mode="bcc"]').click()
-        expect(helper_mode).to_have_text("BCC")
         expect(page.locator("#group-action-contact")).to_have_attribute(
             "href", re.compile(r"^mailto:\?bcc=")
         )
@@ -267,7 +267,7 @@ class TestGroupDetailEditNav:
     def test_edit_button_navigates_and_enters_edit_mode(
         self, standalone_page, base_url_fixture
     ):
-        """Click ✎ Edit group on the detail page → URL flips to
+        """Click ✎ Edit members on the detail page → URL flips to
         #/edit/<id> and the yellow edit-mode banner appears.
         Deeper edit-mode behaviour (auto-save, cancel-edits, etc.)
         is covered in tests/e2e/test_groups_edit.py."""

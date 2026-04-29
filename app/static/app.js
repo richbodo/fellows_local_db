@@ -3208,6 +3208,23 @@
     var hash = window.location.hash || '';
     var editMatch = hash.match(/^#\/edit\/(\d+)$/);
     var nextEditId = editMatch ? parseInt(editMatch[1], 10) : null;
+    var directoryMatch = hash.match(/^#\/groups\/(\d+)\/directory$/);
+    var groupMatch = !directoryMatch ? hash.match(/^#\/groups\/(\d+)$/) : null;
+
+    // Tag <body> with the current focus mode so CSS can collapse the
+    // global directory + composer rails (and, in edit mode, the central
+    // pane). Always clear all four before adding the matching one so
+    // navigating between routes doesn't leave a stale class behind.
+    var body = document.body;
+    body.classList.remove(
+      'route-groups-list', 'route-group-detail',
+      'route-group-edit', 'route-group-directory'
+    );
+    if (directoryMatch) body.classList.add('route-group-directory');
+    else if (groupMatch) body.classList.add('route-group-detail');
+    else if (editMatch) body.classList.add('route-group-edit');
+    else if (hash === '#/groups') body.classList.add('route-groups-list');
+
     // Transition out of edit mode if the URL no longer points there. (Same
     // group still in editingGroupId? Different group? Either way, exit
     // first; if we're entering a new edit-mode session we re-enter below.)
@@ -3226,25 +3243,21 @@
       renderGroupsPage();
       return;
     }
-    var directoryMatch = hash.match(/^#\/groups\/(\d+)\/directory$/);
     if (directoryMatch) {
       renderGroupDirectoryPage(parseInt(directoryMatch[1], 10));
       return;
     }
-    var groupMatch = hash.match(/^#\/groups\/(\d+)$/);
     if (groupMatch) {
       renderGroupDetailPage(parseInt(groupMatch[1], 10));
       return;
     }
     if (editMatch) {
-      // Edit mode is rail-driven, not detail-pane-driven. The directory
-      // and rail flip into edit mode; the detail pane shows whatever was
-      // there (or a placeholder via updateDetailFromHash). Enter once per
-      // hash visit; re-entering for the same id is a no-op.
+      // Edit mode is rail-driven; the central pane is hidden via CSS so
+      // there's nothing useful to render there. Enter once per hash
+      // visit; re-entering for the same id is a no-op.
       if (groupDraft.editingGroupId !== nextEditId) {
         enterEditMode(nextEditId);
       }
-      updateDetailFromHash();
       return;
     }
     updateDetailFromHash();
@@ -3507,19 +3520,26 @@
       var noteEditLabel = hasNote ? 'edit' : 'add a note';
       var html = '<div class="group-detail-page" data-group-id="' + escapeHtml(String(group.id)) + '">' +
         '<p class="group-detail-breadcrumb">' +
-          '<a href="#/groups">groups</a> › ' + escapeHtml(name) +
+          '<a href="#/groups">groups</a> › ' +
+          '<span id="group-detail-breadcrumb-name">' + escapeHtml(name) + '</span>' +
         '</p>' +
-        '<h2 class="group-detail-title">' + escapeHtml(name) + '</h2>' +
+        '<h2 class="group-detail-title">' +
+          '<span class="group-detail-title-text" id="group-detail-title-text">' + escapeHtml(name) + '</span>' +
+          '<a href="#" class="group-detail-title-edit" id="group-detail-title-edit" role="button" ' +
+            'aria-label="Rename group" title="Rename group">✎</a>' +
+        '</h2>' +
         '<p class="group-detail-meta">' +
           escapeHtml(String(memberCount)) + memberWord +
           ' · created ' + escapeHtml((group.created_at || '').slice(0, 10)) +
         '</p>';
 
-      // Action bar: ✉ Contact (primary, real <a href="mailto:…">) + CC/BCC
-      // pill toggle + ⬇ Export + ✎ Edit. Native <a> means the browser
-      // handles handing the mailto URL off to the user's mail client.
-      // The hard-threshold path intercepts the click and copies addresses
-      // to the clipboard instead.
+      // Action bar, two rows. Row 1 = "✉ Mail to the whole group" + CC/BCC
+      // pill (the primary action and its modifier live together). Row 2 =
+      // "✎ Edit members" + "⬇ Export a directory" (the secondary actions).
+      // The Mail button is a native <a href="mailto:…">; the hard-threshold
+      // path intercepts the click and copies addresses to the clipboard
+      // instead. Group rename is reachable via the pencil next to the
+      // title; "Edit members" is membership-only.
       var hasEmails = totalEmails > 0;
       var hardLimit = totalEmails >= GROUPS_CONTACT_HARD_AT;
       var initialHref = (hasEmails && !hardLimit)
@@ -3532,16 +3552,19 @@
       if (!hasEmails) contactAttrs += ' aria-disabled="true" title="No email addresses available for this group"';
       html +=
         '<div class="group-action-bar">' +
-          '<a class="' + contactClasses + '" id="group-action-contact" role="button"' + contactAttrs + '>' +
-            '✉ Contact the whole group' +
-          '</a>' +
-          '<div class="group-contact-mode" role="group" aria-label="Recipient header">' +
-            '<button type="button" class="group-mode-pill group-mode-pill--active" data-mode="cc" aria-pressed="true">CC</button>' +
-            '<button type="button" class="group-mode-pill" data-mode="bcc" aria-pressed="false">BCC</button>' +
+          '<div class="group-action-row">' +
+            '<a class="' + contactClasses + '" id="group-action-contact" role="button"' + contactAttrs + '>' +
+              '✉ Mail to the whole group' +
+            '</a>' +
+            '<div class="group-contact-mode" role="group" aria-label="Recipient header">' +
+              '<button type="button" class="group-mode-pill group-mode-pill--active" data-mode="cc" aria-pressed="true">CC</button>' +
+              '<button type="button" class="group-mode-pill" data-mode="bcc" aria-pressed="false">BCC</button>' +
+            '</div>' +
           '</div>' +
-          '<button type="button" class="group-action-btn" id="group-action-export">⬇ Export a directory</button>' +
-          '<button type="button" class="group-action-btn" id="group-action-edit">✎ Edit group</button>' +
-          '<span class="group-action-helper">opens your mail client with everyone in <span id="group-action-helper-mode">CC</span></span>' +
+          '<div class="group-action-row">' +
+            '<button type="button" class="group-action-btn" id="group-action-edit">✎ Edit members</button>' +
+            '<button type="button" class="group-action-btn" id="group-action-export">⬇ Export a directory</button>' +
+          '</div>' +
         '</div>';
 
       // Threshold banner. Soft warning between WARN and HARD, hard warning ≥ HARD.
@@ -3569,9 +3592,13 @@
           '</div>';
       }
 
-      // Inline export panel. PDF/HTML are mutually exclusive (radios). The
-      // email input is always visible — prefilled from getSelfEmail() when
-      // the user has one in localStorage / settings, else blank with a cue.
+      // Inline export panel. Two-phase: pick a format and Export → file
+      // is built locally and downloaded. After success, the result row
+      // surfaces an Email button alongside the View link, which opens
+      // the user's mail client with a body referencing the just-saved
+      // file. The email input lives inside the result row (it's only
+      // relevant after the file exists); it prefills from getSelfEmail()
+      // and lets the user override per-export without leaving the page.
       var slugFn = slugifyForFilename(name);
       var initialSelfEmail = getSelfEmail();
       html +=
@@ -3587,27 +3614,25 @@
               '<span><b>HTML directory</b><br><code>' + escapeHtml(slugFn) + '.html</code> · self-contained, view in any browser</span>' +
             '</label>' +
           '</div>' +
-          '<div class="group-export-email-row">' +
-            '<label class="group-export-email-label">' +
-              '<input type="checkbox" id="export-self-email" checked> ' +
-              '<span><b>email it to me</b></span>' +
-            '</label>' +
-            '<input type="email" id="export-self-email-addr" class="group-export-email-input' +
-              (initialSelfEmail ? '' : ' group-export-email-input--empty') + '" ' +
-              'placeholder="your@email.com" autocomplete="email" ' +
-              'value="' + escapeHtml(initialSelfEmail) + '">' +
-            '<span class="group-export-email-cue" id="export-self-email-cue">' +
-              (initialSelfEmail ? 'override here to send to a different address' : 'enter your email — you can save it in Settings later') +
-            '</span>' +
-          '</div>' +
           '<div class="group-export-actions">' +
             '<button type="button" class="group-export-cancel">cancel</button>' +
             '<button type="button" class="group-export-go" id="group-export-go">Export</button>' +
           '</div>' +
           '<div class="group-export-result hidden" id="group-export-result" aria-live="polite">' +
-            '<span class="group-export-result-text" id="group-export-result-text"></span> ' +
-            '<a href="#" class="group-export-view" id="group-export-view" target="_blank" rel="noopener">View</a> ' +
-            '<button type="button" class="group-export-email-btn hidden" id="group-export-email-btn">Email it to me</button>' +
+            '<div class="group-export-result-row">' +
+              '<span class="group-export-result-text" id="group-export-result-text"></span> ' +
+              '<a href="#" class="group-export-view" id="group-export-view" target="_blank" rel="noopener">View</a>' +
+            '</div>' +
+            '<div class="group-export-email-row">' +
+              '<input type="email" id="export-self-email-addr" class="group-export-email-input' +
+                (initialSelfEmail ? '' : ' group-export-email-input--empty') + '" ' +
+                'placeholder="your@email.com" autocomplete="email" ' +
+                'value="' + escapeHtml(initialSelfEmail) + '">' +
+              '<span class="group-export-email-cue" id="export-self-email-cue">' +
+                (initialSelfEmail ? 'override here to send to a different address' : 'enter your email to send the export to yourself') +
+              '</span>' +
+              '<button type="button" class="group-export-email-btn" id="group-export-email-btn">Email it to me</button>' +
+            '</div>' +
           '</div>' +
           '<div class="group-contact-banner hidden" id="group-export-banner" role="status"></div>' +
           '<p class="group-export-note" id="group-export-note">' +
@@ -4278,13 +4303,13 @@
     var contactMode = 'cc';
     var contactBtn = document.getElementById('group-action-contact');
     var modePills = document.querySelectorAll('.group-mode-pill');
-    var helperModeEl = document.getElementById('group-action-helper-mode');
     var exportBtn = document.getElementById('group-action-export');
     var editBtn = document.getElementById('group-action-edit');
     var exportPanel = document.getElementById('group-export-panel');
     var exportCancel = document.querySelector('.group-export-cancel');
     var copyEmailsLink = document.getElementById('group-action-copy-emails');
     var noteEditLink = document.getElementById('group-detail-note-edit');
+    var titleEditLink = document.getElementById('group-detail-title-edit');
 
     function setMode(next) {
       contactMode = next;
@@ -4295,7 +4320,6 @@
         else p.classList.remove('group-mode-pill--active');
         p.setAttribute('aria-pressed', on ? 'true' : 'false');
       }
-      if (helperModeEl) helperModeEl.textContent = next.toUpperCase();
       refreshContactHref();
     }
 
@@ -4374,7 +4398,7 @@
           addrInput.classList.toggle('group-export-email-input--empty', !hasValue);
           cue.textContent = hasValue
             ? 'override here to send to a different address'
-            : 'enter your email — you can save it in Settings later';
+            : 'enter your email to send the export to yourself';
         }
         // Reset any prior post-export state when reopening so the panel
         // doesn't confusingly show a stale "View" link.
@@ -4431,6 +4455,105 @@
         startInlineNoteEdit(group);
       });
     }
+
+    if (titleEditLink) {
+      titleEditLink.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        startInlineGroupRename(group);
+      });
+    }
+  }
+
+  /** Inline rename for the group name (pencil ✎ next to the title on the
+   *  group detail page). Swaps the title h2's text + pencil for an input
+   *  + save/cancel pair. On save, PATCHes the group, mirrors the new
+   *  name into group.name + the in-memory groups list, and re-renders
+   *  the title text and the breadcrumb. The "Edit members" page can
+   *  also rename via the rail input; this is just the primary
+   *  affordance from the detail page. */
+  function startInlineGroupRename(group) {
+    var titleH2 = document.querySelector('.group-detail-title');
+    var crumbName = document.getElementById('group-detail-breadcrumb-name');
+    if (!titleH2) return;
+    var current = group.name || '';
+    titleH2.innerHTML = '';
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'group-detail-title-input';
+    input.value = current;
+    input.maxLength = 200;
+    input.setAttribute('aria-label', 'Group name');
+    var actions = document.createElement('span');
+    actions.className = 'group-detail-title-actions';
+    var saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.className = 'group-detail-title-save';
+    saveBtn.textContent = 'Save';
+    var cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'group-detail-title-cancel';
+    cancelBtn.textContent = 'Cancel';
+    actions.appendChild(saveBtn);
+    actions.appendChild(cancelBtn);
+    titleH2.appendChild(input);
+    titleH2.appendChild(actions);
+    input.focus();
+    input.select();
+
+    function restoreTitle(name) {
+      var safe = escapeHtml(name);
+      titleH2.innerHTML =
+        '<span class="group-detail-title-text" id="group-detail-title-text">' + safe + '</span>' +
+        '<a href="#" class="group-detail-title-edit" id="group-detail-title-edit" role="button" ' +
+          'aria-label="Rename group" title="Rename group">✎</a>';
+      var newLink = document.getElementById('group-detail-title-edit');
+      if (newLink) {
+        newLink.addEventListener('click', function (ev) {
+          ev.preventDefault();
+          startInlineGroupRename(group);
+        });
+      }
+      if (crumbName) crumbName.textContent = name;
+    }
+
+    function commit() {
+      var next = (input.value || '').trim();
+      if (!next) {
+        showToast('Group name cannot be empty.');
+        input.focus();
+        return;
+      }
+      if (next.length > 200) {
+        showToast('Group name is too long (max 200 chars).');
+        input.focus();
+        return;
+      }
+      if (next === current) {
+        restoreTitle(current);
+        return;
+      }
+      saveBtn.disabled = true;
+      cancelBtn.disabled = true;
+      dataProvider.updateGroup(group.id, { name: next })
+        .then(function (updated) {
+          var saved = (updated && typeof updated.name === 'string') ? updated.name : next;
+          group.name = saved;
+          restoreTitle(saved);
+          showToast('Group renamed.');
+        })
+        .catch(function () {
+          saveBtn.disabled = false;
+          cancelBtn.disabled = false;
+          showToast('Could not rename group.');
+        });
+    }
+
+    saveBtn.addEventListener('click', commit);
+    cancelBtn.addEventListener('click', function () { restoreTitle(current); });
+    input.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
+      else if (ev.key === 'Escape') { ev.preventDefault(); restoreTitle(current); }
+    });
   }
 
   // Mailto: URL length thresholds for the export "Email it to me" button.
@@ -4535,8 +4658,6 @@
     }
     var ext = formatPdf ? 'pdf' : 'html';
     var filename = slug + '.' + ext;
-    var emailWanted = !!document.getElementById('export-self-email') &&
-      document.getElementById('export-self-email').checked;
     if (button) {
       button.disabled = true;
       button.textContent = 'Exporting…';
@@ -4566,13 +4687,6 @@
         if (viewLink) viewLink.setAttribute('href', lastExportObjectUrl);
         if (resultText) {
           resultText.textContent = 'Created ' + filename + '.';
-        }
-        // Re-query the live email button — the initial-render reference
-        // would be the same node anyway, but re-query keeps this resilient
-        // against future mutations of the post-export row.
-        var liveEmailBtn = document.getElementById('group-export-email-btn');
-        if (liveEmailBtn) {
-          liveEmailBtn.classList.toggle('hidden', !emailWanted);
         }
         if (resultEl) resultEl.classList.remove('hidden');
         showToast('Exported: ' + filename);

@@ -137,41 +137,49 @@ click **Clear App Cache**, since it's by definition unsaved.)
 
 ### Browsing your groups
 
-Open `#/groups` (or use the **Groups** link in the navigation). You'll see
-all your saved groups, newest-touched first, with a member count beside
-each. Click a group's name to open its detail page; click **visual
-directory** to jump straight to its portrait grid (see below).
+Open `#/groups` (or use the **Groups** link in the navigation). The page
+is a focused view — the directory list and the selection rail step out
+of the way so the saved groups are what you see. They're listed
+newest-touched first, with a member count beside each. Click a group's
+name to open its detail page; click **visual directory** to jump
+straight to its portrait grid (see below).
 
 <!-- screenshot: groups index with two or three saved groups -->
 
 ### Group detail
 
-The detail page (`#/groups/<id>`) gives you everything you do *with* the
-group:
+The detail page (`#/groups/<id>`) is a **focused view** — the directory
+list on the left and the selection rail on the right step out of the way
+so you can concentrate on this one group.
 
-- **Member list**, with each fellow's name. Clicking a name opens the
+- **Title with rename** — click the small **✎** pencil next to the
+  group's name to rename it in place. **Save** commits, **Cancel** (or
+  pressing **Esc**) discards the change.
+- **Member list** with each fellow's name. Clicking a name opens the
   fellow's profile.
 - **Note** — a free-text field below the member list. Edit inline; saves
   automatically.
-- **Action bar** (lavender) with three buttons:
-  - **✉ Contact the whole group** — opens your default mail client with
-    every member's email address pre-filled. By default emails go in
-    **CC** so each member sees the others; toggle the CC/BCC pill to
-    BCC instead. Long member lists may be split across multiple draft
-    emails to fit your mail client's address-line limit.
-  - **Export** — opens the export panel inline (see below).
-  - **Edit** — switches into edit mode (see below).
+- **Action bar** (lavender), arranged in two rows:
+  - **Row 1 — ✉ Mail to the whole group** + a **CC/BCC** pill toggle.
+    Opens your default mail client with every member's email address
+    pre-filled (in CC by default; switch to BCC with the pill if you'd
+    rather members not see each other). Long member lists may be split
+    across multiple draft emails to fit your mail client's address-line
+    limit.
+  - **Row 2 — ✎ Edit members** + **⬇ Export a directory**. Edit
+    members switches into edit mode (see below). Export opens the
+    export panel inline (see below).
 
 <!-- screenshot: group detail page with action bar visible -->
 
 ### Visual directory
 
 `#/groups/<id>/directory` (or the **visual directory** row link from the
-groups index) shows the group as an alphabetical grid of portrait tiles
-— closer to a yearbook layout than a list. Click any portrait or name to
-open that fellow's profile. The lavender bar at the top has the same
-**Contact the group** action as the detail page, so you can email the
-whole group from this view too.
+groups index) shows the group as a full-page alphabetical grid of
+portrait tiles — closer to a yearbook layout than a list. Click any
+portrait or name to open that fellow's profile. The lavender bar at the
+top has the same **Mail to the whole group** action as the detail page,
+so you can email the whole group from this view too.
 
 Portraits that didn't download fall back to a silhouette placeholder.
 
@@ -179,11 +187,14 @@ Portraits that didn't download fall back to a silhouette placeholder.
 
 ### Editing a group
 
-Click **Edit** on the detail page (or visit `#/edit/<id>`). You'll see:
+Click **✎ Edit members** on the detail page (or visit `#/edit/<id>`).
+You'll see:
 
 - A **yellow banner** across the top of the app reading "editing group: …".
-- The selection rail flips into **editing group / Done editing** mode and
-  pre-fills with the group's current members.
+- Edit mode is **rail-driven**: the directory list returns on the left
+  for picking fellows, the selection rail on the right flips into
+  **editing group / Done editing** mode and pre-fills with the group's
+  current members. The center pane stays out of the way.
 - Every add/remove **auto-saves** immediately. There's no separate "save"
   button.
 - Two ways to exit:
@@ -191,6 +202,10 @@ Click **Edit** on the detail page (or visit `#/edit/<id>`). You'll see:
   - **Cancel edits** — reverts to the membership you started this edit
     session with. Anything you toggled in this session is undone; earlier
     saves are unaffected.
+
+(Renaming the group also works from this page — the rail's name field is
+the same group name. The pencil ✎ on the detail page is the primary
+affordance; this is a secondary path.)
 
 <!-- screenshot: edit mode with yellow banner and rail in edit state -->
 
@@ -202,18 +217,27 @@ untouched, and any other groups they belong to are untouched.
 
 ### Exporting a group
 
-Click **Export** on the group detail page. The export panel offers:
+Click **⬇ Export a directory** on the group detail page. Exporting is a
+**two-phase** flow:
 
-- **HTML / ZIP** — a self-contained directory bundle (one HTML file per
-  fellow, plus the photos that have downloaded). Useful for archiving or
-  forwarding offline.
-- **PDF** — a printable directory generated locally.
-
-Both exports run entirely in your browser. The "from" address used for
-any embedded `mailto:` links is the **"me" email** from Settings (see
-below); if it isn't set yet, the panel will nudge you to set it first.
+1. Pick a format and click **Export**:
+   - **PDF** — a printable directory generated locally.
+   - **HTML** — a single self-contained `.html` file you can archive or
+     forward offline.
+   The button shows "Exporting…" while the bundle is built in your
+   browser. When it's done, the file lands in your **Downloads** folder
+   (or via the system share sheet on iOS).
+2. After Export completes, the panel reveals a **View** link (opens the
+   file in a new tab) and an **Email it to me** button alongside an
+   email field. The field prefills from the **"me" email** in Settings;
+   override it for this export if you want it sent somewhere else.
+   Clicking **Email it to me** opens your mail client with a draft
+   addressed to that address — you attach the file from your Downloads
+   folder before sending. (Browsers can't attach files to a `mailto:`
+   automatically.)
 
 <!-- screenshot: export panel open on group detail -->
+<!-- screenshot: post-export result row with View link + Email button -->
 
 ---
 

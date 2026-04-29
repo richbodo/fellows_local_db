@@ -10,11 +10,11 @@ Pins:
     single self-contained .html file (HTML5 doctype, contains the
     member's name, contact-bar mailto:);
   - selecting PDF produces a .pdf file (magic bytes %PDF-);
-  - the email input is always present, prefilled from settings when set
-    and showing a cue when empty;
+  - the email input lives inside the post-export result row, prefilled
+    from settings when set and showing a cue when empty;
   - Export only creates the file — it does not navigate to mailto: by
-    itself; a post-export result row exposes a View link (always) and
-    an Email button (when "email it to me" was checked).
+    itself; the post-export result row exposes a View link and an
+    Email button (always — there's no upfront opt-in checkbox).
 """
 from __future__ import annotations
 
@@ -110,7 +110,10 @@ def _create_group(base_url, *, name, fellow_record_ids, note=""):
 
 def _wait_for_directory(page):
     page.locator("#loading").wait_for(state="hidden", timeout=10000)
-    page.locator("#directory").wait_for(state="visible", timeout=5000)
+    # #app-wrap rather than #directory: the directory rail is now
+    # display:none on group routes, so it's no longer a route-independent
+    # readiness signal.
+    page.locator("#app-wrap").wait_for(state="visible", timeout=5000)
 
 
 @pytest.fixture(autouse=True)
@@ -216,10 +219,7 @@ class TestExportDownloads:
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
         _wait_for_directory(page)
         page.locator("#group-action-export").click()
-        # Pick HTML; uncheck the auto-email checkbox so Export is the only
-        # navigation we expect.
         page.locator("#export-format-html").check()
-        page.locator("#export-self-email").uncheck()
         with page.expect_download(timeout=20000) as dl_info:
             page.locator("#group-export-go").click()
         download = dl_info.value
@@ -262,7 +262,6 @@ class TestExportDownloads:
         _wait_for_directory(page)
         page.locator("#group-action-export").click()
         page.locator("#export-format-pdf").check()
-        page.locator("#export-self-email").uncheck()
         with page.expect_download(timeout=20000) as dl_info:
             page.locator("#group-export-go").click()
         download = dl_info.value
@@ -335,30 +334,7 @@ class TestExportDownloads:
         cue = page.locator("#export-self-email-cue")
         expect(cue).to_contain_text("enter your email")
 
-    def test_export_unchecked_email_hides_post_export_email_button(
-        self, standalone_page, base_url_fixture
-    ):
-        page = standalone_page
-        fellows = _real_fellows(base_url_fixture)
-        g = _create_group(
-            base_url_fixture, name="Email button gating",
-            fellow_record_ids=[f[0] for f in fellows[:1]],
-        )
-        page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
-        _wait_for_directory(page)
-        page.locator("#group-action-export").click()
-        page.locator("#export-self-email").uncheck()
-        page.locator("#export-format-pdf").check()
-        with page.expect_download(timeout=20000):
-            page.locator("#group-export-go").click()
-        # Result row + View are always present; the Email button is hidden
-        # because the checkbox was off — Export does not navigate to mailto:
-        # by itself, so we're still on the same page and able to query the DOM.
-        expect(page.locator("#group-export-result")).to_be_visible()
-        expect(page.locator("#group-export-view")).to_be_visible()
-        expect(page.locator("#group-export-email-btn")).to_be_hidden()
-
-    def test_export_checked_email_shows_post_export_email_button(
+    def test_email_button_appears_after_export(
         self, standalone_page, base_url_fixture
     ):
         page = standalone_page
@@ -370,8 +346,11 @@ class TestExportDownloads:
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
         _wait_for_directory(page)
         page.locator("#group-action-export").click()
-        # Default: PDF radio + email checkbox both on. Export creates the
-        # file but does not navigate to mailto: — that's a separate click.
+        # Email button lives inside the post-export result row, which
+        # starts hidden. Export creates the file but does NOT navigate
+        # to mailto: by itself; the result row reveals along with the
+        # View link and the Email button.
+        expect(page.locator("#group-export-result")).to_be_hidden()
         with page.expect_download(timeout=20000):
             page.locator("#group-export-go").click()
         expect(page.locator("#group-export-result")).to_be_visible()
