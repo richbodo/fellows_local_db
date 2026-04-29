@@ -3109,7 +3109,7 @@
     aboutHtml += 'There is no API, login, or web app, so this can only be shared intentionally. ';
     aboutHtml += 'For support, request to join the github repository or just ask on one of the fellows channels.</p>';
     aboutHtml += '<p class="about-support">Having trouble with the app? Contact the EHF Communications Working Group.</p>';
-    aboutHtml += '<p class="about-users-manual"><a href="https://github.com/richbodo/fellows_local_db/blob/main/docs/users_manual.md" target="_blank" rel="noopener">User Guide</a> \u2014 how to install, update, and clear app data.</p>';
+    aboutHtml += '<p class="about-users-manual"><a href="https://github.com/richbodo/fellows_local_db/blob/main/docs/users_manual.md" target="_blank" rel="noopener">User Guide</a> \u2014 how to install, browse, save groups, export, and manage settings.</p>';
     aboutHtml += '<p class="about-update-check">';
     aboutHtml += '<button type="button" id="about-check-updates" class="about-check-updates-btn">Check for updates</button>';
     aboutHtml += '<span id="about-update-status" class="about-update-status" role="status" aria-live="polite"></span>';

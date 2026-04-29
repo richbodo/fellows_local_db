@@ -21,6 +21,7 @@ Read README.md for project setup, API docs, and test commands. Read docs/Archite
 - The DB file `app/fellows.db` is gitignored; rebuild from JSON source.
 - Always run relevant tests after changes.
 - For deploy- or infra-related work, put **manual QA steps for the maintainer** (smoke scripts, DNS/TLS checks, browser install flow) in the **PR description**, not only in commits or docs.
+- **UI/UX changes belong in `docs/users_manual.md`.** When a feature PR changes user-visible behavior (new screen, new flow, changed control, new option), include the corresponding users-manual update in the same PR — accepting the PR accepts the doc change with it. The user guide is the source of truth for UI/UX from a user's perspective; the app links to it from the About page.
 
 ## Two-DB architecture
 
