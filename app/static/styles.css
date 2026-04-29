@@ -1694,6 +1694,39 @@ body.route-group-edit #detail {
 }
 
 /* =========================================================================
+ * Inline 📋 copy button. Renders next to mailto: / tel: links on the
+ * fellow detail page and in the visual-directory contact modal. Subtle
+ * by default, full opacity on hover/focus. data-copy carries the value
+ * the delegated click handler writes to the clipboard.
+ * ========================================================================= */
+
+.copy-btn {
+  font: inherit;
+  font-size: 0.85em;
+  line-height: 1;
+  padding: 0 0.25em;
+  margin-left: 0.15em;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.55;
+  vertical-align: baseline;
+  border-radius: 2px;
+}
+
+.copy-btn:hover,
+.copy-btn:focus-visible {
+  opacity: 1;
+  outline: none;
+}
+
+.copy-btn:focus-visible {
+  outline: 2px solid #4a2c6a;
+  outline-offset: 1px;
+}
+
+/* =========================================================================
  * Groups feature — PR 3: detail action bar, contact + export panel,
  * inline note edit, toast.
  * ========================================================================= */
@@ -2371,7 +2404,8 @@ a.group-action-btn--primary {
   word-break: break-word;
 }
 
-.fellow-modal-value[href] {
+.fellow-modal-value[href],
+.fellow-modal-value > a[href] {
   color: #0066cc;
   text-decoration: underline;
 }

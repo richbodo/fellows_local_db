@@ -104,6 +104,11 @@ skip the install landing and go straight to the directory.
   scrolling is fast and works offline.
 - The visible-count text (e.g. **"142 of 515 fellows visible"**) shows how
   many fellows match your current search + filter.
+- **Copy contact info.** Every email and phone number on a fellow's profile
+  (and inside the visual-directory contact card) has a small **📋** button
+  next to it. Click it to copy that one value to your clipboard — handy if
+  your default mail client is misconfigured and the underlined link does
+  nothing when you click it.
 
 <!-- screenshot: directory view with search active and visible-count text -->
 
@@ -160,12 +165,15 @@ so you can concentrate on this one group.
 - **Note** — a free-text field below the member list. Edit inline; saves
   automatically.
 - **Action bar** (lavender), arranged in two rows:
-  - **Row 1 — ✉ Mail to the whole group** + a **CC/BCC** pill toggle.
-    Opens your default mail client with every member's email address
-    pre-filled (in CC by default; switch to BCC with the pill if you'd
-    rather members not see each other). Long member lists may be split
-    across multiple draft emails to fit your mail client's address-line
-    limit.
+  - **Row 1 — ✉ Mail to the whole group** + a **CC/BCC** pill toggle +
+    **📋 Copy email addresses**. *Mail* opens your default mail client
+    with every member's email address pre-filled (in CC by default;
+    switch to BCC with the pill if you'd rather members not see each
+    other). Long member lists may be split across multiple draft emails
+    to fit your mail client's address-line limit. *Copy email addresses*
+    puts the same comma-separated list on your clipboard — useful when
+    your mail client isn't set up to handle the Mail link, or when you
+    want to paste into a different tool.
   - **Row 2 — ✎ Edit members** + **⬇ Export a directory**. Edit
     members switches into edit mode (see below). Export opens the
     export panel inline (see below).
