@@ -3213,13 +3213,17 @@
 
     // Tag <body> with the current focus mode so CSS can collapse the
     // global directory + composer rails (and, in edit mode, the central
-    // pane). Always clear all three before adding the matching one so
+    // pane). Always clear all four before adding the matching one so
     // navigating between routes doesn't leave a stale class behind.
     var body = document.body;
-    body.classList.remove('route-group-detail', 'route-group-edit', 'route-group-directory');
+    body.classList.remove(
+      'route-groups-list', 'route-group-detail',
+      'route-group-edit', 'route-group-directory'
+    );
     if (directoryMatch) body.classList.add('route-group-directory');
     else if (groupMatch) body.classList.add('route-group-detail');
     else if (editMatch) body.classList.add('route-group-edit');
+    else if (hash === '#/groups') body.classList.add('route-groups-list');
 
     // Transition out of edit mode if the URL no longer points there. (Same
     // group still in editingGroupId? Different group? Either way, exit

@@ -137,10 +137,12 @@ click **Clear App Cache**, since it's by definition unsaved.)
 
 ### Browsing your groups
 
-Open `#/groups` (or use the **Groups** link in the navigation). You'll see
-all your saved groups, newest-touched first, with a member count beside
-each. Click a group's name to open its detail page; click **visual
-directory** to jump straight to its portrait grid (see below).
+Open `#/groups` (or use the **Groups** link in the navigation). The page
+is a focused view — the directory list and the selection rail step out
+of the way so the saved groups are what you see. They're listed
+newest-touched first, with a member count beside each. Click a group's
+name to open its detail page; click **visual directory** to jump
+straight to its portrait grid (see below).
 
 <!-- screenshot: groups index with two or three saved groups -->
 

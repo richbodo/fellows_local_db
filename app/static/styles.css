@@ -1680,6 +1680,8 @@ h1 {
  * has nothing useful to show.
  * ========================================================================= */
 
+body.route-groups-list #directory,
+body.route-groups-list #group-rail,
 body.route-group-detail #directory,
 body.route-group-detail #group-rail,
 body.route-group-directory #directory,
