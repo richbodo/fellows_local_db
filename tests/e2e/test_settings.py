@@ -103,7 +103,7 @@ class TestSettingsPage:
         _wait_for_directory(page)
         expect(page.locator("#settings-self-email")).to_have_value("rich@example.com")
 
-    def test_self_email_surfaces_in_export_hint(
+    def test_self_email_surfaces_in_export_input(
         self, standalone_page, base_url_fixture
     ):
         page = standalone_page
@@ -113,8 +113,8 @@ class TestSettingsPage:
         page.locator("#settings-self-email").fill("rich@example.com")
         page.locator(".settings-save").click()
         expect(page.locator("#settings-status")).to_have_text("Saved.")
-        # Now create a group and open the Export panel; the hint
-        # should show the saved address.
+        # Now create a group and open the Export panel; the email input
+        # should be prefilled with the saved address.
         c = _conn(base_url_fixture)
         c.request("GET", "/api/fellows?full=1")
         r = c.getresponse()
@@ -122,10 +122,9 @@ class TestSettingsPage:
         c.close()
         rows = json.loads(body)
         rid = rows[0]["record_id"]
-        # Create via API.
         c2 = _conn(base_url_fixture)
         payload = json.dumps({
-            "name": "Hint check", "fellow_record_ids": [rid],
+            "name": "Prefill check", "fellow_record_ids": [rid],
         }).encode("utf-8")
         c2.request(
             "POST", "/api/groups", body=payload,
@@ -136,5 +135,5 @@ class TestSettingsPage:
         page.goto(f"{base_url_fixture}/#/groups/{gid}", wait_until="domcontentloaded")
         _wait_for_directory(page)
         page.locator("#group-action-export").click()
-        hint = page.locator("#export-self-email-hint")
-        expect(hint).to_contain_text("rich@example.com")
+        addr = page.locator("#export-self-email-addr")
+        expect(addr).to_have_value("rich@example.com")
