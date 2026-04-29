@@ -1,11 +1,15 @@
 """Pytest configuration and shared fixtures."""
+import hashlib
+import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
 import threading
 import time
 from http.client import HTTPConnection
+from pathlib import Path
 
 import pytest
 
@@ -15,6 +19,10 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 DB_PATH = os.path.join(REPO_ROOT, "app", "fellows.db")
+# Production server runs on a separate port so tests can keep the dev
+# (`app/server.py`, port 8765) and prod-shape (`deploy/server.py`, port 8766)
+# servers up at the same time without colliding.
+DEPLOY_PORT = 8766
 
 
 @pytest.fixture(scope="module")
@@ -99,3 +107,136 @@ def app_server(tmp_path_factory):
     if _server:
         _server.shutdown()
         _server = None
+
+
+@pytest.fixture(scope="session")
+def deploy_server(tmp_path_factory):
+    """Start ``deploy/server.py`` in-process on ``DEPLOY_PORT`` with auth on.
+
+    The Postmark sender is replaced at the function-reference level — no
+    ``FELLOWS_POSTMARK_TOKEN`` is consulted, so a real token in the dev shell
+    cannot leak into the test path. The fixture yields a handle the tests use
+    to drive the round-trip:
+
+        {"base_url": "http://127.0.0.1:8766",
+         "test_email": "<allowlisted address>",
+         "sent": [{"to", "url"}, ...],   # recorder of stubbed Postmark calls
+         "auth_state": ml.AuthState,     # in-memory token + rate-bucket dict
+         "ml": <magic_link_auth module>,
+         "dist_dir": Path}
+
+    Why in-process rather than subprocess: the production server logs only the
+    first 12 chars of an issued token, so a subprocess'd server would give
+    tests no way to consume the token in /api/verify-token. Importing the
+    module here lets us read tokens straight from ``AuthState`` (or, more
+    cleanly, from the recorder's captured magic-link URL).
+    """
+    if os.environ.get("E2E_BASE_URL"):
+        pytest.skip("deploy_server is local-only; unset E2E_BASE_URL to run")
+
+    repo_root = Path(REPO_ROOT)
+    src_db = repo_root / "app" / "fellows.db"
+    if not src_db.is_file():
+        pytest.skip(
+            f"DB not found at {src_db}. Run: python build/restore_from_knack_scrapefile.py"
+        )
+
+    # Build a tmp dist root: app shell + a copy of fellows.db + a single-entry
+    # allowlist for the test email. Copy (not symlink) so a stray write through
+    # any future code path can't corrupt the dev DB.
+    dist_dir = tmp_path_factory.mktemp("deploy_dist")
+    shutil.copytree(repo_root / "app" / "static", dist_dir, dirs_exist_ok=True)
+    shutil.copy2(src_db, dist_dir / "fellows.db")
+
+    test_email = "round-trip-tester@example.com"
+    email_hash = hashlib.sha256(test_email.strip().lower().encode("utf-8")).hexdigest()
+    (dist_dir / "allowed_emails.json").write_text(
+        json.dumps({"hashes": [email_hash]}), encoding="utf-8"
+    )
+
+    # `deploy/server.py` reads DIST_DIR / PORT at import time. Set env first,
+    # save originals so teardown leaves the process clean.
+    saved_env = {}
+    for k in (
+        "FELLOWS_DIST_ROOT",
+        "FELLOWS_SESSION_SECRET",
+        "FELLOWS_COOKIE_INSECURE",
+        "PORT",
+        "FELLOWS_POSTMARK_TOKEN",
+    ):
+        saved_env[k] = os.environ.get(k)
+    os.environ["FELLOWS_DIST_ROOT"] = str(dist_dir)
+    os.environ["FELLOWS_SESSION_SECRET"] = "test-secret-for-round-trip-suite"
+    os.environ["FELLOWS_COOKIE_INSECURE"] = "1"
+    os.environ["PORT"] = str(DEPLOY_PORT)
+    os.environ.pop("FELLOWS_POSTMARK_TOKEN", None)
+
+    deploy_dir = str(repo_root / "deploy")
+    if deploy_dir not in sys.path:
+        sys.path.insert(0, deploy_dir)
+    # Force re-import so module-level globals (DIST_DIR, PORT) pick up our env.
+    for mod_name in ("server", "magic_link_auth", "sqlite_api_support"):
+        sys.modules.pop(mod_name, None)
+    import server as deploy_srv  # noqa: E402
+    import magic_link_auth as ml  # noqa: E402
+
+    sent: list[dict] = []
+    real_send = ml.send_postmark_magic_link
+
+    def fake_send(to_email, magic_url):
+        sent.append({"to": to_email, "url": magic_url})
+        return {
+            "status": 200,
+            "message_id": "stub-message-id",
+            "error_code": 0,
+            "message": "OK (test stub)",
+            "to": to_email,
+            "submitted_at": None,
+            "raw": {},
+        }
+
+    ml.send_postmark_magic_link = fake_send
+
+    deploy_srv.init_auth()
+    deploy_srv.BUILD_META = {}
+
+    # SimpleHTTPRequestHandler resolves static paths against ``self.directory``
+    # if set, falling back to cwd otherwise. ``deploy/server.py`` itself
+    # chdirs in main(), but doing that from a session-scoped pytest fixture
+    # leaks the cwd change into every later test, which destabilizes other
+    # e2e tests. Wire the directory via partial() instead — same effect, no
+    # process-global side effect.
+    from functools import partial
+
+    handler_factory = partial(deploy_srv.Handler, directory=str(dist_dir))
+
+    _free_port(DEPLOY_PORT)
+    httpd = deploy_srv.ThreadingHTTPServer(
+        ("127.0.0.1", DEPLOY_PORT), handler_factory
+    )
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    if not _wait_for_server(DEPLOY_PORT):
+        httpd.shutdown()
+        raise RuntimeError(
+            f"deploy server did not start on port {DEPLOY_PORT}"
+        )
+
+    handle = {
+        "base_url": f"http://127.0.0.1:{DEPLOY_PORT}",
+        "test_email": test_email,
+        "sent": sent,
+        "auth_state": ml.AuthState,
+        "ml": ml,
+        "dist_dir": dist_dir,
+    }
+    try:
+        yield handle
+    finally:
+        httpd.shutdown()
+        ml.send_postmark_magic_link = real_send
+        for k, v in saved_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
