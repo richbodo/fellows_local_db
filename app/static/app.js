@@ -3014,7 +3014,7 @@
           '<td class="groups-cell-date">' + escapeHtml(date) + '</td>' +
           '<td>' + noteHtml + '</td>' +
           '<td class="groups-cell-actions">' +
-            '<a href="#/groups/' + escapeHtml(gidStr) + '/directory" class="groups-action groups-action-view" data-group-id="' + escapeHtml(gidStr) + '">view directory</a>' +
+            '<a href="#/groups/' + escapeHtml(gidStr) + '/directory" class="groups-action groups-action-view" data-group-id="' + escapeHtml(gidStr) + '">visual directory</a>' +
             '<a href="#/edit/' + escapeHtml(gidStr) + '" class="groups-action groups-action-edit" data-group-id="' + escapeHtml(gidStr) + '">edit</a>' +
             '<a href="#" class="groups-action groups-action-rename" data-group-id="' + escapeHtml(gidStr) + '">rename</a>' +
             '<a href="#" class="groups-action groups-action-delete" data-group-id="' + escapeHtml(gidStr) + '">delete</a>' +
@@ -3458,7 +3458,7 @@
           '</div>';
       }
       html += '<div class="group-directory-grid">';
-      members.forEach(function (m) {
+      members.forEach(function (m, idx) {
         var slug = m.slug;
         var imgSrc;
         if (m.has_image && slug) {
@@ -3466,20 +3466,144 @@
         } else {
           imgSrc = PORTRAIT_SVG_PLACEHOLDER;
         }
-        var fellowHref = slug ? ('#/fellow/' + encodeURIComponent(slug)) : '#';
-        html += '<a class="group-directory-cell" href="' + escapeHtml(fellowHref) + '">' +
+        html += '<button type="button" class="group-directory-cell" data-member-idx="' + escapeHtml(String(idx)) + '">' +
           '<div class="group-directory-portrait">' +
             '<img src="' + escapeHtml(imgSrc) + '" alt="' + escapeHtml(m.name) +
             '" loading="lazy" onerror="this.onerror=null;this.src=\'' + PORTRAIT_SVG_PLACEHOLDER + '\';">' +
           '</div>' +
           '<div class="group-directory-name">' + escapeHtml(m.name) + '</div>' +
-        '</a>';
+        '</button>';
       });
       html += '</div></div>';
       detailEl.innerHTML = html;
+      wireGroupDirectoryCells(detailEl, members);
     }).catch(function () {
       detailEl.innerHTML = '<p class="placeholder">Could not load group directory.</p>';
     });
+  }
+
+  /** Click handler for visual-directory portraits/names: open the
+   *  contact-card modal. Single delegated listener, lookup by index. */
+  function wireGroupDirectoryCells(wrap, members) {
+    var grid = wrap.querySelector('.group-directory-grid');
+    if (!grid) return;
+    grid.addEventListener('click', function (ev) {
+      var cell = ev.target.closest('.group-directory-cell');
+      if (!cell) return;
+      ev.preventDefault();
+      var idx = parseInt(cell.getAttribute('data-member-idx'), 10);
+      if (isNaN(idx) || !members[idx]) return;
+      openFellowContactModal(members[idx]);
+    });
+  }
+
+  /** Inline contact-info modal launched from the visual-directory grid.
+   *  Shows name, email (mailto:), phone (tel:), key links, and a link
+   *  to the fellow's full profile. Closes on backdrop click, X button,
+   *  or Escape key. */
+  function openFellowContactModal(m) {
+    closeFellowContactModal();
+    var slug = m.slug;
+    var imgSrc;
+    if (m.has_image && slug) {
+      imgSrc = '/images/' + encodeURIComponent(slug) + '.jpg?v=' + escapeHtml(FELLOWS_UI_DIAG);
+    } else {
+      imgSrc = PORTRAIT_SVG_PLACEHOLDER;
+    }
+
+    var rowsHtml = '';
+    if (m.contact_email) {
+      var email = String(m.contact_email);
+      rowsHtml +=
+        '<li class="fellow-modal-row">' +
+          '<span class="fellow-modal-label">email</span>' +
+          '<a class="fellow-modal-value" href="mailto:' + escapeHtml(email) + '">' +
+            escapeHtml(email) +
+          '</a>' +
+        '</li>';
+    }
+    if (m.mobile_number) {
+      var phoneText = String(m.mobile_number).trim();
+      var phoneTel = phoneText.replace(/[^+\d]/g, '');
+      rowsHtml +=
+        '<li class="fellow-modal-row">' +
+          '<span class="fellow-modal-label">phone</span>' +
+          '<a class="fellow-modal-value" href="tel:' + escapeHtml(phoneTel) + '">' +
+            escapeHtml(phoneText) +
+          '</a>' +
+        '</li>';
+    }
+    if (Array.isArray(m.key_links_urls) && m.key_links_urls.length) {
+      var labels = (m.key_links || '').split(',');
+      var links = m.key_links_urls.map(function (url, i) {
+        var label = (labels[i] || url || '').trim() || url;
+        return '<a class="fellow-modal-value" href="' + escapeHtml(url) +
+          '" target="_blank" rel="noopener">' + escapeHtml(label) + '</a>';
+      }).join('<br>');
+      rowsHtml +=
+        '<li class="fellow-modal-row">' +
+          '<span class="fellow-modal-label">links</span>' +
+          '<span class="fellow-modal-value">' + links + '</span>' +
+        '</li>';
+    }
+    if (!rowsHtml) {
+      rowsHtml =
+        '<li class="fellow-modal-row fellow-modal-row--empty">' +
+          'No public contact info on file.' +
+        '</li>';
+    }
+
+    var profileHref = slug ? ('#/fellow/' + encodeURIComponent(slug)) : '';
+    var profileHtml = profileHref
+      ? '<a class="fellow-modal-profile-link" href="' + escapeHtml(profileHref) + '">View full profile →</a>'
+      : '';
+
+    var overlay = document.createElement('div');
+    overlay.className = 'fellow-modal-overlay';
+    overlay.setAttribute('role', 'presentation');
+    overlay.innerHTML =
+      '<div class="fellow-modal-card" role="dialog" aria-modal="true" aria-labelledby="fellow-modal-name">' +
+        '<button type="button" class="fellow-modal-close" aria-label="Close">×</button>' +
+        '<div class="fellow-modal-portrait">' +
+          '<img src="' + escapeHtml(imgSrc) + '" alt="' + escapeHtml(m.name) +
+          '" onerror="this.onerror=null;this.src=\'' + PORTRAIT_SVG_PLACEHOLDER + '\';">' +
+        '</div>' +
+        '<h3 class="fellow-modal-name" id="fellow-modal-name">' + escapeHtml(m.name || '') + '</h3>' +
+        '<ul class="fellow-modal-rows">' + rowsHtml + '</ul>' +
+        profileHtml +
+      '</div>';
+
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', function (ev) {
+      if (ev.target === overlay || ev.target.closest('.fellow-modal-close')) {
+        closeFellowContactModal();
+      }
+    });
+    // Profile-link click is a hash navigation; close the modal so it
+    // doesn't sit on top of the detail view.
+    var profileLink = overlay.querySelector('.fellow-modal-profile-link');
+    if (profileLink) {
+      profileLink.addEventListener('click', function () {
+        closeFellowContactModal();
+      });
+    }
+    document.addEventListener('keydown', fellowContactModalKeydown);
+    var closeBtn = overlay.querySelector('.fellow-modal-close');
+    if (closeBtn) closeBtn.focus();
+  }
+
+  function fellowContactModalKeydown(ev) {
+    if (ev.key === 'Escape' || ev.key === 'Esc') {
+      closeFellowContactModal();
+    }
+  }
+
+  function closeFellowContactModal() {
+    var overlay = document.querySelector('.fellow-modal-overlay');
+    if (overlay && overlay.parentNode) {
+      overlay.parentNode.removeChild(overlay);
+    }
+    document.removeEventListener('keydown', fellowContactModalKeydown);
   }
 
   // ===== Standalone HTML export (PR 5) ======================================

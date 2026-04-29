@@ -2,8 +2,9 @@
 
 Pins:
 - #/groups/<id>/directory renders a portrait grid + Contact bar.
-- "view directory" row action on /#/groups goes there.
-- Clicking a portrait navigates to #/fellow/<slug>.
+- "visual directory" row action on /#/groups goes there.
+- Clicking a portrait opens a contact-info modal (name, mailto:, tel:,
+  links, "View full profile" link).
 - The Export panel's Export button:
   - generates a PDF (downloads, magic bytes %PDF-);
   - generates an HTML zip (downloads, ZIP magic PK\x03\x04, contains
@@ -153,7 +154,7 @@ class TestVisualDirectoryPage:
         page.wait_for_url(lambda u: f"#/groups/{g['id']}/directory" in u, timeout=3000)
         expect(page.locator(".group-directory-grid")).to_be_visible()
 
-    def test_portrait_click_navigates_to_fellow_detail(
+    def test_portrait_click_opens_contact_modal(
         self, standalone_page, base_url_fixture
     ):
         page = standalone_page
@@ -166,7 +167,37 @@ class TestVisualDirectoryPage:
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}/directory", wait_until="domcontentloaded")
         _wait_for_directory(page)
         page.locator(".group-directory-cell").first.click()
+        # Modal appears with the fellow's name and a mailto: link to
+        # their contact_email (members are filtered to with_email=True).
+        modal = page.locator(".fellow-modal-card")
+        expect(modal).to_be_visible()
+        expect(modal.locator(".fellow-modal-name")).to_have_text(first[1])
+        expect(modal.locator(f"a[href='mailto:{first[2]}']")).to_be_visible()
+        # The "View full profile" link is what navigates — clicking the
+        # cell itself no longer does.
+        profile_link = modal.locator(".fellow-modal-profile-link")
+        expect(profile_link).to_have_attribute("href", f"#/fellow/{first[3]}")
+        profile_link.click()
         page.wait_for_url(lambda u: f"#/fellow/{first[3]}" in u, timeout=3000)
+        # Modal is dismissed after navigation.
+        expect(page.locator(".fellow-modal-overlay")).to_have_count(0)
+
+    def test_portrait_modal_close_button_dismisses(
+        self, standalone_page, base_url_fixture
+    ):
+        page = standalone_page
+        fellows = _real_fellows(base_url_fixture)
+        first = fellows[0]
+        g = _create_group(
+            base_url_fixture, name="Close test",
+            fellow_record_ids=[first[0]],
+        )
+        page.goto(f"{base_url_fixture}/#/groups/{g['id']}/directory", wait_until="domcontentloaded")
+        _wait_for_directory(page)
+        page.locator(".group-directory-cell").first.click()
+        expect(page.locator(".fellow-modal-card")).to_be_visible()
+        page.locator(".fellow-modal-close").click()
+        expect(page.locator(".fellow-modal-overlay")).to_have_count(0)
 
 
 class TestExportDownloads:
