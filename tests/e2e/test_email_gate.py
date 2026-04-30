@@ -286,6 +286,116 @@ class TestEmailGate:
         finally:
             page.close()
 
+    def test_send_diagnostics_posts_sanitized_payload(self, context, base_url_fixture):
+        """Clicking 'Send diagnostics' on the gate POSTs the ring buffer +
+        diag block to /api/client-errors. We mock 204 here to assert the
+        client-side wiring (payload shape, status feedback). The server
+        sanitizer is verified separately in tests/test_client_error_sanitizer.py
+        and tests/test_deploy_client_errors.py.
+        """
+        page = context.new_page()
+        captured = {"body": None}
+
+        def _capture(route):
+            req = route.request
+            try:
+                captured["body"] = req.post_data_json
+            except Exception:
+                captured["body"] = json.loads(req.post_data or "{}")
+            route.fulfill(status=204, body="")
+
+        try:
+            _mock_auth_status(page, authEnabled=True, authenticated=False)
+            page.route("**/api/client-errors", _capture)
+            page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+            expect(page.locator("#auth-debug-private-send")).to_be_visible()
+            with page.expect_request("**/api/client-errors"):
+                page.locator("#auth-debug-private-send").click()
+            page.wait_for_function(
+                "el => el && el.textContent && el.textContent.indexOf('Sent') !== -1",
+                arg=page.locator("#auth-debug-private-copy-status").element_handle(),
+                timeout=3000,
+            )
+            body = captured["body"]
+            assert isinstance(body, dict)
+            assert isinstance(body.get("events"), list)
+            assert "ua" in body and body["ua"]
+            assert "displayMode" in body
+            assert body["displayMode"] in ("standalone", "browser-tab")
+            # No email in the payload — never. The hash prefix is opt-in
+            # after a submit (this test doesn't submit, so it's absent).
+            assert "lastSubmitHashPrefix" not in body
+        finally:
+            page.close()
+
+    def test_send_diagnostics_shows_failure_on_non_204(self, context, base_url_fixture):
+        page = context.new_page()
+        try:
+            _mock_auth_status(page, authEnabled=True, authenticated=False)
+            page.route(
+                "**/api/client-errors",
+                lambda r: r.fulfill(status=503, body="oops"),
+            )
+            page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+            page.locator("#auth-debug-private-send").click()
+            page.wait_for_function(
+                "el => el && el.textContent && el.textContent.indexOf('Send failed') !== -1",
+                arg=page.locator("#auth-debug-private-copy-status").element_handle(),
+                timeout=3000,
+            )
+            text = page.locator("#auth-debug-private-copy-status").inner_text()
+            assert "Send failed" in text
+        finally:
+            page.close()
+
+    def test_send_diagnostics_after_submit_includes_correlation_handle(
+        self, context, base_url_fixture
+    ):
+        """Submitting an email populates lastSubmitInfo.emailHashPrefix
+        (PR #69). A subsequent Send diagnostics click must include that
+        prefix in the POST body so the maintainer can join the report
+        to the matching event=send_unlock_email journald entry."""
+        page = context.new_page()
+        try:
+            _mock_auth_status(page, authEnabled=True, authenticated=False)
+            page.route(
+                "**/api/send-unlock",
+                lambda r: r.fulfill(
+                    status=200, content_type="application/json",
+                    body=json.dumps({"sent": True}),
+                ),
+            )
+            page.route(
+                "**/api/client-errors",
+                lambda r: r.fulfill(status=204, body=""),
+            )
+            page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+            page.locator("#unlock-email").fill("foo@bar.com")
+            with page.expect_request("**/api/send-unlock"):
+                page.locator("#unlock-submit").click()
+            # Wait for the async sha256 to populate lastSubmitInfo.
+            page.wait_for_function(
+                "el => el && el.textContent && el.textContent.indexOf('last_submit:') !== -1",
+                arg=page.locator("#auth-debug-private-pre").element_handle(),
+                timeout=3000,
+            )
+            # Read the request via expect_request's return value to avoid
+            # the route-handler-closure timing issue.
+            with page.expect_request("**/api/client-errors") as req_info:
+                page.locator("#auth-debug-private-send").click()
+            req = req_info.value
+            assert req.method == "POST"
+            try:
+                body = req.post_data_json
+            except Exception:
+                body = json.loads(req.post_data or "{}")
+            assert isinstance(body, dict), f"expected dict body, got {body!r}"
+            assert "lastSubmitHashPrefix" in body
+            import re
+            assert re.fullmatch(r"[0-9a-f]{12}", body["lastSubmitHashPrefix"])
+        finally:
+            page.close()
+
     def test_back_to_gate_link_posts_logout_and_navigates(self, context, base_url_fixture):
         page = context.new_page()
 

@@ -133,6 +133,82 @@ Installed PWAs never see the install landing.
 | POST   | `/api/send-unlock`     | Accepts `{email}`. Always returns `{sent: true}` (anti-enumeration). Internally: validates shape, checks rate limit, checks allowlist, issues token, sends Postmark email. |
 | POST   | `/api/verify-token`    | Accepts `{token}`. Returns `{ok: true}` + Set-Cookie on success; `{ok: false, error: "expired"\|"invalid"}` otherwise (401). |
 | POST   | `/api/logout`          | Clears session cookie (Max-Age=0). Always returns `{ok: true}`. |
+| POST   | `/api/client-errors`   | Accepts a sanitized client-error report. Always returns 204 (anti-enumeration). Logs `event=client_error` to journald. See § Client error reporting. |
+
+## Client error reporting
+
+Behavioral spec for `POST /api/client-errors` and the gate's "Send diagnostics" button. Implementation: `deploy/server.py:_handle_client_errors` and `deploy/client_error_sanitizer.py`. Surfaces in operations: `just prod-errors` (see `docs/justfile.md`).
+
+### Why it exists
+
+The bug-report dialog (in-app "Report bug" / inline "report a problem to the maintainer") covers the case where a user is willing to open their mail client and describe what happened. The "Send diagnostics" button on the gate covers the case where the user is stuck *at* the gate: they hit Send link, got "Could not send. Try again later.", and need a friction-free way to flag the failure without composing an email. One click → sanitized POST → server-side journald.
+
+### Goal
+
+Capture enough diagnostic detail (browser/OS, the captured error ring, which build was running, the optional `lastSubmitHashPrefix` correlation handle) to triage from the maintainer side, **without** the user disclosing their email, IP, profile slug, magic-link token, or other identifiers.
+
+### Privacy boundary
+
+The privacy boundary is *server-side*. The client tries to send a clean payload, but the server re-sanitizes everything regardless. Trust the server, not the client. The boundary is enforced by `deploy/client_error_sanitizer.py` (pure functions; unit-tested in `tests/test_client_error_sanitizer.py`).
+
+What the maintainer can read in journald:
+
+- **User agent** — `navigator.userAgent`, length-capped at 240. Used for "is this Safari 15 or 16?" triage. Not sanitized further (some browsers encode device names; accepted tradeoff for high signal).
+- **Build** — `git_sha @ built_at` of the JS bundle the user was running. Up to 64 chars.
+- **Route** — the URL hash route the user was on, with these substitutions: query string dropped (`?…`), `#/fellow/<slug>` redacted to `#/fellow/<redacted>`, `#/unlock/<token>` redacted to `#/unlock/<token>` placeholder (token leak would grant a session).
+- **Display mode** — `"standalone"` (installed PWA) or `"browser-tab"`. Other values dropped.
+- **Online flag** — `Boolean(navigator.onLine)`.
+- **Events** (up to 20) — each has a `kind` from a fixed allow-list (`http`, `sw`, `window.error`, `unhandledrejection`, `console.error`), an optional ISO `ts` (length-capped, not parsed), a `msg` (up to 500 chars, with email + slug + token redaction applied), and an optional `extra` (up to 200 chars, same redaction). Unknown kinds are silently dropped.
+- **`lastSubmitHashPrefix`** — only if it matches `^[0-9a-f]{12}$`. This is `sha256(email).slice(0,12)` from a prior gate submit; it's the same join key the server already logs as `email_hash_prefix` in `event=send_unlock_email`. Not reversible to an email at this length, but stable enough to grep journald and find the matching send attempt.
+- **`client_ip_prefix`** — first 12 hex of `sha256(client_ip)`. The raw IP is *never* logged. The hash is stable enough that two reports from the same client cluster together; opaque enough that a journald audit doesn't expose a per-fellow source map.
+
+What never reaches journald:
+
+- Raw email addresses (regex-replaced with `<email>` in every free-text field).
+- Profile slugs (`#/fellow/<slug>` → `<redacted>`).
+- Magic-link tokens (`#/unlock/<token>` → `<redacted>`).
+- Query strings (dropped from any URL field).
+- The raw client IP.
+- Anything that doesn't match the schema's accept-list of top-level keys.
+
+### Schema
+
+Request body (POST, `Content-Type: application/json`, max 16 KB):
+
+```jsonc
+{
+  "events": [                              // required, array, capped at 20
+    {
+      "kind": "http",                       // one of: http, sw, window.error, unhandledrejection, console.error
+      "ts":   "2026-04-30T15:00:00Z",       // optional, ISO-8601, length-capped
+      "msg":  "GET /api/fellows → 404",    // free text, sanitized + truncated to 500
+      "extra": "..."                        // optional, sanitized + truncated to 200
+    }
+  ],
+  "ua":    "Mozilla/5.0 ...",                // length-capped at 240
+  "build": "abc1234 @ 2026-04-30T15:00Z",    // length-capped at 64
+  "route": "#/groups/3",                     // sanitized: query stripped, slugs/tokens redacted
+  "displayMode": "browser-tab",              // "standalone" or "browser-tab"
+  "online": true,                            // boolean
+  "lastSubmitHashPrefix": "ab12cd34ef56"     // optional, 12 lowercase-hex chars only
+}
+```
+
+Unknown top-level keys are silently dropped. Events whose `kind` isn't in the accept-list are silently dropped. Non-conforming `lastSubmitHashPrefix` is silently dropped.
+
+### Anti-abuse posture
+
+- **Always 204 No Content.** No echo, no error message, no oracle. A probing attacker can't tell whether their payload was logged, dropped on shape, dropped on rate-limit, or dropped because all events were filtered.
+- **16 KB body cap** at the `do_POST` layer. Larger → 413, no log emitted.
+- **Per-IP rate limit.** Same bucket machinery as `/api/send-unlock` (`deploy/magic_link_auth.py:check_rate_limit`), keyed by `clienterr:<ip_hash_prefix>`. 4th request in the window is silently dropped.
+- **Unauthenticated by design.** The whole point is to capture reports from users who couldn't pass the auth gate. Authenticated visitors can use it too; the endpoint never depends on a session cookie.
+- **No DB writes, no file writes.** The structured journald event is the only persistence. Wipe operations are journald rotation; no extra cleanup needed.
+
+### Operator triage
+
+`just prod-errors [SINCE]` (see `docs/justfile.md`) prints the 4xx + 5xx access-line counters AND the new `Client error reports:` count, with the recent-errors list interleaving both kinds tagged `[client_error]` vs raw access lines. Pair with the user's `lastSubmitHashPrefix` (if they shared a screenshot of the diag block) to find the matching `event=send_unlock_email` entry: `journalctl -u fellows-pwa | grep '"email_hash_prefix": "ab12cd34ef56"'`.
+
+
 
 ## Cookie format (v2)
 
@@ -151,3 +227,4 @@ On every request the server recomputes HMAC, rejects on mismatch, and rejects if
 - Distinguishing "expired" vs "invalid" in verify-token leaks only the fact that the token existed at some point. Negligible vs UX win.
 - `/api/logout` is idempotent and doesn't require a valid session. That's intentional — the endpoint's job is to guarantee the cookie is cleared, not to validate the caller.
 - The URL override `?gate=1` does not bypass auth; it only forces the **UI** to render the gate. Protected endpoints (`/fellows.db`, `/images/*`, directory `/api/*`) still require a valid session.
+- `/api/client-errors` is unauthenticated by design (see § Client error reporting) but rate-limited per IP and capped at 16 KB body. Always returns 204, never echoes payload, sanitizes free-text against email / profile-slug / unlock-token leakage before logging.

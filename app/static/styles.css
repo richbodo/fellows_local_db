@@ -1240,8 +1240,17 @@ h1 {
   cursor: pointer;
 }
 
+.auth-debug-copy + .auth-debug-copy {
+  margin-left: 0.4rem;
+}
+
 .auth-debug-copy:hover {
   background: #ddd4ec;
+}
+
+.auth-debug-copy:disabled {
+  opacity: 0.6;
+  cursor: progress;
 }
 
 .auth-debug-copy-status {

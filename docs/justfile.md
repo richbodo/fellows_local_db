@@ -154,12 +154,18 @@ Export them or inline: `FELLOWS_BASE_URL=https://staging.example.com just smoke`
   `/opt/fellows/deploy/dist/fellows.db` and matching against the
   `email_hash_prefix` the server logs per send event. Treat output as
   confidential — it contains fellow email addresses.
-- **`prod-errors [SINCE]`** — focused triage view: prints just the 4xx +
-  5xx counters and the 10 most recent error access lines verbatim.
-  Default window `24 hours ago`. Use this when a user reports "I got a
-  404" / "I got a 403" — pair the timestamp they give you with the
-  recent-error block to find the matching access line. Wraps
-  `prod_stats --errors-only`.
+- **`prod-errors [SINCE]`** — focused triage view: prints the 4xx + 5xx
+  counters, the new `Client error reports:` count, and the 10 most
+  recent error entries verbatim — interleaving server-side access
+  lines (4xx/5xx) with client-side `event=client_error` reports
+  posted via the gate's "Send diagnostics" button. Default window
+  `24 hours ago`. Use this when a user reports "I got a 404" / "I got
+  a 403" or when you want to see what's been posted to
+  `/api/client-errors`. The recent-errors list tags client-error rows
+  with `[client_error]`. Schema and privacy boundary for
+  `/api/client-errors` is [`docs/email_gate.md` §
+  Client error reporting](email_gate.md#client-error-reporting).
+  Wraps `prod_stats --errors-only`.
 - **`prod-status`** — SSH + `systemctl status fellows-pwa caddy --no-pager`.
 - **`prod-env`** — dump remote `/etc/fellows/fellows-pwa.env` (prompts for
   sudo password — values shown raw for paste-ready rotation). Wraps

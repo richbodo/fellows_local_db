@@ -25,8 +25,16 @@ REPO_ROOT = APP_DIR.parent
 # only puts ``app/`` on sys.path, so we add the repo root explicitly.
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+# Add deploy/ so the dev server can share the client-error sanitizer with
+# prod (deploy/client_error_sanitizer.py). Keeping a single source of
+# truth for the privacy boundary so dev round-trip + prod logging behave
+# identically.
+_DEPLOY_DIR = str(REPO_ROOT / "deploy")
+if _DEPLOY_DIR not in sys.path:
+    sys.path.insert(0, _DEPLOY_DIR)
 
 from app import relationships  # noqa: E402  (after sys.path manipulation)
+import client_error_sanitizer as ces  # noqa: E402
 DB_PATH = APP_DIR / "fellows.db"
 STATIC_DIR = APP_DIR / "static"
 IMAGES_DIR = APP_DIR / "fellow_profile_images_by_name"
@@ -374,6 +382,29 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 conn.close()
             return self.send_json(full, status=201)
+        if path == "/api/client-errors":
+            # Dev stub mirrors deploy/server.py:_handle_client_errors so
+            # the round-trip works locally (`just serve-fg` tails the
+            # event=client_error stderr line). No rate limit here — dev
+            # is single-user. Same sanitizer + same anti-oracle 204.
+            body = self._read_json_body(max_bytes=16 * 1024)
+            if body is None:
+                self.send_response(204)
+                self.end_headers()
+                return
+            try:
+                sanitized = ces.sanitize_payload(body)
+            except ValueError:
+                self.send_response(204)
+                self.end_headers()
+                return
+            if sanitized.get("events"):
+                event = {"event": "client_error", "client_ip_prefix": ""}
+                event.update(sanitized)
+                print(json.dumps(event), file=sys.stderr)
+            self.send_response(204)
+            self.end_headers()
+            return
         self.send_error_404()
 
     def do_PUT(self):
