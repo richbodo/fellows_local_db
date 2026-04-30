@@ -59,6 +59,12 @@ def test_install_recently_allowed_window_math():
 
 
 def test_consume_token_distinguishes_invalid_expired_ok(monkeypatch):
+    # Reset state in case other unit tests leaked into the module-level
+    # AuthState (no autouse fixture here).
+    with ml.AuthState.lock:
+        ml.AuthState.tokens.clear()
+        ml.AuthState.consumed.clear()
+
     # Unknown token → invalid.
     r = ml.consume_token("no-such-token-1234567890")
     assert r == {"status": "invalid"}
@@ -74,8 +80,73 @@ def test_consume_token_distinguishes_invalid_expired_ok(monkeypatch):
     r = ml.consume_token(tok)
     assert r["status"] == "ok"
     assert "issued_at" in r
-    # Second consume fails (single-use).
-    assert ml.consume_token(tok) == {"status": "invalid"}
+    # Second consume within the grace window is ok with the original
+    # issued_at (M3) — see test_consume_within_grace_window_returns_ok
+    # below for the dedicated coverage.
+    r2 = ml.consume_token(tok)
+    assert r2["status"] == "ok"
+    assert r2["issued_at"] == r["issued_at"]
+
+
+def test_consume_within_grace_window_returns_ok_with_original_issued_at():
+    """M3: a second consume within GRACE_WINDOW seconds returns ok with
+    the issued_at captured at first consume (so the resulting session
+    cookie carries the same install-window anchor as the first one)."""
+    with ml.AuthState.lock:
+        ml.AuthState.tokens.clear()
+        ml.AuthState.consumed.clear()
+    tok = ml.issue_token()
+    r1 = ml.consume_token(tok)
+    assert r1["status"] == "ok"
+    # Re-consume inside the window: ok, same issued_at.
+    r2 = ml.consume_token(tok)
+    assert r2["status"] == "ok"
+    assert r2["issued_at"] == r1["issued_at"]
+
+
+def test_consume_after_grace_window_returns_invalid():
+    """M3: outside the window the re-consume reverts to invalid. Rewind
+    the consumed record's consumed_at rather than sleeping."""
+    with ml.AuthState.lock:
+        ml.AuthState.tokens.clear()
+        ml.AuthState.consumed.clear()
+    tok = ml.issue_token()
+    r1 = ml.consume_token(tok)
+    assert r1["status"] == "ok"
+    with ml.AuthState.lock:
+        rec = ml.AuthState.consumed.get(tok)
+        assert rec is not None
+        rec["consumed_at"] = time.time() - (ml.GRACE_WINDOW + 1)
+    r2 = ml.consume_token(tok)
+    assert r2 == {"status": "invalid"}
+    # Opportunistic drop on miss: the consumed record should be gone now.
+    with ml.AuthState.lock:
+        assert tok not in ml.AuthState.consumed
+
+
+def test_cleanup_stale_tokens_drops_expired_consumed_entries():
+    """cleanup_stale_tokens drops both past-TTL live tokens AND consumed
+    records past the grace window. Bounded memory across long uptimes."""
+    with ml.AuthState.lock:
+        ml.AuthState.tokens.clear()
+        ml.AuthState.consumed.clear()
+    # One stale live token, one stale consumed record, one fresh consumed record.
+    now = time.time()
+    with ml.AuthState.lock:
+        ml.AuthState.tokens["stale-live"] = now - 10
+        ml.AuthState.consumed["stale-consumed"] = {
+            "issued_at": now - 200,
+            "consumed_at": now - (ml.GRACE_WINDOW + 5),
+        }
+        ml.AuthState.consumed["fresh-consumed"] = {
+            "issued_at": now - 5,
+            "consumed_at": now - 5,
+        }
+    ml.cleanup_stale_tokens()
+    with ml.AuthState.lock:
+        assert "stale-live" not in ml.AuthState.tokens
+        assert "stale-consumed" not in ml.AuthState.consumed
+        assert "fresh-consumed" in ml.AuthState.consumed
 
 
 def test_clear_session_cookie_line_has_max_age_0():

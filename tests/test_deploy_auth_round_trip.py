@@ -76,10 +76,11 @@ def _token_from_url(magic_url):
 
 @pytest.fixture(autouse=True)
 def _reset_auth_state(deploy_server):
-    """Each test starts with empty rate buckets, no live tokens, no recorded sends."""
+    """Each test starts with empty rate buckets, no live tokens, no consumed-token grace records, no recorded sends."""
     state = deploy_server["auth_state"]
     with state.lock:
         state.tokens.clear()
+        state.consumed.clear()
         state.rate_buckets.clear()
     deploy_server["sent"].clear()
 
@@ -179,9 +180,13 @@ def test_verify_token_with_empty_token_returns_401_invalid(deploy_server):
     assert body == {"ok": False, "error": "invalid"}
 
 
-def test_verify_token_reuse_returns_invalid_on_second_call(deploy_server):
-    """Tokens are single-use. Two consumers of the same magic link must not
-    both end up with sessions."""
+def test_verify_token_reuse_within_grace_window_returns_ok(deploy_server):
+    """A re-consume of the same token within ``GRACE_WINDOW`` seconds (M3
+    follow-up to the Anne-Marie iOS report) returns ok again, so a bfcache
+    replay or scanner pre-fetch doesn't break the legitimate user. Both
+    responses end up with the same session contract: 200 ok + a fresh
+    Set-Cookie carrying the original ``token_issued_at``. After the grace
+    window the token reverts to ``invalid`` — see the test below."""
     _post_json(
         deploy_server, "/api/send-unlock", {"email": deploy_server["test_email"]}
     )
@@ -189,6 +194,28 @@ def test_verify_token_reuse_returns_invalid_on_second_call(deploy_server):
     s1, _, b1 = _post_json(deploy_server, "/api/verify-token", {"token": token})
     s2, _, b2 = _post_json(deploy_server, "/api/verify-token", {"token": token})
     assert s1 == 200 and b1 == {"ok": True}
+    assert s2 == 200 and b2 == {"ok": True}
+
+
+def test_verify_token_reuse_after_grace_window_returns_invalid(deploy_server):
+    """Outside the grace window a re-consume reverts to ``invalid`` —
+    re-asserts the original single-use property holds in the long run.
+    We rewind the consumed record's ``consumed_at`` rather than sleeping."""
+    state = deploy_server["auth_state"]
+    ml = deploy_server["ml"]
+    _post_json(
+        deploy_server, "/api/send-unlock", {"email": deploy_server["test_email"]}
+    )
+    token = _token_from_url(deploy_server["sent"][-1]["url"])
+    s1, _, _ = _post_json(deploy_server, "/api/verify-token", {"token": token})
+    assert s1 == 200
+    import time as _time
+
+    with state.lock:
+        rec = state.consumed.get(token)
+        assert rec is not None
+        rec["consumed_at"] = _time.time() - (ml.GRACE_WINDOW + 1)
+    s2, _, b2 = _post_json(deploy_server, "/api/verify-token", {"token": token})
     assert s2 == 401
     assert b2 == {"ok": False, "error": "invalid"}
 
