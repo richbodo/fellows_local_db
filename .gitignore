@@ -20,6 +20,7 @@ playwright-report/
 test-results/
 .playwright/
 tests/e2e/screenshots/
+tests/e2e/mobile/current_state/
 
 # OS
 .DS_Store
