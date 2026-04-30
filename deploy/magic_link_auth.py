@@ -23,6 +23,15 @@ SESSION_COOKIE = "fellows_session"
 SESSION_MAX_AGE = 7 * 24 * 3600
 TOKEN_TTL = 30 * 60
 INSTALL_WINDOW = TOKEN_TTL  # window (from token issue) during which install landing may show
+# Re-consume window: after a token is first consumed, the same token re-presented
+# within GRACE_WINDOW seconds returns the same session payload instead of
+# "invalid". Defends against bfcache / back-button replays in iOS Safari and
+# against email-side link scanners that GET the URL before the user clicks.
+# Net threat-model effect is a safety win: the dominant real-world failure was
+# "passive scanner consumes the token, legit user sees invalid"; the grace
+# window flips that to "scanner consumes, legit user's click within 60s also
+# succeeds." See plans/auth_debug_improvements.md (M3) for the rationale.
+GRACE_WINDOW = 60
 RATE_WINDOW = 3600
 RATE_MAX = 3
 SESSION_VERSION = "v2"
@@ -33,6 +42,10 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 class AuthState:
     lock = threading.Lock()
     tokens: dict[str, float] = {}
+    # tok -> {"issued_at": <epoch>, "consumed_at": <epoch>}. Populated by
+    # consume_token on first success; used to honor a re-consume of the same
+    # token within GRACE_WINDOW seconds. Cleaned up by cleanup_stale_tokens.
+    consumed: dict[str, dict] = {}
     rate_buckets: dict[str, list[float]] = {}
 
 
@@ -63,6 +76,9 @@ def cleanup_stale_tokens() -> None:
         for t, exp in list(AuthState.tokens.items()):
             if exp < now:
                 del AuthState.tokens[t]
+        for t, rec in list(AuthState.consumed.items()):
+            if (now - rec["consumed_at"]) >= GRACE_WINDOW:
+                del AuthState.consumed[t]
 
 
 def check_rate_limit(email_hash: str) -> bool:
@@ -91,21 +107,42 @@ def consume_token(tok: str) -> dict:
     """Consume a magic-link token.
 
     Returns one of:
-      {"status": "ok", "issued_at": <epoch>} — token was valid and unexpired; caller
-          should use issued_at when signing the session cookie.
+      {"status": "ok", "issued_at": <epoch>} — token was valid and unexpired,
+          OR was consumed within the last GRACE_WINDOW seconds. On a fresh
+          consume the issued_at is derived from the live token's stored
+          expiry; on a re-consume within the grace window it's the
+          issued_at that was captured at first consume. Caller signs the
+          session cookie with this value.
       {"status": "expired"} — token existed but was past TTL. Shown to user as
           "that link expired".
-      {"status": "invalid"} — token was never issued or already consumed. Shown
-          to user as "that link isn't valid".
+      {"status": "invalid"} — token was never issued, or was consumed more
+          than GRACE_WINDOW seconds ago. Shown to user as
+          "that link isn't valid".
     """
+    now = time.time()
     with AuthState.lock:
         exp = AuthState.tokens.pop(tok, None)
-    if exp is None:
+        if exp is not None:
+            if exp < now:
+                # Past-TTL tokens are treated as expired and NOT recorded
+                # in `consumed` — re-presenting them after this point is
+                # an "invalid" outcome, consistent with the prior contract.
+                return {"status": "expired"}
+            issued_at = exp - TOKEN_TTL
+            AuthState.consumed[tok] = {
+                "issued_at": issued_at,
+                "consumed_at": now,
+            }
+            return {"status": "ok", "issued_at": issued_at}
+        # Token not in the live set — check whether it was just consumed.
+        rec = AuthState.consumed.get(tok)
+        if rec and (now - rec["consumed_at"]) < GRACE_WINDOW:
+            return {"status": "ok", "issued_at": rec["issued_at"]}
+        if rec:
+            # Past the grace window; drop opportunistically so memory doesn't
+            # accumulate even when cleanup_stale_tokens hasn't run recently.
+            AuthState.consumed.pop(tok, None)
         return {"status": "invalid"}
-    now = time.time()
-    if exp < now:
-        return {"status": "expired"}
-    return {"status": "ok", "issued_at": exp - TOKEN_TTL}
 
 
 def install_recently_allowed(token_issued_at: Optional[float], now: Optional[float] = None) -> bool:

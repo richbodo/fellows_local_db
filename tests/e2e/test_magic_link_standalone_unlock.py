@@ -51,6 +51,7 @@ def deploy_page(context, deploy_server):
     state = deploy_server["auth_state"]
     with state.lock:
         state.tokens.clear()
+        state.consumed.clear()
         state.rate_buckets.clear()
     deploy_server["sent"].clear()
     try:
