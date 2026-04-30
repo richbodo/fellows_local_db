@@ -313,6 +313,11 @@ prod-stats since="24 hours ago":
 prod-stats-long:
     ssh -p {{ssh_port}} {{ssh_user}}@{{host}} "/opt/fellows/bin/prod_stats --include-emails"
 
+# 4xx/5xx counters and the 10 most recent error access lines (default 24h).
+[group('prod')]
+prod-errors since="24 hours ago":
+    ssh -p {{ssh_port}} {{ssh_user}}@{{host}} "/opt/fellows/bin/prod_stats --errors-only --since '{{since}}'"
+
 # systemctl status fellows-pwa caddy.
 [group('prod')]
 prod-status:

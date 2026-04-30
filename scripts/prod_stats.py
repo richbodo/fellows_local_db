@@ -99,6 +99,9 @@ def _entry_ts(entry: dict) -> str | None:
         return None
 
 
+RECENT_ERRORS_CAP = 10
+
+
 def tally(entries) -> dict:
     """Count request categories, structured events, and per-hash send events."""
     shell_loads = 0
@@ -106,7 +109,12 @@ def tally(entries) -> dict:
     db_downloads = 0
     verify_ok = 0
     verify_fail = 0
+    errors_4xx: Counter = Counter()
     errors_5xx: Counter = Counter()
+    # All 4xx/5xx access lines, captured verbatim for `--errors-only` recall
+    # ("user said they got a 404 around 3pm — what happened?"). We over-collect
+    # here and trim at the end so the order of the input stream doesn't matter.
+    recent_errors_buf: list = []
     links_sent = 0
     links_send_failed: Counter = Counter()
     # hash_prefix -> {"events": [{"ts", "result"}, ...]}
@@ -159,6 +167,18 @@ def tally(entries) -> dict:
                 verify_fail += 1
         if status >= 500:
             errors_5xx[f"{status} {method} {path_no_query}"] += 1
+        elif status >= 400:
+            errors_4xx[f"{status} {method} {path_no_query}"] += 1
+        if status >= 400:
+            recent_errors_buf.append((ts or "", status, m))
+
+    # Newest first, capped. Sorts on ts then status so a tie on missing ts
+    # still gives a stable order rather than relying on input order.
+    recent_errors_buf.sort(key=lambda t: (t[0], t[1]), reverse=True)
+    recent_errors = [
+        {"ts": t, "status": s, "message": msg}
+        for (t, s, msg) in recent_errors_buf[:RECENT_ERRORS_CAP]
+    ]
 
     return {
         "shell_loads": shell_loads,
@@ -168,7 +188,9 @@ def tally(entries) -> dict:
         "magic_links_send_failed": dict(links_send_failed),
         "magic_links_verified": verify_ok,
         "magic_links_verify_failed": verify_fail,
+        "errors_4xx": dict(errors_4xx),
         "errors_5xx": dict(errors_5xx),
+        "recent_errors": recent_errors,
         "email_events_by_prefix": email_events,
     }
 
@@ -253,21 +275,38 @@ def resolve_recipients(email_events: dict, hash_index: dict) -> list:
 def print_human(
     stats: dict, disk: dict, since: str, unit: str,
     recipients: list | None = None,
+    errors_only: bool = False,
 ) -> None:
     print(f"== {unit} — since {since} ==")
-    print(f"  App-shell loads:         {stats['shell_loads']}")
-    print(f"  Directory API hits:      {stats['api_fellows']}")
-    print(f"  DB downloads:            {stats['db_downloads']}")
-    print(f"  Magic links sent:        {stats['magic_links_sent']}")
-    for result, count in sorted(stats["magic_links_send_failed"].items()):
-        print(f"    └─ send {result:12s} {count}")
-    print(f"  Magic links verified:    {stats['magic_links_verified']}")
-    if stats["magic_links_verify_failed"]:
-        print(f"  Magic links rejected:    {stats['magic_links_verify_failed']}")
+    if not errors_only:
+        print(f"  App-shell loads:         {stats['shell_loads']}")
+        print(f"  Directory API hits:      {stats['api_fellows']}")
+        print(f"  DB downloads:            {stats['db_downloads']}")
+        print(f"  Magic links sent:        {stats['magic_links_sent']}")
+        for result, count in sorted(stats["magic_links_send_failed"].items()):
+            print(f"    └─ send {result:12s} {count}")
+        print(f"  Magic links verified:    {stats['magic_links_verified']}")
+        if stats["magic_links_verify_failed"]:
+            print(f"  Magic links rejected:    {stats['magic_links_verify_failed']}")
+    total_4xx = sum(stats.get("errors_4xx", {}).values())
+    print(f"  4xx errors:              {total_4xx}")
+    for line, count in sorted(stats.get("errors_4xx", {}).items(), key=lambda kv: -kv[1])[:5]:
+        print(f"    └─ {line}: {count}")
     total_5xx = sum(stats["errors_5xx"].values())
     print(f"  5xx errors:              {total_5xx}")
     for line, count in sorted(stats["errors_5xx"].items(), key=lambda kv: -kv[1])[:5]:
         print(f"    └─ {line}: {count}")
+    if errors_only:
+        recent = stats.get("recent_errors") or []
+        print("")
+        print(f"-- {len(recent)} most recent error access line(s) --")
+        if not recent:
+            print("  (none in window)")
+        else:
+            for r in recent:
+                ts = r.get("ts") or "—"
+                print(f"  [{ts}] {r.get('message', '')}")
+        return
     print(
         f"  Disk ({disk['path']}):  "
         f"{disk['used_gib']:.1f} / {disk['total_gib']:.1f} GiB used "
@@ -320,6 +359,11 @@ def main(argv=None) -> int:
         "(joined against /opt/fellows/deploy/dist/fellows.db). When set and "
         "--since is omitted, the window defaults to '@0' (full journal).",
     )
+    parser.add_argument(
+        "--errors-only", action="store_true",
+        help="Print only 4xx/5xx counters and the most recent error access "
+        "lines. Useful for triaging a user-reported error code.",
+    )
     args = parser.parse_args(argv)
 
     if args.since is None:
@@ -348,7 +392,10 @@ def main(argv=None) -> int:
             payload["recipients"] = recipients
         print(json.dumps(payload, sort_keys=True))
     else:
-        print_human(public_stats, disk, args.since, args.unit, recipients=recipients)
+        print_human(
+            public_stats, disk, args.since, args.unit,
+            recipients=recipients, errors_only=args.errors_only,
+        )
     return 0
 
 
