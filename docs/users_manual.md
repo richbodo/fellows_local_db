@@ -46,8 +46,21 @@ install it anyway.  Do that.  Ask for help.
    background — you should see photos filling in over a minute or so on a
    normal connection.
 
-If you see a message saying your browser doesn't support install, try
-Chrome or Edge on desktop, or Safari on iOS.
+If clicking **Install app** doesn't bring up an install prompt, the
+landing page shows a hint with two options:
+
+- If you've already installed this app on this device, open it from your
+  dock, Applications folder, or home screen (the install prompt is
+  suppressed for already-installed PWAs).
+- Otherwise, click **Use the directory in this tab** below the install
+  button to start using the app immediately in the current browser tab.
+  Search, profiles, and groups all work — it just lives inside the
+  browser instead of as a standalone app icon.
+
+The "in tab" path is also a graceful fallback for older browsers that
+can't run the install prompt at all. You can always come back and try
+the install button later — your browser may need more engagement before
+it offers the prompt.
 
 ---
 
