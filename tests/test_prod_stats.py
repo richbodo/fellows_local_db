@@ -126,6 +126,63 @@ def test_tally_bucket_5xx_by_route():
     assert stats["errors_5xx"] == {"500 GET /api/stats": 1}
 
 
+def test_tally_buckets_4xx_by_route_and_excludes_5xx():
+    """4xx access lines bucket separately from 5xx; verify-token 401 already
+    has its own counter (verify_fail) but should still also appear here so
+    the operator sees full per-status breakdown."""
+    entries = [
+        _entry('127.0.0.1 - - [x] "GET /api/fellows/missing HTTP/1.1" 404 -'),
+        _entry('127.0.0.1 - - [x] "GET /fellows.db HTTP/1.1" 403 -'),
+        _entry('127.0.0.1 - - [x] "GET /api/fellows/missing HTTP/1.1" 404 -'),
+        _entry('127.0.0.1 - - [x] "GET /api/stats HTTP/1.1" 500 -'),
+    ]
+    stats = prod_stats.tally(entries)
+    assert stats["errors_4xx"] == {
+        "404 GET /api/fellows/missing": 2,
+        "403 GET /fellows.db": 1,
+    }
+    # 5xx still bucketed independently.
+    assert stats["errors_5xx"] == {"500 GET /api/stats": 1}
+
+
+def test_tally_recent_errors_caps_and_orders_newest_first():
+    """recent_errors carries the verbatim access line for each 4xx/5xx,
+    sorted newest-first and capped at RECENT_ERRORS_CAP. This is what
+    `--errors-only` prints to support 'user reported a 404 at 3pm —
+    what was it?' triage."""
+    msgs = []
+    expected_total = prod_stats.RECENT_ERRORS_CAP + 3
+    for i in range(expected_total):
+        # Increment timestamp so sort order is well-defined.
+        ts = f"2026-04-23T10:{i:02d}:00Z"
+        msgs.append(_entry(f'127.0.0.1 - - [x] "GET /thing/{i} HTTP/1.1" 404 -', ts=ts))
+    # Sprinkle 200s — must NOT show up in recent_errors.
+    msgs.append(_entry('127.0.0.1 - - [x] "GET / HTTP/1.1" 200 -',
+                       ts="2026-04-23T11:00:00Z"))
+    stats = prod_stats.tally(msgs)
+    recent = stats["recent_errors"]
+    assert len(recent) == prod_stats.RECENT_ERRORS_CAP
+    # Newest first: i = expected_total-1 down to expected_total - CAP
+    assert "GET /thing/" + str(expected_total - 1) in recent[0]["message"]
+    assert recent[0]["status"] == 404
+    # All entries must be 4xx/5xx; no 200s
+    for r in recent:
+        assert r["status"] >= 400
+    # Strictly descending ts.
+    timestamps = [r["ts"] for r in recent]
+    assert timestamps == sorted(timestamps, reverse=True)
+
+
+def test_tally_recent_errors_empty_when_no_errors():
+    entries = [
+        _entry('127.0.0.1 - - [x] "GET / HTTP/1.1" 200 -'),
+        _entry('127.0.0.1 - - [x] "GET /api/fellows HTTP/1.1" 200 -'),
+    ]
+    stats = prod_stats.tally(entries)
+    assert stats["recent_errors"] == []
+    assert stats["errors_4xx"] == {}
+
+
 def test_tally_ignores_build_meta_and_rate_limit_lines():
     # Inputs that look structured but aren't send_unlock_email must not count.
     entries = [
@@ -368,11 +425,63 @@ def test_print_human_with_recipients_prints_confidential_block(capsys):
         "shell_loads": 0, "api_fellows": 0, "db_downloads": 0,
         "magic_links_sent": 2, "magic_links_send_failed": {},
         "magic_links_verified": 0, "magic_links_verify_failed": 0,
-        "errors_5xx": {},
+        "errors_4xx": {}, "errors_5xx": {},
     }, disk, "@0", "fellows-pwa", recipients=recipients)
     out = capsys.readouterr().out
     assert "Magic-link recipients" in out
     assert "alice@example.com" in out
+
+
+def test_print_human_errors_only_skips_unrelated_sections(capsys):
+    """In --errors-only mode, print_human prints just the 4xx/5xx counts
+    plus the most recent error access lines. The shell-loads / disk /
+    magic-link sections must NOT appear — that's the whole point of
+    "what just broke?" triage view."""
+    disk = {"path": "/", "total_gib": 25.0, "used_gib": 10.0,
+            "free_gib": 15.0, "pct_used": 40.0}
+    stats = {
+        "shell_loads": 99, "api_fellows": 99, "db_downloads": 99,
+        "magic_links_sent": 7, "magic_links_send_failed": {},
+        "magic_links_verified": 7, "magic_links_verify_failed": 0,
+        "errors_4xx": {"404 GET /thing": 3},
+        "errors_5xx": {"500 GET /api/stats": 1},
+        "recent_errors": [
+            {"ts": "2026-04-23T15:00:00Z", "status": 404,
+             "message": '127.0.0.1 - - [x] "GET /thing HTTP/1.1" 404 -'},
+        ],
+    }
+    prod_stats.print_human(stats, disk, "24 hours ago", "fellows-pwa",
+                           errors_only=True)
+    out = capsys.readouterr().out
+    assert "fellows-pwa" in out
+    assert "4xx errors:" in out and "404 GET /thing: 3" in out
+    assert "5xx errors:" in out and "500 GET /api/stats: 1" in out
+    # The verbatim recent line is the high-value signal.
+    assert "most recent error access line" in out
+    assert "/thing" in out and "2026-04-23T15:00:00Z" in out
+    # Sections that don't belong in errors-only must be absent.
+    assert "App-shell loads:" not in out
+    assert "Magic links sent:" not in out
+    assert "Disk (" not in out
+
+
+def test_print_human_errors_only_with_no_errors_says_so(capsys):
+    """Empty 4xx/5xx + recent_errors should still produce a clean report
+    (no crash, no blank section)."""
+    disk = {"path": "/", "total_gib": 25.0, "used_gib": 10.0,
+            "free_gib": 15.0, "pct_used": 40.0}
+    stats = {
+        "shell_loads": 0, "api_fellows": 0, "db_downloads": 0,
+        "magic_links_sent": 0, "magic_links_send_failed": {},
+        "magic_links_verified": 0, "magic_links_verify_failed": 0,
+        "errors_4xx": {}, "errors_5xx": {}, "recent_errors": [],
+    }
+    prod_stats.print_human(stats, disk, "24 hours ago", "fellows-pwa",
+                           errors_only=True)
+    out = capsys.readouterr().out
+    assert "4xx errors:              0" in out
+    assert "5xx errors:              0" in out
+    assert "(none in window)" in out
 
 
 # ---- main() + --json -----------------------------------------------------
@@ -391,5 +500,34 @@ def test_main_json_output_parses(monkeypatch, capsys):
     assert set(payload["disk"].keys()) == {
         "path", "total_gib", "used_gib", "free_gib", "pct_used",
     }
+    # 4xx + 5xx counters and recent-error list must be in the public JSON
+    # so an automated consumer (e.g. an oncall dashboard) can read them.
+    assert "errors_4xx" in payload["requests"]
+    assert "errors_5xx" in payload["requests"]
+    assert "recent_errors" in payload["requests"]
     # Internal per-prefix bucket must not leak into the public JSON.
     assert "email_events_by_prefix" not in payload["requests"]
+
+
+def test_main_errors_only_flag_routes_to_focused_view(monkeypatch, capsys):
+    """`--errors-only` switches the human output to the focused triage
+    view; it must NOT change the JSON path. Verifies the wiring from
+    argparse → print_human, not the body of print_human itself (which
+    has its own tests above)."""
+    error_entries = [
+        _entry('127.0.0.1 - - [x] "GET /missing HTTP/1.1" 404 -',
+               ts="2026-04-23T15:00:00Z"),
+        _entry('127.0.0.1 - - [x] "GET / HTTP/1.1" 200 -',
+               ts="2026-04-23T15:01:00Z"),
+    ]
+    monkeypatch.setattr(prod_stats, "journal_entries",
+                        lambda unit, since: error_entries)
+    rc = prod_stats.main(["--errors-only", "--since", "1 hour ago"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "4xx errors:" in out
+    assert "404 GET /missing: 1" in out
+    assert "most recent error access line" in out
+    # Non-error sections suppressed.
+    assert "App-shell loads:" not in out
+    assert "Disk (" not in out

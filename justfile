@@ -109,6 +109,20 @@ port:
 gate:
     {{opener}} "http://localhost:{{port}}/?gate=1"
 
+# Print LAN URL for testing on a real phone over Wi-Fi, then start server.
+[group('dev')]
+serve-lan:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ip=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)
+    if [ -z "${ip:-}" ]; then
+        echo "Could not auto-detect LAN IP. Try: ifconfig | grep 'inet '"
+    else
+        echo "LAN URL:  http://$ip:{{port}}/"
+        echo "(phone must be on the same Wi-Fi network)"
+    fi
+    ./run.sh start
+
 
 # ---- db / data -----------------------------------------------------------
 
@@ -215,6 +229,11 @@ test-e2e filter="":
 test-fast:
     ./scripts/ensure_port_8765_free.sh tests/test_database.py tests/test_api.py tests/test_prod_stats.py -v
 
+# Mobile screenshot harness across device matrix → tests/e2e/mobile/current_state/.
+[group('test')]
+test-mobile *args="tests/e2e/mobile/ -v":
+    ./scripts/ensure_port_8765_free.sh {{args}}
+
 
 # ---- build / deploy ------------------------------------------------------
 
@@ -312,6 +331,11 @@ prod-stats since="24 hours ago":
 [group('prod')]
 prod-stats-long:
     ssh -p {{ssh_port}} {{ssh_user}}@{{host}} "/opt/fellows/bin/prod_stats --include-emails"
+
+# 4xx/5xx counters and the 10 most recent error access lines (default 24h).
+[group('prod')]
+prod-errors since="24 hours ago":
+    ssh -p {{ssh_port}} {{ssh_user}}@{{host}} "/opt/fellows/bin/prod_stats --errors-only --since '{{since}}'"
 
 # systemctl status fellows-pwa caddy.
 [group('prod')]
