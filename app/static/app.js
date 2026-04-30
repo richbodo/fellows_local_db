@@ -116,6 +116,7 @@
   var authDebugInstallEl = document.getElementById('auth-debug-install');
   var gateReasonBannerEl = document.getElementById('gate-reason-banner');
   var installUnsupportedHintEl = document.getElementById('install-unsupported-hint');
+  var installUseInTabEl = document.getElementById('install-use-in-tab');
   var backToGateLinkEl = document.getElementById('back-to-gate-link');
   var swUpdateBannerEl = document.getElementById('sw-update-banner');
   var swUpdateReloadEl = document.getElementById('sw-update-reload');
@@ -2317,6 +2318,21 @@
           });
       });
     }
+
+    // "Use the directory in this tab" — escape hatch for users whose browser
+    // never fires beforeinstallprompt (already-installed Chrome, engagement
+    // heuristic not yet met, etc.). Mirrors the path a returning user gets
+    // automatically via shouldActAsApp(): mark this origin as authenticated
+    // and boot the directory in the current tab.
+    if (installUseInTabEl && !installUseInTabEl._wired) {
+      installUseInTabEl._wired = true;
+      installUseInTabEl.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        markAuthenticatedOnce();
+        if (installLandingEl) installLandingEl.classList.add('hidden');
+        bootDirectoryAsApp();
+      });
+    }
   }
 
   function setGateReasonBanner(reason) {
@@ -2389,6 +2405,21 @@
       return Promise.resolve();
     }
     var token = m[1];
+    // Guard against double-fire within the same tab. Magic-link tokens are
+    // single-use server-side, so a second POST returns "invalid" — which the
+    // user sees as "That link isn't valid." iOS Safari's bfcache restore and
+    // back/forward navigation can both resurrect a page with the original
+    // #/unlock/<tok> hash and re-run boot. sessionStorage is per-tab and
+    // cleared on tab close, so a fresh visit (new tab) always retries cleanly.
+    var redeemKey = 'redeeming:' + token;
+    try {
+      if (sessionStorage.getItem(redeemKey)) {
+        // Already in-flight or completed in this tab; strip hash, no-op.
+        window.history.replaceState(null, '', '/#/');
+        return Promise.resolve();
+      }
+      sessionStorage.setItem(redeemKey, String(Date.now()));
+    } catch (e) {}
     return fetch('/api/verify-token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

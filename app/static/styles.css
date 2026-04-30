@@ -1086,6 +1086,34 @@ h1 {
   text-align: left;
 }
 
+.install-unsupported-hint-lead {
+  margin: 0 0 0.4rem;
+  font-weight: 600;
+}
+
+.install-unsupported-hint-list {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.install-unsupported-hint-list li + li {
+  margin-top: 0.3rem;
+}
+
+.install-use-in-tab {
+  margin: 1rem 0 0;
+  font-size: 0.9rem;
+}
+
+.install-use-in-tab-link {
+  color: #4a2c6a;
+  text-decoration: underline;
+}
+
+.install-use-in-tab-link:hover {
+  color: #3d2460;
+}
+
 .install-back-gate {
   margin: 0.75rem 0 0;
   font-size: 0.85rem;

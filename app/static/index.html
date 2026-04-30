@@ -125,9 +125,17 @@
       <p id="install-ios-hint" class="install-ios-hint hidden">
         On iPhone or iPad: tap <strong>Share</strong>, then <strong>Add to Home Screen</strong>.
       </p>
-      <p id="install-unsupported-hint" class="install-unsupported-hint hidden">
-        Your browser doesn't support install. We don't want to run this as SaaS, so please use Chrome,
-        Edge, Safari, or any other browser that supports installing a progressive web app. Thanks.
+      <div id="install-unsupported-hint" class="install-unsupported-hint hidden">
+        <p class="install-unsupported-hint-lead">No install prompt yet. Two ways forward:</p>
+        <ul class="install-unsupported-hint-list">
+          <li>If you've already installed this app on this device, open it from your dock,
+              Applications folder, or home screen.</li>
+          <li>Otherwise, click <strong>use the directory in this tab</strong> below to start
+              using the app right now without installing.</li>
+        </ul>
+      </div>
+      <p class="install-use-in-tab">
+        <a href="#" id="install-use-in-tab" class="install-use-in-tab-link">Use the directory in this tab</a>
       </p>
       <p class="install-ttl-hint">Install within 30 minutes of requesting the link, or request a new one.</p>
       <p class="install-back-gate">
