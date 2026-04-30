@@ -3657,7 +3657,7 @@
         if (totalEl) totalEl.innerHTML = 'Total Fellows: <strong>' + escapeHtml(String(data.total)) + '</strong>';
         if (gridEl) {
           var gh = '<div class="stats-col stats-col--left">';
-          gh += statsSection('Fellows by Type', data.by_fellow_type, '#4a2c6a');
+          gh += statsSection('Fellows by Type', data.by_fellow_type, '#0066cc');
           gh += statsSection('Fellows by Cohort', data.by_cohort, '#2c6a4a');
           gh += statsSection('Fellows by Region', data.by_region, '#2c4a6a');
           gh += '</div>';
@@ -4502,10 +4502,10 @@
     'h1{margin:0 0 0.2rem;font-size:1.4rem;}' +
     '.meta{font-size:0.85rem;color:#666;margin-bottom:0.6rem;}' +
     '.contact-bar{display:flex;align-items:center;gap:0.75rem;padding:0.5rem 0.7rem;' +
-    'margin-bottom:1rem;background:#f0ecf5;border:1px solid #dcd6e8;border-radius:3px;' +
+    'margin-bottom:1rem;background:#dbeafe;border:1px solid #c4d0e0;border-radius:3px;' +
     'font-size:0.85rem;}' +
     '.contact-bar a{color:#0066cc;text-decoration:underline;font-weight:500;}' +
-    '.helper{color:#7a6f91;font-size:0.78rem;}' +
+    '.helper{color:#64748b;font-size:0.78rem;}' +
     '.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:0.9rem;' +
     'margin-bottom:1.6rem;}' +
     '.cell{display:block;text-decoration:none;color:inherit;text-align:center;}' +
