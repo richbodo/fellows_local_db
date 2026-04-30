@@ -113,6 +113,9 @@
   var installStatusEl = document.getElementById('install-status');
   var iosHintEl = document.getElementById('install-ios-hint');
   var authDebugPrivateEl = document.getElementById('auth-debug-private');
+  var authDebugPrivatePreEl = document.getElementById('auth-debug-private-pre');
+  var authDebugPrivateCopyEl = document.getElementById('auth-debug-private-copy');
+  var authDebugPrivateCopyStatusEl = document.getElementById('auth-debug-private-copy-status');
   var authDebugInstallEl = document.getElementById('auth-debug-install');
   var gateReasonBannerEl = document.getElementById('gate-reason-banner');
   var installUnsupportedHintEl = document.getElementById('install-unsupported-hint');
@@ -152,6 +155,31 @@
   // lives in relationships.settings for durability across Clear App Cache;
   // localStorage is just a fast-read cache that boot mirrors from settings.
   var FELLOWS_SELF_EMAIL_KEY = 'fellows_self_email';
+
+  // Last gate submit, used as a correlation handle in the bug-report body
+  // and the gate diag block. Hash matches what deploy/server.py logs as
+  // email_hash_prefix in event=send_unlock_email, so a maintainer can join
+  // a user report to the journald entry without the email leaving the user.
+  var lastSubmitInfo = { emailHashPrefix: null, submittedAt: null };
+
+  function sha256HexBrowser(str) {
+    if (!(window.crypto && window.crypto.subtle && window.TextEncoder)) {
+      return Promise.resolve(null);
+    }
+    try {
+      var bytes = new TextEncoder().encode(str);
+      return window.crypto.subtle.digest('SHA-256', bytes).then(function (buf) {
+        var arr = new Uint8Array(buf);
+        var hex = '';
+        for (var i = 0; i < arr.length; i++) {
+          hex += (arr[i] < 16 ? '0' : '') + arr[i].toString(16);
+        }
+        return hex;
+      }).catch(function () { return null; });
+    } catch (e) {
+      return Promise.resolve(null);
+    }
+  }
 
   function getSelfEmail() {
     try { return localStorage.getItem(FELLOWS_SELF_EMAIL_KEY) || ''; }
@@ -1116,13 +1144,19 @@
       kind: 'api',
       getList: function () {
         return fetch('/api/fellows').then(function (r) {
-          if (!r.ok) throw apiError('/api/fellows', r.status);
+          if (!r.ok) {
+            pushBugReportError('http', 'GET /api/fellows → ' + r.status);
+            throw apiError('/api/fellows', r.status);
+          }
           return r.json();
         });
       },
       getFull: function () {
         return fetch('/api/fellows?full=1').then(function (r) {
-          if (!r.ok) throw apiError('/api/fellows?full=1', r.status);
+          if (!r.ok) {
+            pushBugReportError('http', 'GET /api/fellows?full=1 → ' + r.status);
+            throw apiError('/api/fellows?full=1', r.status);
+          }
           return r.json();
         });
       },
@@ -1744,6 +1778,13 @@
       lines.push('directoryDataSource: ' +
         (typeof directoryDataSource !== 'undefined' ? directoryDataSource : '(unset)'));
     } catch (e) {}
+    if (lastSubmitInfo.emailHashPrefix && lastSubmitInfo.submittedAt) {
+      // Join key into deploy/server.py's event=send_unlock_email log.
+      lines.push(
+        'last_submit: hash=' + lastSubmitInfo.emailHashPrefix +
+        '  at ' + lastSubmitInfo.submittedAt
+      );
+    }
     if (bugReportErrorRing.length === 0) {
       lines.push('recent errors: (none captured)');
     } else {
@@ -1968,6 +2009,7 @@
   function fetchFellowsDbWithProgress(onProgress) {
     return fetch('/fellows.db').then(function (r) {
       if (!r.ok) {
+        pushBugReportError('http', 'GET /fellows.db → ' + r.status);
         throw new Error('GET /fellows.db failed: HTTP ' + r.status);
       }
       var lenHeader = r.headers.get('Content-Length');
@@ -2181,6 +2223,7 @@
         })
         .catch(function (err) {
           logSwLifecycle('register_error', { message: err && err.message });
+          pushBugReportError('sw', 'register_error: ' + (err && err.message));
         });
     });
   }
@@ -2215,14 +2258,52 @@
     );
   }
 
+  // Multi-line diag for the email-gate block. Same fields the bug-report
+  // body uses, minus the recent-error ring — we keep the gate compact and
+  // expect the user to click "report a problem" if they need to send the
+  // full payload. last_submit appears only after a Send link click; that
+  // hash matches deploy/server.py's email_hash_prefix log so a maintainer
+  // can grep journald without the user having to disclose their address.
+  function formatGateDiagSummary(data, httpStatus) {
+    var lines = [];
+    lines.push('time:        ' + new Date().toISOString());
+    lines.push('auth:        ' + formatAuthDebugLine(data, httpStatus));
+    lines.push('app:         ' + FELLOWS_UI_DIAG);
+    var serverLabel = '(unknown)';
+    if (bootBuildMeta && (bootBuildMeta.git_sha || bootBuildMeta.built_at)) {
+      serverLabel = (bootBuildMeta.git_sha || '') +
+        (bootBuildMeta.built_at ? ' @ ' + bootBuildMeta.built_at : '');
+    }
+    lines.push('server:      ' + serverLabel);
+    lines.push('display:     ' + (isStandaloneDisplayMode() ? 'standalone' : 'browser-tab'));
+    try { lines.push('viewport:    ' + window.innerWidth + 'x' + window.innerHeight); } catch (e) {}
+    try { lines.push('online:      ' + Boolean(navigator.onLine)); } catch (e) {}
+    try { lines.push('language:    ' + String(navigator.language || '')); } catch (e) {}
+    try { lines.push('platform:    ' + String(navigator.platform || '')); } catch (e) {}
+    lines.push('userAgent:   ' + String(navigator.userAgent || ''));
+    if (lastSubmitInfo.emailHashPrefix && lastSubmitInfo.submittedAt) {
+      lines.push(
+        'last_submit: hash=' + lastSubmitInfo.emailHashPrefix +
+        '  at ' + lastSubmitInfo.submittedAt
+      );
+    }
+    return lines.join('\n');
+  }
+
   function showAuthDebugInstall(data, httpStatus) {
     if (authDebugPrivateEl) {
       authDebugPrivateEl.classList.add('hidden');
-      authDebugPrivateEl.textContent = '';
     }
+    if (authDebugPrivatePreEl) authDebugPrivatePreEl.textContent = '';
     if (authDebugInstallEl) {
       authDebugInstallEl.textContent = formatAuthDebugLine(data, httpStatus);
       authDebugInstallEl.classList.remove('hidden');
+    }
+  }
+
+  function renderAuthDebugPrivate(data, httpStatus) {
+    if (authDebugPrivatePreEl) {
+      authDebugPrivatePreEl.textContent = formatGateDiagSummary(data, httpStatus);
     }
   }
 
@@ -2232,9 +2313,57 @@
       authDebugInstallEl.textContent = '';
     }
     if (authDebugPrivateEl) {
-      authDebugPrivateEl.textContent = formatAuthDebugLine(data, httpStatus);
+      // Stash the latest payload so a later refresh (e.g. after a submit
+      // populates lastSubmitInfo) can rebuild the block in place.
+      authDebugPrivateEl._lastData = data;
+      authDebugPrivateEl._lastHttpStatus = httpStatus;
+      renderAuthDebugPrivate(data, httpStatus);
       authDebugPrivateEl.classList.remove('hidden');
     }
+  }
+
+  function refreshAuthDebugPrivate() {
+    if (!authDebugPrivateEl) return;
+    if (authDebugPrivateEl.classList.contains('hidden')) return;
+    renderAuthDebugPrivate(
+      authDebugPrivateEl._lastData || null,
+      authDebugPrivateEl._lastHttpStatus
+    );
+  }
+
+  function setAuthDebugCopyStatus(msg) {
+    if (!authDebugPrivateCopyStatusEl) return;
+    authDebugPrivateCopyStatusEl.textContent = msg || '';
+  }
+
+  function initAuthDebugCopyButton() {
+    if (!authDebugPrivateCopyEl || authDebugPrivateCopyEl._wired) return;
+    authDebugPrivateCopyEl._wired = true;
+    authDebugPrivateCopyEl.addEventListener('click', function () {
+      var text = (authDebugPrivatePreEl && authDebugPrivatePreEl.textContent) || '';
+      function fallback() {
+        try {
+          var sel = window.getSelection();
+          var range = document.createRange();
+          range.selectNodeContents(authDebugPrivatePreEl);
+          sel.removeAllRanges();
+          sel.addRange(range);
+          if (document.execCommand && document.execCommand('copy')) {
+            setAuthDebugCopyStatus('Copied.');
+            sel.removeAllRanges();
+            return;
+          }
+        } catch (e) {}
+        setAuthDebugCopyStatus('Copy failed — select the box above and copy manually.');
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () {
+          setAuthDebugCopyStatus('Copied.');
+        }, fallback);
+      } else {
+        fallback();
+      }
+    });
   }
 
   function initBrowserInstallMode(authPayload, httpStatus) {
@@ -2349,24 +2478,44 @@
     if (authPayload) {
       showAuthDebugPrivate(authPayload, httpStatus != null ? httpStatus : 200);
     }
+    initAuthDebugCopyButton();
 
     if (unlockEmailFormEl && !unlockEmailFormEl._wired) {
       unlockEmailFormEl._wired = true;
       unlockEmailFormEl.addEventListener('submit', function (ev) {
         ev.preventDefault();
         var email = (unlockEmailInputEl && unlockEmailInputEl.value) || '';
+        var trimmed = email.trim();
         // Capture the user's own email for the export "email it to me"
         // feature (PR 5). Mirrors to relationships.settings on next boot.
         setSelfEmailLocal(email);
         if (unlockStatusEl) unlockStatusEl.textContent = 'Sending…';
         setGateReasonBanner('');
+        // Hash the submitted email locally so the bug-report and gate diag
+        // block carry a stable join key into deploy/server.py's journald
+        // event=send_unlock_email.email_hash_prefix without ever sending
+        // the address itself out-of-band.
+        var submittedAt = new Date().toISOString();
+        var hashPromise = trimmed
+          ? sha256HexBrowser(trimmed.toLowerCase())
+          : Promise.resolve(null);
+        hashPromise.then(function (hex) {
+          lastSubmitInfo = {
+            emailHashPrefix: hex ? hex.slice(0, 12) : null,
+            submittedAt: submittedAt
+          };
+          refreshAuthDebugPrivate();
+        });
         fetch('/api/send-unlock', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'same-origin',
-          body: JSON.stringify({ email: email.trim() })
+          body: JSON.stringify({ email: trimmed })
         })
           .then(function (r) {
+            if (!r.ok) {
+              pushBugReportError('http', 'POST /api/send-unlock → ' + r.status);
+            }
             return r.json();
           })
           .then(function () {
@@ -2375,7 +2524,8 @@
                 'If that email is on file, you will receive a link shortly. Check your inbox.';
             }
           })
-          .catch(function () {
+          .catch(function (err) {
+            pushBugReportError('http', 'POST /api/send-unlock failed: ' + (err && err.message));
             if (unlockStatusEl) unlockStatusEl.textContent = 'Could not send. Try again later.';
           });
       });
@@ -2405,13 +2555,21 @@
             window.history.replaceState(null, '', '/#/');
             return;
           }
+          pushBugReportError(
+            'http',
+            'POST /api/verify-token → ' + r.status + ' error=' + (j && j.error)
+          );
           var reason = (j && j.error) === 'expired' ? 'expired' : 'invalid';
           window.location.replace('/?gate=1&reason=' + reason);
           // stall remaining chain — the replace will reload us
           return new Promise(function () {});
         });
       })
-      .catch(function () {
+      .catch(function (err) {
+        pushBugReportError(
+          'http',
+          'POST /api/verify-token failed: ' + (err && err.message)
+        );
         window.location.replace('/?gate=1&reason=invalid');
         return new Promise(function () {});
       });
@@ -2453,6 +2611,7 @@
           return new Promise(function () {});
         }
         if (!r.ok) {
+          pushBugReportError('http', 'GET /api/auth/status → ' + r.status);
           throw new Error('/api/auth/status failed with HTTP ' + r.status);
         }
         return r.json().then(function (data) {

@@ -1,6 +1,24 @@
-"""E2E: bug-report dialog (in-app + install-landing surfaces)."""
+"""E2E: bug-report dialog (in-app + install-landing + gate surfaces)."""
+import json
 import pytest
 from playwright.sync_api import expect
+
+
+def _mock_auth_status_for_gate(page):
+    page.route(
+        "**/api/auth/status",
+        lambda r: r.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({
+                "authEnabled": True,
+                "authenticated": False,
+                "hasSessionCookie": False,
+                "installRecentlyAllowed": False,
+            }),
+            headers={"X-Fellows-Build": "e2e-mock"},
+        ),
+    )
 
 
 class TestBugReportInApp:
@@ -101,3 +119,93 @@ class TestBugReportInstallLanding:
         assert "display: browser-tab" in body
         # Sync-only path means the in-app extra block is NOT appended
         assert "additional diagnostics" not in body
+
+
+class TestBugReportGate:
+    """Pre-app surface: email gate exposes the same inline 'report a problem' button."""
+
+    def test_gate_inline_button_includes_browser_and_no_submit_yet(
+        self, page, base_url_fixture
+    ):
+        _mock_auth_status_for_gate(page)
+        page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+        expect(page.locator("#install-gate-private")).to_be_visible()
+
+        page.locator("#bug-report-button-gate").click()
+        dialog = page.locator("#bug-report-dialog")
+        expect(dialog).to_be_visible()
+
+        body = page.locator("#bug-report-textarea").input_value()
+        assert "userAgent:" in body
+        assert "platform:" in body
+        assert "display: browser-tab" in body
+        assert "last_submit:" not in body  # nothing submitted yet
+
+    def test_gate_bug_report_includes_last_submit_correlation_handle(
+        self, page, base_url_fixture
+    ):
+        """Submit on the gate, then open the bug report — body must carry the
+        same hash+timestamp the server's event=send_unlock_email logs.
+        """
+        _mock_auth_status_for_gate(page)
+        page.route(
+            "**/api/send-unlock",
+            lambda r: r.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"sent": True}),
+            ),
+        )
+        page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+        page.locator("#unlock-email").fill("foo@bar.com")
+        with page.expect_request("**/api/send-unlock"):
+            page.locator("#unlock-submit").click()
+        # Wait for the async sha256 to populate lastSubmitInfo.
+        page.wait_for_function(
+            "el => el && el.textContent && el.textContent.indexOf('last_submit:') !== -1",
+            arg=page.locator("#auth-debug-private-pre").element_handle(),
+            timeout=3000,
+        )
+
+        page.locator("#bug-report-button-gate").click()
+        body = page.locator("#bug-report-textarea").input_value()
+        assert "last_submit: hash=" in body
+
+        import re
+        # foo@bar.com → sha256 → 'b19d...' — assert the 12-hex shape, not value.
+        m = re.search(r"last_submit: hash=([0-9a-f]{12})\s+at\s+(\S+)", body)
+        assert m, f"expected last_submit line, got: {body[-400:]}"
+
+
+class TestBugReportHttpCapture:
+    """Boot-path non-2xx fetches push into the bug-report ring buffer so the
+    body shows users the server returned an error code (e.g. 404) — without
+    making them play journald-grep with the maintainer.
+    """
+
+    def test_404_on_api_fellows_appears_in_bug_report_body(
+        self, context, base_url_fixture
+    ):
+        page = context.new_page()
+        # Marker set + standalone fixture path forces app boot via API
+        # provider on dev (where fellows.db isn't fetched in OPFS by default).
+        page.add_init_script(
+            "window.localStorage.setItem('fellows_authenticated_once', '1');"
+        )
+        page.route(
+            "**/api/fellows*",
+            lambda r: r.fulfill(status=404, body="Not Found"),
+        )
+        try:
+            page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+            # Boot will fail; surfaces will switch to email gate fallback.
+            # Wait for some quiescence and then click the gate's bug-report
+            # button (which is reliably present in the gate fallback DOM).
+            page.locator("#install-gate-private").wait_for(
+                state="visible", timeout=5000
+            )
+            page.locator("#bug-report-button-gate").click()
+            body = page.locator("#bug-report-textarea").input_value()
+            assert "GET /api/fellows" in body and "→ 404" in body
+        finally:
+            page.close()
