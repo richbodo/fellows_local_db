@@ -151,6 +151,12 @@ Export them or inline: `FELLOWS_BASE_URL=https://staging.example.com just smoke`
   `/opt/fellows/deploy/dist/fellows.db` and matching against the
   `email_hash_prefix` the server logs per send event. Treat output as
   confidential — it contains fellow email addresses.
+- **`prod-errors [SINCE]`** — focused triage view: prints just the 4xx +
+  5xx counters and the 10 most recent error access lines verbatim.
+  Default window `24 hours ago`. Use this when a user reports "I got a
+  404" / "I got a 403" — pair the timestamp they give you with the
+  recent-error block to find the matching access line. Wraps
+  `prod_stats --errors-only`.
 - **`prod-status`** — SSH + `systemctl status fellows-pwa caddy --no-pager`.
 - **`prod-env`** — dump remote `/etc/fellows/fellows-pwa.env` (prompts for
   sudo password — values shown raw for paste-ready rotation). Wraps
