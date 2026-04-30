@@ -30,7 +30,7 @@ The explicit columns cover the fields needed for display and filtering. Any JSON
 
 The server opens a new SQLite connection per request (no connection pool — unnecessary at local scale). Responses are JSON for API routes and raw bytes for static files and images.
 
-**HTTP API.** The dev server (`app/server.py`) exposes the table below. The production server (`deploy/server.py`) adds magic-link auth (`/api/send-unlock`, `/api/verify-token`, `/api/logout`), build/diagnostics endpoints (`/healthz`, `/build-meta.json`, `/api/debug/diagnostics`, `/allowed_emails.json`), and gates directory `/api/*` paths behind a valid session cookie. The behavioral spec for the auth flow is [`email_gate.md`](email_gate.md).
+**HTTP API.** The dev server (`app/server.py`) exposes the table below. The production server (`deploy/server.py`) adds magic-link auth (`/api/send-unlock`, `/api/verify-token`, `/api/logout`), the unauthenticated client-error sink (`/api/client-errors`), build/diagnostics endpoints (`/healthz`, `/build-meta.json`, `/api/debug/diagnostics`, `/allowed_emails.json`), and gates directory `/api/*` paths behind a valid session cookie. The behavioral spec for the auth flow + client-error sanitization is [`email_gate.md`](email_gate.md).
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -48,6 +48,7 @@ The server opens a new SQLite connection per request (no connection pool — unn
 | GET | `/api/settings/<key>` | One setting; 404 if unset. |
 | PUT | `/api/settings/<key>` | Upsert (`{value: "…"}`). Empty value clears the key. |
 | GET | `/api/auth/status` | Stub in dev (auth disabled). Real shape comes from `deploy/server.py`. |
+| POST | `/api/client-errors` | Unauthenticated client-error sink. Always 204. Sanitized + rate-limited; logs `event=client_error` to journald. Schema + privacy boundary: [`email_gate.md` § Client error reporting](email_gate.md#client-error-reporting). Dev stub mirrors prod for round-trip. |
 | GET | `/fellows.db` | Raw SQLite snapshot for the PWA's OPFS bootstrap. |
 | GET | `/images/<slug>.{jpg,png}` | Profile image; alphanumeric-fallback filename match. |
 | GET | `/` and other static paths | App shell from `app/static/`. |

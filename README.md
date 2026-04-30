@@ -134,7 +134,7 @@ Static / bootstrap:
 - `GET /images/<slug>.jpg|.png` — profile image lookup by slug/name fallback.
 - `GET /` — static app shell.
 
-Production (`deploy/server.py`) adds magic-link auth (`/api/send-unlock`, `/api/verify-token`, `/api/logout`) and build/diagnostics endpoints (`/healthz`, `/build-meta.json`, `/api/debug/diagnostics`); see [`docs/email_gate.md`](docs/email_gate.md).
+Production (`deploy/server.py`) adds magic-link auth (`/api/send-unlock`, `/api/verify-token`, `/api/logout`), an unauthenticated client-error sink (`POST /api/client-errors` — sanitized, rate-limited, always 204; see [`docs/email_gate.md` § Client error reporting](docs/email_gate.md#client-error-reporting) for the schema and privacy boundary), and build/diagnostics endpoints (`/healthz`, `/build-meta.json`, `/api/debug/diagnostics`); see [`docs/email_gate.md`](docs/email_gate.md).
 
 ### Two-Phase Load
 

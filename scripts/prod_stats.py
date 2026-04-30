@@ -111,9 +111,13 @@ def tally(entries) -> dict:
     verify_fail = 0
     errors_4xx: Counter = Counter()
     errors_5xx: Counter = Counter()
-    # All 4xx/5xx access lines, captured verbatim for `--errors-only` recall
-    # ("user said they got a 404 around 3pm — what happened?"). We over-collect
-    # here and trim at the end so the order of the input stream doesn't matter.
+    # User-submitted client-error reports (POST /api/client-errors). The
+    # server already sanitizes before emitting (deploy/client_error_sanitizer.py)
+    # so anything reaching us here is safe to surface in the triage view.
+    client_errors_count = 0
+    # All 4xx/5xx access lines + client_error events, captured verbatim for
+    # `--errors-only` recall. We over-collect here and trim at the end so
+    # the order of the input stream doesn't matter.
     recent_errors_buf: list = []
     links_sent = 0
     links_send_failed: Counter = Counter()
@@ -144,6 +148,19 @@ def tally(entries) -> dict:
                     links_send_failed[result] += 1
                 continue
 
+        # Client-error reports (POST /api/client-errors → event=client_error).
+        # Sort key uses status=0 so they cluster behind same-ts access lines
+        # without disturbing the existing "newest 4xx/5xx first" ordering.
+        if m.startswith("{") and "client_error" in m:
+            try:
+                evt = json.loads(m)
+            except json.JSONDecodeError:
+                evt = None
+            if isinstance(evt, dict) and evt.get("event") == "client_error":
+                client_errors_count += 1
+                recent_errors_buf.append((ts or "", 0, m, "client_error"))
+                continue
+
         # HTTP access log lines.
         match = ACCESS_RE.search(m)
         if not match:
@@ -170,14 +187,14 @@ def tally(entries) -> dict:
         elif status >= 400:
             errors_4xx[f"{status} {method} {path_no_query}"] += 1
         if status >= 400:
-            recent_errors_buf.append((ts or "", status, m))
+            recent_errors_buf.append((ts or "", status, m, "access"))
 
     # Newest first, capped. Sorts on ts then status so a tie on missing ts
     # still gives a stable order rather than relying on input order.
     recent_errors_buf.sort(key=lambda t: (t[0], t[1]), reverse=True)
     recent_errors = [
-        {"ts": t, "status": s, "message": msg}
-        for (t, s, msg) in recent_errors_buf[:RECENT_ERRORS_CAP]
+        {"ts": t, "status": s, "message": msg, "kind": k}
+        for (t, s, msg, k) in recent_errors_buf[:RECENT_ERRORS_CAP]
     ]
 
     return {
@@ -190,6 +207,7 @@ def tally(entries) -> dict:
         "magic_links_verify_failed": verify_fail,
         "errors_4xx": dict(errors_4xx),
         "errors_5xx": dict(errors_5xx),
+        "client_errors": client_errors_count,
         "recent_errors": recent_errors,
         "email_events_by_prefix": email_events,
     }
@@ -296,16 +314,20 @@ def print_human(
     print(f"  5xx errors:              {total_5xx}")
     for line, count in sorted(stats["errors_5xx"].items(), key=lambda kv: -kv[1])[:5]:
         print(f"    └─ {line}: {count}")
+    client_errors = int(stats.get("client_errors", 0) or 0)
+    print(f"  Client error reports:    {client_errors}")
     if errors_only:
         recent = stats.get("recent_errors") or []
         print("")
-        print(f"-- {len(recent)} most recent error access line(s) --")
+        print(f"-- {len(recent)} most recent error entry(ies) --")
         if not recent:
             print("  (none in window)")
         else:
             for r in recent:
                 ts = r.get("ts") or "—"
-                print(f"  [{ts}] {r.get('message', '')}")
+                kind = r.get("kind") or "access"
+                tag = "[client_error] " if kind == "client_error" else ""
+                print(f"  [{ts}] {tag}{r.get('message', '')}")
         return
     print(
         f"  Disk ({disk['path']}):  "

@@ -26,12 +26,14 @@ Request lines are logged to stdout for journald under systemd.
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import hashlib
 import json
 import os
 import sys
 import urllib.error
 import urllib.parse
 
+import client_error_sanitizer as ces
 import magic_link_auth as ml
 import sqlite_api_support as sq
 
@@ -273,6 +275,13 @@ class Handler(SimpleHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
         ln = int(self.headers.get("Content-Length", 0) or 0)
+        # Hard cap on POST bodies. send-unlock / verify-token / logout
+        # are tiny by schema (a single email or token). client-errors is
+        # the only open-ended one; 16KB is more than enough for the
+        # diagnostics block + the 20-event ring.
+        if ln > 16 * 1024:
+            self.send_error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "Payload Too Large")
+            return
         raw_body = self.rfile.read(ln) if ln > 0 else b"{}"
         try:
             body = json.loads(raw_body.decode("utf-8"))
@@ -288,6 +297,9 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if path == "/api/logout":
             self._handle_logout()
+            return
+        if path == "/api/client-errors":
+            self._handle_client_errors(body)
             return
         self.send_error(HTTPStatus.NOT_FOUND, "Not Found")
 
@@ -395,6 +407,61 @@ class Handler(SimpleHTTPRequestHandler):
         val = ml.sign_session_value(sec, token_issued_at=result.get("issued_at"))
         cookie = ml.set_session_cookie_line(val, self.headers)
         self.send_json_with_headers({"ok": True}, 200, [("Set-Cookie", cookie)])
+
+    def _client_ip_hash_prefix(self) -> str:
+        """Stable per-IP key for rate-limiting and journald correlation.
+
+        We never log the raw IP — only the first 12 hex of its sha256.
+        Stable enough that two reports from the same browser tie together
+        in the recent-errors view; opaque enough that journald audit
+        doesn't expose a per-fellow source map.
+        """
+        ip = ""
+        try:
+            ip = (self.client_address or ("",))[0] or ""
+        except (AttributeError, IndexError):
+            ip = ""
+        if not ip:
+            return ""
+        return hashlib.sha256(ip.encode("utf-8")).hexdigest()[:12]
+
+    def _handle_client_errors(self, body: dict) -> None:
+        """Accept a sanitized client-error report; log to journald.
+
+        Unauthenticated by design — the whole point is to catch users
+        who couldn't pass the auth gate. Privacy/abuse posture:
+          * 16KB body cap (do_POST)
+          * Per-IP rate limit via the same bucket as send-unlock
+          * Schema accept-list + free-text sanitization (deploy/client_error_sanitizer.py)
+          * Always 204 — no oracle, no echo, no error message
+          * Structured journald event (`event=client_error`) is the
+            ONLY persistence; no DB writes, no file writes
+        Anything that doesn't fit the schema is dropped silently rather
+        than 400'd, to discourage probe-based reconnaissance.
+        """
+        ip_prefix = self._client_ip_hash_prefix()
+        if ip_prefix and not ml.check_rate_limit(f"clienterr:{ip_prefix}"):
+            # Silently drop to keep parity with send-unlock anti-enum.
+            self.send_response(HTTPStatus.NO_CONTENT)
+            self.end_headers()
+            return
+        try:
+            sanitized = ces.sanitize_payload(body)
+        except ValueError:
+            # Malformed-but-shape-not-recoverable. Still 204 — no oracle.
+            self.send_response(HTTPStatus.NO_CONTENT)
+            self.end_headers()
+            return
+        # Drop entries with no usable events; nothing worth logging.
+        if not sanitized.get("events"):
+            self.send_response(HTTPStatus.NO_CONTENT)
+            self.end_headers()
+            return
+        event = {"event": "client_error", "client_ip_prefix": ip_prefix}
+        event.update(sanitized)
+        print(json.dumps(event), file=sys.stderr)
+        self.send_response(HTTPStatus.NO_CONTENT)
+        self.end_headers()
 
     def send_response(self, code, message=None):
         # Track status so end_headers can pick the right Cache-Control. A long

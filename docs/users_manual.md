@@ -378,9 +378,21 @@ to help.
 - **Stuck at the email-gate page** (no link arriving, error on submit, or
   any other "I can't get in"): the gate shows a small diagnostics block
   below the form with your browser, OS, viewport, and the most recent
-  request. Click **Copy diagnostics** and paste it into your message
-  along with the time you tried — that's enough for us to find the
-  matching server-side log entry.
+  request. You have two options:
+  - **Copy diagnostics** — copies the block to your clipboard so you can
+    paste it into a chat message, an email, or anywhere else along with
+    the time you tried. That's enough for us to find the matching
+    server-side log entry.
+  - **Send diagnostics** — one-tap version of the same thing. The block
+    is sent directly to the maintainer's server log. Your email and IP
+    address are **never sent**; only your browser/OS, the recent
+    requests the app captured, and the build SHA. (If you've just
+    submitted an email and are getting "Could not send", an opaque
+    12-character hash of your address is included so we can find which
+    sign-in attempt failed — but the hash isn't reversible to your
+    actual address.) Sanitization happens server-side in
+    [`deploy/client_error_sanitizer.py`](https://github.com/richbodo/fellows_local_db/blob/main/deploy/client_error_sanitizer.py)
+    if you want to see exactly what the rules are.
 
 ---
 

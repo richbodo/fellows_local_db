@@ -115,6 +115,7 @@
   var authDebugPrivateEl = document.getElementById('auth-debug-private');
   var authDebugPrivatePreEl = document.getElementById('auth-debug-private-pre');
   var authDebugPrivateCopyEl = document.getElementById('auth-debug-private-copy');
+  var authDebugPrivateSendEl = document.getElementById('auth-debug-private-send');
   var authDebugPrivateCopyStatusEl = document.getElementById('auth-debug-private-copy-status');
   var authDebugInstallEl = document.getElementById('auth-debug-install');
   var gateReasonBannerEl = document.getElementById('gate-reason-banner');
@@ -2367,6 +2368,77 @@
     });
   }
 
+  // Payload for POST /api/client-errors. Mirrors the schema declared in
+  // deploy/client_error_sanitizer.py; the server re-sanitizes regardless,
+  // so this is a best-effort cleanup, not the privacy boundary. The
+  // boundary is server-side. Email is never sent — only the 12-hex
+  // sha256 prefix from lastSubmitInfo (PR #69), which matches what the
+  // server already logs as email_hash_prefix in event=send_unlock_email.
+  function buildClientErrorsPayload() {
+    var events = [];
+    for (var i = 0; i < bugReportErrorRing.length; i++) {
+      var ev = bugReportErrorRing[i];
+      var out = { kind: String(ev.kind || ''), msg: String(ev.msg || '') };
+      if (ev.t) out.ts = String(ev.t);
+      if (ev.extra) out.extra = String(ev.extra);
+      events.push(out);
+    }
+    var build = '';
+    if (bootBuildMeta && (bootBuildMeta.git_sha || bootBuildMeta.built_at)) {
+      build = (bootBuildMeta.git_sha || '') +
+        (bootBuildMeta.built_at ? ' @ ' + bootBuildMeta.built_at : '');
+    }
+    var route = '';
+    try { route = String(location.hash || location.pathname || ''); } catch (e) {}
+    var payload = {
+      events: events,
+      ua: String(navigator.userAgent || ''),
+      build: build,
+      route: route,
+      displayMode: isStandaloneDisplayMode() ? 'standalone' : 'browser-tab'
+    };
+    try { payload.online = Boolean(navigator.onLine); } catch (e) {}
+    if (lastSubmitInfo.emailHashPrefix) {
+      payload.lastSubmitHashPrefix = lastSubmitInfo.emailHashPrefix;
+    }
+    return payload;
+  }
+
+  function initAuthDebugSendButton() {
+    if (!authDebugPrivateSendEl || authDebugPrivateSendEl._wired) return;
+    authDebugPrivateSendEl._wired = true;
+    authDebugPrivateSendEl.addEventListener('click', function () {
+      var payload;
+      try {
+        payload = buildClientErrorsPayload();
+      } catch (e) {
+        setAuthDebugCopyStatus('Send failed — try Copy diagnostics instead.');
+        return;
+      }
+      setAuthDebugCopyStatus('Sending…');
+      authDebugPrivateSendEl.disabled = true;
+      fetch('/api/client-errors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(payload)
+      })
+        .then(function (r) {
+          if (r.status === 204) {
+            setAuthDebugCopyStatus('Sent. Thank you.');
+          } else {
+            setAuthDebugCopyStatus('Send failed — try Copy diagnostics instead.');
+          }
+        })
+        .catch(function () {
+          setAuthDebugCopyStatus('Send failed — try Copy diagnostics instead.');
+        })
+        .then(function () {
+          authDebugPrivateSendEl.disabled = false;
+        });
+    });
+  }
+
   function initBrowserInstallMode(authPayload, httpStatus) {
     if (installGatePrivateEl) installGatePrivateEl.classList.add('hidden');
     if (installLandingEl) installLandingEl.classList.remove('hidden');
@@ -2495,6 +2567,7 @@
       showAuthDebugPrivate(authPayload, httpStatus != null ? httpStatus : 200);
     }
     initAuthDebugCopyButton();
+    initAuthDebugSendButton();
 
     if (unlockEmailFormEl && !unlockEmailFormEl._wired) {
       unlockEmailFormEl._wired = true;

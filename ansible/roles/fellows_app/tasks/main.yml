@@ -88,6 +88,18 @@
     mode: "0644"
   notify: Restart fellows app
 
+# Privacy boundary for POST /api/client-errors. Pure functions, no I/O.
+# Imported by deploy/server.py as `client_error_sanitizer`. See
+# `docs/email_gate.md` § Client error reporting for the schema.
+- name: Copy deploy client-error sanitizer
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../deploy/client_error_sanitizer.py"
+    dest: "{{ app_root }}/deploy/client_error_sanitizer.py"
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
+    mode: "0644"
+  notify: Restart fellows app
+
 # Operator-facing read-only helpers live under {{ app_root }}/bin. The app
 # service itself never invokes these, so no restart notify.
 - name: Ensure operator-helpers bin directory exists

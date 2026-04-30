@@ -181,6 +181,85 @@ def test_tally_recent_errors_empty_when_no_errors():
     stats = prod_stats.tally(entries)
     assert stats["recent_errors"] == []
     assert stats["errors_4xx"] == {}
+    assert stats["client_errors"] == 0
+
+
+def test_tally_counts_client_error_events_and_includes_in_recent_errors():
+    """client_error structured events (POST /api/client-errors → journald)
+    surface in two places: the new client_errors counter and the existing
+    recent_errors list with kind='client_error'. They mix freely with 4xx
+    access lines so the maintainer sees both in chronological context."""
+    entries = [
+        _entry('127.0.0.1 - - [x] "GET /missing HTTP/1.1" 404 -',
+               ts="2026-04-30T15:00:00Z"),
+        _entry(
+            json.dumps({
+                "event": "client_error",
+                "client_ip_prefix": "ab12cd34ef56",
+                "events": [{"kind": "http", "msg": "GET /api/fellows → 404"}],
+                "ua": "Mozilla/5.0",
+                "build": "abc123 @ 2026-04-30T15:00:00Z",
+            }),
+            ts="2026-04-30T15:30:00Z",
+        ),
+        _entry(
+            json.dumps({
+                "event": "client_error",
+                "events": [{"kind": "window.error", "msg": "boom"}],
+            }),
+            ts="2026-04-30T16:00:00Z",
+        ),
+    ]
+    stats = prod_stats.tally(entries)
+    assert stats["client_errors"] == 2
+    # Newest first: two client_errors at 15:30 and 16:00, then the 404 at 15:00.
+    recent = stats["recent_errors"]
+    assert len(recent) == 3
+    kinds = [r["kind"] for r in recent]
+    assert kinds == ["client_error", "client_error", "access"]
+    # Verbatim JSON message preserved on client_error rows.
+    assert "client_error" in recent[0]["message"]
+    assert "client_error" in recent[1]["message"]
+
+
+def test_tally_ignores_unrecognized_structured_events():
+    """A JSON line with `event=client_error` matches the new branch only
+    when the parsed dict actually carries that event — guards against a
+    bare substring match on `m`."""
+    entries = [
+        # JSON that mentions client_error but is a different event.
+        _entry(json.dumps({"event": "auth_status", "note": "client_error"})),
+    ]
+    stats = prod_stats.tally(entries)
+    assert stats["client_errors"] == 0
+
+
+def test_print_human_errors_only_includes_client_error_count_and_kind_tag(capsys):
+    """In errors-only mode, print_human prints the client error count
+    and tags client_error rows in the recent-errors list."""
+    disk = {"path": "/", "total_gib": 25.0, "used_gib": 10.0,
+            "free_gib": 15.0, "pct_used": 40.0}
+    stats = {
+        "shell_loads": 0, "api_fellows": 0, "db_downloads": 0,
+        "magic_links_sent": 0, "magic_links_send_failed": {},
+        "magic_links_verified": 0, "magic_links_verify_failed": 0,
+        "errors_4xx": {}, "errors_5xx": {},
+        "client_errors": 2,
+        "recent_errors": [
+            {"ts": "2026-04-30T16:00:00Z", "status": 0, "kind": "client_error",
+             "message": '{"event": "client_error", "events": [...]}'},
+            {"ts": "2026-04-30T15:00:00Z", "status": 404, "kind": "access",
+             "message": '127.0.0.1 - - [x] "GET /missing HTTP/1.1" 404 -'},
+        ],
+    }
+    prod_stats.print_human(stats, disk, "24h ago", "fellows-pwa", errors_only=True)
+    out = capsys.readouterr().out
+    assert "Client error reports:    2" in out
+    assert "[client_error]" in out  # tag on the client_error row
+    # The access row does NOT get the tag.
+    access_line_idx = out.find("/missing")
+    tag_idx = out.find("[client_error]")
+    assert tag_idx < access_line_idx
 
 
 def test_tally_ignores_build_meta_and_rate_limit_lines():
@@ -457,7 +536,7 @@ def test_print_human_errors_only_skips_unrelated_sections(capsys):
     assert "4xx errors:" in out and "404 GET /thing: 3" in out
     assert "5xx errors:" in out and "500 GET /api/stats: 1" in out
     # The verbatim recent line is the high-value signal.
-    assert "most recent error access line" in out
+    assert "most recent error entry" in out
     assert "/thing" in out and "2026-04-23T15:00:00Z" in out
     # Sections that don't belong in errors-only must be absent.
     assert "App-shell loads:" not in out
@@ -527,7 +606,7 @@ def test_main_errors_only_flag_routes_to_focused_view(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "4xx errors:" in out
     assert "404 GET /missing: 1" in out
-    assert "most recent error access line" in out
+    assert "most recent error entry" in out
     # Non-error sections suppressed.
     assert "App-shell loads:" not in out
     assert "Disk (" not in out
