@@ -362,6 +362,12 @@ to help.
   ask Rich.
 - **Install link expired or lost**: request a fresh one from the
   operator.
+- **Stuck at the email-gate page** (no link arriving, error on submit, or
+  any other "I can't get in"): the gate shows a small diagnostics block
+  below the form with your browser, OS, viewport, and the most recent
+  request. Click **Copy diagnostics** and paste it into your message
+  along with the time you tried — that's enough for us to find the
+  matching server-side log entry.
 
 ---
 

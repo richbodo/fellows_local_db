@@ -218,6 +218,74 @@ class TestEmailGate:
         finally:
             page.close()
 
+    def test_gate_diag_block_renders_expected_fields(self, context, base_url_fixture):
+        """The gate's auth-debug block carries enough environment info to triage
+        an install/email-gate problem from a screenshot. Asserting the field
+        labels (rather than full values) keeps the test stable across
+        browsers/builds.
+        """
+        page = context.new_page()
+        try:
+            _mock_auth_status(page, authEnabled=True, authenticated=False)
+            page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+            block = page.locator("#auth-debug-private")
+            expect(block).to_be_visible()
+            pre = page.locator("#auth-debug-private-pre")
+            text = pre.inner_text()
+            assert "auth:" in text
+            assert "GET /api/auth/status → HTTP 200" in text
+            assert "authEnabled=True" in text or "authEnabled=true" in text
+            assert "app:" in text
+            assert "userAgent:" in text
+            assert "platform:" in text
+            assert "viewport:" in text
+            assert "display:" in text
+            # last_submit only appears after a Send link click — not yet.
+            assert "last_submit:" not in text
+            expect(page.locator("#auth-debug-private-copy")).to_be_visible()
+        finally:
+            page.close()
+
+    def test_gate_diag_block_includes_last_submit_after_send(self, context, base_url_fixture):
+        """Submitting the form populates a hash + ISO timestamp inside the diag
+        block. The hash matches deploy/server.py's email_hash_prefix
+        (sha256(email).slice(0,12)) so a maintainer can join a screenshot
+        to a journald event without the user disclosing their address.
+        """
+        import json
+
+        page = context.new_page()
+        try:
+            _mock_auth_status(page, authEnabled=True, authenticated=False)
+            page.route(
+                "**/api/send-unlock",
+                lambda r: r.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({"sent": True}),
+                ),
+            )
+            page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+            page.locator("#unlock-email").fill("foo@bar.com")
+            with page.expect_request("**/api/send-unlock"):
+                page.locator("#unlock-submit").click()
+            # Wait for the post-submit refresh to land in the pre block.
+            pre = page.locator("#auth-debug-private-pre")
+            page.wait_for_function(
+                "el => el && el.textContent && el.textContent.indexOf('last_submit:') !== -1",
+                arg=pre.element_handle(),
+                timeout=3000,
+            )
+            text = pre.inner_text()
+            assert "last_submit: hash=" in text
+            # 12-hex prefix exactly.
+            import re
+
+            m = re.search(r"last_submit: hash=([0-9a-f]{12})\s+at\s+(\S+)", text)
+            assert m, f"expected last_submit hash+ts, got: {text}"
+        finally:
+            page.close()
+
     def test_back_to_gate_link_posts_logout_and_navigates(self, context, base_url_fixture):
         page = context.new_page()
 

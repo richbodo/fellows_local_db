@@ -1131,6 +1131,46 @@ h1 {
   word-break: break-word;
 }
 
+.auth-debug-block {
+  margin: 0 0 0.75rem;
+  padding: 0.45rem 0.55rem;
+  text-align: left;
+  color: #3d3550;
+  background: #f3f0f8;
+  border: 1px solid #dcd6e8;
+  border-radius: 4px;
+}
+
+.auth-debug-pre {
+  margin: 0 0 0.4rem;
+  padding: 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  font-family: ui-monospace, "Cascadia Code", Menlo, Monaco, Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.auth-debug-copy {
+  font-size: 0.72rem;
+  padding: 0.2rem 0.55rem;
+  background: #e7e1f2;
+  color: #3d3550;
+  border: 1px solid #c8bedc;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.auth-debug-copy:hover {
+  background: #ddd4ec;
+}
+
+.auth-debug-copy-status {
+  margin-left: 0.55rem;
+  font-size: 0.72rem;
+  color: #3d3550;
+}
+
 .sw-update-banner {
   margin: 0 0 0.75rem;
   padding: 0.5rem 0.75rem;

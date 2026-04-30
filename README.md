@@ -57,7 +57,7 @@ The origin of this app was [prt](https://github.com/richbodo/prt) and the next v
 
 `requirements-dev.txt` only covers dev/test tools (pytest, Playwright). The app runtime itself does not need them.
 
-> Commands below use the project's `just` command runner. See [`docs/justfile.md`](docs/justfile.md) for the full recipe list and what each one wraps. The long-form scripts still work — `just` is a shortcut, not a replacement.
+> Commands below use the project's `just` command runner. **Run `just` (or `just --list`) at the repo root for a grouped menu of every recipe**; run `just <recipe>` to invoke one (e.g. `just doctor`). Full reference with what each recipe wraps: [`docs/justfile.md`](docs/justfile.md). The long-form scripts still work — `just` is a shortcut, not a replacement.
 
 ### First-Time Setup (Developers)
 

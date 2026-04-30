@@ -5,8 +5,11 @@ scripts in `scripts/`, `build/`, `run.sh`, and the `ansible/` playbooks. It
 does not replace any of them — every recipe shells out to the underlying
 script. You can keep typing the long forms; `just` exists to save typing.
 
+**Discoverability:** run `just` (or `just --list`) at the repo root for a
+grouped menu of every recipe. Then `just <recipe>` invokes one. The rest
+of this doc is the long-form annotated reference for the same list.
+
 Install: `brew install just` (already present on the maintainer's laptop).
-Run `just` with no arguments for the live menu.
 
 ## Conventions
 
