@@ -117,6 +117,34 @@ body {
   outline-offset: 2px;
 }
 
+/* Secondary recovery option below Clear App Cache. Deliberately small
+   and muted so it reads as "only if the red button didn't help" — this
+   one wipes OPFS too (groups, notes, settings). */
+.reset-everything-button {
+  position: fixed;
+  right: 0.75rem;
+  bottom: 2.85rem;
+  z-index: 9999;
+  padding: 0.15rem 0.35rem;
+  font-size: 0.72rem;
+  color: #6b7280;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: #cbd5e1;
+}
+
+.reset-everything-button:hover {
+  color: #b91c1c;
+  text-decoration-color: #b91c1c;
+}
+
+.reset-everything-button:focus {
+  outline: 2px solid #b91c1c;
+  outline-offset: 2px;
+}
+
 .diag-toggle {
   position: fixed;
   left: 0.75rem;
@@ -3028,6 +3056,7 @@ a.group-action-btn--primary {
      desktop continues to use them; mobile users hit the kebab menu. */
   #build-badge,
   #clear-app-cache-button,
+  #reset-everything-button,
   #diag-toggle,
   #bug-report-button {
     display: none;
