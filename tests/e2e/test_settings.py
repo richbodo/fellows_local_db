@@ -154,4 +154,35 @@ class TestSettingsPage:
         _wait_for_directory(page)
         expect(page.locator("#settings-export-section")).to_be_visible()
         expect(page.locator("#settings-download-userdata")).to_be_visible()
-        expect(page.locator(".settings-section-title")).to_contain_text("Your saved data")
+        expect(page.locator(".settings-section-title").first).to_contain_text("Your saved data")
+
+    def test_restore_section_renders_with_picker_and_backup_list(
+        self, standalone_page, base_url_fixture
+    ):
+        """Issue #85: Settings exposes a Restore from a file button + a
+        Recent auto-backups list. Like the export half (PR #84), the
+        actual restore round-trip needs OPFS, which the dev e2e harness
+        doesn't have. This test asserts the markup renders; the OPFS
+        round-trip is verified manually on prod (see issue #85 test plan)."""
+        page = standalone_page
+        page.goto(f"{base_url_fixture}/#/settings", wait_until="domcontentloaded")
+        _wait_for_directory(page)
+        # Restore section + heading.
+        expect(page.locator("#settings-restore-section")).to_be_visible()
+        expect(
+            page.locator("#settings-restore-section .settings-section-title")
+        ).to_contain_text("Restore from backup")
+        # File-picker affordance: input is hidden by design; the visible
+        # button click()s the input. Both must exist.
+        expect(page.locator("#settings-restore-pick")).to_be_visible()
+        file_input = page.locator("#settings-restore-file")
+        expect(file_input).to_have_count(1)
+        accept = file_input.get_attribute("accept") or ""
+        assert ".db" in accept and ".sqlite" in accept
+        # Recent auto-backups list region: in API mode (dev) the list
+        # resolves to [] and the empty-state hint is what the user sees.
+        expect(page.locator("#settings-backup-list-empty")).to_be_visible()
+        # Live list itself is hidden until populated.
+        backup_list = page.locator("#settings-backup-list")
+        expect(backup_list).to_have_count(1)
+        assert backup_list.evaluate("el => el.hidden") is True
