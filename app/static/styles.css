@@ -3547,3 +3547,26 @@ a.group-action-btn--primary {
     display: none;
   }
 }
+
+/* ----- Screenshot mode (maintainer-only) ---------------------------
+   Blurs PII fields on the fellow detail page so docs/users_manual
+   screenshots can show the full layout without exposing a real
+   fellow's contact info, demographics, or free-text bio responses.
+   Names and portraits stay sharp by design — they're allowed in the
+   user guide.
+
+   Toggle from DevTools console:
+     document.body.classList.toggle('screenshot-mode')
+
+   Leaves other pages untouched. If a future page needs blurring,
+   add its leaf-text class here. Filter cannot be inherited-then-
+   un-blurred, so target leaves directly.
+*/
+body.screenshot-mode .detail-tagline,
+body.screenshot-mode .detail-demographics,
+body.screenshot-mode .detail-section-body .field-value,
+body.screenshot-mode .work-value,
+body.screenshot-mode .detail-section-body:not(:has(table)):not(:has(.work-block)) {
+  filter: blur(6px);
+  user-select: none;
+}
