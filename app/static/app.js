@@ -162,7 +162,7 @@
   /** Bump on every meaningful UI / diagnostics change. Rendered in the
    *  always-visible build badge so a dev can tell at a glance which app.js
    *  is actually running vs what the server was deployed with. */
-  var FELLOWS_UI_DIAG = 'diag-2026-04s-groups-pr5';
+  var FELLOWS_UI_DIAG = '2026-05-02-6a74fa5-initial';
 
   // Persistent marker: "this origin has been authenticated successfully at
   // least once." Preserved across clearAllAppData. Used by startBrowserUx's
