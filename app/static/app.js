@@ -931,6 +931,130 @@
         } catch (e) {
           return Promise.reject(e);
         }
+      },
+      // Read-only validation of a candidate file. Returns
+      // {valid, error?, counts?} where counts mirrors the live row
+      // counts so the Settings UI can render a delta in the confirm
+      // dialog before importRelationshipsBytes touches anything.
+      inspectRelationshipsBytes: function (bytes) {
+        if (!poolUtil) return Promise.reject(new Error('pool util unavailable'));
+        return inspectRelationshipsBytes(poolUtil, bytes);
+      },
+      // Live row counts on the open relationships.db, for the "current"
+      // side of the restore confirm dialog's row-count delta.
+      countRelationships: function () {
+        if (!relDb) return Promise.resolve(null);
+        try {
+          return Promise.resolve({
+            groups: dbSelectOne(relDb, 'SELECT COUNT(*) AS n FROM groups', null).n,
+            members: dbSelectOne(relDb, 'SELECT COUNT(*) AS n FROM group_members', null).n,
+            tags: dbSelectOne(relDb, 'SELECT COUNT(*) AS n FROM fellow_tags', null).n,
+            notes: dbSelectOne(relDb, 'SELECT COUNT(*) AS n FROM fellow_notes', null).n,
+            settings: dbSelectOne(relDb, 'SELECT COUNT(*) AS n FROM settings', null).n
+          });
+        } catch (e) {
+          return Promise.reject(e);
+        }
+      },
+      // Replace the live relationships.db with `bytes`. Validates first,
+      // snapshots the current state into the auto-backup rotation slot
+      // (so a wrong restore is recoverable from the picker), then
+      // closes / replaces / reopens the live OPFS slot. Resolves with
+      // the new row counts. Reassigns the closure-captured relDb so
+      // every other provider method (listGroups, getSetting, etc.)
+      // sees the new handle without a page reload.
+      importRelationshipsBytes: function (bytes) {
+        if (!poolUtil) return Promise.reject(new Error('pool util unavailable'));
+        return inspectRelationshipsBytes(poolUtil, bytes).then(function (inspection) {
+          if (!inspection.valid) {
+            var err = new Error(inspection.error || 'invalid relationships.db file');
+            err.invalidBackup = true;
+            throw err;
+          }
+          return snapshotRelationshipsDbToBackup(poolUtil).then(function (snap) {
+            return { inspection: inspection, snapshot: snap };
+          });
+        }).then(function (state) {
+          if (relDb) {
+            try { relDb.close(); } catch (e) {}
+            relDb = null;
+          }
+          poolUtil.importDb('relationships.db', bytes);
+          relDb = new poolUtil.OpfsSAHPoolDb('relationships.db');
+          // Belt-and-suspenders: backup might be from a slightly older
+          // schema (CREATE IF NOT EXISTS handles it). No-ops on a
+          // current backup.
+          bootstrapRelationshipsSchema(relDb);
+          return {
+            counts: state.inspection.counts,
+            preRestoreSnapshot: state.snapshot && state.snapshot.backedUp
+              ? state.snapshot.name
+              : null
+          };
+        });
+      },
+      // List on-device auto-backups for the "Recent auto-backups"
+      // picker. Each entry is enriched with the row counts inside the
+      // backup so the user can pick by content, not just timestamp.
+      // Enrichment runs SEQUENTIALLY — every inspect call writes to
+      // the shared restore-staging SAH-pool slot, so parallel calls
+      // would clobber each other.
+      listRelationshipsBackups: function () {
+        if (!poolUtil) return Promise.resolve([]);
+        return listRelationshipsBackups().then(function (raw) {
+          function enrichOne(entry) {
+            return _opfsReadBinary(entry.name).then(function (bytes) {
+              return inspectRelationshipsBytes(poolUtil, bytes).then(function (insp) {
+                return {
+                  name: entry.name,
+                  size: entry.size,
+                  lastModified: entry.lastModified,
+                  counts: insp.valid ? insp.counts : null,
+                  invalid: !insp.valid,
+                  error: insp.valid ? null : insp.error
+                };
+              });
+            }).catch(function (e) {
+              return {
+                name: entry.name,
+                size: entry.size,
+                lastModified: entry.lastModified,
+                counts: null,
+                invalid: true,
+                error: (e && e.message) || String(e)
+              };
+            });
+          }
+          var chain = Promise.resolve([]);
+          raw.forEach(function (entry) {
+            chain = chain.then(function (acc) {
+              return enrichOne(entry).then(function (one) {
+                acc.push(one);
+                return acc;
+              });
+            });
+          });
+          return chain;
+        });
+      },
+      // Restore one of the on-device auto-backups by name. Reads the
+      // bytes from OPFS root, then funnels through importRelationshipsBytes
+      // (which handles validation + pre-restore snapshot + replace).
+      restoreRelationshipsBackup: function (backupName) {
+        var self = this;
+        if (!poolUtil) return Promise.reject(new Error('pool util unavailable'));
+        return listRelationshipsBackups().then(function (backups) {
+          var match = null;
+          for (var i = 0; i < backups.length; i++) {
+            if (backups[i].name === backupName) { match = backups[i]; break; }
+          }
+          if (!match) {
+            throw new Error('Backup not found: ' + backupName);
+          }
+          return _opfsReadBinary(backupName);
+        }).then(function (bytes) {
+          return self.importRelationshipsBytes(bytes);
+        });
       }
     };
   }
@@ -1313,6 +1437,25 @@
       // Settings UI hides the download button when this rejects.
       exportRelationshipsBytes: function () {
         return Promise.reject(localDataUnavailableError('export-relationships'));
+      },
+      // Same story for inspect / import / restore — the Settings UI
+      // hides the restore section when listRelationshipsBackups returns
+      // []  AND import rejects, so unsupported browsers see only the
+      // unsupported-browser panel that already covers groups/settings.
+      inspectRelationshipsBytes: function () {
+        return Promise.reject(localDataUnavailableError('inspect-relationships'));
+      },
+      countRelationships: function () {
+        return Promise.resolve(null);
+      },
+      importRelationshipsBytes: function () {
+        return Promise.reject(localDataUnavailableError('import-relationships'));
+      },
+      listRelationshipsBackups: function () {
+        return Promise.resolve([]);
+      },
+      restoreRelationshipsBackup: function () {
+        return Promise.reject(localDataUnavailableError('restore-relationships'));
       }
     };
   }
@@ -2592,6 +2735,13 @@
     await w.close();
   }
 
+  async function _opfsReadBinary(name) {
+    var root = await _opfsRoot();
+    var fh = await root.getFileHandle(name);
+    var f = await fh.getFile();
+    return new Uint8Array(await f.arrayBuffer());
+  }
+
   async function listRelationshipsBackups() {
     try {
       var root = await _opfsRoot();
@@ -2672,6 +2822,104 @@
       'sentinel ' + (prevSha || '<none>') + ' → ' + sha
     );
     return { backedUp: true, name: backupName, size: bytes.byteLength };
+  }
+
+  // Forced version of maybeBackupRelationshipsDb: skips the SHA-change
+  // check and always writes a backup if relationships.db exists. The
+  // restore flow calls this to capture pre-restore state into the same
+  // rotation slot, so a wrong restore is one click away from undo.
+  // Sentinel is left untouched — a snapshot is not a deploy event.
+  async function snapshotRelationshipsDbToBackup(poolUtil) {
+    var poolFiles = [];
+    try { poolFiles = poolUtil.getFileNames(); } catch (e) {}
+    if (poolFiles.indexOf('relationships.db') === -1) {
+      return { backedUp: false, reason: 'no relationships.db' };
+    }
+    var bytes;
+    try {
+      bytes = poolUtil.exportFile('relationships.db');
+    } catch (e) {
+      return { backedUp: false, reason: 'export failed: ' + (e && e.message || e) };
+    }
+    if (!bytes || !bytes.byteLength) {
+      return { backedUp: false, reason: 'empty file' };
+    }
+    var ts = new Date().toISOString().replace(/[:.]/g, '-');
+    var backupName = BACKUP_PREFIX + ts;
+    try {
+      await _opfsWriteBinary(backupName, bytes);
+    } catch (e) {
+      return { backedUp: false, reason: 'write failed: ' + (e && e.message || e) };
+    }
+    await _rotateRelationshipsBackups();
+    bootDebugPush('snapshot: wrote ' + backupName + ' (' + bytes.byteLength + ' bytes)');
+    return { backedUp: true, name: backupName, size: bytes.byteLength };
+  }
+
+  // Validates a candidate relationships.db file by writing it to a temp
+  // SAH-pool slot, opening it, and checking schema + row counts. The
+  // staging slot is left occupied; the next inspection overwrites it.
+  // Returns { valid, error?, counts? } where counts has groups, members,
+  // tags, notes, settings — used to render the restore confirm dialog.
+  var RESTORE_STAGING_SLOT = 'relationships.db.restore-staging';
+  var REQUIRED_RESTORE_TABLES = ['groups', 'group_members', 'fellow_tags', 'fellow_notes', 'settings'];
+
+  async function inspectRelationshipsBytes(poolUtil, bytes) {
+    if (!poolUtil) {
+      return { valid: false, error: 'pool util unavailable' };
+    }
+    if (!bytes || !bytes.byteLength) {
+      return { valid: false, error: 'File is empty.' };
+    }
+    // SQLite header is "SQLite format 3\0" (16 bytes). Cheap pre-flight
+    // before paying the import cost.
+    var hdr = 'SQLite format 3\0';
+    if (bytes.byteLength < hdr.length) {
+      return { valid: false, error: 'File is too small to be a SQLite database.' };
+    }
+    for (var i = 0; i < hdr.length; i++) {
+      if (bytes[i] !== hdr.charCodeAt(i)) {
+        return { valid: false, error: 'File does not look like a SQLite database.' };
+      }
+    }
+    var tmp = null;
+    try {
+      poolUtil.importDb(RESTORE_STAGING_SLOT, bytes);
+      tmp = new poolUtil.OpfsSAHPoolDb(RESTORE_STAGING_SLOT);
+      var qc = dbSelectOne(tmp, 'PRAGMA quick_check', null);
+      var qcResult = qc && (qc.quick_check || qc['quick_check']);
+      if (qcResult !== 'ok') {
+        return { valid: false, error: 'SQLite integrity check failed: ' + (qcResult || 'unknown') };
+      }
+      var tableRows = dbSelectAll(
+        tmp, "SELECT name FROM sqlite_master WHERE type='table'", null
+      );
+      var tableNames = tableRows.map(function (r) { return r.name; });
+      var missing = REQUIRED_RESTORE_TABLES.filter(function (t) {
+        return tableNames.indexOf(t) === -1;
+      });
+      if (missing.length) {
+        return {
+          valid: false,
+          error: 'File is missing expected tables: ' + missing.join(', ') +
+            '. Is this a relationships.db backup?'
+        };
+      }
+      var counts = {
+        groups: dbSelectOne(tmp, 'SELECT COUNT(*) AS n FROM groups', null).n,
+        members: dbSelectOne(tmp, 'SELECT COUNT(*) AS n FROM group_members', null).n,
+        tags: dbSelectOne(tmp, 'SELECT COUNT(*) AS n FROM fellow_tags', null).n,
+        notes: dbSelectOne(tmp, 'SELECT COUNT(*) AS n FROM fellow_notes', null).n,
+        settings: dbSelectOne(tmp, 'SELECT COUNT(*) AS n FROM settings', null).n
+      };
+      return { valid: true, counts: counts };
+    } catch (e) {
+      return { valid: false, error: (e && e.message) || String(e) };
+    } finally {
+      if (tmp) {
+        try { tmp.close(); } catch (e2) {}
+      }
+    }
   }
 
   // Exposed for diagnostics + Settings UI.
@@ -5771,6 +6019,25 @@
         '</button>' +
         '<span id="settings-download-status" class="settings-status" aria-live="polite"></span>' +
       '</div>' +
+      '<div class="settings-section" id="settings-restore-section">' +
+        '<h3 class="settings-section-title">Restore from backup</h3>' +
+        '<p class="settings-hint">' +
+          'Replace your current saved data with a backup. ' +
+          'Reversible — the app captures a snapshot of your current data ' +
+          'into the auto-backup rotation before each restore, so the recent-backups ' +
+          'list below always lets you undo.' +
+        '</p>' +
+        '<input type="file" id="settings-restore-file" accept=".db,.sqlite,application/octet-stream" hidden />' +
+        '<button type="button" id="settings-restore-pick" class="settings-download">' +
+          '⬆ Restore from a file…' +
+        '</button>' +
+        '<span id="settings-restore-status" class="settings-status" aria-live="polite"></span>' +
+        '<h4 class="settings-section-subtitle">Recent auto-backups</h4>' +
+        '<p class="settings-hint" id="settings-backup-list-empty">' +
+          'No auto-backups on this device yet — they’re written before each app upgrade.' +
+        '</p>' +
+        '<ul id="settings-backup-list" class="settings-backup-list" hidden></ul>' +
+      '</div>' +
       '</div>';
     detailEl.innerHTML = html;
     var input = document.getElementById('settings-self-email');
@@ -5820,6 +6087,214 @@
           });
       });
     }
+
+    // ===== Restore from backup =====
+    var restoreSection = document.getElementById('settings-restore-section');
+    var restoreFile = document.getElementById('settings-restore-file');
+    var restorePick = document.getElementById('settings-restore-pick');
+    var restoreStatus = document.getElementById('settings-restore-status');
+    var backupListEl = document.getElementById('settings-backup-list');
+    var backupListEmptyEl = document.getElementById('settings-backup-list-empty');
+
+    function hideRestoreSection() {
+      if (restoreSection) restoreSection.style.display = 'none';
+    }
+
+    function fmtCounts(c) {
+      if (!c) return '(unreadable)';
+      return c.groups + ' groups · ' + c.notes + ' notes · ' + c.tags + ' tags';
+    }
+
+    function fmtBytes(n) {
+      if (!n && n !== 0) return '';
+      if (n < 1024) return n + ' B';
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+      return (n / (1024 * 1024)).toFixed(2) + ' MB';
+    }
+
+    function fmtBackupTimestamp(name) {
+      // BACKUP_PREFIX is "relationships.db.bak."; the rest is an ISO
+      // timestamp with ":" and "." replaced by "-".
+      var prefix = 'relationships.db.bak.';
+      if (name.indexOf(prefix) !== 0) return name;
+      var stamp = name.slice(prefix.length);
+      // Reverse the [:.] → '-' substitution so it parses back as ISO.
+      var iso = stamp.replace(
+        /^(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d+)Z?$/,
+        '$1-$2-$3T$4:$5:$6.$7Z'
+      );
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return stamp;
+      return d.toLocaleString();
+    }
+
+    // Build a multi-line confirm message showing the row-count delta
+    // between current and incoming backup. Used by both restore paths.
+    function buildConfirmMessage(currentCounts, incomingCounts, sourceLabel) {
+      function deltaLine(label, key) {
+        var cur = currentCounts ? currentCounts[key] : '?';
+        var inc = incomingCounts[key];
+        return '  • ' + label + ': ' + cur + ' → ' + inc;
+      }
+      return (
+        'Restore from ' + sourceLabel + ' will replace your current saved data:\n' +
+        deltaLine('Groups', 'groups') + '\n' +
+        deltaLine('Group members', 'members') + '\n' +
+        deltaLine('Group notes / fellow notes', 'notes') + '\n' +
+        deltaLine('Fellow tags', 'tags') + '\n' +
+        deltaLine('Settings', 'settings') + '\n\n' +
+        'Your current data will first be saved as an auto-backup so you can undo.\n\n' +
+        'Continue?'
+      );
+    }
+
+    // Render the recent-auto-backups list. Each row: timestamp, content
+    // summary, restore button. The list is enriched server-side (well,
+    // provider-side) with row counts read out of each backup file, so
+    // the user can choose by content rather than by timestamp guess.
+    function refreshBackupList() {
+      if (!backupListEl) return;
+      if (!dataProvider || typeof dataProvider.listRelationshipsBackups !== 'function') {
+        return;
+      }
+      dataProvider.listRelationshipsBackups()
+        .then(function (backups) {
+          if (!backups || !backups.length) {
+            if (backupListEmptyEl) backupListEmptyEl.hidden = false;
+            backupListEl.hidden = true;
+            backupListEl.innerHTML = '';
+            return;
+          }
+          if (backupListEmptyEl) backupListEmptyEl.hidden = true;
+          backupListEl.hidden = false;
+          // Newest first.
+          backups.sort(function (a, b) {
+            return b.name < a.name ? -1 : (b.name > a.name ? 1 : 0);
+          });
+          var html = '';
+          for (var i = 0; i < backups.length; i++) {
+            var b = backups[i];
+            html +=
+              '<li class="settings-backup-item">' +
+                '<div class="settings-backup-meta">' +
+                  '<div class="settings-backup-when">' + escapeHtml(fmtBackupTimestamp(b.name)) + '</div>' +
+                  '<div class="settings-backup-summary">' +
+                    (b.invalid
+                      ? '<em>Backup unreadable: ' + escapeHtml(b.error || 'unknown error') + '</em>'
+                      : escapeHtml(fmtCounts(b.counts) + ' · ' + fmtBytes(b.size))) +
+                  '</div>' +
+                '</div>' +
+                '<button type="button" class="settings-backup-restore" ' +
+                  'data-backup-name="' + escapeHtml(b.name) + '"' +
+                  (b.invalid ? ' disabled' : '') +
+                  '>Restore this</button>' +
+              '</li>';
+          }
+          backupListEl.innerHTML = html;
+        })
+        .catch(function () {
+          // Provider doesn't have backups (API path) or OPFS read failed.
+          // Hide the section entirely; the file-picker still works only
+          // on OPFS providers anyway.
+          if (backupListEmptyEl) backupListEmptyEl.hidden = false;
+          backupListEl.hidden = true;
+          backupListEl.innerHTML = '';
+        });
+    }
+
+    function flashRestoreStatus(text) {
+      if (restoreStatus) restoreStatus.textContent = text;
+    }
+
+    function performImport(bytes, sourceLabel) {
+      if (!dataProvider || typeof dataProvider.importRelationshipsBytes !== 'function') {
+        flashRestoreStatus('Restore not available in this mode.');
+        return Promise.resolve(null);
+      }
+      return Promise.all([
+        dataProvider.inspectRelationshipsBytes(bytes),
+        dataProvider.countRelationships()
+      ]).then(function (results) {
+        var inspection = results[0];
+        var current = results[1];
+        if (!inspection || !inspection.valid) {
+          var msg = inspection && inspection.error
+            ? 'Could not read backup: ' + inspection.error
+            : 'Could not read backup.';
+          flashRestoreStatus(msg);
+          return null;
+        }
+        var ok = window.confirm(buildConfirmMessage(current, inspection.counts, sourceLabel));
+        if (!ok) {
+          flashRestoreStatus('Restore cancelled.');
+          return null;
+        }
+        flashRestoreStatus('Restoring…');
+        return dataProvider.importRelationshipsBytes(bytes).then(function (result) {
+          flashRestoreStatus(
+            'Restored from ' + sourceLabel + ' — ' +
+            result.counts.groups + ' groups, ' +
+            result.counts.notes + ' notes, ' +
+            result.counts.tags + ' tags.' +
+            (result.preRestoreSnapshot
+              ? ' Previous data saved as auto-backup; click an entry below to undo.'
+              : '')
+          );
+          // Refresh the backup list so the user can see the new
+          // pre-restore snapshot land.
+          refreshBackupList();
+          return result;
+        });
+      }).catch(function (err) {
+        if (err && err.localDataUnavailable) {
+          hideRestoreSection();
+          return null;
+        }
+        flashRestoreStatus('Restore failed: ' + (err && err.message || String(err)));
+        return null;
+      });
+    }
+
+    if (restorePick && restoreFile) {
+      restorePick.addEventListener('click', function () { restoreFile.click(); });
+      restoreFile.addEventListener('change', function () {
+        var f = restoreFile.files && restoreFile.files[0];
+        if (!f) return;
+        flashRestoreStatus('Reading ' + f.name + '…');
+        f.arrayBuffer().then(function (buf) {
+          performImport(new Uint8Array(buf), '“' + f.name + '”');
+        }).catch(function (e) {
+          flashRestoreStatus('Could not read file: ' + (e && e.message || String(e)));
+        }).then(function () {
+          // Reset the input so picking the same file twice still fires change.
+          try { restoreFile.value = ''; } catch (e) {}
+        });
+      });
+    }
+
+    if (backupListEl) {
+      backupListEl.addEventListener('click', function (ev) {
+        var btn = ev.target && ev.target.closest && ev.target.closest('.settings-backup-restore');
+        if (!btn || btn.disabled) return;
+        var name = btn.getAttribute('data-backup-name');
+        if (!name) return;
+        flashRestoreStatus('Reading auto-backup…');
+        if (!dataProvider || typeof dataProvider.restoreRelationshipsBackup !== 'function') {
+          flashRestoreStatus('Restore not available in this mode.');
+          return;
+        }
+        // For the auto-backup path we read bytes ourselves (so we can
+        // run the confirm dialog), then reuse performImport for the
+        // shared validation + delta + import flow.
+        _opfsReadBinary(name).then(function (bytes) {
+          return performImport(bytes, 'auto-backup ' + fmtBackupTimestamp(name));
+        }).catch(function (err) {
+          flashRestoreStatus('Could not read auto-backup: ' + (err && err.message || String(err)));
+        });
+      });
+    }
+
+    refreshBackupList();
 
     function showUnsupportedAndDisable() {
       detailEl.innerHTML = renderLocalDataUnavailablePanel('settings');

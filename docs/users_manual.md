@@ -376,8 +376,18 @@ Open `#/settings` (linked from the navigation).
   a backup before a major change, or if you want to keep an off-device
   copy. The app also auto-snapshots the same file before every app
   upgrade and keeps the newest 3 — Diagnostics shows the current list.
-  (A user-facing **Restore** flow isn't built yet — if you ever need to
-  recover from a backup, contact the maintainer.)
+- **Restore from backup → Restore from a file** — pick a `.db` file you
+  previously downloaded (or one a friend who hit a bug shared with you)
+  and replace your current saved data with it. The app reads the file,
+  shows you a confirmation summary ("4 groups, 12 notes → 7 groups,
+  23 notes — Continue?"), and only swaps once you say yes. Reversible:
+  before the swap it captures your current state into the auto-backup
+  list below, so a wrong restore is one click away from undo.
+- **Restore from backup → Recent auto-backups** — the same panel lists
+  every snapshot the app has taken on this device (newest 3, including
+  any you triggered by restoring). Each row shows when it was taken
+  and what's inside (groups · notes · tags). **Restore this** rolls
+  back to that snapshot.
 
 Settings are stored in the app's local user-data store and survive
 both app updates and **Clear App Cache**.

@@ -2732,6 +2732,72 @@ a.group-action-btn--primary {
   cursor: wait;
 }
 
+.settings-section-subtitle {
+  font-size: 0.92rem;
+  font-weight: 600;
+  margin: 1.25rem 0 0.4rem;
+  color: var(--text-strong, #0f172a);
+}
+
+.settings-backup-list {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.settings-backup-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+}
+
+.settings-backup-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-backup-when {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-strong, #0f172a);
+}
+
+.settings-backup-summary {
+  font-size: 0.82rem;
+  color: #475569;
+  margin-top: 0.1rem;
+}
+
+.settings-backup-restore {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.3rem 0.7rem;
+  background: #fff;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  cursor: pointer;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.settings-backup-restore:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+}
+
+.settings-backup-restore:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ===== Local-data-unavailable panel ===================================
    Shown when groups/settings can't be reached locally — typically a
    browser too old for OPFS+SyncAccessHandle on the production server

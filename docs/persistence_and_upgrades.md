@@ -109,13 +109,51 @@ The Settings page exposes the live `relationships.db` as a download
 a copy off-device. Diagnostics lists the backup files with sizes and
 mtimes.
 
-What this does NOT cover yet (deferred):
-- **Restore from backup.** If you find a corrupt `relationships.db`
-  and want to revert to a `.bak.*` snapshot, today the path is manual
-  (`chrome://settings → site data → fellows...` to wipe, then re-import,
-  or copy the bytes via the OPFS root API in DevTools). A user-facing
-  restore button is on the roadmap; export-only is shipped as v1
-  because the typical recovery path so far has been "email Rich".
+### Restore
+
+Two restore paths surface on the Settings page (added in #85, on top
+of the auto-backup machinery from PR #84):
+
+- **Restore from a file.** File-picker accepts a `.db` / `.sqlite`
+  download from any device. The bytes are read into a temp SAH-pool
+  slot (`relationships.db.restore-staging`), validated with
+  `PRAGMA quick_check` plus a schema check against the five expected
+  tables (`groups`, `group_members`, `fellow_tags`, `fellow_notes`,
+  `settings`), and the user gets a confirm dialog with a row-count
+  delta before any live data changes.
+- **Restore from a recent auto-backup.** Same panel lists the
+  `relationships.db.bak.*` files already in OPFS root, each enriched
+  with the row counts inside (read via the same staging slot — done
+  sequentially because the slot is shared). Picking one rolls back
+  to that snapshot.
+
+Both paths funnel through `dataProvider.importRelationshipsBytes(bytes)`,
+which:
+
+1. Validates via `inspectRelationshipsBytes` (the same staging-slot
+   trick as the backup picker).
+2. Calls `snapshotRelationshipsDbToBackup` — a forced version of
+   `maybeBackupRelationshipsDb` that skips the SHA-change check.
+   The pre-restore state lands in the same rotation slot, so a wrong
+   restore is one click away from undo.
+3. Closes the live `relDb` handle, calls `poolUtil.importDb('relationships.db', bytes)`
+   to atomically replace the SAH-pool slot, opens a fresh handle, and
+   reassigns the closure-captured `relDb` so every other provider
+   method (`listGroups`, `getSetting`, etc.) sees the new DB without
+   a page reload.
+4. Re-runs `bootstrapRelationshipsSchema(relDb)` (idempotent CREATE
+   IF NOT EXISTS) so a backup from an older schema gets the missing
+   tables added.
+
+The `last_seen_sha.txt` sentinel is intentionally NOT touched by
+restore — restoring an old backup is not a deploy event, so the
+next genuine SHA-change boot will still trigger an auto-backup.
+
+What this does NOT cover (out of scope, no plan to add):
+- Cross-device sync.
+- Encrypted backups (use external tooling).
+- Merging / diffing two DBs — restore is a full replacement.
+- Server-side storage of the backup file.
 
 ## Per-user customization (or lack thereof)
 
@@ -234,7 +272,8 @@ either:
   ends up with a corrupt OPFS-stored `fellows.db`, there's no UI path
   to wipe just that file. If this surfaces, add a separate "wipe local
   data and re-download" hook that deletes `fellows.db` from OPFS but
-  leaves `relationships.db` intact.
+  leaves `relationships.db` intact. (Note: the equivalent gap for
+  `relationships.db` is now covered — see § Restore above.)
 - **Future cross-device sync.** Out of scope today, but the layering
   here keeps the door open: `relationships.db` is a single
   self-contained file with stable schemas, suitable for an
