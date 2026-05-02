@@ -401,32 +401,58 @@ When an update is available, a banner appears across the top of the app:
 ## Clearing app data
 
 If the app gets into a weird state (corrupt cache, stuck banner, stale
-data), you can reset it.
+data), there are two reset paths. Try the first one first.
+
+### Clear App Cache (gentle reset — preserves your groups)
 
 - **On a phone or tablet:** tap the **⋮** kebab in the top-right of the
   app bar → **Clear app cache & reload**. Confirm.
 - **On desktop:** click the red **Clear App Cache & Reload** button in
   the bottom-right corner. Confirm.
 
-The app wipes its local storage and reloads. The same kebab menu also
-holds **Diagnostics…** and **Report a bug…**, which on desktop appear
-as separate floating buttons.
+The app wipes its local cache, signs you out, and reloads. The same
+kebab menu also holds **Diagnostics…** and **Report a bug…**, which on
+desktop appear as separate floating buttons.
 
 ![Mobile app-bar kebab opened: app/server build line, Diagnostics,
-Report a bug, and Clear app cache & reload all live in one
+Report a bug, Clear app cache & reload, and Reset everything (lose
+groups & settings) all live in one
 sheet.](images/users_manual/m6_mobile_appbar_kebab.png)
 
 **Heads-up:** clearing the cache also re-downloads the fellow data and
-photos on the next launch. The session cookie is cleared, so if the
-server asks for auth again you'll need your install link (or a fresh
-one). The app preserves a small "you've been here before" marker so the
-URL still opens the directory directly and a future server outage won't
-strand you at the error panel.
+photos on the next launch, and signs you out — so if the server asks
+for auth again you'll need your install link (or a fresh one). The app
+preserves a small "you've been here before" marker so the URL still
+opens the directory directly and a future server outage won't strand
+you at the error panel.
 
 **What survives a cache clear:** your saved groups, your group notes,
 and your Settings (e.g. your "me" email). These live in a separate
 local store from the app cache and aren't touched by this button. An
 in-progress group draft *is* lost — drafts are by definition unsaved.
+
+### Reset everything (nuclear — also wipes your groups)
+
+If Clear App Cache didn't fix the problem, the next escalation is
+**Reset everything**. This wipes the local store too, so your saved
+groups, group notes, fellow tags, and Settings are deleted along with
+the cache.
+
+- **On a phone or tablet:** same kebab → **Reset everything (lose
+  groups & settings)** at the bottom of the sheet. Confirm.
+- **On desktop:** the small underlined **…or reset everything** link
+  just above the red Clear App Cache button. Confirm.
+
+A confirm dialog spells out what's being lost before it runs. Use this
+only when the gentle reset hasn't helped — for example, the directory
+is showing stale or wrong data after multiple Clear App Cache attempts,
+or the app is stuck on a "can't open groups on this browser" panel
+that you suspect is a corrupted local store rather than a real browser
+limit.
+
+After Reset everything you'll come back to the email gate as if it were
+your first visit. Sign in again with your magic link. The directory
+will re-download; your groups will not — they're gone.
 
 ---
 

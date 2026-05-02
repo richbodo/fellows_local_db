@@ -20,6 +20,14 @@ shared mental model when triaging "why did my X disappear?" reports.
 | localStorage `fellows_self_email` | User's "me" email for `mailto:?to=…` | Untouched | Cleared, but rehydrated from `relationships.settings` on next boot |
 | Cookie `fellows_session` (HttpOnly) | HMAC'd session, 7-day TTL, contains `token_issued_at` | Untouched (still valid until TTL) | Cleared via `POST /api/logout` (server sends a clearing `Set-Cookie`). `clearCookiesBestEffort()` also runs from JS as a fallback for any non-HttpOnly cookies. |
 
+**Reset Everything** (kebab → bottom item / desktop link below the red
+button) clears every row above *including* the two OPFS files and the
+`fellows_authenticated_once` marker. Use only when Clear App Cache
+hasn't fixed the problem; the user loses all saved groups, notes, and
+settings. Implementation: same teardown as `clearAllAppData` plus an
+OPFS-root iteration that `removeEntry`s every top-level entry. See
+[A user clicks Reset Everything](#a-user-clicks-reset-everything).
+
 The key architectural decision: **`relationships.db` is a separate
 OPFS file from `fellows.db`** rather than a set of new tables inside
 `fellows.db`. That's because `fellows.db` is bundled with the build
@@ -116,6 +124,34 @@ most users hit this only once or never.
   boot, so the Settings page already shows it.
 - The in-progress group draft (`ehf.group_draft`) IS lost — drafts
   are by definition unsaved.
+
+### A user clicks Reset Everything
+
+The escalation past Clear App Cache. Same surface as Clear App Cache
+(kebab on mobile, small muted link below the red button on desktop)
+but explicitly destructive — the confirm dialog spells out what gets
+lost.
+
+- localStorage clears (including `fellows_authenticated_once`, unlike
+  Clear App Cache).
+- IndexedDB clears.
+- All Cache API entries clear (shell + images).
+- The HttpOnly session cookie clears via `POST /api/logout`.
+- Service worker registrations are unregistered.
+- **OPFS clears**: every top-level entry (`relationships.db`,
+  `fellows.db`, and any `relationships.db.bak.*` siblings once
+  auto-backup ships) is deleted via `removeEntry`. There is no
+  per-origin "wipe OPFS" API, so the implementation iterates the root
+  with `await for entry of root.values()` and removes each by name.
+- After reload: user lands at the email gate as a first-time visitor.
+  Their groups, notes, settings, and fellow tags are gone.
+
+When to recommend this over Clear App Cache: only after Clear App
+Cache hasn't helped. Common triggers — a corrupt OPFS-stored
+`fellows.db` that re-import didn't fix, a `relationships.db` schema
+that survived a botched migration, or the unsupported-browser panel
+appearing on a browser you know is supported (suggesting a
+locally-broken OPFS state rather than a real browser limit).
 
 ### A user installs on a brand-new device
 

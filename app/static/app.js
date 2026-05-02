@@ -1529,12 +1529,133 @@
 
   window.clearAllAppData = clearAllAppData;
 
+  // Recovery escape hatch beyond Clear App Cache. Wipes OPFS too —
+  // meaning the user loses all their saved groups, group notes, fellow
+  // tags, and settings. Use only when Clear App Cache hasn't fixed the
+  // problem (corrupt OPFS-stored fellows.db, schema-migration glitch,
+  // a hard "I want a brand-new install" reset). Also clears the
+  // fellows_authenticated_once marker so the next load starts at the
+  // email gate as if the URL had never been visited.
+  async function clearEverything() {
+    try {
+      // Server-side cookie clear: see clearAllAppData for the same
+      // rationale (HttpOnly cookie can't be touched from JS).
+      try {
+        await fetch('/api/logout', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}'
+        });
+      } catch (e) { /* offline / dev / network — proceed */ }
+
+      // OPFS wipe: removes relationships.db (groups + notes + settings),
+      // fellows.db (re-imported on next boot anyway), and any sibling
+      // files (e.g. relationships.db.bak.* once auto-backup ships).
+      // Iterate and removeEntry for each — there is no per-origin
+      // "wipe OPFS" API, so we delete each top-level entry by name.
+      if (navigator.storage && typeof navigator.storage.getDirectory === 'function') {
+        try {
+          var root = await navigator.storage.getDirectory();
+          var names = [];
+          // values() returns an async iterator; collect names first so
+          // we don't mutate while iterating.
+          if (typeof root.values === 'function') {
+            for await (var entry of root.values()) {
+              names.push(entry.name);
+            }
+          }
+          for (var i = 0; i < names.length; i++) {
+            try {
+              await root.removeEntry(names[i], { recursive: true });
+            } catch (rmErr) {
+              console.error('[Fellows] OPFS removeEntry failed for ' + names[i], rmErr);
+            }
+          }
+        } catch (opfsErr) {
+          console.error('[Fellows] OPFS wipe failed:', opfsErr);
+        }
+      }
+
+      // Full local-storage clear — DON'T preserve AUTH_ONCE_KEY here.
+      // Reset Everything is the explicit "treat me like a brand-new
+      // install" path; the marker survival in clearAllAppData is for
+      // the gentler Clear App Cache flow.
+      localStorage.clear();
+      sessionStorage.clear();
+
+      if (window.indexedDB && typeof window.indexedDB.deleteDatabase === 'function') {
+        try {
+          window.indexedDB.deleteDatabase('fellows-local-db');
+        } catch (err) {}
+      }
+
+      if ('caches' in window) {
+        try {
+          var cacheNames = await caches.keys();
+          await Promise.all(
+            cacheNames.map(function (cacheName) {
+              return caches.delete(cacheName);
+            })
+          );
+        } catch (err) {
+          console.error('Error clearing Cache API caches:', err);
+        }
+      }
+
+      if ('serviceWorker' in navigator) {
+        try {
+          var registrations = await navigator.serviceWorker.getRegistrations();
+          for (var j = 0; j < registrations.length; j++) {
+            await registrations[j].unregister();
+          }
+        } catch (err2) {
+          console.error('Error unregistering service workers:', err2);
+        }
+      }
+
+      clearCookiesBestEffort();
+      window.location.replace(
+        window.location.pathname + '?cache_reset=full&t=' + Date.now()
+      );
+    } catch (e) {
+      console.error('[Fellows] clearEverything failed:', e);
+      try {
+        window.location.replace(
+          window.location.pathname + '?cache_reset=full-force'
+        );
+      } catch (e2) {
+        window.location.reload();
+      }
+    }
+  }
+
+  window.clearEverything = clearEverything;
+
   function initClearCacheButton() {
     var btn = document.getElementById('clear-app-cache-button');
     if (!btn) return;
     btn.addEventListener('click', function () {
       Promise.resolve(clearAllAppData()).catch(function (e) {
         console.error('[Fellows] clearAllAppData rejected:', e);
+      });
+    });
+  }
+
+  function initResetEverythingButton() {
+    var btn = document.getElementById('reset-everything-button');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      var ok = window.confirm(
+        'Reset everything?\n\n' +
+        'This deletes your saved groups, group notes, fellow tags, and settings, ' +
+        'AND signs you out. It is meant for the case where Clear App Cache hasn\'t ' +
+        'fixed the problem.\n\n' +
+        'Continue?'
+      );
+      if (!ok) return;
+      Promise.resolve(clearEverything()).catch(function (e) {
+        console.error('[Fellows] clearEverything rejected:', e);
       });
     });
   }
@@ -2123,6 +2244,7 @@
         if (action === 'diagnostics') targetId = 'diag-toggle';
         else if (action === 'report-bug') targetId = 'bug-report-button';
         else if (action === 'clear-cache') targetId = 'clear-app-cache-button';
+        else if (action === 'reset-everything') targetId = 'reset-everything-button';
         if (!targetId) return;
         var target = document.getElementById(targetId);
         if (target) target.click();
@@ -6334,6 +6456,7 @@
 
   initSwReloadButton();
   initClearCacheButton();
+  initResetEverythingButton();
   initDiagnosticsPanel();
   initBugReportButtons();
   initKebabSheet();

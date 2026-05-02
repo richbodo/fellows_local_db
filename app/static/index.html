@@ -25,6 +25,14 @@
   <button type="button" id="clear-app-cache-button" class="clear-app-cache-button">
     Clear App Cache & Reload
   </button>
+  <button
+    type="button"
+    id="reset-everything-button"
+    class="reset-everything-button"
+    title="Wipes saved groups, settings, and signs you out. Use only if Clear App Cache didn't help."
+  >
+    …or reset everything
+  </button>
   <button type="button" id="diag-toggle" class="diag-toggle" title="Show bundle and auth diagnostics">
     Diagnostics
   </button>
@@ -408,6 +416,7 @@
     <button type="button" class="sheet-action" data-kebab-action="diagnostics">Diagnostics…</button>
     <button type="button" class="sheet-action" data-kebab-action="report-bug">Report a bug…</button>
     <button type="button" class="sheet-action sheet-action--danger" data-kebab-action="clear-cache">Clear app cache &amp; reload</button>
+    <button type="button" class="sheet-action sheet-action--danger" data-kebab-action="reset-everything">Reset everything (lose groups &amp; settings)</button>
   </aside>
   <script src="/vendor/sqlite3.js"></script>
   <script src="/vendor/jspdf-2.5.1.umd.min.js"></script>
