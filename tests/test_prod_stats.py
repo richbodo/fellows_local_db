@@ -234,6 +234,175 @@ def test_tally_ignores_unrecognized_structured_events():
     assert stats["client_errors"] == 0
 
 
+def test_tally_buckets_install_funnel_events_inside_client_error_payloads():
+    """Install-funnel telemetry rides inside client_error payloads as
+    nested events with kind=install. Each msg is bucketed; outcome_*
+    events also get a per-platform breakdown from the `extra` field."""
+    entries = [
+        _entry(json.dumps({
+            "event": "client_error",
+            "events": [
+                {"kind": "install", "msg": "landing_shown"},
+                {"kind": "install", "msg": "before_prompt_fired", "extra": "web"},
+            ],
+        }), ts="2026-05-02T09:00:00Z"),
+        _entry(json.dumps({
+            "event": "client_error",
+            "events": [
+                {"kind": "install", "msg": "landing_shown"},
+                {"kind": "install", "msg": "before_prompt_never_arrived"},
+                {"kind": "install", "msg": "use_in_tab_clicked"},
+            ],
+        }), ts="2026-05-02T09:01:00Z"),
+        _entry(json.dumps({
+            "event": "client_error",
+            "events": [
+                {"kind": "install", "msg": "landing_shown"},
+                {"kind": "install", "msg": "button_clicked"},
+                {"kind": "install", "msg": "outcome_accepted", "extra": "web"},
+                {"kind": "install", "msg": "app_installed"},
+            ],
+        }), ts="2026-05-02T09:02:00Z"),
+        _entry(json.dumps({
+            "event": "client_error",
+            "events": [
+                {"kind": "install", "msg": "outcome_accepted", "extra": "android"},
+                {"kind": "install", "msg": "outcome_dismissed", "extra": ""},
+            ],
+        }), ts="2026-05-02T09:03:00Z"),
+    ]
+    stats = prod_stats.tally(entries)
+    funnel = stats["install_funnel"]
+    assert funnel["landing_shown"] == 3
+    assert funnel["before_prompt_fired"] == 1
+    assert funnel["before_prompt_never_arrived"] == 1
+    assert funnel["button_clicked"] == 1
+    assert funnel["outcome_accepted"] == 2
+    assert funnel["outcome_dismissed"] == 1
+    assert funnel["app_installed"] == 1
+    assert funnel["use_in_tab_clicked"] == 1
+    platforms = stats["install_outcome_platforms"]
+    assert platforms["outcome_accepted"] == {"web": 1, "android": 1}
+    # Empty extra → bucket as "(none)" so the operator still sees the
+    # event happened, just with unknown platform.
+    assert platforms["outcome_dismissed"] == {"(none)": 1}
+
+
+def test_tally_install_funnel_ignores_non_install_kinds_inside_client_errors():
+    """A client_error payload with mixed kinds — install events must be
+    bucketed; http / window.error / unknown kinds must NOT bump the
+    install funnel counters."""
+    entries = [
+        _entry(json.dumps({
+            "event": "client_error",
+            "events": [
+                {"kind": "install", "msg": "landing_shown"},
+                {"kind": "http", "msg": "GET /api/fellows → 404"},
+                {"kind": "window.error", "msg": "boom"},
+                # Sanitizer would drop unknown kinds before they reach
+                # journald, but be defensive — never trust the input.
+                {"kind": "admin_command", "msg": "drop tables"},
+            ],
+        })),
+    ]
+    stats = prod_stats.tally(entries)
+    assert stats["install_funnel"] == {"landing_shown": 1}
+    assert stats["install_outcome_platforms"] == {}
+
+
+def test_tally_install_funnel_empty_when_no_install_events():
+    """Hosts with no install activity in the window get empty dicts —
+    not missing keys — so print_human can decide visibility cleanly."""
+    stats = prod_stats.tally([])
+    assert stats["install_funnel"] == {}
+    assert stats["install_outcome_platforms"] == {}
+
+
+def test_print_human_renders_install_funnel_section_when_populated(capsys):
+    """The funnel section appears in the human output (not errors-only),
+    in the canonical happy-path order, with per-platform breakdowns on
+    outcome_* lines."""
+    stats = prod_stats.tally([
+        _entry(json.dumps({
+            "event": "client_error",
+            "events": [
+                {"kind": "install", "msg": "landing_shown"},
+                {"kind": "install", "msg": "before_prompt_fired", "extra": "web"},
+                {"kind": "install", "msg": "button_clicked"},
+                {"kind": "install", "msg": "outcome_accepted", "extra": "web"},
+                {"kind": "install", "msg": "app_installed"},
+            ],
+        })),
+    ])
+    disk = {"path": "/", "total_gib": 10.0, "used_gib": 5.0, "free_gib": 5.0, "pct_used": 50.0}
+    prod_stats.print_human(stats, disk, since="24h", unit="fellows-pwa")
+    out = capsys.readouterr().out
+    assert "Install funnel:" in out
+    assert "landing_shown" in out
+    assert "before_prompt_fired" in out
+    assert "button_clicked" in out
+    assert "outcome_accepted" in out
+    assert "(web:1)" in out  # platform breakdown
+    assert "app_installed" in out
+    # Order check: landing_shown before before_prompt_fired before
+    # button_clicked before outcome_accepted before app_installed.
+    positions = [out.index(name) for name in (
+        "landing_shown", "before_prompt_fired", "button_clicked",
+        "outcome_accepted", "app_installed",
+    )]
+    assert positions == sorted(positions)
+
+
+def test_print_human_hides_install_funnel_section_when_empty(capsys):
+    """No install activity → no section header, to avoid noise on hosts
+    that haven't seen any install events in the window."""
+    stats = prod_stats.tally([])
+    disk = {"path": "/", "total_gib": 10.0, "used_gib": 5.0, "free_gib": 5.0, "pct_used": 50.0}
+    prod_stats.print_human(stats, disk, since="24h", unit="fellows-pwa")
+    out = capsys.readouterr().out
+    assert "Install funnel:" not in out
+
+
+def test_print_human_install_funnel_skipped_in_errors_only_mode(capsys):
+    """`prod_stats --errors-only` is a focused triage view — the install
+    funnel is informational, not an error, so it stays out."""
+    stats = prod_stats.tally([
+        _entry(json.dumps({
+            "event": "client_error",
+            "events": [{"kind": "install", "msg": "landing_shown"}],
+        })),
+    ])
+    disk = {"path": "/", "total_gib": 10.0, "used_gib": 5.0, "free_gib": 5.0, "pct_used": 50.0}
+    prod_stats.print_human(stats, disk, since="24h", unit="fellows-pwa", errors_only=True)
+    out = capsys.readouterr().out
+    assert "Install funnel:" not in out
+
+
+def test_print_human_install_funnel_surfaces_unknown_msg_after_known_ones(capsys):
+    """Forward-compat: a future install msg name we haven't added to the
+    canonical order still shows up — just after the known names, sorted
+    alphabetically — so new client telemetry isn't silently dropped from
+    the operator's view."""
+    stats = prod_stats.tally([
+        _entry(json.dumps({
+            "event": "client_error",
+            "events": [
+                {"kind": "install", "msg": "landing_shown"},
+                {"kind": "install", "msg": "totally_new_funnel_step"},
+                {"kind": "install", "msg": "z_extra_step_added_later"},
+            ],
+        })),
+    ])
+    disk = {"path": "/", "total_gib": 10.0, "used_gib": 5.0, "free_gib": 5.0, "pct_used": 50.0}
+    prod_stats.print_human(stats, disk, since="24h", unit="fellows-pwa")
+    out = capsys.readouterr().out
+    # Known step first, then unknowns in alphabetical order.
+    pos_known = out.index("landing_shown")
+    pos_extra1 = out.index("totally_new_funnel_step")
+    pos_extra2 = out.index("z_extra_step_added_later")
+    assert pos_known < pos_extra1 < pos_extra2
+
+
 def test_print_human_errors_only_includes_client_error_count_and_kind_tag(capsys):
     """In errors-only mode, print_human prints the client error count
     and tags client_error rows in the recent-errors list."""
