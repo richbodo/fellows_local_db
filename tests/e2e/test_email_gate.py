@@ -436,3 +436,70 @@ class TestEmailGate:
             expect(page.locator("#install-gate-private")).to_be_visible()
         finally:
             page.close()
+
+
+class TestInstallTelemetry:
+    """Install-funnel telemetry: every meaningful step in the install
+    landing flow POSTs a `kind=install` event to /api/client-errors so
+    the maintainer can grep journald for "what fraction of install
+    visits actually saw beforeinstallprompt fire vs. timed out?" The
+    /api/client-errors sink is the same one the existing client errors
+    use; the kind allowlist was extended in deploy/client_error_sanitizer.py.
+    """
+
+    def test_landing_shown_posts_install_event(self, context, base_url_fixture):
+        page = context.new_page()
+        try:
+            _mock_auth_status(
+                page,
+                authEnabled=True,
+                authenticated=True,
+                installRecentlyAllowed=True,
+            )
+            with page.expect_request(
+                lambda r: "/api/client-errors" in r.url and r.method == "POST",
+                timeout=5000,
+            ) as req_info:
+                page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+                expect(page.locator("#install-landing")).to_be_visible()
+            body = req_info.value.post_data_json
+            assert body["events"][0]["kind"] == "install"
+            assert body["events"][0]["msg"] == "landing_shown"
+            # Sanity: build line, route, and displayMode shape match the
+            # rest of the /api/client-errors payloads (and survive the
+            # server-side sanitizer).
+            assert body["route"] == "#install-landing"
+            assert body["displayMode"] in ("standalone", "browser-tab")
+        finally:
+            page.close()
+
+    def test_use_in_tab_click_posts_install_event(self, context, base_url_fixture):
+        """The 'Use the directory in this tab' escape hatch fires its own
+        event so we can tell apart 'never saw the prompt' from 'saw it
+        and decided to escape' in the funnel."""
+        page = context.new_page()
+        try:
+            _mock_auth_status(
+                page,
+                authEnabled=True,
+                authenticated=True,
+                installRecentlyAllowed=True,
+            )
+            page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+            expect(page.locator("#install-landing")).to_be_visible()
+            # Wait for the landing_shown POST to land so the next
+            # expect_request doesn't race-capture it instead of the click
+            # event we care about.
+            page.wait_for_timeout(200)
+            with page.expect_request(
+                lambda r: "/api/client-errors" in r.url
+                and r.method == "POST"
+                and (r.post_data or "").find("use_in_tab_clicked") >= 0,
+                timeout=5000,
+            ) as req_info:
+                page.locator("#install-use-in-tab").click()
+            body = req_info.value.post_data_json
+            assert body["events"][0]["kind"] == "install"
+            assert body["events"][0]["msg"] == "use_in_tab_clicked"
+        finally:
+            page.close()

@@ -53,12 +53,19 @@ MAX_ROUTE_LEN = 240
 MAX_BUILD_LEN = 64
 
 # Restricted set so a caller can't smuggle e.g. `kind=admin_command`.
+# `install` carries install-funnel telemetry from the install landing
+# page (beforeinstallprompt fired / never arrived, button clicked,
+# accept/dismiss outcome, app installed, "use in tab" escape hatch,
+# iOS Safari advisory). The privacy boundary is the same — same
+# free-text sanitization on `msg` and `extra` — so adding the kind
+# doesn't widen what a caller can put in the journald log.
 ALLOWED_EVENT_KINDS = frozenset({
     "http",
     "sw",
     "window.error",
     "unhandledrejection",
     "console.error",
+    "install",
 })
 
 ALLOWED_DISPLAY_MODES = frozenset({"standalone", "browser-tab"})

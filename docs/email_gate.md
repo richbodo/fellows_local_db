@@ -179,7 +179,7 @@ Request body (POST, `Content-Type: application/json`, max 16 KB):
 {
   "events": [                              // required, array, capped at 20
     {
-      "kind": "http",                       // one of: http, sw, window.error, unhandledrejection, console.error
+      "kind": "http",                       // one of: http, sw, window.error, unhandledrejection, console.error, install
       "ts":   "2026-04-30T15:00:00Z",       // optional, ISO-8601, length-capped
       "msg":  "GET /api/fellows → 404",    // free text, sanitized + truncated to 500
       "extra": "..."                        // optional, sanitized + truncated to 200
@@ -195,6 +195,46 @@ Request body (POST, `Content-Type: application/json`, max 16 KB):
 ```
 
 Unknown top-level keys are silently dropped. Events whose `kind` isn't in the accept-list are silently dropped. Non-conforming `lastSubmitHashPrefix` is silently dropped.
+
+#### `kind=install` events (install-funnel telemetry)
+
+The install landing page (`#install-landing`) fires one-event payloads with `kind=install` at each meaningful step in the install flow, so the maintainer can answer "what fraction of install-landing visits actually saw `beforeinstallprompt` fire vs. timed out?" without instrumenting an analytics pipeline. Same `/api/client-errors` sink, same sanitizer rules — adding the kind to the allowlist doesn't widen what a caller can put in journald.
+
+Event names in `msg`:
+
+| `msg` | Fired when |
+|---|---|
+| `landing_shown` | The install landing first renders. The denominator for everything below. |
+| `ios_safari_advised` | The user is on iOS Safari, where `beforeinstallprompt` doesn't exist; the UI shows the Share → Add to Home Screen hint. |
+| `before_prompt_fired` | Chrome/Edge fired `beforeinstallprompt`; install button now active. `extra` carries the comma-joined `event.platforms` (typically `web`). |
+| `before_prompt_never_arrived` | 5 seconds after `landing_shown`, no `beforeinstallprompt` seen — engagement heuristic not met, already-installed PWA on the same profile, or unsupported browser. Skipped on iOS Safari (where the event doesn't exist by design). |
+| `button_clicked` | User clicked the Install button. |
+| `button_clicked_no_prompt` | User clicked Install but no deferred prompt was available — the unsupported-hint surfaces. |
+| `outcome_accepted` / `outcome_dismissed` / `outcome_unknown` | Result of the OS install dialog; `extra` carries `choice.platform`. |
+| `outcome_error` | The promise from `prompt()` / `userChoice` rejected; `extra` carries the error message (sanitizer-redacted). |
+| `app_installed` | The browser's `appinstalled` event fired — terminal success signal. |
+| `use_in_tab_clicked` | User took the "Use the directory in this tab" escape hatch instead of installing. |
+
+Operator query example — last 24h funnel breakdown:
+
+```bash
+just prod-logs | grep '"kind": "install"' | python3 -c '
+import json, sys
+from collections import Counter
+c = Counter()
+for line in sys.stdin:
+    try:
+        for ev in json.loads(line.split(" ", 4)[-1])["events"]:
+            if ev["kind"] == "install":
+                c[ev["msg"]] += 1
+    except Exception:
+        pass
+for k, v in c.most_common():
+    print(f"{v:>6}  {k}")
+'
+```
+
+A future `just prod-stats` extension could surface the same breakdown alongside the existing `magic_links_sent` / `magic_links_verified` tallies.
 
 ### Anti-abuse posture
 

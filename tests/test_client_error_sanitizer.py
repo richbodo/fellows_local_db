@@ -157,6 +157,34 @@ def test_sanitize_payload_drops_unknown_event_kind():
     assert out["events"] == []
 
 
+def test_sanitize_payload_accepts_install_kind():
+    """Install-funnel telemetry rides the same /api/client-errors sink as
+    the existing kinds. The privacy boundary (free-text sanitizer on
+    msg/extra) is the same; adding the kind to the allowlist doesn't
+    widen what a caller can put in journald."""
+    body = {"events": [
+        {"kind": "install", "msg": "before_prompt_fired"},
+        {"kind": "install", "msg": "outcome_accepted", "extra": "android"},
+        {"kind": "install", "msg": "use_in_tab_clicked"},
+    ]}
+    out = ces.sanitize_payload(body)
+    assert len(out["events"]) == 3
+    assert all(e["kind"] == "install" for e in out["events"])
+    assert out["events"][1]["extra"] == "android"
+
+
+def test_sanitize_payload_install_kind_still_redacts_email_in_msg():
+    """The kind allowlist doesn't bypass the email-redaction rule on
+    free-text fields. A buggy caller that tries to send the user's
+    email in an install event still gets it scrubbed server-side."""
+    body = {"events": [
+        {"kind": "install", "msg": "outcome_accepted by me@example.com"},
+    ]}
+    out = ces.sanitize_payload(body)
+    assert "me@example.com" not in out["events"][0]["msg"]
+    assert "<email>" in out["events"][0]["msg"]
+
+
 def test_sanitize_payload_caps_event_count():
     events = [{"kind": "http", "msg": f"e{i}"} for i in range(50)]
     out = ces.sanitize_payload({"events": events})

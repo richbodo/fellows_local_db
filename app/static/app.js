@@ -3072,6 +3072,42 @@
     });
   }
 
+  // Reports a single install-flow event to /api/client-errors so the
+  // maintainer can grep journald to answer questions like "what fraction
+  // of install-landing visits saw beforeinstallprompt fire vs. timed
+  // out?" Fire-and-forget; never blocks the install UX. The server-side
+  // sanitizer (deploy/client_error_sanitizer.py) is the privacy
+  // boundary — same email-redaction + length cap rules as the existing
+  // kinds. Uses fetch keepalive so the request survives the navigation
+  // that often follows (e.g. user_in_tab_clicked → bootDirectoryAsApp).
+  function reportInstallEvent(name, extra) {
+    if (!name) return;
+    var build = '';
+    if (bootBuildMeta && (bootBuildMeta.git_sha || bootBuildMeta.built_at)) {
+      build = (bootBuildMeta.git_sha || '') +
+        (bootBuildMeta.built_at ? ' @ ' + bootBuildMeta.built_at : '');
+    }
+    var ev = { kind: 'install', msg: String(name) };
+    if (extra) ev.extra = String(extra);
+    var payload = {
+      events: [ev],
+      ua: String(navigator.userAgent || ''),
+      build: build,
+      route: '#install-landing',
+      displayMode: isStandaloneDisplayMode() ? 'standalone' : 'browser-tab'
+    };
+    try { payload.online = Boolean(navigator.onLine); } catch (e) {}
+    try {
+      fetch('/api/client-errors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(payload),
+        keepalive: true
+      }).catch(function () { /* ignore — telemetry is best-effort */ });
+    } catch (e) { /* ignore */ }
+  }
+
   function initBrowserInstallMode(authPayload, httpStatus) {
     if (installGatePrivateEl) installGatePrivateEl.classList.add('hidden');
     if (installLandingEl) installLandingEl.classList.remove('hidden');
@@ -3084,21 +3120,44 @@
       showAuthDebugInstall(authPayload, httpStatus != null ? httpStatus : 200);
     }
 
+    reportInstallEvent('landing_shown');
+
     if (isIosSafari() && iosHintEl) {
       iosHintEl.classList.remove('hidden');
       if (installButtonEl) installButtonEl.classList.add('hidden');
+      reportInstallEvent('ios_safari_advised');
     }
 
+    // Track whether beforeinstallprompt arrived. The 5s timer reports
+    // a "never_arrived" event so we can distinguish browsers that
+    // suppress the prompt (already-installed Chrome on the same
+    // profile, engagement heuristic not yet met) from browsers that
+    // genuinely don't support it. Skipped when the iOS Safari path
+    // already advised the user — beforeinstallprompt is iOS-by-design
+    // not-a-thing there, no value reporting it.
+    var beforeInstallPromptSeen = false;
     window.addEventListener('beforeinstallprompt', function (e) {
       e.preventDefault();
       deferredInstallPrompt = e;
+      beforeInstallPromptSeen = true;
+      var platforms = '';
+      try { platforms = (e.platforms || []).join(','); } catch (ePf) {}
+      reportInstallEvent('before_prompt_fired', platforms);
       setInstallStatus('');
       if (installUnsupportedHintEl) installUnsupportedHintEl.classList.add('hidden');
       if (installButtonEl) installButtonEl.classList.remove('hidden');
     });
+    if (!isIosSafari()) {
+      setTimeout(function () {
+        if (!beforeInstallPromptSeen) {
+          reportInstallEvent('before_prompt_never_arrived');
+        }
+      }, 5000);
+    }
 
     window.addEventListener('appinstalled', function () {
       deferredInstallPrompt = null;
+      reportInstallEvent('app_installed');
       setInstallStatus('App installed — open it from your dock or app drawer.');
       if (installButtonEl) installButtonEl.classList.add('hidden');
     });
@@ -3115,21 +3174,27 @@
     if (installButtonEl && !installButtonEl._wired) {
       installButtonEl._wired = true;
       installButtonEl.addEventListener('click', function () {
+        reportInstallEvent('button_clicked');
         if (deferredInstallPrompt) {
           deferredInstallPrompt.prompt();
           deferredInstallPrompt.userChoice
             .then(function (choice) {
               deferredInstallPrompt = null;
-              if (choice && choice.outcome === 'accepted') {
+              var outcome = (choice && choice.outcome) || 'unknown';
+              var platform = (choice && choice.platform) || '';
+              reportInstallEvent('outcome_' + outcome, platform);
+              if (outcome === 'accepted') {
                 setInstallStatus('Installing…');
               }
             })
-            .catch(function () {
+            .catch(function (err) {
               deferredInstallPrompt = null;
+              reportInstallEvent('outcome_error', err && err.message);
             });
         } else if (isIosSafari()) {
           setInstallStatus('Use Share → Add to Home Screen.');
         } else {
+          reportInstallEvent('button_clicked_no_prompt');
           if (installUnsupportedHintEl) installUnsupportedHintEl.classList.remove('hidden');
           if (installButtonEl) installButtonEl.classList.add('hidden');
         }
@@ -3162,6 +3227,7 @@
       installUseInTabEl._wired = true;
       installUseInTabEl.addEventListener('click', function (ev) {
         ev.preventDefault();
+        reportInstallEvent('use_in_tab_clicked');
         markAuthenticatedOnce();
         if (installLandingEl) installLandingEl.classList.add('hidden');
         bootDirectoryAsApp();
