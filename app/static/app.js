@@ -134,6 +134,16 @@
   var tabsEl = document.getElementById('tabs');
   var kebabSheetEl = document.getElementById('kebab-sheet');
   var kebabScrimEl = document.getElementById('kebab-scrim');
+  // PR 2 of the mobile redesign: FAB-driven composer sheet + per-card
+  // kebab on the groups index + group-detail action-bar overflow sheet.
+  // All three reuse the .sheet / .sheet-scrim CSS pattern landed in PR 1.
+  var composerFabEl = document.getElementById('composer-fab');
+  var composerFabCountEl = document.getElementById('composer-fab-count');
+  var composerScrimEl = document.getElementById('composer-scrim');
+  var groupCardSheetEl = document.getElementById('group-card-sheet');
+  var groupCardScrimEl = document.getElementById('group-card-scrim');
+  var groupActionbarSheetEl = document.getElementById('group-actionbar-sheet');
+  var groupActionbarScrimEl = document.getElementById('group-actionbar-scrim');
   var deferredInstallPrompt = null;
   var directoryDataSource = 'api';
   var dataProvider = null;
@@ -2008,6 +2018,33 @@
     }
   }
 
+  function updateAppbarFellowNav(prevSlug, prevHref, nextSlug, nextHref) {
+    var prevEl = document.getElementById('appbar-fellow-prev');
+    var nextEl = document.getElementById('appbar-fellow-next');
+    if (prevEl) {
+      if (prevSlug) {
+        prevEl.classList.remove('hidden');
+        prevEl.removeAttribute('hidden');
+        prevEl.setAttribute('href', prevHref);
+      } else {
+        prevEl.classList.add('hidden');
+        prevEl.setAttribute('hidden', '');
+        prevEl.setAttribute('href', '#');
+      }
+    }
+    if (nextEl) {
+      if (nextSlug) {
+        nextEl.classList.remove('hidden');
+        nextEl.removeAttribute('hidden');
+        nextEl.setAttribute('href', nextHref);
+      } else {
+        nextEl.classList.add('hidden');
+        nextEl.setAttribute('hidden', '');
+        nextEl.setAttribute('href', '#');
+      }
+    }
+  }
+
   function isKebabSheetOpen() {
     return !!(kebabSheetEl && !kebabSheetEl.classList.contains('hidden'));
   }
@@ -2079,6 +2116,166 @@
     if (tabsEl) {
       tabsEl.addEventListener('click', function () {
         if (isKebabSheetOpen()) closeKebabSheet();
+      });
+    }
+  }
+
+  // ----- Composer FAB + sheet (PR 2) -----------------------------------
+  // The FAB is the mobile entry point into the existing #group-rail
+  // composer. CSS turns the rail into a fixed bottom-sheet at ≤1024px;
+  // the FAB only renders on the directory route when at least one
+  // fellow is selected. Selection state already lives in
+  // groupDraft.members (a Set); we mirror it onto the body class so
+  // CSS can react without JS having to touch the FAB on every change.
+
+  function updateComposerFabFromDraft() {
+    var n = groupDraft && groupDraft.members ? groupDraft.members.size : 0;
+    if (composerFabCountEl) composerFabCountEl.textContent = String(n);
+    var body = document.body;
+    if (n > 0) body.classList.add('has-selection');
+    else {
+      body.classList.remove('has-selection');
+      // If the sheet was open and selection drained to zero, close it.
+      if (body.classList.contains('composer-open')) closeComposerSheet();
+    }
+  }
+
+  function openComposerSheet() {
+    var body = document.body;
+    body.classList.add('composer-open');
+    if (composerScrimEl) {
+      composerScrimEl.classList.remove('hidden');
+      composerScrimEl.removeAttribute('hidden');
+    }
+    if (composerFabEl) composerFabEl.setAttribute('aria-expanded', 'true');
+    // Focus the title input so the user can start naming immediately.
+    if (groupRailTitleEl) {
+      try { groupRailTitleEl.focus({ preventScroll: true }); } catch (_) { groupRailTitleEl.focus(); }
+    }
+  }
+
+  function closeComposerSheet() {
+    var body = document.body;
+    body.classList.remove('composer-open');
+    if (composerScrimEl) {
+      composerScrimEl.classList.add('hidden');
+      composerScrimEl.setAttribute('hidden', '');
+    }
+    if (composerFabEl) composerFabEl.setAttribute('aria-expanded', 'false');
+  }
+
+  function initComposerFab() {
+    if (!composerFabEl) return;
+    composerFabEl.addEventListener('click', function () {
+      if (document.body.classList.contains('composer-open')) closeComposerSheet();
+      else openComposerSheet();
+    });
+    if (composerScrimEl) {
+      composerScrimEl.addEventListener('click', closeComposerSheet);
+    }
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && document.body.classList.contains('composer-open')) {
+        closeComposerSheet();
+      }
+    });
+    // Initial sync — selection may already be non-empty if the user
+    // had a draft saved in localStorage.
+    updateComposerFabFromDraft();
+  }
+
+  // ----- Per-card kebab sheet (groups index) ---------------------------
+
+  function initGroupCardSheet() {
+    if (!groupCardSheetEl) return;
+    if (groupCardScrimEl) {
+      groupCardScrimEl.addEventListener('click', closeGroupCardSheet);
+    }
+    var closeBtn = document.getElementById('group-card-sheet-close');
+    if (closeBtn) closeBtn.addEventListener('click', closeGroupCardSheet);
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && groupCardSheetEl && !groupCardSheetEl.classList.contains('hidden')) {
+        closeGroupCardSheet();
+      }
+    });
+    var actions = groupCardSheetEl.querySelectorAll('[data-card-action]');
+    for (var i = 0; i < actions.length; i++) {
+      actions[i].addEventListener('click', function (ev) {
+        var action = ev.currentTarget.getAttribute('data-card-action');
+        var gidStr = groupCardSheetEl.dataset.groupId;
+        var wrap = groupCardSheetEl._fellowsHostWrap;
+        closeGroupCardSheet();
+        if (!gidStr || !wrap) return;
+        if (action === 'rename') startInlineRename(wrap, gidStr);
+        else if (action === 'delete') confirmAndDeleteGroup(wrap, gidStr);
+      });
+    }
+  }
+
+  // ----- Group-detail action-bar overflow sheet ------------------------
+
+  function openGroupActionbarSheet(currentMode) {
+    if (!groupActionbarSheetEl) return;
+    // Reflect the current CC/BCC selection from the visible pill so
+    // the radio in the sheet matches what the action bar shows.
+    var radios = groupActionbarSheetEl.querySelectorAll('input[name="group-mode-sheet"]');
+    for (var i = 0; i < radios.length; i++) {
+      radios[i].checked = radios[i].value === currentMode;
+    }
+    groupActionbarSheetEl.classList.remove('hidden');
+    groupActionbarSheetEl.removeAttribute('hidden');
+    if (groupActionbarScrimEl) {
+      groupActionbarScrimEl.classList.remove('hidden');
+      groupActionbarScrimEl.removeAttribute('hidden');
+    }
+  }
+
+  function closeGroupActionbarSheet() {
+    if (!groupActionbarSheetEl) return;
+    groupActionbarSheetEl.classList.add('hidden');
+    groupActionbarSheetEl.setAttribute('hidden', '');
+    if (groupActionbarScrimEl) {
+      groupActionbarScrimEl.classList.add('hidden');
+      groupActionbarScrimEl.setAttribute('hidden', '');
+    }
+    var moreBtn = document.getElementById('group-action-more');
+    if (moreBtn) moreBtn.setAttribute('aria-expanded', 'false');
+  }
+
+  function initGroupActionbarSheet() {
+    if (!groupActionbarSheetEl) return;
+    if (groupActionbarScrimEl) {
+      groupActionbarScrimEl.addEventListener('click', closeGroupActionbarSheet);
+    }
+    var closeBtn = document.getElementById('group-actionbar-sheet-close');
+    if (closeBtn) closeBtn.addEventListener('click', closeGroupActionbarSheet);
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && groupActionbarSheetEl && !groupActionbarSheetEl.classList.contains('hidden')) {
+        closeGroupActionbarSheet();
+      }
+    });
+    // Radio changes mirror to the visible CC/BCC pill in the action
+    // bar so the desktop and the sheet stay in lockstep.
+    var radios = groupActionbarSheetEl.querySelectorAll('input[name="group-mode-sheet"]');
+    for (var i = 0; i < radios.length; i++) {
+      radios[i].addEventListener('change', function (ev) {
+        var mode = ev.target.value;
+        var pill = document.querySelector('.group-mode-pill[data-mode="' + mode + '"]');
+        if (pill) pill.click();
+      });
+    }
+    // Each sheet action proxies to the matching action-bar button so
+    // there is exactly one set of click handlers in the renderer.
+    var actions = groupActionbarSheetEl.querySelectorAll('[data-actionbar-action]');
+    for (var j = 0; j < actions.length; j++) {
+      actions[j].addEventListener('click', function (ev) {
+        var action = ev.currentTarget.getAttribute('data-actionbar-action');
+        closeGroupActionbarSheet();
+        var targetId = null;
+        if (action === 'copy') targetId = 'group-action-copy-emails';
+        else if (action === 'edit') targetId = 'group-action-edit';
+        if (!targetId) return;
+        var btn = document.getElementById(targetId);
+        if (btn) btn.click();
       });
     }
   }
@@ -3182,7 +3379,16 @@
           '<a class="' + nextClass + '" href="' + nextHref + '" aria-label="Next fellow">&rarr;</a>' +
           '<span class="fellow-nav-hint">or use arrow keys</span>' +
           '</nav>';
+        // Mirror prev/next into the mobile app bar so it stays
+        // reachable with one thumb at narrow widths. CSS gates
+        // visibility by `body.route-fellow` + the `.hidden` class
+        // we toggle here for end-of-list cases.
+        updateAppbarFellowNav(prevSlug, prevHref, nextSlug, nextHref);
+      } else {
+        updateAppbarFellowNav(null, null, null, null);
       }
+    } else {
+      updateAppbarFellowNav(null, null, null, null);
     }
 
     var html = '<header class="detail-page-title">' + escapeHtml(DETAIL_PAGE_TITLE) + '</header>' +
@@ -3400,6 +3606,11 @@
   function renderRail() {
     renderRailHeader();
     renderRailMembers();
+    // Mirror selection state onto body class so the FAB renders only
+    // when there's something to compose with — see initComposerFab().
+    if (typeof updateComposerFabFromDraft === 'function') {
+      updateComposerFabFromDraft();
+    }
   }
 
   function setMarkerEl(markEl, on) {
@@ -3627,6 +3838,7 @@
         }
         hasEmailOnly = false;
         showEditBanner(group.name || '(untitled)');
+        setShellChrome('groups', 'Editing — ' + (group.name || '(untitled)'));
         // The detail pane during edit mode shows the current fellow detail
         // (or the group's detail page that brought us here, depending on
         // hash). We render the directory afresh and let the existing route
@@ -3917,6 +4129,23 @@
     else if (hash.indexOf('#/fellow/') === 0) body.classList.add('route-fellow');
     else body.classList.add('route-directory');
 
+    // Sheets are route-local — close anything left open when the URL
+    // changes so the next route renders cleanly.
+    if (typeof closeComposerSheet === 'function' && body.classList.contains('composer-open')) {
+      closeComposerSheet();
+    }
+    if (typeof closeKebabSheet === 'function' && isKebabSheetOpen()) {
+      closeKebabSheet();
+    }
+    if (typeof closeGroupCardSheet === 'function' && groupCardSheetEl &&
+        !groupCardSheetEl.classList.contains('hidden')) {
+      closeGroupCardSheet();
+    }
+    if (typeof closeGroupActionbarSheet === 'function' && groupActionbarSheetEl &&
+        !groupActionbarSheetEl.classList.contains('hidden')) {
+      closeGroupActionbarSheet();
+    }
+
     // Mobile shell chrome — appbar title + active tab. Renderers that
     // know a richer title (group name, fellow name) can overwrite by
     // calling setShellChrome again after their data resolves.
@@ -4040,6 +4269,44 @@
         '</tr>'
       );
     }).join('');
+    // Path A from plans/mobile_redesign/css_porting_notes.md §8: render both
+    // a desktop table and a mobile card list from the same group array.
+    // CSS picks which is visible at the breakpoint (>1024px → table,
+    // ≤1024px → cards). Each card wires the same actions as the matching
+    // table row — wireGroupsListActions covers both DOM shapes.
+    var cardsHtml = groups.map(function (g) {
+      var gidStr = String(g.id);
+      var date = (g.created_at || '').slice(0, 10);
+      var note = g.note || '';
+      var memberCount = g.count || 0;
+      var memberWord = memberCount === 1 ? ' member' : ' members';
+      var noteHtml = note
+        ? '<p class="groups-card__note">' + escapeHtml(note) + '</p>'
+        : '';
+      return (
+        '<li class="groups-card" data-group-id="' + escapeHtml(gidStr) + '">' +
+          '<a class="groups-card__title-link" href="#/groups/' + escapeHtml(gidStr) + '">' +
+            escapeHtml(g.name || '(untitled)') +
+          '</a>' +
+          '<p class="groups-card__meta">' +
+            escapeHtml(String(memberCount)) + memberWord +
+            ' · created ' + escapeHtml(date) +
+          '</p>' +
+          noteHtml +
+          '<div class="groups-card__actions">' +
+            '<a href="#/groups/' + escapeHtml(gidStr) + '/directory" class="groups-card__action groups-card__action--visual" data-group-id="' + escapeHtml(gidStr) + '" aria-label="Open visual directory">▤ Visual</a>' +
+            '<a href="#/edit/' + escapeHtml(gidStr) + '" class="groups-card__action groups-card__action--edit" data-group-id="' + escapeHtml(gidStr) + '" aria-label="Edit members">✎ Edit</a>' +
+            '<button type="button" class="groups-card__kebab" data-group-id="' + escapeHtml(gidStr) + '" aria-label="More" aria-haspopup="dialog" aria-expanded="false">' +
+              '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">' +
+                '<circle cx="12" cy="5" r="1.7" fill="currentColor" />' +
+                '<circle cx="12" cy="12" r="1.7" fill="currentColor" />' +
+                '<circle cx="12" cy="19" r="1.7" fill="currentColor" />' +
+              '</svg>' +
+            '</button>' +
+          '</div>' +
+        '</li>'
+      );
+    }).join('');
     wrap.innerHTML =
       '<table class="groups-table">' +
         '<thead><tr>' +
@@ -4050,11 +4317,12 @@
           '<th class="groups-th-actions"></th>' +
         '</tr></thead>' +
         '<tbody>' + rowsHtml + '</tbody>' +
-      '</table>';
-    wireGroupsTableActions(wrap);
+      '</table>' +
+      '<ul class="groups-card-list">' + cardsHtml + '</ul>';
+    wireGroupsListActions(wrap);
   }
 
-  function wireGroupsTableActions(wrap) {
+  function wireGroupsListActions(wrap) {
     var renameLinks = wrap.querySelectorAll('.groups-action-rename');
     for (var i = 0; i < renameLinks.length; i++) {
       renameLinks[i].addEventListener('click', function (ev) {
@@ -4069,22 +4337,113 @@
         confirmAndDeleteGroup(wrap, this.dataset.groupId);
       });
     }
+    // Per-card kebab on mobile. Opens a sheet with Rename / Delete; both
+    // proxy to the same handlers as the desktop inline links above.
+    var kebabs = wrap.querySelectorAll('.groups-card__kebab');
+    for (var k = 0; k < kebabs.length; k++) {
+      kebabs[k].addEventListener('click', function (ev) {
+        ev.preventDefault();
+        openGroupCardSheet(wrap, this.dataset.groupId, this);
+      });
+    }
+  }
+
+  function openGroupCardSheet(wrap, gidStr, sourceBtn) {
+    if (!groupCardSheetEl) return;
+    groupCardSheetEl.dataset.groupId = gidStr;
+    if (sourceBtn) sourceBtn.setAttribute('aria-expanded', 'true');
+    // Stash a closer that resets the source's aria-expanded back.
+    groupCardSheetEl._fellowsResetExpanded = function () {
+      if (sourceBtn) sourceBtn.setAttribute('aria-expanded', 'false');
+    };
+    groupCardSheetEl._fellowsHostWrap = wrap;
+    groupCardSheetEl.classList.remove('hidden');
+    groupCardSheetEl.removeAttribute('hidden');
+    if (groupCardScrimEl) {
+      groupCardScrimEl.classList.remove('hidden');
+      groupCardScrimEl.removeAttribute('hidden');
+    }
+  }
+
+  function closeGroupCardSheet() {
+    if (!groupCardSheetEl) return;
+    groupCardSheetEl.classList.add('hidden');
+    groupCardSheetEl.setAttribute('hidden', '');
+    if (groupCardScrimEl) {
+      groupCardScrimEl.classList.add('hidden');
+      groupCardScrimEl.setAttribute('hidden', '');
+    }
+    if (typeof groupCardSheetEl._fellowsResetExpanded === 'function') {
+      groupCardSheetEl._fellowsResetExpanded();
+      groupCardSheetEl._fellowsResetExpanded = null;
+    }
+    groupCardSheetEl._fellowsHostWrap = null;
   }
 
   function startInlineRename(wrap, gidStr) {
+    // Edit on whichever DOM form is currently visible (table row at
+    // desktop, card at mobile). offsetParent is null when an ancestor
+    // has display:none, which is exactly how the breakpoint switches
+    // them.
     var row = wrap.querySelector('tr[data-group-id="' + gidStr + '"]');
-    if (!row) return;
+    var card = wrap.querySelector('li.groups-card[data-group-id="' + gidStr + '"]');
+    var rowVisible = !!(row && row.offsetParent !== null);
+    var cardVisible = !!(card && card.offsetParent !== null);
+    if (rowVisible) {
+      startInlineRenameOnTable(row, gidStr);
+    } else if (cardVisible) {
+      startInlineRenameOnCard(card, gidStr);
+    } else if (row) {
+      startInlineRenameOnTable(row, gidStr);
+    } else if (card) {
+      startInlineRenameOnCard(card, gidStr);
+    }
+  }
+
+  function startInlineRenameOnTable(row, gidStr) {
     var nameCell = row.querySelector('.groups-cell-name');
-    var nameLink = nameCell.querySelector('.groups-name-link');
+    var nameLink = nameCell ? nameCell.querySelector('.groups-name-link') : null;
     if (!nameCell || !nameLink) return;
     var current = nameLink.textContent;
-    var input = document.createElement('input');
-    input.type = 'text';
-    input.value = current;
-    input.className = 'groups-rename-input';
-    input.maxLength = 200;
+    var input = createRenameInput(current);
     nameCell.innerHTML = '';
     nameCell.appendChild(input);
+    bindRenameCommit(input, gidStr, current, function (savedName) {
+      restoreNameLink(nameCell, gidStr, savedName);
+    }, function () {
+      nameCell.innerHTML = '<span class="groups-saving">saving…</span>';
+    });
+  }
+
+  function startInlineRenameOnCard(card, gidStr) {
+    var link = card.querySelector('.groups-card__title-link');
+    if (!link) return;
+    var current = link.textContent;
+    var input = createRenameInput(current);
+    input.classList.add('groups-rename-input--card');
+    var holder = link.parentNode;
+    holder.replaceChild(input, link);
+    bindRenameCommit(input, gidStr, current, function (savedName) {
+      var a = document.createElement('a');
+      a.className = 'groups-card__title-link';
+      a.href = '#/groups/' + gidStr;
+      a.textContent = savedName;
+      if (input.parentNode === holder) holder.replaceChild(a, input);
+    }, function () {
+      input.disabled = true;
+    });
+  }
+
+  function createRenameInput(initial) {
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.value = initial;
+    input.className = 'groups-rename-input';
+    input.maxLength = 200;
+    return input;
+  }
+
+  function bindRenameCommit(input, gidStr, current, onSettled, onSaving) {
     input.focus();
     input.select();
     var done = false;
@@ -4093,16 +4452,16 @@
       done = true;
       var next = (input.value || '').replace(/^\s+|\s+$/g, '');
       if (!save || !next || next === current) {
-        restoreNameLink(nameCell, gidStr, current);
+        onSettled(current);
         return;
       }
-      nameCell.innerHTML = '<span class="groups-saving">saving…</span>';
+      if (typeof onSaving === 'function') onSaving();
       dataProvider.updateGroup(parseInt(gidStr, 10), { name: next })
         .then(function (updated) {
-          restoreNameLink(nameCell, gidStr, (updated && updated.name) || next);
+          onSettled((updated && updated.name) || next);
         })
         .catch(function () {
-          restoreNameLink(nameCell, gidStr, current);
+          onSettled(current);
         });
     }
     input.addEventListener('blur', function () { commit(true); });
@@ -4307,6 +4666,12 @@
         copyAttrs += ' title="Copy ' + escapeHtml(String(totalEmails)) +
           ' email address' + (totalEmails === 1 ? '' : 'es') + ' to the clipboard"';
       }
+      // The action bar carries every group-level action. At desktop
+      // (>1024px) all six are inline across two rows. At mobile
+      // (≤1024px) it pins to the bottom of the viewport: Mail and
+      // Export remain inline as the two primary verbs; the rest
+      // (CC/BCC, Copy emails, Edit members) are reachable via the
+      // kebab on the bar, which opens the #group-actionbar-sheet.
       html +=
         '<div class="group-action-bar">' +
           '<div class="group-action-row">' +
@@ -4324,6 +4689,14 @@
           '<div class="group-action-row">' +
             '<button type="button" class="group-action-btn" id="group-action-edit">✎ Edit members</button>' +
             '<button type="button" class="group-action-btn" id="group-action-export">⬇ Export a directory</button>' +
+            '<button type="button" class="group-action-btn group-action-btn--more" id="group-action-more"' +
+              ' aria-label="More actions" aria-haspopup="dialog" aria-expanded="false">' +
+              '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">' +
+                '<circle cx="12" cy="5" r="1.7" fill="currentColor" />' +
+                '<circle cx="12" cy="12" r="1.7" fill="currentColor" />' +
+                '<circle cx="12" cy="19" r="1.7" fill="currentColor" />' +
+              '</svg>' +
+            '</button>' +
           '</div>' +
         '</div>';
 
@@ -5113,6 +5486,18 @@
     for (var i = 0; i < modePills.length; i++) {
       modePills[i].addEventListener('click', function () {
         setMode(this.dataset.mode);
+      });
+    }
+
+    // Mobile-only overflow kebab in the action bar. Opens the
+    // #group-actionbar-sheet with the current CC/BCC value pre-selected;
+    // the sheet's controls proxy back to the inline buttons + pills via
+    // initGroupActionbarSheet().
+    var actionbarMoreBtn = document.getElementById('group-action-more');
+    if (actionbarMoreBtn) {
+      actionbarMoreBtn.addEventListener('click', function () {
+        openGroupActionbarSheet(contactMode);
+        actionbarMoreBtn.setAttribute('aria-expanded', 'true');
       });
     }
 
@@ -5928,6 +6313,9 @@
   initDiagnosticsPanel();
   initBugReportButtons();
   initKebabSheet();
+  initComposerFab();
+  initGroupCardSheet();
+  initGroupActionbarSheet();
   wireCopyButtons();
 
   function bootDirectoryAsApp() {

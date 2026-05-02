@@ -136,8 +136,16 @@ per-browser, never synced to a server, and survive **Clear App Cache**.
 
 ### Composing a group
 
-The directory page has a right-side **selection rail** that builds up the
-group you're working on.
+On desktop the directory page has a right-side **selection rail** that
+builds up the group you're working on.
+
+On a phone or tablet, the rail collapses into a **floating + button**
+(bottom-right) that appears as soon as you select your first fellow.
+Tap it to slide the composer up as a bottom sheet; tap outside, press
+**Esc**, or tap the close button to dismiss it again. The button shows
+the current selection count.
+
+The rest of the flow is the same on either form factor:
 
 1. Browse or search the directory.
 2. Click a fellow to open their profile, then use **Add to selection** to
@@ -162,6 +170,12 @@ newest-touched first, with a member count beside each. Click a group's
 name to open its detail page; click **visual directory** to jump
 straight to its portrait grid (see below).
 
+On a phone or tablet, each group renders as a card with the group name,
+member count + creation date, the note (if any), and three actions:
+**▤ Visual** (jump to the visual directory), **✎ Edit** (enter
+edit mode), and a **⋮** kebab that opens **Rename** and **Delete**.
+On desktop the same data renders as a table; the actions are inline.
+
 <!-- screenshot: groups index with two or three saved groups -->
 
 ### Group detail
@@ -177,19 +191,24 @@ so you can concentrate on this one group.
   fellow's profile.
 - **Note** — a free-text field below the member list. Edit inline; saves
   automatically.
-- **Action bar** (lavender), arranged in two rows:
-  - **Row 1 — ✉ Mail to the whole group** + a **CC/BCC** pill toggle +
-    **📋 Copy email addresses**. *Mail* opens your default mail client
-    with every member's email address pre-filled (in CC by default;
-    switch to BCC with the pill if you'd rather members not see each
-    other). Long member lists may be split across multiple draft emails
-    to fit your mail client's address-line limit. *Copy email addresses*
-    puts the same comma-separated list on your clipboard — useful when
-    your mail client isn't set up to handle the Mail link, or when you
-    want to paste into a different tool.
-  - **Row 2 — ✎ Edit members** + **⬇ Export a directory**. Edit
-    members switches into edit mode (see below). Export opens the
-    export panel inline (see below).
+- **Action bar.** Carries every group-level action.
+  - On desktop the bar sits below the note and is laid out in two
+    rows: **Row 1 — ✉ Mail to the whole group** + a **CC/BCC** pill
+    toggle + **📋 Copy email addresses**. **Row 2 — ✎ Edit members**
+    + **⬇ Export a directory**.
+  - On a phone or tablet the bar is **pinned to the bottom of the
+    screen** and shows just the two primary verbs inline: **✉ Mail**
+    and **⬇ Export**. A **⋮** kebab on the bar opens a sheet with
+    **CC / BCC** (radio), **📋 Copy email addresses**, and **✎ Edit
+    members**. Same actions, just folded so the bar stays thumb-sized.
+
+  *Mail* opens your default mail client with every member's email
+  address pre-filled (in CC by default; switch to BCC if you'd rather
+  members not see each other). Long member lists may be split across
+  multiple draft emails to fit your mail client's address-line limit.
+  *Copy email addresses* puts the same comma-separated list on your
+  clipboard — useful when your mail client isn't set up to handle the
+  Mail link, or when you want to paste into a different tool.
 
 <!-- screenshot: group detail page with action bar visible -->
 
