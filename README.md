@@ -25,6 +25,7 @@ Data and assets are local-first (SQLite + static files), served by Python stdlib
   - [JSON To SQLite + FTS5](#json-to-sqlite-fts5)
   - [PWA Static Bundle](#pwa-static-bundle)
 - [Production / DevOps](#production--devops)
+  - [Shipping a change (the standard rubric)](#shipping-a-change-the-standard-rubric)
 - [Local Dev Notes](#local-dev-notes)
 - [Before Making This Repo Public](#before-making-this-repo-public)
 - [Project Layout](#project-layout)
@@ -303,6 +304,25 @@ just prod-stats-long    # full-history tally + plaintext list of every magic-lin
 ```
 
 Under the hood: `./scripts/deploy_pwa.sh --ask-become-pass` runs the `ansible/deploy_pwa.yml` playbook (build → rsync → restart → HTTPS smoke).
+
+### Shipping a change (the standard rubric)
+
+After PRs merge to `main`, deploy with:
+
+```bash
+git checkout main && git pull         # confirm merges are local
+just bump [<label>]                   # one chore(version): commit on main
+git push                              # push the bump to origin/main
+just ship                             # build → test → deploy → smoke (refuses if you forgot to bump)
+just whats-running                    # confirm prod's git SHA matches local HEAD
+```
+
+A few rules of thumb:
+
+- **Bump on `main`, not on a PR branch.** The bump is a deploy marker, not a PR marker. Bumping on a feature branch creates noise (every PR carries its own bump, only the last-merged wins) and obscures the deploy boundary in `main`'s history. The exception is PR #80's own bump infrastructure — the very first deploy after that merged needs `just bump initial` once, then the normal rubric.
+- **The label is optional but useful.** `just bump groups-fab` produces `2026-05-02-<sha>-groups-fab`, which reads more memorably in the build badge than a bare timestamp + SHA.
+- **Test on prod, not localhost, when the change touches auth or session state.** The dev server returns `authEnabled: false` and skips the email gate entirely — checks like "Clear App Cache lands me at the gate" don't reproduce locally. The Playwright e2e suite (`just test-e2e ...`) mocks the prod auth path; `https://fellows.globaldonut.com` is the real verification.
+- **Hotfix override.** `BUMP_GUARD=skip just deploy` bypasses the bump guard for a fix that can't wait. The in-app version label stays behind one deploy until you bump and re-ship.
 
 ## Local Dev Notes
 
