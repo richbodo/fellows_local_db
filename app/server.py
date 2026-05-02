@@ -282,6 +282,20 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass  # quiet by default; override to log
 
+    def end_headers(self):
+        # Cross-origin isolation. sqlite3-wasm's OPFS-SAH-Pool VFS gates
+        # SharedArrayBuffer / Atomics on this; without crossOriginIsolated
+        # the VFS install fails ("Cannot install OPFS: Missing
+        # SharedArrayBuffer and/or Atomics"), and the dev server falls back
+        # to the API provider — which has no live relationships.db, so
+        # backup/restore in Settings don't function. Setting these here
+        # mirrors what a properly-configured production reverse proxy
+        # should set; the app is fully first-party so require-corp is
+        # safe (no cross-origin scripts / fonts / images to break).
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+        self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
+        super().end_headers()
+
     def send_json(self, data, status=200):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")

@@ -141,48 +141,40 @@ class TestSettingsPage:
         addr = page.locator("#export-self-email-addr")
         expect(addr).to_have_value("rich@example.com")
 
-    def test_download_userdata_button_present(
+    def test_userdata_sections_in_dom_and_hidden_in_api_mode(
         self, standalone_page, base_url_fixture
     ):
-        """PR D: Settings page exposes a Download my user data button.
-        The actual export only works on the OPFS path (which the dev e2e
-        harness doesn't have — see the SharedArrayBuffer warning in
-        console). This test asserts the markup is in place; the OPFS
-        round-trip is real-browser-only."""
-        page = standalone_page
-        page.goto(f"{base_url_fixture}/#/settings", wait_until="domcontentloaded")
-        _wait_for_directory(page)
-        expect(page.locator("#settings-export-section")).to_be_visible()
-        expect(page.locator("#settings-download-userdata")).to_be_visible()
-        expect(page.locator(".settings-section-title").first).to_contain_text("Your saved data")
+        """The Settings page emits both the "Your saved data" (PR #84) and
+        "Restore from backup" (PR #88) sections in the DOM. Their *visibility*
+        depends on the data provider:
+        - OPFS-backed sqlite provider → both sections visible.
+        - API provider → both sections hidden up front, because there's no
+          live relationships.db to export or overwrite (PR #88's fix to the
+          silent-fail Download bug).
 
-    def test_restore_section_renders_with_picker_and_backup_list(
-        self, standalone_page, base_url_fixture
-    ):
-        """Issue #85: Settings exposes a Restore from a file button + a
-        Recent auto-backups list. Like the export half (PR #84), the
-        actual restore round-trip needs OPFS, which the dev e2e harness
-        doesn't have. This test asserts the markup renders; the OPFS
-        round-trip is verified manually on prod (see issue #85 test plan)."""
+        Dev e2e runs in API-provider mode (Playwright's chromium does not
+        expose `FileSystemFileHandle.prototype.createSyncAccessHandle` on the
+        main thread, so the SAH-pool VFS can't install). The OPFS round-trip
+        is verified on prod manually — see issue #85 test plan."""
         page = standalone_page
         page.goto(f"{base_url_fixture}/#/settings", wait_until="domcontentloaded")
         _wait_for_directory(page)
-        # Restore section + heading.
-        expect(page.locator("#settings-restore-section")).to_be_visible()
-        expect(
-            page.locator("#settings-restore-section .settings-section-title")
-        ).to_contain_text("Restore from backup")
-        # File-picker affordance: input is hidden by design; the visible
-        # button click()s the input. Both must exist.
-        expect(page.locator("#settings-restore-pick")).to_be_visible()
+        export_section = page.locator("#settings-export-section")
+        restore_section = page.locator("#settings-restore-section")
+        # Both sections must be in the DOM (so OPFS-mode users see them).
+        expect(export_section).to_have_count(1)
+        expect(restore_section).to_have_count(1)
+        # Markup details that don't depend on visibility.
+        expect(page.locator("#settings-download-userdata")).to_have_count(1)
+        expect(page.locator("#settings-restore-pick")).to_have_count(1)
         file_input = page.locator("#settings-restore-file")
         expect(file_input).to_have_count(1)
         accept = file_input.get_attribute("accept") or ""
         assert ".db" in accept and ".sqlite" in accept
-        # Recent auto-backups list region: in API mode (dev) the list
-        # resolves to [] and the empty-state hint is what the user sees.
-        expect(page.locator("#settings-backup-list-empty")).to_be_visible()
-        # Live list itself is hidden until populated.
-        backup_list = page.locator("#settings-backup-list")
-        expect(backup_list).to_have_count(1)
-        assert backup_list.evaluate("el => el.hidden") is True
+        # In dev (API provider), proactive hide kicks in.
+        assert export_section.evaluate("el => el.style.display") == "none", (
+            "expected export section hidden in API-provider mode"
+        )
+        assert restore_section.evaluate("el => el.style.display") == "none", (
+            "expected restore section hidden in API-provider mode"
+        )

@@ -2929,9 +2929,25 @@
     setSetupStatus('Setting up your local directory…');
     return globalThis
       .sqlite3InitModule()
-      .then(function (Module) {
+      .then(function (sqlite3) {
+        // sqlite3-wasm's init wrapper resolves with the sqlite3
+        // namespace itself (see vendor/sqlite3.js's `globalThis.sqlite3InitModule`
+        // override — it returns the result of `s.asyncPostInit()`,
+        // where `s` is the sqlite3 namespace). Earlier code here
+        // treated the resolved value as an EmscriptenModule with a
+        // `.sqlite3` child, which made `installOpfsSAHPoolVfs` look
+        // undefined and silently dropped every browser to the API
+        // provider — so backup/restore (PR #84 + #88) only ever
+        // worked in theory. Calling it directly on the namespace
+        // is what the upstream API expects.
         bootDebugPush('sqlite3InitModule: OK');
-        return Module.sqlite3.installOpfsSAHPoolVfs();
+        if (typeof sqlite3.installOpfsSAHPoolVfs !== 'function') {
+          throw new Error(
+            'sqlite3.installOpfsSAHPoolVfs missing from this build (' +
+            (sqlite3.version && sqlite3.version.libVersion || 'unknown version') + ')'
+          );
+        }
+        return sqlite3.installOpfsSAHPoolVfs();
       })
       .then(function (poolUtil) {
         bootDebugPush('installOpfsSAHPoolVfs: OK');
@@ -6112,6 +6128,23 @@
     var downloadBtn = document.getElementById('settings-download-userdata');
     var downloadStatus = document.getElementById('settings-download-status');
     var exportSection = document.getElementById('settings-export-section');
+
+    // Backup + restore both depend on the OPFS-backed sqlite provider —
+    // the API provider has no live relationships.db to export or
+    // overwrite. Hide both sections up front when we're on the API
+    // provider (typical on dev localhost without the SAH-pool VFS, or
+    // any browser that fell back to API mode). PR #84's behavior was
+    // to hide the export section only on click rejection; this matches
+    // it for both sections at render time so users don't see broken
+    // affordances. The localDataUnavailable click-rejection paths
+    // below remain for paranoia / late provider downgrades.
+    var localPersistenceAvailable = !!(dataProvider && dataProvider.kind === 'sqlite');
+    if (!localPersistenceAvailable) {
+      var preExport = document.getElementById('settings-export-section');
+      if (preExport) preExport.style.display = 'none';
+      var preRestore = document.getElementById('settings-restore-section');
+      if (preRestore) preRestore.style.display = 'none';
+    }
 
     if (downloadBtn) {
       downloadBtn.addEventListener('click', function () {
