@@ -147,8 +147,16 @@ Export them or inline: `FELLOWS_BASE_URL=https://staging.example.com just smoke`
   `/api/debug/diagnostics`; fails loud if any are broken.
 - **`check-env`** — DNS A record + HTTPS headers + `/healthz` for
   `FELLOWS_HOST`. Non-intrusive pre-/post-deploy probe.
-- **`drift`** — compare prod's `X-Fellows-Build` response header with local
-  `HEAD` and `origin/main`. One glance tells you whether prod is current.
+- **`drift`** — three SHA-aligned lines: prod's git SHA (read from
+  `/build-meta.json`), your local `HEAD`, and `origin/main`. Each line is
+  `<sha> <iso-timestamp> <subject>`, so a glance tells you whether all
+  three match. The looked-up commit subject for prod's SHA comes from
+  your local clone (`git log -1 <sha>`); if you don't have that commit
+  yet, the recipe says so. The `X-Fellows-Build` response header still
+  exists on every API response for DevTools / journald correlation —
+  this recipe just doesn't use it any more (the header value is the
+  build timestamp; the SHA from `/build-meta.json` is more useful for
+  side-by-side comparison with `git log`).
 - **`whats-running`** — full version report: local HEAD, on-disk
   `CACHE_VERSION` + `FELLOWS_UI_DIAG`, the most recent `chore(version):`
   commit and how many commits HEAD is past it, prod's `/build-meta.json`,

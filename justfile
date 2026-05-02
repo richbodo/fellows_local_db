@@ -429,18 +429,31 @@ whats-running:
     echo "    (groups, settings, fellows.db) survives by design."
     echo "  - Incognito window: nuclear-clean baseline (no SW, no OPFS, no cookie)."
 
-# Compare local HEAD to prod's X-Fellows-Build header.
+# Compare prod's git SHA to local HEAD and origin/main, side-by-side.
+# All three lines have the same shape — <sha> <iso-timestamp> <subject>
+# — so a glance tells you whether prod, your laptop, and the remote are
+# in sync. Reads /build-meta.json for the prod SHA (the X-Fellows-Build
+# response header is still set on every API response for DevTools /
+# journald correlation; this recipe just doesn't use it).
 [group('prod')]
 drift:
     #!/usr/bin/env bash
     set -uo pipefail
-    echo "Prod X-Fellows-Build:"
-    curl -sSI {{base_url}}/api/auth/status 2>/dev/null | awk 'BEGIN{IGNORECASE=1} /^x-fellows-build/ {print "  " $0}' | tr -d '\r' || true
+    echo "Prod ({{base_url}}):"
+    if curl -sf "{{base_url}}/build-meta.json" -o /tmp/_fellows_drift_bm.json 2>/dev/null; then
+        prod_sha=$(python3 -c "import json,sys; print(json.load(open('/tmp/_fellows_drift_bm.json')).get('git_sha','?'))" 2>/dev/null || echo '?')
+        prod_built=$(python3 -c "import json,sys; print(json.load(open('/tmp/_fellows_drift_bm.json')).get('built_at','?'))" 2>/dev/null || echo '?')
+        prod_subj=$(git log -1 --format=%s "${prod_sha}" 2>/dev/null || echo '(commit not in local clone — git fetch?)')
+        echo "  ${prod_sha} ${prod_built}  ${prod_subj}"
+        rm -f /tmp/_fellows_drift_bm.json
+    else
+        echo "  (could not fetch /build-meta.json — prod down or unreachable?)"
+    fi
     echo
     echo "Local HEAD:"
-    git log -1 --format='  %ci %h %s' HEAD
+    git log -1 --format='  %h %cI  %s' HEAD
     echo "origin/main:"
-    git log -1 --format='  %ci %h %s' origin/main 2>/dev/null || echo "  (no origin/main)"
+    git log -1 --format='  %h %cI  %s' origin/main 2>/dev/null || echo "  (no origin/main)"
 
 # Tail journald for UNIT (default fellows-pwa).
 [group('prod')]
