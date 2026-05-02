@@ -135,8 +135,9 @@ just smoke              # /healthz, /manifest.webmanifest, /api/debug/diagnostic
 just check-env          # DNS + TLS + healthz
 just prod-status        # systemctl status fellows-pwa caddy (over SSH)
 just drift              # prod git SHA vs local HEAD + origin/main (SHA-aligned)
-just prod-stats         # summarise last 24h: page loads, magic-link sends/verifies, 5xx, disk
-just prod-stats-long    # full retained journal + plaintext recipient list (every magic-link send)
+just prod-stats                # 24h: page loads, magic-link sends/verifies, install funnel, 5xx, disk
+just prod-stats '7 days ago'   # weekly view (any "since" that journalctl accepts)
+just prod-stats-long           # full retained journal + plaintext recipient list (every magic-link send)
 ```
 
 Lower-level equivalents (what each recipe runs):
@@ -179,7 +180,7 @@ That wraps `./scripts/configure_email_auth_env.sh`, which prompts for `FELLOWS_M
 ## Debugging
 
 - **Service**: `just prod-logs` (`journalctl -u fellows-pwa -f`) streams structured JSON (`event=auth_status`, `event=send_unlock_email`, `event=build_meta`). Pass a different unit with `just prod-logs caddy`.
-- **Activity summary**: `just prod-stats` reads journald on the droplet and prints a tally of page loads, directory-API hits, DB downloads, magic-link sends/verifies, 5xx errors, and disk usage over a window (default `24 hours ago`; try `just prod-stats '7 days ago'`). `just prod-stats-long` extends the window to the full retained journal and lists the plaintext email of every magic-link recipient (joined against `/opt/fellows/deploy/dist/fellows.db` on the droplet). The remote binary is `/opt/fellows/bin/prod_stats` (source: `scripts/prod_stats.py`, deployed by the `fellows_app` Ansible role). No sudo needed — journal-read access is granted by the `systemd-journal` and `adm` group memberships that the `common` role adds to the operator. If `just prod-stats` starts returning all zeros (and the script also prints a "journalctl returned 0 entries" warning on stderr), that membership has drifted; re-run `just bootstrap` to re-apply it.
+- **Activity summary**: `just prod-stats` reads journald on the droplet and prints a tally of page loads, directory-API hits, DB downloads, magic-link sends/verifies, the **install funnel** (denominator `landing_shown` + per-step counts down through `app_installed` and `use_in_tab_clicked`, with per-platform splits on `outcome_*` accept/dismiss), 5xx errors, client error reports, and disk usage. Default window is `24 hours ago`; pass any string `journalctl --since` accepts. Common examples: `just prod-stats` for a daily check, `just prod-stats '7 days ago'` for a weekly view (more useful for the install funnel since installs are sparse — answers "of N landing visits this week, what fraction installed vs. timed out vs. used the in-tab escape hatch?"). `just prod-stats-long` extends the window to the full retained journal and lists the plaintext email of every magic-link recipient (joined against `/opt/fellows/deploy/dist/fellows.db` on the droplet). The remote binary is `/opt/fellows/bin/prod_stats` (source: `scripts/prod_stats.py`, deployed by the `fellows_app` Ansible role). No sudo needed — journal-read access is granted by the `systemd-journal` and `adm` group memberships that the `common` role adds to the operator. If `just prod-stats` starts returning all zeros (and the script also prints a "journalctl returned 0 entries" warning on stderr), that membership has drifted; re-run `just bootstrap` to re-apply it.
 - **Bundle drift**: `just drift` shows prod's `X-Fellows-Build` alongside local `HEAD` and `origin/main`. The browser's Diagnostics panel (`?diag=1`) shows the same header plus auth state and Cache API contents. Pair with `just prod-logs` to confirm client and server are on the same build.
 - **Send-flow failures**: `just email-debug` mines recent `event=send_unlock_email` entries from journald and optionally resolves Postmark `MessageID`s.
 - **Deploy failures**: `ansible-playbook … -vvv` for SSH/module detail. Log path is `ansible/ansible.log` relative to the repo root.
