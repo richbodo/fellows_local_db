@@ -159,6 +159,31 @@
     </div>
   </div>
 
+  <header id="appbar" class="appbar hidden" role="banner">
+    <h1 class="appbar__title" id="appbar-title">Directory</h1>
+    <button
+      type="button"
+      id="appbar-kebab"
+      class="appbar__kebab"
+      aria-label="More"
+      aria-haspopup="dialog"
+      aria-expanded="false"
+      aria-controls="kebab-sheet"
+    >
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
+        <circle cx="12" cy="5" r="1.7" fill="currentColor" />
+        <circle cx="12" cy="12" r="1.7" fill="currentColor" />
+        <circle cx="12" cy="19" r="1.7" fill="currentColor" />
+      </svg>
+    </button>
+  </header>
+  <nav id="tabs" class="tabs hidden" aria-label="Primary">
+    <a class="tabs__tab" href="#/" data-tab="directory">Directory</a>
+    <a class="tabs__tab" href="#/groups" data-tab="groups">Groups</a>
+    <a class="tabs__tab" href="#/settings" data-tab="settings">Settings</a>
+    <a class="tabs__tab" href="#/about" data-tab="about">About</a>
+  </nav>
+
   <header id="site-header" class="site-header hidden">
     <h1><a href="#/" class="site-title-link">EHF Fellows Directory</a></h1>
     <div id="search-container" class="header-search">
@@ -280,6 +305,29 @@
       <p id="group-rail-status" class="group-rail-status" aria-live="polite"></p>
     </aside>
   </div>
+  <div id="kebab-scrim" class="sheet-scrim hidden" hidden></div>
+  <aside
+    id="kebab-sheet"
+    class="sheet sheet--kebab hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="kebab-sheet-title"
+    hidden
+  >
+    <div class="sheet__handle" aria-hidden="true"></div>
+    <div class="sheet__head">
+      <div class="sheet__title" id="kebab-sheet-title">App info</div>
+      <button type="button" id="kebab-sheet-close" class="sheet__close" aria-label="Close">×</button>
+    </div>
+    <ul class="diag-list" id="kebab-sheet-build">
+      <li><span>app</span><b id="kebab-sheet-build-app">…</b></li>
+      <li><span>server</span><b id="kebab-sheet-build-server">…</b></li>
+    </ul>
+    <div class="sheet__divider" aria-hidden="true"></div>
+    <button type="button" class="sheet-action" data-kebab-action="diagnostics">Diagnostics…</button>
+    <button type="button" class="sheet-action" data-kebab-action="report-bug">Report a bug…</button>
+    <button type="button" class="sheet-action sheet-action--danger" data-kebab-action="clear-cache">Clear app cache &amp; reload</button>
+  </aside>
   <script src="/vendor/sqlite3.js"></script>
   <script src="/vendor/jspdf-2.5.1.umd.min.js"></script>
   <script src="/app.js"></script>

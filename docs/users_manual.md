@@ -299,11 +299,16 @@ When an update is available, a banner appears across the top of the app:
 ## Clearing app data
 
 If the app gets into a weird state (corrupt cache, stuck banner, stale
-data), you can reset it:
+data), you can reset it.
 
-1. Go to the **About** page.
-2. Scroll to **Diagnostics** → **Clear app cache**.
-3. Confirm. The app wipes its local storage and reloads.
+- **On a phone or tablet:** tap the **⋮** kebab in the top-right of the
+  app bar → **Clear app cache & reload**. Confirm.
+- **On desktop:** click the red **Clear App Cache & Reload** button in
+  the bottom-right corner. Confirm.
+
+The app wipes its local storage and reloads. The same kebab menu also
+holds **Diagnostics…** and **Report a bug…**, which on desktop appear
+as separate floating buttons.
 
 **Heads-up:** clearing the cache also re-downloads the fellow data and
 photos on the next launch. The session cookie is cleared, so if the
