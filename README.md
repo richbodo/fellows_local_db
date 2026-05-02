@@ -15,6 +15,11 @@ Data and assets are local-first (SQLite + static files), served by Python stdlib
   - [Server](#server)
   - [API Endpoints](#api-endpoints)
   - [Two-Phase Load](#two-phase-load)
+- [Testing The Latest Code In A Browser](#testing-the-latest-code-in-a-browser)
+  - [1. Local Dev — See The Latest `main`](#1-local-dev--see-the-latest-main)
+  - [2. Local Dev — Exercise The Email-Gate UI](#2-local-dev--exercise-the-email-gate-ui)
+  - [3. Prod — First-Time Visitor Simulation](#3-prod--first-time-visitor-simulation)
+  - [4. Prod — Reset State In An Existing Tab](#4-prod--reset-state-in-an-existing-tab)
 - [Testing](#testing)
 - [Build And Data Pipeline](#build-and-data-pipeline)
   - [JSON To SQLite + FTS5](#json-to-sqlite-fts5)
@@ -139,6 +144,78 @@ Production (`deploy/server.py`) adds magic-link auth (`/api/send-unlock`, `/api/
 ### Two-Phase Load
 
 The UI requests `/api/fellows` first (instant list), then fetches `/api/fellows?full=1` in the background. Directory view is names/links only; images load on detail view only.
+
+## Testing The Latest Code In A Browser
+
+This is about manual QA — driving the running app in a browser to verify a change. For the pytest / Playwright suite see [Testing](#testing) below.
+
+The trap is **stale state**. The PWA's service worker, OPFS (`relationships.db`, `fellows.db`), IndexedDB, the `fellows_session` HttpOnly cookie, and the `fellows_authenticated_once` localStorage marker all persist by design. DevTools' "Clear site data" misses several layers, and the in-app **Clear App Cache** button intentionally preserves OPFS + the auth-once marker. Below is what actually works for each scenario.
+
+### 1. Local Dev — See The Latest `main`
+
+```bash
+git checkout main && git pull
+just stop
+just serve-fg            # foreground; you can watch request logs live
+```
+
+Then **hard-reload** the localhost tab (Cmd-Shift-R / Ctrl-Shift-R). Restarting the server bumps `BUILD_META`, which knocks the SW into fetching a fresh shell on next load. The localhost passthrough (PR #63) means you won't get trapped on the install landing.
+
+If the page still feels stale, open an **incognito/private window** at `http://localhost:8765/` — no SW registered, no localStorage, no OPFS for that profile; you're guaranteed to see the latest bundle.
+
+What persists across this flow on localhost (intentionally):
+- `relationships.db` in OPFS — your saved groups and notes.
+- `fellows.db` in OPFS — re-imported on every boot anyway.
+
+### 2. Local Dev — Exercise The Email-Gate UI
+
+```bash
+just gate                 # opens http://localhost:8765/?gate=1
+```
+
+The gate UI renders, but the dev server has **no `/api/send-unlock`** — submitting the form fails. To exercise the actual magic-link round-trip, either run the e2e suite (`just test-e2e -- -k email_gate`, which spins up `deploy/server.py` in-process with a fake Postmark) or test against prod (scenarios 3 / 4).
+
+### 3. Prod — First-Time Visitor Simulation
+
+The cleanest "what does a fresh fellow see?" test is a **new incognito/private window** pointed at `https://fellows.globaldonut.com/`. Nothing carries over: no SW, no OPFS, no cookies, no localStorage. This is the canonical pre-deploy smoke for any UX change touching the install landing or gate.
+
+Pair with:
+
+```bash
+just smoke                # HTTPS health-check + manifest probe
+just drift                # confirm prod is on current main
+```
+
+### 4. Prod — Reset State In An Existing Tab
+
+When you need to test from inside a tab you've already used (an installed PWA, a session locked into a stale shell, a debugging trail you don't want to abandon), DevTools' "Clear site data" misses the HttpOnly session cookie *and* OPFS. Use this sequence:
+
+1. **Drop the HttpOnly session cookie.** It's HttpOnly — JS can't see or unset it. Only the server can. Paste into the DevTools console:
+
+   ```js
+   await fetch('/api/logout', { method: 'POST', credentials: 'include' });
+   ```
+
+2. **Nuke every browser-side persistence layer (except OPFS).** Paste into the DevTools console:
+
+   ```js
+   localStorage.clear();
+   sessionStorage.clear();
+   indexedDB.deleteDatabase('fellows-local-db');
+   caches.keys().then(ks => Promise.all(ks.map(k => caches.delete(k))))
+     .then(() => navigator.serviceWorker.getRegistrations())
+     .then(rs => Promise.all(rs.map(r => r.unregister())))
+     .then(() => location.reload());
+   ```
+
+3. After the reload you land at the **email gate** as a first-time visitor.
+
+What this does *not* clear:
+
+- **OPFS** (`relationships.db`, `fellows.db`). There is no JS API to wipe per-origin OPFS. To clear OPFS too, use **chrome://settings → Cookies and site data → fellows.globaldonut.com → Delete** (clears OPFS along with everything else), or just open a fresh incognito window (scenario 3).
+- HTTP/disk cache for static assets — but the SW unregister + Cache API delete in step 2 makes this moot; the next load re-fetches from the server.
+
+If you only need to **force the gate UI** without nuking state — for example, to test the gate's banner copy — append `?gate=1` to the URL. That overrides the decision tree at the UI layer but leaves the cookie and OPFS intact.
 
 ## Testing
 
