@@ -161,6 +161,20 @@
 
   <header id="appbar" class="appbar hidden" role="banner">
     <h1 class="appbar__title" id="appbar-title">Directory</h1>
+    <a
+      id="appbar-fellow-prev"
+      class="appbar__nav appbar__nav--prev hidden"
+      href="#"
+      aria-label="Previous fellow"
+      hidden
+    >&larr;</a>
+    <a
+      id="appbar-fellow-next"
+      class="appbar__nav appbar__nav--next hidden"
+      href="#"
+      aria-label="Next fellow"
+      hidden
+    >&rarr;</a>
     <button
       type="button"
       id="appbar-kebab"
@@ -305,6 +319,65 @@
       <p id="group-rail-status" class="group-rail-status" aria-live="polite"></p>
     </aside>
   </div>
+  <button
+    type="button"
+    id="composer-fab"
+    class="fab fab--composer hidden"
+    aria-label="Open group composer"
+    aria-controls="group-rail"
+    aria-expanded="false"
+    hidden
+  >
+    <span class="fab__count" id="composer-fab-count">0</span>
+    <span class="fab__caption">selected</span>
+  </button>
+  <div id="composer-scrim" class="sheet-scrim hidden" hidden></div>
+  <div id="group-card-scrim" class="sheet-scrim hidden" hidden></div>
+  <aside
+    id="group-card-sheet"
+    class="sheet sheet--card hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="group-card-sheet-title"
+    hidden
+  >
+    <div class="sheet__handle" aria-hidden="true"></div>
+    <div class="sheet__head">
+      <div class="sheet__title" id="group-card-sheet-title">Group actions</div>
+      <button type="button" id="group-card-sheet-close" class="sheet__close" aria-label="Close">×</button>
+    </div>
+    <button type="button" class="sheet-action" data-card-action="rename">Rename group…</button>
+    <button type="button" class="sheet-action sheet-action--danger" data-card-action="delete">Delete group</button>
+  </aside>
+  <div id="group-actionbar-scrim" class="sheet-scrim hidden" hidden></div>
+  <aside
+    id="group-actionbar-sheet"
+    class="sheet sheet--actionbar hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="group-actionbar-sheet-title"
+    hidden
+  >
+    <div class="sheet__handle" aria-hidden="true"></div>
+    <div class="sheet__head">
+      <div class="sheet__title" id="group-actionbar-sheet-title">More actions</div>
+      <button type="button" id="group-actionbar-sheet-close" class="sheet__close" aria-label="Close">×</button>
+    </div>
+    <fieldset class="sheet-fieldset">
+      <legend class="sheet-fieldset__legend">Recipient header</legend>
+      <label class="sheet-radio">
+        <input type="radio" name="group-mode-sheet" value="cc" checked />
+        <span>CC — recipients see each other's addresses</span>
+      </label>
+      <label class="sheet-radio">
+        <input type="radio" name="group-mode-sheet" value="bcc" />
+        <span>BCC — recipients hidden from each other</span>
+      </label>
+    </fieldset>
+    <div class="sheet__divider" aria-hidden="true"></div>
+    <button type="button" class="sheet-action" data-actionbar-action="copy">📋 Copy email addresses</button>
+    <button type="button" class="sheet-action" data-actionbar-action="edit">✎ Edit members</button>
+  </aside>
   <div id="kebab-scrim" class="sheet-scrim hidden" hidden></div>
   <aside
     id="kebab-sheet"

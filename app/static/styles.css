@@ -2955,19 +2955,21 @@ a.group-action-btn--primary {
  * ===================================================================== */
 
 @media (max-width: 1024px) {
-  /* Existing `#site-header`: full hide off-directory; on directory keep
-     it as a thin wrapper for the search bar by suppressing the title
-     and nav children. */
-  body:not(.route-directory) #site-header {
+  /* Existing `#site-header`: full hide off-directory (and off-edit); on
+     directory and edit-mode keep it as a thin wrapper for the search
+     bar by suppressing the title and nav children. Edit mode is also
+     directory-driven (search + pick), so it shares the directory's
+     mobile chrome rules. */
+  body:not(.route-directory):not(.route-group-edit) #site-header {
     display: none;
   }
 
-  body.route-directory #site-header > h1,
-  body.route-directory #site-header > .site-nav {
+  body:is(.route-directory, .route-group-edit) #site-header > h1,
+  body:is(.route-directory, .route-group-edit) #site-header > .site-nav {
     display: none;
   }
 
-  body.route-directory #site-header {
+  body:is(.route-directory, .route-group-edit) #site-header {
     flex-wrap: nowrap;
     gap: 0;
     margin: 0 -0.75rem;
@@ -2976,7 +2978,7 @@ a.group-action-btn--primary {
     border-bottom: 1px solid var(--border);
   }
 
-  body.route-directory #site-header > #search-container {
+  body:is(.route-directory, .route-group-edit) #site-header > #search-container {
     flex: 1;
     max-width: none;
     min-width: 0;
@@ -2984,10 +2986,10 @@ a.group-action-btn--primary {
   }
 
   /* Focus mode: hide the directory list and composer rail on every
-     non-directory route. The rail stays visible on the directory route
-     in PR 1; PR 2 will turn it into a FAB-driven bottom sheet. */
-  body:not(.route-directory) #directory,
-  body:not(.route-directory) #group-rail {
+     non-directory route except edit mode (which needs them to pick
+     fellows for the existing group). */
+  body:not(.route-directory):not(.route-group-edit) #directory,
+  body:not(.route-directory):not(.route-group-edit) #group-rail {
     display: none;
   }
 
@@ -2997,6 +2999,387 @@ a.group-action-btn--primary {
   #clear-app-cache-button,
   #diag-toggle,
   #bug-report-button {
+    display: none;
+  }
+}
+
+/* =========================================================================
+ * Mobile redesign — Phase 3 step 3: interaction surfaces (PR 2).
+ *
+ * - Selection FAB + composer bottom-sheet (replaces the right-rail
+ *   composer at ≤1024px). Rail DOM is unchanged; only its positioning
+ *   and trigger differ.
+ * - Groups index card list, rendered alongside the existing table.
+ *   CSS picks which is visible by viewport width (Path A from
+ *   plans/mobile_redesign/css_porting_notes.md §8).
+ * - Group-detail action bar pinned to bottom on mobile, with secondary
+ *   actions (CC/BCC, Copy, Edit) folded into a kebab overflow sheet.
+ * - Fellow-detail prev/next surfaced in the app bar at mobile;
+ *   inline .fellow-nav hides at mobile (the app bar replaces it).
+ * ========================================================================= */
+
+/* ----- Selection FAB ------------------------------------------------- */
+
+.fab {
+  position: fixed;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0));
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  padding: 0;
+}
+
+.fab:hover {
+  background: var(--accent-hover);
+}
+
+.fab:focus-visible {
+  outline: 3px solid var(--accent-soft);
+  outline-offset: 2px;
+}
+
+.fab__count {
+  font-size: 18px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.fab__caption {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+/* ----- Appbar prev/next (fellow detail) ----------------------------- */
+
+.appbar__nav {
+  width: 44px;
+  height: 44px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  font-size: 20px;
+  color: var(--accent);
+  border-radius: 6px;
+  flex: 0 0 44px;
+  margin: 0 2px;
+}
+
+.appbar__nav:hover {
+  background: var(--accent-soft);
+}
+
+.appbar__nav:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.appbar__nav.hidden {
+  display: none;
+}
+
+/* ----- Groups card list (mobile-only DOM form) ---------------------- */
+
+.groups-card-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: none;
+}
+
+.groups-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
+}
+
+.groups-card__title-link {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+  word-break: break-word;
+}
+
+.groups-card__title-link:hover {
+  text-decoration: underline;
+}
+
+.groups-card__meta {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0;
+}
+
+.groups-card__note {
+  font-size: 14px;
+  color: var(--subink);
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-style: italic;
+}
+
+.groups-card__actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.groups-card__action {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.groups-card__action:hover {
+  background: var(--accent-soft);
+}
+
+.groups-card__kebab {
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  cursor: pointer;
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.groups-card__kebab:hover {
+  background: var(--accent-soft);
+}
+
+.groups-card__kebab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.groups-rename-input--card {
+  font: inherit;
+  font-size: 17px;
+  font-weight: 600;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+/* ----- Sheet fieldset (radios) -------------------------------------- */
+
+.sheet-fieldset {
+  border: 0;
+  margin: 0 0 12px;
+  padding: 0;
+}
+
+.sheet-fieldset__legend {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+  padding: 0;
+}
+
+.sheet-radio {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 8px;
+  font-size: 15px;
+  cursor: pointer;
+  min-height: 44px;
+  border-radius: 4px;
+}
+
+.sheet-radio:hover {
+  background: var(--accent-soft);
+}
+
+.sheet-radio input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+/* ----- Mobile: composer + cards + sticky action bar ---------------- */
+
+@media (max-width: 1024px) {
+  /* FAB visible on the directory route when there's a selection,
+     and always in edit mode so the user has a clear exit (Done
+     editing) regardless of member count. PR 1 left #group-rail
+     visible at mobile on directory; PR 2 hides the in-flow rail
+     on mobile and reveals it only as a bottom-sheet behind the FAB. */
+  body.route-directory.has-selection .fab--composer,
+  body.route-group-edit .fab--composer {
+    display: flex;
+  }
+
+  body:is(.route-directory, .route-group-edit) #group-rail {
+    position: fixed;
+    inset: auto 0 0 0;
+    margin: 0;
+    border-radius: 16px 16px 0 0;
+    background: var(--surface);
+    box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.18);
+    padding: 16px 16px calc(20px + env(safe-area-inset-bottom, 0));
+    transform: translateY(100%);
+    transition: transform 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+    z-index: 12;
+    max-height: 80vh;
+    overflow-y: auto;
+    width: 100vw;
+    box-sizing: border-box;
+  }
+
+  body:is(.route-directory, .route-group-edit).composer-open #group-rail {
+    transform: translateY(0);
+  }
+
+  /* Hide the in-flow rail unless the composer-open class is set, so
+     it doesn't peek above the FAB at narrow widths. */
+  body:is(.route-directory, .route-group-edit):not(.composer-open) #group-rail {
+    pointer-events: none;
+  }
+
+  /* Groups index — table out, cards in. */
+  .groups-table {
+    display: none;
+  }
+
+  .groups-card-list {
+    display: block;
+  }
+
+  /* Group-detail action bar pinned to bottom; only Mail + Export +
+     kebab visible inline. Secondary actions (CC/BCC pill, copy,
+     edit) move into the kebab sheet. */
+  body.route-group-detail .group-action-bar {
+    position: fixed;
+    inset: auto 0 0 0;
+    margin: 0;
+    background: var(--surface);
+    border-top: 1px solid var(--border-strong);
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0));
+    z-index: 9;
+    box-shadow: 0 -4px 14px rgba(0, 0, 0, 0.08);
+  }
+
+  body.route-group-detail .group-action-bar .group-action-row {
+    flex-wrap: nowrap;
+    gap: 6px;
+  }
+
+  /* Hide row 1 secondaries (CC/BCC pill, Copy emails) inline at
+     mobile — they live in the action-bar sheet now. The Mail
+     button stays visible (primary). */
+  body.route-group-detail .group-contact-mode,
+  body.route-group-detail #group-action-copy-emails,
+  body.route-group-detail #group-action-edit {
+    display: none;
+  }
+
+  /* Mail span the row 1 width on mobile. */
+  body.route-group-detail #group-action-contact {
+    flex: 1;
+  }
+
+  /* Row 2: Edit hides (kebab); Export + kebab inline. */
+  body.route-group-detail #group-action-export {
+    flex: 1;
+  }
+
+  /* Reserve thumb-room above the sticky action bar so the page
+     content scrolls past comfortably. */
+  body.route-group-detail #app-wrap,
+  body.route-group-detail #detail {
+    padding-bottom: 120px;
+  }
+
+  /* Fellow detail: appbar nav appears, inline arrows hide. */
+  body.route-fellow .appbar__nav:not(.hidden) {
+    display: inline-flex;
+  }
+
+  body.route-fellow .fellow-nav {
+    display: none;
+  }
+
+  /* Directory + edit routes: the detail pane's placeholder
+     ("Select a fellow…") is desktop-only context — at mobile we show
+     the list and route to a full-screen fellow page on tap, so the
+     placeholder is just dead space. Hide it. The pane itself reappears
+     on route-fellow where it carries the actual fellow content. */
+  body:is(.route-directory, .route-group-edit) #detail {
+    display: none;
+  }
+}
+
+.group-action-btn--more {
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+
+.group-action-btn--more:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+/* ----- Desktop: hide the mobile-only chrome ------------------------ */
+
+@media (min-width: 1025px) {
+  .groups-card-list {
+    display: none;
+  }
+  .group-action-btn--more {
     display: none;
   }
 }

@@ -1,10 +1,18 @@
 """Mobile screenshot smoke tests across the device matrix.
 
-Captures a full-page PNG for every route on every device profile. Output
-lands in ``tests/e2e/mobile/current_state/<route>--<device>.png``. These
-are reference captures for the Phase 2 mobile redesign — NOT regression
-baselines. Phase 3 will commit baselines to ``__snapshots__/`` after
-the redesign lands.
+Captures a full-page PNG for every route on every device profile.
+
+- Latest captures land in ``tests/e2e/mobile/current_state/`` (gitignored).
+- Baselines live in ``tests/e2e/mobile/__snapshots__/`` (committed).
+
+The committed baselines are a *visual reference* for what each route
+should look like in the redesigned UI — review them with ``git diff``
+or your image-aware diff tool after a UI change. The test itself only
+asserts the file was written; it does not pixel-compare against the
+baseline because the dev ``relationships.db`` accumulates state across
+test runs and the screenshot_group fixture's id varies, which makes
+per-byte comparison too flaky. To accept new captures as the next
+reference, run ``just test-mobile-promote``.
 
 Run with ``just test-mobile``.
 """
@@ -18,7 +26,9 @@ from pathlib import Path
 import pytest
 
 OUT_DIR = Path(__file__).parent / "current_state"
+SNAP_DIR = Path(__file__).parent / "__snapshots__"
 OUT_DIR.mkdir(exist_ok=True)
+SNAP_DIR.mkdir(exist_ok=True)
 
 
 # Routes that don't need any pre-existing user-authored state. The label
@@ -82,7 +92,7 @@ def screenshot_group(base_url_fixture) -> int:
 def test_screenshot_static_route(
     mobile_page, device_name, base_url_fixture, hash_route, label
 ):
-    """Snap each static route on each device profile; assert PNG was written."""
+    """Snap each static route on each device profile; check against baseline."""
     page = mobile_page
     page.goto(base_url_fixture + "/" + hash_route, wait_until="domcontentloaded")
     _wait_for_app_boot(page)
