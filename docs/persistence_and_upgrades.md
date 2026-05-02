@@ -18,7 +18,7 @@ shared mental model when triaging "why did my X disappear?" reports.
 | localStorage `ehf_has_email_only` | Has-email filter pref | Untouched | Cleared |
 | localStorage `ehf.group_draft` | In-progress group composer state | Untouched | Cleared (acceptable: drafts are unsaved) |
 | localStorage `fellows_self_email` | User's "me" email for `mailto:?to=…` | Untouched | Cleared, but rehydrated from `relationships.settings` on next boot |
-| Cookie `fellows_session` (HttpOnly) | HMAC'd session, 7-day TTL, contains `token_issued_at` | Untouched (still valid until TTL) | Cleared (best effort — see `clearCookiesBestEffort`) |
+| Cookie `fellows_session` (HttpOnly) | HMAC'd session, 7-day TTL, contains `token_issued_at` | Untouched (still valid until TTL) | Cleared via `POST /api/logout` (server sends a clearing `Set-Cookie`). `clearCookiesBestEffort()` also runs from JS as a fallback for any non-HttpOnly cookies. |
 
 The key architectural decision: **`relationships.db` is a separate
 OPFS file from `fellows.db`** rather than a set of new tables inside
@@ -104,7 +104,9 @@ most users hit this only once or never.
 - localStorage clears (except `fellows_authenticated_once`).
 - IndexedDB clears.
 - All Cache API entries clear (shell + images).
-- Cookies clear.
+- The HttpOnly session cookie clears via `POST /api/logout` (server sends
+  a clearing `Set-Cookie`); JS-visible cookies clear via best-effort
+  `document.cookie` overwrites.
 - Service worker registrations are unregistered.
 - **OPFS does not clear**, so `relationships.db` — and `fellows.db` —
   both survive.

@@ -1452,6 +1452,22 @@
 
   async function clearAllAppData() {
     try {
+      // Server-side cookie clear. The session cookie is HttpOnly so JS can't
+      // see or unset it — clearCookiesBestEffort() below only handles
+      // JS-visible cookies. POST /api/logout asks the server to send a
+      // clearing Set-Cookie header. Best-effort: the dev server has no
+      // /api/logout endpoint, so this 404s harmlessly there. Done first
+      // so the request reaches the network before we tear down caches and
+      // unregister the SW.
+      try {
+        await fetch('/api/logout', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}'
+        });
+      } catch (e) { /* offline / network — proceed with local clear */ }
+
       // Preserve the "has ever been authenticated" marker across full reset.
       // Rationale: Clear App Cache is meant to fix "my app is broken," not
       // "log me out of an installed PWA I was happily using." Without this,
