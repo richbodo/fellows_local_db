@@ -1139,6 +1139,15 @@ h1 {
   line-height: 1.4;
 }
 
+.install-support-link {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.install-support-link:hover {
+  color: var(--accent-hover);
+}
+
 .install-ttl-hint {
   margin: 1rem 0 0;
   font-size: 0.85rem;

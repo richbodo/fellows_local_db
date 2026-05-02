@@ -64,6 +64,32 @@ it offers the prompt.
 
 ---
 
+## Can't install at all?
+
+If you've followed the install steps and the app still won't install on
+your device — no install prompt appears, an "Older version of Android"
+error pops up, or just nothing happens after tapping the install link
+— it's almost always a device-side quirk rather than a problem with
+the app itself. Two third-party tools that help triage before
+contacting support:
+
+- **PWAHero** — paste the app URL and it walks you through install
+  steps tailored to your specific browser and OS. Best for "I'm not
+  sure what to tap on this device."
+- **Progressier's PWA diagnostic** — a green/red checklist that flags
+  exactly which install requirement isn't being met on your device.
+  Best for "I want to know what's broken before asking."
+
+Both are free, web-based, and don't require sign-in. Search either
+name in your browser to find the current URL.
+
+If neither helps, contact the EHF Communications Working Group with
+the output from one of those tools (a screenshot of the report is
+enough) — that gives us a head start on the triage instead of
+starting with "what device are you on?"
+
+---
+
 ## Where does the installed app live?
 
 A PWA install drops an icon on your device so you can launch the app like

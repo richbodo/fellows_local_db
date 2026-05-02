@@ -108,6 +108,15 @@ Hash-based SPA routing with no history API and no router library. Defined in `ro
 
 User-facing screen behavior, navigation, and UX flows live in [`users_manual.md`](users_manual.md). Treat the user guide as the source of truth for UI/UX from a user's perspective and keep it in sync when the UI changes.
 
+## Manifest gotchas
+
+`app/static/manifest.webmanifest` is intentionally minimal: `id`, `start_url`, and `scope` all `=/`; three icons (`any`, `any`, `maskable`); no `related_applications`, no `share_target`. Two reasons not to add either casually:
+
+- **`related_applications`** — if a stale or wrong app ID lands here, Android's WebAPK pipeline tries to verify it against the Play Store and fails with the cryptic "Older Version of Android" install error. Don't add unless we actually ship a Play Store companion.
+- **`share_target` with `method: "POST"`** — some Samsung/Chromium WebAPK servers reject POST share targets and the install silently fails. If a future feature needs a share target, use `method: "GET"`.
+
+Longer treatment of these and other PWA-installability traps is in [`pwa_tips.md`](pwa_tips.md).
+
 ## Database Schema
 
 Produced by `build/restore_from_knack_scrapefile.py` (matches `sqlite3 app/fellows.db ".schema"` for the app-defined objects). Slug uniqueness is enforced with an index rather than an inline `UNIQUE` column constraint.
