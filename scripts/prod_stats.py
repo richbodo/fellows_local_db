@@ -115,6 +115,12 @@ def tally(entries) -> dict:
     # server already sanitizes before emitting (deploy/client_error_sanitizer.py)
     # so anything reaching us here is safe to surface in the triage view.
     client_errors_count = 0
+    # Install-funnel events nested inside client_error payloads
+    # (kind=install). Bucketed by `msg` so the operator can read off
+    # the funnel without parsing JSON. Platform breakdowns for outcome_*
+    # come from the event's `extra` field.
+    install_funnel: Counter = Counter()
+    install_outcome_platforms: dict = {}  # msg -> Counter[platform]
     # All 4xx/5xx access lines + client_error events, captured verbatim for
     # `--errors-only` recall. We over-collect here and trim at the end so
     # the order of the input stream doesn't matter.
@@ -158,6 +164,22 @@ def tally(entries) -> dict:
                 evt = None
             if isinstance(evt, dict) and evt.get("event") == "client_error":
                 client_errors_count += 1
+                # Install-funnel events ride inside the client_error
+                # payload as nested `events` items with kind=install.
+                # The sanitizer already validated the kind allowlist
+                # server-side, so we trust what we see here.
+                for inner in evt.get("events") or []:
+                    if not isinstance(inner, dict):
+                        continue
+                    if inner.get("kind") != "install":
+                        continue
+                    msg = inner.get("msg")
+                    if not isinstance(msg, str):
+                        continue
+                    install_funnel[msg] += 1
+                    if msg.startswith("outcome_"):
+                        platform = (inner.get("extra") or "").strip() or "(none)"
+                        install_outcome_platforms.setdefault(msg, Counter())[platform] += 1
                 recent_errors_buf.append((ts or "", 0, m, "client_error"))
                 continue
 
@@ -208,6 +230,10 @@ def tally(entries) -> dict:
         "errors_4xx": dict(errors_4xx),
         "errors_5xx": dict(errors_5xx),
         "client_errors": client_errors_count,
+        "install_funnel": dict(install_funnel),
+        "install_outcome_platforms": {
+            k: dict(v) for k, v in install_outcome_platforms.items()
+        },
         "recent_errors": recent_errors,
         "email_events_by_prefix": email_events,
     }
@@ -316,6 +342,8 @@ def print_human(
         print(f"    └─ {line}: {count}")
     client_errors = int(stats.get("client_errors", 0) or 0)
     print(f"  Client error reports:    {client_errors}")
+    if not errors_only:
+        _print_install_funnel(stats)
     if errors_only:
         recent = stats.get("recent_errors") or []
         print("")
@@ -336,6 +364,60 @@ def print_human(
     )
     if recipients is not None:
         _print_recipients(recipients)
+
+
+# Display order for the install funnel — chronological-ish through the
+# happy path, then the alternate ("escape hatch") and edge cases.
+# Names not in this list still surface, after the named ones, in
+# alphabetical order.
+_INSTALL_FUNNEL_DISPLAY_ORDER = [
+    "landing_shown",
+    "ios_safari_advised",
+    "before_prompt_fired",
+    "before_prompt_never_arrived",
+    "button_clicked",
+    "button_clicked_no_prompt",
+    "outcome_accepted",
+    "outcome_dismissed",
+    "outcome_unknown",
+    "outcome_error",
+    "app_installed",
+    "use_in_tab_clicked",
+]
+
+
+def _print_install_funnel(stats: dict) -> None:
+    """Render the install-funnel section if there are any events to show.
+
+    No data → no section, to avoid noise on hosts that haven't seen any
+    install activity in the window. The denominator (`landing_shown`) is
+    surfaced first; per-step counts follow in the canonical happy-path
+    order. `outcome_*` events get a parenthetical platform breakdown
+    when the client supplied one in `extra` (typically `web` for
+    Chrome/Edge desktop or Android).
+    """
+    funnel = stats.get("install_funnel") or {}
+    if not funnel:
+        return
+    platforms = stats.get("install_outcome_platforms") or {}
+
+    print("  Install funnel:")
+    seen = set()
+    for name in _INSTALL_FUNNEL_DISPLAY_ORDER:
+        count = funnel.get(name)
+        if not count:
+            continue
+        seen.add(name)
+        plat = platforms.get(name)
+        plat_suffix = ""
+        if plat:
+            parts = [f"{p}:{c}" for p, c in sorted(plat.items(), key=lambda kv: -kv[1])]
+            plat_suffix = "  (" + ", ".join(parts) + ")"
+        print(f"    {name:32s} {count}{plat_suffix}")
+    # Anything the client started reporting that we don't know about yet.
+    extras = sorted(name for name in funnel.keys() if name not in seen)
+    for name in extras:
+        print(f"    {name:32s} {funnel[name]}")
 
 
 def _print_recipients(recipients: list) -> None:

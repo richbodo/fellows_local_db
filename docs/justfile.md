@@ -166,12 +166,16 @@ Export them or inline: `FELLOWS_BASE_URL=https://staging.example.com just smoke`
 - **`prod-logs [UNIT]`** — SSH + `journalctl -u UNIT -f`. Default unit
   `fellows-pwa`; try `just prod-logs caddy` for the reverse proxy.
 - **`prod-stats [SINCE]`** — summary of page views, magic-link send/verify
-  counts, 5xx errors, and disk usage over the window (default `24 hours
-  ago`). Runs `/opt/fellows/bin/prod_stats` on the droplet via SSH; reads
+  counts, 5xx errors, **install-funnel breakdown** (denominator
+  `landing_shown` + per-step counts down through `app_installed` /
+  `use_in_tab_clicked`, with per-platform splits on `outcome_*`), client
+  error reports, and disk usage over the window (default `24 hours ago`).
+  Runs `/opt/fellows/bin/prod_stats` on the droplet via SSH; reads
   journald directly (no sudo needed — the operator is in the
   `systemd-journal` and `adm` groups). Examples: `just prod-stats`,
-  `just prod-stats '7 days ago'`. Source: `scripts/prod_stats.py`, deployed
-  by the `fellows_app` Ansible role.
+  `just prod-stats '7 days ago'`. The install-funnel section is hidden
+  when there's no install activity in the window. Source:
+  `scripts/prod_stats.py`, deployed by the `fellows_app` Ansible role.
 - **`prod-stats-long`** — same tally as `prod-stats`, but over the full
   retained journal (`--since '@0'`), plus a plaintext list of every
   magic-link recipient (email, name, send count, first/last send time).
