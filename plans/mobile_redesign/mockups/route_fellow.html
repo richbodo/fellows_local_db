@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>EHF Mobile — Fellow detail (#/fellow/&lt;slug&gt;)</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="gallery">
+    <h1>Fellow detail · <code class="mono" style="font-size:13px;color:var(--muted);">#/fellow/&lt;slug&gt;</code></h1>
+    <p class="lede">Photo, name, tagline, tag chips, contact rows with copy
+    buttons, labelled blocks for free-text fields. Prev/next arrows in the
+    app bar; sticky bottom bar for Mail + Add to selection.</p>
+
+    <div class="phone-wrap">
+      <span class="phone-tag">narrow-360</span>
+      <div class="phone-frame">
+
+        <header class="appbar">
+          <button class="appbar__kebab" aria-label="Back" style="margin-right:4px;">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg>
+          </button>
+          <div class="appbar__title">Fellow</div>
+          <button class="appbar__kebab" aria-label="Previous fellow" title="Previous">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>
+          </button>
+          <button class="appbar__kebab" aria-label="Next fellow" title="Next">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
+          <button class="appbar__kebab" aria-label="More">
+            <svg class="ico" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+          </button>
+        </header>
+
+        <nav class="tabs">
+          <a class="tabs__tab tabs__tab--active" href="#">Directory</a>
+          <a class="tabs__tab" href="#">Groups</a>
+          <a class="tabs__tab" href="#">Settings</a>
+          <a class="tabs__tab" href="#">About</a>
+        </nav>
+
+        <main class="content" style="padding-bottom:88px;">
+
+          <div class="fellow-hero">
+            <div class="fellow-photo">AB</div>
+            <div>
+              <h1 class="fellow-name">Aaron Bird</h1>
+              <p class="fellow-tagline">Building a regenerative dairy supply chain in Aotearoa.</p>
+            </div>
+          </div>
+
+          <div class="tag-chips" style="margin-bottom:20px;">
+            <span class="tag-chip">Cohort 8</span>
+            <span class="tag-chip">Auckland</span>
+            <span class="tag-chip">Climate</span>
+            <span class="tag-chip">Founder</span>
+          </div>
+
+          <div>
+            <span class="display-m">Contact</span>
+          </div>
+          <div style="margin-top:8px;">
+            <div class="contact-row">
+              <span class="contact-row__label">Email</span>
+              <span class="contact-row__value">aaron@birdfarms.co.nz</span>
+              <button class="contact-row__copy" aria-label="Copy email">
+                <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+              </button>
+            </div>
+            <div class="contact-row">
+              <span class="contact-row__label">Mobile</span>
+              <span class="contact-row__value">+64 21 555 0142</span>
+              <button class="contact-row__copy" aria-label="Copy mobile">
+                <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div style="margin-top:24px;">
+            <span class="display-m">Career highlights</span>
+          </div>
+          <p style="margin:8px 0 0;color:var(--muted);font-size:15px;line-height:1.6;">
+            Founded Bird Farms in 2014. NZ Innovator of the Year 2022.
+            Previously product lead at Fonterra Digital. BSc Agricultural
+            Science, Massey University.
+          </p>
+
+          <div style="margin-top:24px;">
+            <span class="display-m">Looking to support</span>
+          </div>
+          <p style="margin:8px 0 0;color:var(--muted);font-size:15px;line-height:1.6;">
+            Founders working on regenerative agriculture, especially
+            dairy and pastoral. Always happy to take a 30-min call.
+          </p>
+
+          <div style="margin-top:24px;">
+            <span class="display-m">Key links</span>
+          </div>
+          <div style="margin-top:8px;">
+            <a href="#" class="row" style="border-radius:var(--r-sm);padding:12px 16px;border:1px solid var(--border);min-height:44px;">
+              <span class="row__label" style="color:var(--accent-deeper);">birdfarms.co.nz</span>
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="color:var(--muted);"><path d="M14 3h7v7M21 3l-9 9M19 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h6"/></svg>
+            </a>
+          </div>
+
+        </main>
+
+        <div class="actionbar">
+          <button class="btn btn--ghost" style="flex:0 0 auto;width:44px;padding:0;" aria-label="Mail">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18v12H3z"/><path d="M3 6l9 7 9-7"/></svg>
+          </button>
+          <button class="btn btn--primary">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M12 5v14"/></svg>
+            Add to selection
+          </button>
+        </div>
+
+      </div>
+      <div class="phone-caption">Compact mobile fellow page; same data, no two-column grid at this width.</div>
+    </div>
+  </div>
+</body>
+</html>

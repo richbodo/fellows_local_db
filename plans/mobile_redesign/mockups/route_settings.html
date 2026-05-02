@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>EHF Mobile — Settings (#/settings)</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="gallery">
+    <h1>Settings · <code class="mono" style="font-size:13px;color:var(--muted);">#/settings</code></h1>
+    <p class="lede">Single section today (the "me" email used by export).
+    Designed so future sections (theme, default group, signature) drop in
+    as additional labelled blocks without rework.</p>
+
+    <div class="phone-wrap">
+      <span class="phone-tag">narrow-360</span>
+      <div class="phone-frame">
+
+        <header class="appbar">
+          <div class="appbar__title">Settings</div>
+          <button class="appbar__kebab" aria-label="More">
+            <svg class="ico" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+          </button>
+        </header>
+
+        <nav class="tabs">
+          <a class="tabs__tab" href="#">Directory</a>
+          <a class="tabs__tab" href="#">Groups</a>
+          <a class="tabs__tab tabs__tab--active" href="#">Settings</a>
+          <a class="tabs__tab" href="#">About</a>
+        </nav>
+
+        <main class="content">
+
+          <h1 class="page-title">Settings</h1>
+          <p class="page-lede">Small preferences, stored only on this device. Persist across app updates and Clear App Cache.</p>
+
+          <div class="card" style="margin-top:20px;">
+            <label class="label" for="me-email">Your email</label>
+            <input id="me-email" class="input" type="email" value="rich@example.org">
+            <p class="hint">Used for "email it to me" on group exports. Auto-captured the first time you sign in via magic link — override here if you want exports addressed elsewhere.</p>
+            <div style="display:flex;gap:8px;margin-top:14px;">
+              <button class="btn btn--ghost" style="flex:0 0 auto;">Reset</button>
+              <button class="btn btn--primary" style="flex:1;">Save</button>
+            </div>
+          </div>
+
+          <div class="card" style="margin-top:12px;border-style:dashed;background:transparent;">
+            <span class="display-m" style="font-size:16px;font-weight:500;color:var(--muted);">Future sections</span>
+            <p class="hint" style="margin-top:6px;">Theme · default group · email signature · etc. drop in as additional cards in this stack.</p>
+          </div>
+
+        </main>
+
+      </div>
+      <div class="phone-caption">Same focus-mode shell as About. No bleed-through.</div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>EHF Mobile — About (#/about)</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="gallery">
+    <h1>About · <code class="mono" style="font-size:13px;color:var(--muted);">#/about</code></h1>
+    <p class="lede">Currently the most broken mobile route — directory list bleeds
+    behind, build-badge collides with the title, three floating buttons stack
+    over the panel content. Here it's focus-mode by default with labelled
+    stats and the diagnostics chrome demoted into the kebab.</p>
+
+    <div class="phone-wrap">
+      <span class="phone-tag">narrow-360</span>
+      <div class="phone-frame">
+
+        <header class="appbar">
+          <div class="appbar__title">About</div>
+          <button class="appbar__kebab" aria-label="More">
+            <svg class="ico" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+          </button>
+        </header>
+
+        <nav class="tabs">
+          <a class="tabs__tab" href="#">Directory</a>
+          <a class="tabs__tab" href="#">Groups</a>
+          <a class="tabs__tab" href="#">Settings</a>
+          <a class="tabs__tab tabs__tab--active" href="#">About</a>
+        </nav>
+
+        <main class="content">
+
+          <h1 class="page-title">EHF Fellows Directory</h1>
+          <p class="page-lede">A private, installable directory of Edmund Hillary Fellowship fellow profiles.</p>
+
+          <p style="margin-top:12px;color:var(--muted);font-size:15px;line-height:1.55;">
+            Version 0.1 — distributed only to fellows by emailed magic link.
+            Keep the data confidential and don't share screenshots outside
+            the fellowship.
+          </p>
+
+          <div style="margin:24px 0 12px;">
+            <span class="display-m">By the numbers</span>
+          </div>
+
+          <div>
+            <div class="stat-line"><span class="stat-line__label">Total fellows</span><span class="stat-line__dots"></span><span class="stat-line__value">515</span></div>
+            <div class="stat-line"><span class="stat-line__label">With contact email</span><span class="stat-line__dots"></span><span class="stat-line__value">512</span></div>
+            <div class="stat-line"><span class="stat-line__label">With profile photo</span><span class="stat-line__dots"></span><span class="stat-line__value">487</span></div>
+            <div class="stat-line"><span class="stat-line__label">Cohorts</span><span class="stat-line__dots"></span><span class="stat-line__value">9</span></div>
+            <div class="stat-line"><span class="stat-line__label">Regions</span><span class="stat-line__dots"></span><span class="stat-line__value">14</span></div>
+          </div>
+
+          <div style="margin:24px 0 12px;">
+            <span class="display-m">Help &amp; updates</span>
+          </div>
+
+          <div class="card">
+            <p style="margin:0 0 12px;color:var(--muted);font-size:15px;line-height:1.55;">
+              Read the <a href="#" style="color:var(--accent-deeper);">User Guide</a> for how to install,
+              browse, save groups, and manage settings. Bug reports go on
+              <a href="#" style="color:var(--accent-deeper);">GitHub</a> — ask Rich for repo access.
+            </p>
+            <button class="btn btn--ghost" style="width:100%;">Check for updates</button>
+          </div>
+
+          <div style="margin-top:20px;">
+            <span class="build-tag">
+              <span><b>app</b> diag-2026-04s-groups-pr5</span>
+              <span><b>server</b> 591891f</span>
+            </span>
+            <p class="hint" style="margin-top:8px;">Build identifiers — useful when filing bugs.</p>
+          </div>
+
+        </main>
+
+      </div>
+      <div class="phone-caption">No directory bleed. Build tag is content, not chrome.</div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>EHF Mobile Redesign — Mockup Gallery</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .gallery-page {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 32px 24px 64px;
+      font-family: var(--font-body);
+    }
+    .gallery-page h1 {
+      font-size: 28px;
+      font-weight: 600;
+      line-height: 1.2;
+      margin: 0 0 6px;
+      color: var(--ink-deep);
+    }
+    .gallery-page .lede {
+      font-size: 15px;
+      color: var(--muted);
+      max-width: 720px;
+      margin: 0 0 24px;
+      line-height: 1.55;
+    }
+    .gallery-page h2 {
+      font-size: 18px;
+      font-weight: 600;
+      margin: 32px 0 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border-strong);
+      color: var(--ink-deep);
+    }
+    .route-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 12px;
+    }
+    .route-tile {
+      display: block;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-md);
+      padding: 14px 16px;
+      text-decoration: none;
+      color: var(--ink);
+    }
+    .route-tile:hover {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+    .route-tile h3 {
+      font-size: 17px;
+      font-weight: 600;
+      margin: 0 0 4px;
+      color: var(--ink-deep);
+    }
+    .route-tile code {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--muted);
+      background: var(--surface-soft);
+      padding: 1px 6px;
+      border-radius: 2px;
+      display: inline-block;
+      margin-bottom: 8px;
+    }
+    .route-tile p {
+      font-size: 14px;
+      color: var(--subink);
+      line-height: 1.5;
+      margin: 0;
+    }
+    .route-tile__count {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--accent-deeper);
+      background: var(--accent-soft);
+      border: 1px solid var(--border);
+      padding: 2px 8px;
+      border-radius: 999px;
+      margin-top: 8px;
+    }
+    .meta-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 6px 16px;
+      margin: 12px 0 0;
+      list-style: none;
+      padding: 0;
+    }
+    .meta-list li {
+      font-size: 14px;
+      color: var(--subink);
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .meta-list b { color: var(--ink-deep); font-weight: 600; }
+    .docs-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+    .docs-row a {
+      flex: 1 1 240px;
+      padding: 12px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-md);
+      color: var(--ink);
+      text-decoration: none;
+      font-size: 14px;
+    }
+    .docs-row a:hover { border-color: var(--accent); background: var(--accent-soft); }
+    .docs-row a b {
+      display: block;
+      font-size: 15px;
+      margin-bottom: 4px;
+      color: var(--ink-deep);
+    }
+    .docs-row a code {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--accent-deeper);
+      background: var(--surface-soft);
+      padding: 1px 4px;
+      border-radius: 2px;
+    }
+  </style>
+</head>
+<body>
+  <div class="gallery-page">
+
+    <h1>Mobile Redesign — Mockups</h1>
+    <p class="lede">UX-first redesign for narrow phone widths. Same palette
+    and system fonts as the current app — only the layout structure and
+    readability targets change. Open any route below to see the mockup
+    framed at 360px on desktop, or load the same file on a real phone for
+    a full-screen preview.</p>
+
+    <div class="docs-row">
+      <a href="../DESIGN.md">
+        <b>DESIGN.md</b>
+        Spec — tokens, primitives, per-route patterns, accessibility, open questions.
+      </a>
+      <a href="../css_porting_notes.md">
+        <b>css_porting_notes.md</b>
+        Mapping from each mockup decision to a concrete change in <code>app/static/styles.css</code> and <code>app.js</code>.
+      </a>
+    </div>
+
+    <h2>Routes</h2>
+
+    <div class="route-grid">
+
+      <a class="route-tile" href="route_directory.html">
+        <h3>Directory</h3>
+        <code>#/</code>
+        <p>Search + filter + alphabetical fellow list. Composer rail collapses into a FAB-triggered bottom sheet. Kebab consolidates build badge, diagnostics, report bug, clear cache.</p>
+        <span class="route-tile__count">4 states</span>
+      </a>
+
+      <a class="route-tile" href="route_about.html">
+        <h3>About</h3>
+        <code>#/about</code>
+        <p>Currently the most broken mobile route. Here it's focus-mode by default with labelled stats and the build tag demoted from chrome to body content.</p>
+        <span class="route-tile__count">1 state</span>
+      </a>
+
+      <a class="route-tile" href="route_settings.html">
+        <h3>Settings</h3>
+        <code>#/settings</code>
+        <p>Single labelled card today (the "me" email). Designed so future preferences (theme, default group, signature) drop in as additional cards.</p>
+        <span class="route-tile__count">1 state</span>
+      </a>
+
+      <a class="route-tile" href="route_groups.html">
+        <h3>Groups index</h3>
+        <code>#/groups</code>
+        <p>The 5-column table is gone. Full-width cards with two primary actions inline (visual, edit) and rename / delete in a per-card kebab.</p>
+        <span class="route-tile__count">2 states</span>
+      </a>
+
+      <a class="route-tile" href="route_group_detail.html">
+        <h3>Group detail</h3>
+        <code>#/groups/&lt;id&gt;</code>
+        <p>Sticky bottom action bar with Mail + Export inline, kebab for CC/BCC, copy, edit, delete. Edit-mode banner pins between tabs and action bar.</p>
+        <span class="route-tile__count">3 states</span>
+      </a>
+
+      <a class="route-tile" href="route_fellow.html">
+        <h3>Fellow detail</h3>
+        <code>#/fellow/&lt;slug&gt;</code>
+        <p>Photo, name, tagline, tag chips, contact rows with copy buttons. Prev/next arrows in the app bar. Sticky bottom bar for Mail + Add to selection.</p>
+        <span class="route-tile__count">1 state</span>
+      </a>
+
+    </div>
+
+    <h2>Tokens</h2>
+
+    <ul class="meta-list">
+      <li><b>Body / display:</b> <code class="mono">system-ui, -apple-system, ...</code> — same stack as today</li>
+      <li><b>Mono:</b> <code class="mono">ui-monospace, "Cascadia Code", Menlo, ...</code></li>
+      <li><b>Page bg:</b> #f5f5f8 (current body background)</li>
+      <li><b>Brand purple:</b> #4a2c6a — primary action, focus ring</li>
+      <li><b>Link blue:</b> #0066cc — high contrast for fellow names</li>
+      <li><b>Warning yellow:</b> #fff3cd / #ffe69c / #664d03 family</li>
+      <li><b>Danger red:</b> #7a1f1f / #fde2e2 family</li>
+      <li><b>Phone breakpoint:</b> ≤480px — focus-mode by default</li>
+      <li><b>Tablet breakpoint:</b> ≤768px — same rules, looser gutters</li>
+      <li><b>Touch targets:</b> 44pt minimum on every interactive control</li>
+      <li><b>Inputs:</b> 16px text — avoids iOS auto-zoom on focus</li>
+      <li><b>Safe areas:</b> top + bottom insets respected (iOS notch / home indicator)</li>
+    </ul>
+
+    <h2>Reviewing on a phone</h2>
+    <p style="font-size:15px;color:var(--subink);line-height:1.55;max-width:720px;">
+      Each route file collapses its phone-frame chrome at viewports ≤480px,
+      filling the screen the way the design would once ported. To preview on
+      your actual Android run <code class="mono" style="background:var(--surface-soft);padding:1px 6px;border-radius:2px;">just serve-lan</code>
+      to start the dev server with the LAN IP printed, then open
+      <code class="mono" style="background:var(--surface-soft);padding:1px 6px;border-radius:2px;">http://&lt;ip&gt;:8765/plans/mobile_redesign/mockups/index.html</code>
+      from the phone. The dev server already binds to all interfaces.
+    </p>
+
+  </div>
+</body>
+</html>
