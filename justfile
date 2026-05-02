@@ -230,9 +230,18 @@ test-fast:
     ./scripts/ensure_port_8765_free.sh tests/test_database.py tests/test_api.py tests/test_prod_stats.py -v
 
 # Mobile screenshot harness across device matrix → tests/e2e/mobile/current_state/.
+# The committed baselines under __snapshots__/ are a visual reference, not a
+# regression gate; review captures by eye after meaningful UI changes.
 [group('test')]
 test-mobile *args="tests/e2e/mobile/ -v":
     ./scripts/ensure_port_8765_free.sh {{args}}
+
+# Promote the latest mobile captures to baselines. Run after deliberate UI
+# changes; review the visual diff in git before committing.
+[group('test')]
+test-mobile-promote:
+    cp tests/e2e/mobile/current_state/*.png tests/e2e/mobile/__snapshots__/
+    @echo "Baselines updated. Review the diff in git, then commit."
 
 
 # ---- build / deploy ------------------------------------------------------
