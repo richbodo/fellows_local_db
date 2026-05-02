@@ -149,7 +149,7 @@ skip the install landing and go straight to the directory.
   your default mail client is misconfigured and the underlined link does
   nothing when you click it.
 
-<!-- screenshot: directory view with search active and visible-count text -->
+![Directory page during a search: the count line ("2 of 515 fellows visible") shows how many results match, and the right-side composer rail stands ready for the next group.](images/users_manual/01_directory_search.png)
 
 ---
 
@@ -160,32 +160,62 @@ cohort, exporting a sub-directory, or just keeping track of who you've
 already reached out to. Groups live entirely on your device — they're
 per-browser, never synced to a server, and survive **Clear App Cache**.
 
-### Composing a group
+### Composing a group — the easy way
 
-On desktop the directory page has a right-side **selection rail** that
-builds up the group you're working on.
+The directory page is also where you build groups. The flow:
 
-On a phone or tablet, the rail collapses into a **floating + button**
-(bottom-right) that appears as soon as you select your first fellow.
-Tap it to slide the composer up as a bottom sheet; tap outside, press
-**Esc**, or tap the close button to dismiss it again. The button shows
-the current selection count.
+1. Search or filter the directory.
+2. Tap **+** beside a fellow to add them to your selection.
+3. Run a different search and add more.
+4. Name the group and click **Create new group**.
 
-The rest of the flow is the same on either form factor:
+**Your selection persists across searches.** That's the part most
+people miss at first — you don't have to find every fellow with one
+clever search. Browse three or four different slices of the directory
+in one sitting (one search by region, one by topic, one by name) and
+pick the people you want from each. Until you type a name, the rail
+auto-names the group after your most recent search; type your own name
+any time to override.
 
-1. Browse or search the directory.
-2. Click a fellow to open their profile, then use **Add to selection** to
-   put them on the rail. (Or use the toggle on the directory list itself,
-   if visible.)
-3. The rail shows everyone currently selected, plus a running count.
-4. When you're happy with the set, type a name into the rail and click
-   **Save group**. You're taken to the group's detail page.
+![A first search ("auckland") narrows the directory to two fellows; the
+right-side composer rail is still empty, waiting for you to tap +.](images/users_manual/01_directory_search.png)
 
-Drafts in progress are kept in browser storage, so you can close the tab
-and come back to the same selection later. (The draft is cleared when you
-click **Clear App Cache**, since it's by definition unsaved.)
+![After tapping + on both Auckland fellows and changing the search to
+"design", the rail still holds Rebecca and Shay — your selection
+persists while the directory below filters to a different
+slice.](images/users_manual/02_second_search_rail_kept.png)
 
-<!-- screenshot: directory page with right-rail composer mid-selection -->
+![After a third search ("climate") the rail has accumulated seven
+fellows from three different keywords. Already-added fellows show a
+checkmark in the list instead of a +. Type a group name and click
+Create new group.](images/users_manual/03_third_search_rail_seven.png)
+
+You can also add and remove members from a saved group later — see
+[Editing a group](#editing-a-group) — but most groups start with this
+compose-while-you-search flow. Editing is for adjusting an existing
+group, not the usual way to build one.
+
+#### Where the composer lives
+
+- **Desktop**: a fixed right-side rail (visible in both screenshots
+  above). Fellows in your selection show with × to remove; fellows
+  already in the selection show a checkmark instead of + in the
+  directory list.
+- **Phone or tablet**: a **floating action button** in the bottom-right
+  shows your current count (e.g. "3 SELECTED"). Tap it to slide the
+  composer up as a bottom sheet; tap outside, press **Esc**, or tap ×
+  to dismiss.
+
+![Mobile directory after three selections — the floating action button
+in the bottom-right shows the current count.](images/users_manual/m2_mobile_directory_with_fab.png)
+
+![Tapping the FAB slides the composer up as a bottom sheet — same
+fields as the desktop rail, just folded so it stays out of the way
+while you search.](images/users_manual/m3_mobile_composer_sheet.png)
+
+Drafts in progress are kept in browser storage, so you can close the
+tab and come back to the same selection later. (The draft is cleared
+when you click **Clear App Cache**, since it's by definition unsaved.)
 
 ### Browsing your groups
 
@@ -202,7 +232,9 @@ member count + creation date, the note (if any), and three actions:
 edit mode), and a **⋮** kebab that opens **Rename** and **Delete**.
 On desktop the same data renders as a table; the actions are inline.
 
-<!-- screenshot: groups index with two or three saved groups -->
+![Groups index on desktop. Each row shows the group name, member
+count, creation date, and note, with inline links to the visual
+directory, edit mode, rename, and delete.](images/users_manual/08_groups_index.png)
 
 ### Group detail
 
@@ -236,7 +268,17 @@ so you can concentrate on this one group.
   clipboard — useful when your mail client isn't set up to handle the
   Mail link, or when you want to paste into a different tool.
 
-<!-- screenshot: group detail page with action bar visible -->
+![Group detail on desktop: title with rename pencil, member count,
+saved note in the cream callout, action bar with Mail / CC-BCC / Copy
+on row one and Edit / Export on row two, then the alphabetical member
+list.](images/users_manual/05_group_detail.png)
+
+![Same group on a phone. The action bar pins to the bottom of the
+screen — Mail and Export are inline, the kebab opens the rest. The
+group title takes over the top app bar.](images/users_manual/m4_mobile_group_detail.png)
+
+![Tapping the action-bar kebab on mobile reveals CC/BCC, Copy email
+addresses, and Edit members.](images/users_manual/m5_mobile_actionbar_sheet.png)
 
 ### Visual directory
 
@@ -249,7 +291,9 @@ so you can email the whole group from this view too.
 
 Portraits that didn't download fall back to a silhouette placeholder.
 
-<!-- screenshot: visual portrait directory -->
+![Visual portrait directory: an alphabetical grid of profile photos for
+the group. The blue bar at the top has the same Mail-the-whole-group
+action as the detail page.](images/users_manual/09_visual_directory.png)
 
 ### Editing a group
 
@@ -273,7 +317,11 @@ You'll see:
 the same group name. The pencil ✎ on the detail page is the primary
 affordance; this is a secondary path.)
 
-<!-- screenshot: edit mode with yellow banner and rail in edit state -->
+![Edit mode: the yellow banner across the top makes it obvious which
+group you're editing, the directory list returns on the left so you
+can pick fellows to add (already-added fellows show a checkmark), and
+the centre panel lists current members with × to remove. Every
+add/remove auto-saves.](images/users_manual/10_edit_mode.png)
 
 ### Deleting a group
 
@@ -302,8 +350,13 @@ Click **⬇ Export a directory** on the group detail page. Exporting is a
    folder before sending. (Browsers can't attach files to a `mailto:`
    automatically.)
 
-<!-- screenshot: export panel open on group detail -->
-<!-- screenshot: post-export result row with View link + Email button -->
+![Export panel: choose PDF or HTML, see the filename that will land in
+your Downloads folder, click Export.](images/users_manual/06_export_panel.png)
+
+![After Export completes, the panel reveals a "Created … " line with a
+View link and an "Email it to me" button. The email field prefills
+from your Settings; override it here to send this export
+elsewhere.](images/users_manual/07_export_done.png)
 
 ---
 
@@ -322,7 +375,8 @@ setting:
 The setting is stored in the app's local user-data store and survives
 both app updates and **Clear App Cache**.
 
-<!-- screenshot: settings page with self-email field -->
+![Settings page: one field today, the "me" email used by group
+exports.](images/users_manual/11_settings.png)
 
 ---
 
@@ -357,6 +411,10 @@ data), you can reset it.
 The app wipes its local storage and reloads. The same kebab menu also
 holds **Diagnostics…** and **Report a bug…**, which on desktop appear
 as separate floating buttons.
+
+![Mobile app-bar kebab opened: app/server build line, Diagnostics,
+Report a bug, and Clear app cache & reload all live in one
+sheet.](images/users_manual/m6_mobile_appbar_kebab.png)
 
 **Heads-up:** clearing the cache also re-downloads the fellow data and
 photos on the next launch. The session cookie is cleared, so if the
