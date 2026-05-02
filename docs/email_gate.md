@@ -215,26 +215,14 @@ Event names in `msg`:
 | `app_installed` | The browser's `appinstalled` event fired — terminal success signal. |
 | `use_in_tab_clicked` | User took the "Use the directory in this tab" escape hatch instead of installing. |
 
-Operator query example — last 24h funnel breakdown:
+Operator query — funnel breakdown:
 
 ```bash
-just prod-logs | grep '"kind": "install"' | python3 -c '
-import json, sys
-from collections import Counter
-c = Counter()
-for line in sys.stdin:
-    try:
-        for ev in json.loads(line.split(" ", 4)[-1])["events"]:
-            if ev["kind"] == "install":
-                c[ev["msg"]] += 1
-    except Exception:
-        pass
-for k, v in c.most_common():
-    print(f"{v:>6}  {k}")
-'
+just prod-stats                # last 24h
+just prod-stats '7 days ago'   # weekly view
 ```
 
-A future `just prod-stats` extension could surface the same breakdown alongside the existing `magic_links_sent` / `magic_links_verified` tallies.
+`just prod-stats` parses these events out of journald and renders an `Install funnel:` section under `Client error reports`. Each row counts events by `msg`; `outcome_*` rows include a per-platform breakdown from `extra` (typically `web` for Chrome/Edge/Android Chrome). The section is hidden when there's no install activity in the window. See `scripts/prod_stats.py:_print_install_funnel` for the renderer.
 
 ### Anti-abuse posture
 
