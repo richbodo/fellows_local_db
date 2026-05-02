@@ -125,6 +125,15 @@
   var swUpdateBannerEl = document.getElementById('sw-update-banner');
   var swUpdateReloadEl = document.getElementById('sw-update-reload');
   var siteHeaderEl = document.getElementById('site-header');
+  // Mobile shell (≤1024px): appbar + tab strip + kebab sheet. Hidden on
+  // desktop via CSS, hidden during install/boot via the same .hidden
+  // toggle as siteHeaderEl. setShellVisible() keeps the three in lockstep.
+  var appbarEl = document.getElementById('appbar');
+  var appbarTitleEl = document.getElementById('appbar-title');
+  var appbarKebabEl = document.getElementById('appbar-kebab');
+  var tabsEl = document.getElementById('tabs');
+  var kebabSheetEl = document.getElementById('kebab-sheet');
+  var kebabScrimEl = document.getElementById('kebab-scrim');
   var deferredInstallPrompt = null;
   var directoryDataSource = 'api';
   var dataProvider = null;
@@ -1972,6 +1981,108 @@
     });
   }
 
+  // ===== Mobile shell: appbar + tabs + kebab sheet =======================
+  // Phase 3 of the mobile redesign (plans/mobile_redesign/). The appbar
+  // and tab strip are mobile-only persistent chrome (CSS hides them at
+  // >1024px). The kebab sheet consolidates the floating Diagnostics /
+  // Report bug / Clear App Cache controls into one bottom sheet on
+  // mobile; the same controls remain on screen at desktop widths.
+
+  function setShellVisible(visible) {
+    var hide = !visible;
+    if (siteHeaderEl) siteHeaderEl.classList.toggle('hidden', hide);
+    if (appbarEl) appbarEl.classList.toggle('hidden', hide);
+    if (tabsEl) tabsEl.classList.toggle('hidden', hide);
+  }
+
+  function setShellChrome(routeKey, title) {
+    if (appbarTitleEl && typeof title === 'string' && title) {
+      appbarTitleEl.textContent = title;
+    }
+    if (tabsEl) {
+      var tabs = tabsEl.querySelectorAll('.tabs__tab');
+      for (var i = 0; i < tabs.length; i++) {
+        var t = tabs[i];
+        t.classList.toggle('tabs__tab--active', t.getAttribute('data-tab') === routeKey);
+      }
+    }
+  }
+
+  function isKebabSheetOpen() {
+    return !!(kebabSheetEl && !kebabSheetEl.classList.contains('hidden'));
+  }
+
+  function openKebabSheet() {
+    if (!kebabSheetEl) return;
+    // Mirror the current build-badge values into the sheet so users on
+    // mobile (where the badge is hidden) still see what they're running.
+    var appBadge = document.getElementById('build-badge-client');
+    var serverBadge = document.getElementById('build-badge-server');
+    var appOut = document.getElementById('kebab-sheet-build-app');
+    var serverOut = document.getElementById('kebab-sheet-build-server');
+    if (appOut && appBadge) appOut.textContent = (appBadge.textContent || '').replace(/^app:\s*/, '');
+    if (serverOut && serverBadge) serverOut.textContent = (serverBadge.textContent || '').replace(/^server:\s*/, '');
+    kebabSheetEl.classList.remove('hidden');
+    kebabSheetEl.removeAttribute('hidden');
+    if (kebabScrimEl) {
+      kebabScrimEl.classList.remove('hidden');
+      kebabScrimEl.removeAttribute('hidden');
+    }
+    if (appbarKebabEl) appbarKebabEl.setAttribute('aria-expanded', 'true');
+  }
+
+  function closeKebabSheet() {
+    if (!kebabSheetEl) return;
+    kebabSheetEl.classList.add('hidden');
+    kebabSheetEl.setAttribute('hidden', '');
+    if (kebabScrimEl) {
+      kebabScrimEl.classList.add('hidden');
+      kebabScrimEl.setAttribute('hidden', '');
+    }
+    if (appbarKebabEl) appbarKebabEl.setAttribute('aria-expanded', 'false');
+  }
+
+  function initKebabSheet() {
+    if (!appbarKebabEl || !kebabSheetEl) return;
+    appbarKebabEl.addEventListener('click', function () {
+      if (isKebabSheetOpen()) closeKebabSheet();
+      else openKebabSheet();
+    });
+    if (kebabScrimEl) {
+      kebabScrimEl.addEventListener('click', closeKebabSheet);
+    }
+    var closeBtn = document.getElementById('kebab-sheet-close');
+    if (closeBtn) closeBtn.addEventListener('click', closeKebabSheet);
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && isKebabSheetOpen()) closeKebabSheet();
+    });
+    // Each sheet action proxies to the existing floating-button handler
+    // by clicking the original element. Means we don't reimplement any
+    // of the dialog/diag/clear-cache logic — same code path as the
+    // desktop floating buttons.
+    var actions = kebabSheetEl.querySelectorAll('[data-kebab-action]');
+    for (var i = 0; i < actions.length; i++) {
+      var btn = actions[i];
+      btn.addEventListener('click', function (ev) {
+        var action = ev.currentTarget.getAttribute('data-kebab-action');
+        closeKebabSheet();
+        var targetId = null;
+        if (action === 'diagnostics') targetId = 'diag-toggle';
+        else if (action === 'report-bug') targetId = 'bug-report-button';
+        else if (action === 'clear-cache') targetId = 'clear-app-cache-button';
+        if (!targetId) return;
+        var target = document.getElementById(targetId);
+        if (target) target.click();
+      });
+    }
+    // Tab clicks should close the sheet too if it happens to be open.
+    if (tabsEl) {
+      tabsEl.addEventListener('click', function () {
+        if (isKebabSheetOpen()) closeKebabSheet();
+      });
+    }
+  }
+
   function showAuthFailure(reason, extra) {
     var lines = [];
     lines.push('=== Fellows auth check failure ===');
@@ -1997,7 +2108,7 @@
     if (installLandingEl) installLandingEl.classList.add('hidden');
     if (installGatePrivateEl) installGatePrivateEl.classList.add('hidden');
     if (appWrapEl) appWrapEl.classList.add('hidden');
-    if (siteHeaderEl) siteHeaderEl.classList.add('hidden');
+    setShellVisible(false);
     if (connectionBannerEl) connectionBannerEl.classList.add('hidden');
     if (authErrorPanelEl) authErrorPanelEl.classList.remove('hidden');
     if (authErrorPreEl) authErrorPreEl.textContent = lines.join('\n');
@@ -2442,7 +2553,7 @@
   function initBrowserInstallMode(authPayload, httpStatus) {
     if (installGatePrivateEl) installGatePrivateEl.classList.add('hidden');
     if (installLandingEl) installLandingEl.classList.remove('hidden');
-    if (siteHeaderEl) siteHeaderEl.classList.add('hidden');
+    setShellVisible(false);
     showLoading(false);
     showApp(false);
     if (connectionBannerEl) connectionBannerEl.classList.add('hidden');
@@ -2556,7 +2667,7 @@
   function initEmailGate(authPayload, httpStatus, reason) {
     if (installGatePrivateEl) installGatePrivateEl.classList.remove('hidden');
     if (installLandingEl) installLandingEl.classList.add('hidden');
-    if (siteHeaderEl) siteHeaderEl.classList.add('hidden');
+    setShellVisible(false);
     showLoading(false);
     showApp(false);
     if (connectionBannerEl) connectionBannerEl.classList.add('hidden');
@@ -2954,6 +3065,9 @@
       return;
     }
     var name = fellow.name || fellow.slug || 'Unknown';
+    if (window.location.hash.indexOf('#/fellow/') === 0) {
+      setShellChrome('directory', name);
+    }
     var slug = fellow.slug || '';
     var rid = fellow.record_id || '';
     var inDraft = !!(rid && groupDraft.members.has(rid));
@@ -3791,12 +3905,27 @@
     var body = document.body;
     body.classList.remove(
       'route-groups-list', 'route-group-detail',
-      'route-group-edit', 'route-group-directory'
+      'route-group-edit', 'route-group-directory',
+      'route-directory', 'route-about', 'route-settings', 'route-fellow'
     );
     if (directoryMatch) body.classList.add('route-group-directory');
     else if (groupMatch) body.classList.add('route-group-detail');
     else if (editMatch) body.classList.add('route-group-edit');
     else if (hash === '#/groups') body.classList.add('route-groups-list');
+    else if (hash === '#/about') body.classList.add('route-about');
+    else if (hash === '#/settings') body.classList.add('route-settings');
+    else if (hash.indexOf('#/fellow/') === 0) body.classList.add('route-fellow');
+    else body.classList.add('route-directory');
+
+    // Mobile shell chrome — appbar title + active tab. Renderers that
+    // know a richer title (group name, fellow name) can overwrite by
+    // calling setShellChrome again after their data resolves.
+    if (hash === '#/about') setShellChrome('about', 'About');
+    else if (hash === '#/settings') setShellChrome('settings', 'Settings');
+    else if (hash === '#/groups') setShellChrome('groups', 'Groups');
+    else if (groupMatch || directoryMatch || editMatch) setShellChrome('groups', 'Group');
+    else if (hash.indexOf('#/fellow/') === 0) setShellChrome('directory', 'Fellow');
+    else setShellChrome('directory', 'Directory');
 
     // Transition out of edit mode if the URL no longer points there. (Same
     // group still in editingGroupId? Different group? Either way, exit
@@ -4127,6 +4256,7 @@
         return;
       }
       var name = group.name || '(untitled)';
+      setShellChrome('groups', name);
       var members = group.members || [];
       var memberCount = members.length;
       var memberWord = memberCount === 1 ? ' fellow' : ' fellows';
@@ -4418,6 +4548,7 @@
       var members = resolveMembersForView(group);
       var contact = buildContactBarMailto(group, members);
       var name = group.name || '(untitled)';
+      setShellChrome('groups', name + ' — Visual');
       var html = '<div class="group-directory-page" data-group-id="' + escapeHtml(String(group.id)) + '">' +
         '<p class="group-detail-breadcrumb">' +
           '<a href="#/groups">groups</a> › ' +
@@ -5796,11 +5927,12 @@
   initClearCacheButton();
   initDiagnosticsPanel();
   initBugReportButtons();
+  initKebabSheet();
   wireCopyButtons();
 
   function bootDirectoryAsApp() {
     bootDebugLines.length = 0;
-    if (siteHeaderEl) siteHeaderEl.classList.remove('hidden');
+    setShellVisible(true);
     if (loadingPanelEl) {
       loadingPanelEl.classList.remove('hidden');
     }
@@ -5942,7 +6074,7 @@
         if (!isStandaloneDisplayMode() && hasAuthenticatedOnce()) {
           bootDebugPush('as-app boot failed; handing off to startBrowserUx: ' +
             (err && err.message ? err.message : String(err)));
-          if (siteHeaderEl) siteHeaderEl.classList.add('hidden');
+          setShellVisible(false);
           if (loadingPanelEl) loadingPanelEl.classList.add('hidden');
           if (loadingEl) loadingEl.classList.add('hidden');
           startBrowserUx();

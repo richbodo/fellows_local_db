@@ -1157,7 +1157,7 @@ h1 {
 }
 
 .install-use-in-tab-link {
-  color: #4a2c6a;
+  color: var(--accent);
   text-decoration: underline;
 }
 
@@ -2683,4 +2683,320 @@ a.group-action-btn--primary {
   margin-top: 1rem;
   font-size: 0.85rem;
   color: #6a5800;
+}
+
+/* =========================================================================
+ * Mobile redesign — Phase 3 step 2: shell chrome (appbar, tab nav, kebab
+ * bottom-sheet) and focus-mode-by-default at the mobile breakpoint.
+ *
+ * The new shell is mobile-only. It's hidden by default (the `.hidden` class
+ * is used during install-landing / boot to suppress all top chrome; the
+ * `@media (min-width: 1025px)` block hides it on desktop). The existing
+ * `#site-header` keeps doing its job above 1024px; below that, it
+ * collapses to just the search bar on the directory route and disappears
+ * entirely on every other route.
+ *
+ * Spec: plans/mobile_redesign/DESIGN.md (§3 layout primitives, §4 focus
+ * mode by default). Porting notes: plans/mobile_redesign/css_porting_notes.md.
+ * ========================================================================= */
+
+/* ----- App bar -------------------------------------------------------- */
+
+.appbar {
+  display: flex;
+  align-items: center;
+  height: 48px;
+  padding: 0 4px 0 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  /* Bleed past body's 0.75rem padding so the bar reaches viewport edges. */
+  margin: -0.75rem -0.75rem 0;
+}
+
+.appbar.hidden {
+  display: none;
+}
+
+.appbar__title {
+  flex: 1;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink-deep);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.appbar__kebab {
+  width: 44px;
+  height: 44px;
+  border: 0;
+  background: transparent;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--accent);
+  flex: 0 0 44px;
+}
+
+.appbar__kebab:hover {
+  background: var(--accent-soft);
+}
+
+.appbar__kebab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ----- Tab strip ------------------------------------------------------ */
+
+.tabs {
+  display: flex;
+  gap: 0;
+  height: 40px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+  position: sticky;
+  top: 48px;
+  z-index: 4;
+  margin: 0 -0.75rem;
+}
+
+.tabs.hidden {
+  display: none;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.tabs__tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  padding: 0 8px;
+  min-width: 72px;
+  white-space: nowrap;
+}
+
+.tabs__tab:hover {
+  background: var(--accent-soft);
+}
+
+.tabs__tab--active {
+  color: var(--ink-deep);
+  border-bottom-color: var(--accent);
+}
+
+.tabs__tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}
+
+/* ----- Bottom-sheet shell + scrim ------------------------------------ */
+/* The kebab sheet is the first user; PR 2 will reuse the same .sheet /
+ * .sheet-scrim classes for the FAB composer and the per-card kebab on
+ * the groups index. */
+
+.sheet {
+  position: fixed;
+  inset: auto 0 0 0;
+  background: var(--surface);
+  border-top: 1px solid var(--border-strong);
+  border-radius: 12px 12px 0 0;
+  box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.18);
+  padding: 10px 14px calc(16px + env(safe-area-inset-bottom, 0));
+  z-index: 12;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.sheet.hidden {
+  display: none;
+}
+
+.sheet__handle {
+  width: 40px;
+  height: 4px;
+  background: var(--border-strong);
+  border-radius: 2px;
+  margin: 0 auto 10px;
+}
+
+.sheet__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 10px;
+}
+
+.sheet__title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink-deep);
+}
+
+.sheet__close {
+  border: 0;
+  background: transparent;
+  font-size: 24px;
+  line-height: 1;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0 6px;
+  min-width: 32px;
+  min-height: 32px;
+}
+
+.sheet__close:hover {
+  color: var(--ink-deep);
+}
+
+.sheet__divider {
+  height: 1px;
+  background: var(--border);
+  margin: 10px -14px;
+}
+
+.sheet-action {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 8px;
+  font: inherit;
+  font-size: 15px;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  color: var(--ink-deep);
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  min-height: 44px;
+}
+
+.sheet-action:hover {
+  background: var(--accent-soft);
+}
+
+.sheet-action--danger {
+  color: var(--danger);
+}
+
+.sheet-action--danger:hover {
+  background: var(--danger-bg);
+}
+
+.sheet-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 16, 30, 0.55);
+  z-index: 11;
+}
+
+.sheet-scrim.hidden {
+  display: none;
+}
+
+.diag-list {
+  padding: 4px 0 0;
+  margin: 0;
+  list-style: none;
+}
+
+.diag-list li {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+  word-break: break-all;
+}
+
+.diag-list li b {
+  color: var(--ink-deep);
+  font-weight: 600;
+  margin-left: 8px;
+  text-align: right;
+}
+
+/* ----- Desktop: hide the mobile shell -------------------------------- */
+
+@media (min-width: 1025px) {
+  .appbar,
+  .tabs {
+    display: none;
+  }
+}
+
+/* ----- Mobile (≤1024px): focus mode by default ----------------------- *
+ * Hide the directory chrome on every non-directory route so About,
+ * Settings, Groups, Group detail, Fellow detail render full-width.
+ * Hide the floating chrome — those controls now live inside the kebab
+ * sheet. PR 2 will turn `#group-rail` into a FAB-driven bottom sheet;
+ * for now we keep it visible on the directory route so mobile users
+ * can still create groups during the rollout window.
+ * ===================================================================== */
+
+@media (max-width: 1024px) {
+  /* Existing `#site-header`: full hide off-directory; on directory keep
+     it as a thin wrapper for the search bar by suppressing the title
+     and nav children. */
+  body:not(.route-directory) #site-header {
+    display: none;
+  }
+
+  body.route-directory #site-header > h1,
+  body.route-directory #site-header > .site-nav {
+    display: none;
+  }
+
+  body.route-directory #site-header {
+    flex-wrap: nowrap;
+    gap: 0;
+    margin: 0 -0.75rem;
+    padding: 8px 12px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+
+  body.route-directory #site-header > #search-container {
+    flex: 1;
+    max-width: none;
+    min-width: 0;
+    margin: 0;
+  }
+
+  /* Focus mode: hide the directory list and composer rail on every
+     non-directory route. The rail stays visible on the directory route
+     in PR 1; PR 2 will turn it into a FAB-driven bottom sheet. */
+  body:not(.route-directory) #directory,
+  body:not(.route-directory) #group-rail {
+    display: none;
+  }
+
+  /* Floating chrome → kebab sheet. The originals remain in the DOM so
+     desktop continues to use them; mobile users hit the kebab menu. */
+  #build-badge,
+  #clear-app-cache-button,
+  #diag-toggle,
+  #bug-report-button {
+    display: none;
+  }
 }
