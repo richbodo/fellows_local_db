@@ -140,3 +140,18 @@ class TestSettingsPage:
         page.locator("#group-action-export").click()
         addr = page.locator("#export-self-email-addr")
         expect(addr).to_have_value("rich@example.com")
+
+    def test_download_userdata_button_present(
+        self, standalone_page, base_url_fixture
+    ):
+        """PR D: Settings page exposes a Download my user data button.
+        The actual export only works on the OPFS path (which the dev e2e
+        harness doesn't have — see the SharedArrayBuffer warning in
+        console). This test asserts the markup is in place; the OPFS
+        round-trip is real-browser-only."""
+        page = standalone_page
+        page.goto(f"{base_url_fixture}/#/settings", wait_until="domcontentloaded")
+        _wait_for_directory(page)
+        expect(page.locator("#settings-export-section")).to_be_visible()
+        expect(page.locator("#settings-download-userdata")).to_be_visible()
+        expect(page.locator(".settings-section-title")).to_contain_text("Your saved data")

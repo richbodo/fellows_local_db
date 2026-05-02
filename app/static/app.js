@@ -713,7 +713,7 @@
     };
   }
 
-  function createSqliteDataProvider(db, relDb) {
+  function createSqliteDataProvider(db, relDb, poolUtil) {
     function attachMemberNames(rows) {
       // OPFS path skips ATTACH between SAH-pool databases; instead we
       // resolve fellow names from the in-memory cache populated by
@@ -919,6 +919,18 @@
           );
         }
         return Promise.resolve({ key: key, value: value });
+      },
+      // Hands the user the live relationships.db file as bytes so the
+      // Settings UI can offer a download. SAH-pool supports reads while
+      // the DB is open; sqlite locks are file-level and exportFile() is
+      // a snapshot read.
+      exportRelationshipsBytes: function () {
+        if (!poolUtil) return Promise.reject(new Error('pool util unavailable'));
+        try {
+          return Promise.resolve(poolUtil.exportFile('relationships.db'));
+        } catch (e) {
+          return Promise.reject(e);
+        }
       }
     };
   }
@@ -1296,6 +1308,11 @@
             return r.json();
           });
         });
+      },
+      // API path = no OPFS = no local relationships.db to export. The
+      // Settings UI hides the download button when this rejects.
+      exportRelationshipsBytes: function () {
+        return Promise.reject(localDataUnavailableError('export-relationships'));
       }
     };
   }
@@ -1770,6 +1787,32 @@
           (imagePrewarmState.startedAt ? ' started=' + imagePrewarmState.startedAt : '') +
           (imagePrewarmState.finishedAt ? ' finished=' + imagePrewarmState.finishedAt : '')
       );
+    }
+    lines.push('');
+    // Auto-backup snapshot list (PR D). Only meaningful on the OPFS
+    // path; on the API/unsupported-browser fallback this section is
+    // empty.
+    try {
+      var backups = await listRelationshipsBackups();
+      lines.push('relationships.db backups (newest 3, OPFS-only):');
+      if (!backups.length) {
+        lines.push('  (none yet)');
+      } else {
+        var totalBytes = 0;
+        for (var bi = 0; bi < backups.length; bi++) {
+          var b = backups[bi];
+          totalBytes += b.size || 0;
+          lines.push(
+            '  ' + b.name + ' — ' + (b.size || 0) + ' bytes' +
+            (b.lastModified ? ' (mtime ' + new Date(b.lastModified).toISOString() + ')' : '')
+          );
+        }
+        lines.push('  total: ' + totalBytes + ' bytes');
+      }
+      var lastSha = await _opfsReadText(BACKUP_SENTINEL);
+      lines.push('last_seen_sha.txt: ' + (lastSha || '(none)'));
+    } catch (bErr) {
+      lines.push('backups: list error — ' + String(bErr && bErr.message || bErr));
     }
     lines.push('');
     lines.push(
@@ -2498,6 +2541,142 @@
     });
   }
 
+  // ===== Auto-backup of relationships.db on app upgrade ===================
+  //
+  // relationships.db is the user-authored store (groups, notes, settings,
+  // fellow tags). It is intentionally not regenerated on app update — it
+  // is the one local file the user can't recover if it gets corrupted by
+  // a botched migration or an OPFS glitch. Auto-backup runs on every
+  // boot where the build SHA differs from the last-seen SHA: copy
+  // relationships.db (via SAH-pool exportFile) to a top-level OPFS file
+  // relationships.db.bak.<ISO timestamp>, then rotate to keep the newest
+  // BACKUP_KEEP. Backups live at OPFS root, NOT inside the SAH pool —
+  // Reset Everything iterates the root and removeEntry's everything, so
+  // backups go with the rest of the wipe.
+  //
+  // The sentinel file last_seen_sha.txt also lives at OPFS root. On
+  // first boot post-PR-D, the sentinel is absent → baseline backup.
+  // First install (no relationships.db at all) → just write the sentinel.
+  var BACKUP_PREFIX = 'relationships.db.bak.';
+  var BACKUP_SENTINEL = 'last_seen_sha.txt';
+  var BACKUP_KEEP = 3;
+
+  async function _opfsRoot() {
+    return await navigator.storage.getDirectory();
+  }
+
+  async function _opfsReadText(name) {
+    try {
+      var root = await _opfsRoot();
+      var fh = await root.getFileHandle(name);
+      var f = await fh.getFile();
+      return await f.text();
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function _opfsWriteText(name, content) {
+    var root = await _opfsRoot();
+    var fh = await root.getFileHandle(name, { create: true });
+    var w = await fh.createWritable();
+    await w.write(content);
+    await w.close();
+  }
+
+  async function _opfsWriteBinary(name, bytes) {
+    var root = await _opfsRoot();
+    var fh = await root.getFileHandle(name, { create: true });
+    var w = await fh.createWritable();
+    await w.write(bytes);
+    await w.close();
+  }
+
+  async function listRelationshipsBackups() {
+    try {
+      var root = await _opfsRoot();
+      var out = [];
+      for await (var entry of root.values()) {
+        if (entry.kind === 'file' && entry.name.indexOf(BACKUP_PREFIX) === 0) {
+          var f = await entry.getFile();
+          out.push({ name: entry.name, size: f.size, lastModified: f.lastModified });
+        }
+      }
+      out.sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
+      return out;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  async function _rotateRelationshipsBackups() {
+    var backups = await listRelationshipsBackups();
+    var root = await _opfsRoot();
+    while (backups.length > BACKUP_KEEP) {
+      var oldest = backups.shift();
+      try {
+        await root.removeEntry(oldest.name);
+        bootDebugPush('backup: rotated out ' + oldest.name);
+      } catch (e) {
+        bootDebugPush('backup: rotate removeEntry failed for ' + oldest.name);
+      }
+    }
+  }
+
+  async function maybeBackupRelationshipsDb(poolUtil) {
+    var sha = (bootBuildMeta && bootBuildMeta.git_sha) || null;
+    if (!sha) {
+      bootDebugPush('backup: skipped (no build SHA available)');
+      return { backedUp: false, reason: 'no SHA' };
+    }
+    var poolFiles = [];
+    try { poolFiles = poolUtil.getFileNames(); } catch (e) {}
+    var hasRelDb = poolFiles.indexOf('relationships.db') !== -1;
+    var prevSha = await _opfsReadText(BACKUP_SENTINEL);
+    if (!hasRelDb) {
+      // First install: no DB to back up. Sentinel marks "we've seen
+      // this SHA boot the app cleanly".
+      try { await _opfsWriteText(BACKUP_SENTINEL, sha); } catch (e) {}
+      bootDebugPush('backup: skipped (no relationships.db yet)');
+      return { backedUp: false, reason: 'first install' };
+    }
+    if (prevSha === sha) {
+      bootDebugPush('backup: skipped (no SHA change)');
+      return { backedUp: false, reason: 'no SHA change' };
+    }
+    // Different SHA, OR no sentinel → back up.
+    var bytes;
+    try {
+      bytes = poolUtil.exportFile('relationships.db');
+    } catch (e) {
+      bootDebugPush('backup: exportFile failed: ' + (e && e.message || e));
+      return { backedUp: false, reason: 'export failed' };
+    }
+    if (!bytes || !bytes.byteLength) {
+      try { await _opfsWriteText(BACKUP_SENTINEL, sha); } catch (e) {}
+      bootDebugPush('backup: empty file, sentinel updated');
+      return { backedUp: false, reason: 'empty file' };
+    }
+    var ts = new Date().toISOString().replace(/[:.]/g, '-');
+    var backupName = BACKUP_PREFIX + ts;
+    try {
+      await _opfsWriteBinary(backupName, bytes);
+    } catch (e) {
+      bootDebugPush('backup: write failed: ' + (e && e.message || e));
+      return { backedUp: false, reason: 'write failed' };
+    }
+    await _rotateRelationshipsBackups();
+    try { await _opfsWriteText(BACKUP_SENTINEL, sha); } catch (e) {}
+    bootDebugPush(
+      'backup: wrote ' + backupName + ' (' + bytes.byteLength + ' bytes); ' +
+      'sentinel ' + (prevSha || '<none>') + ' → ' + sha
+    );
+    return { backedUp: true, name: backupName, size: bytes.byteLength };
+  }
+
+  // Exposed for diagnostics + Settings UI.
+  window._fellowsBackups = { list: listRelationshipsBackups };
+
   function initOpfsDataProvider() {
     setSetupStatus('Setting up your local directory…');
     return globalThis
@@ -2508,6 +2687,14 @@
       })
       .then(function (poolUtil) {
         bootDebugPush('installOpfsSAHPoolVfs: OK');
+        // Auto-backup runs BEFORE we open relationships.db for app use,
+        // so any schema migration or app-update glitch leaves a clean
+        // pre-upgrade snapshot the user can fall back on.
+        return maybeBackupRelationshipsDb(poolUtil).then(function () {
+          return poolUtil;
+        });
+      })
+      .then(function (poolUtil) {
         setSetupStatus('Downloading directory data…');
         return fetchFellowsDbWithProgress(function (n, total) {
           var pct = total ? Math.round((100 * n) / total) : 0;
@@ -2533,7 +2720,7 @@
             );
             relDb = null;
           }
-          return createSqliteDataProvider(db, relDb);
+          return createSqliteDataProvider(db, relDb, poolUtil);
         });
       });
   }
@@ -3270,6 +3457,41 @@
 
   function saveHasEmailFilter(v) {
     try { localStorage.setItem(HAS_EMAIL_FILTER_KEY, v ? '1' : '0'); } catch (e) {}
+    // Mirror to relationships.settings for durability across Clear App
+    // Cache. localStorage stays as the synchronous read path on boot;
+    // settings is the source of truth that survives.
+    if (dataProvider && typeof dataProvider.setSetting === 'function') {
+      dataProvider.setSetting('has_email_only', v ? '1' : '0').catch(function () { /* ignore */ });
+    }
+  }
+
+  /** Boot-time companion to reconcileSelfEmailOnBoot: reconcile the
+   *  has-email filter pref between localStorage (fast read) and
+   *  relationships.settings (durable). On the first boot after this
+   *  PR ships, settings is empty and localStorage carries the user's
+   *  pref → migrate localStorage → settings. After Clear App Cache,
+   *  localStorage is wiped but settings survives → rehydrate the
+   *  localStorage cache and update the in-memory + UI state. */
+  function reconcileHasEmailFilterOnBoot() {
+    if (!dataProvider || typeof dataProvider.getSetting !== 'function') return;
+    dataProvider.getSetting('has_email_only').then(function (settingVal) {
+      if (settingVal === '0' || settingVal === '1') {
+        var fromSettings = settingVal === '1';
+        if (fromSettings !== hasEmailOnly) {
+          hasEmailOnly = fromSettings;
+          try { localStorage.setItem(HAS_EMAIL_FILTER_KEY, settingVal); } catch (e) {}
+          if (hasEmailFilterEl) hasEmailFilterEl.checked = fromSettings;
+          // Re-render the directory if it's currently visible.
+          if (typeof updateDirectory === 'function') {
+            try { updateDirectory(); } catch (e) {}
+          }
+        }
+      } else if (typeof dataProvider.setSetting === 'function') {
+        // Settings is empty — migrate from localStorage.
+        var localVal = hasEmailOnly ? '1' : '0';
+        dataProvider.setSetting('has_email_only', localVal).catch(function () { /* ignore */ });
+      }
+    }).catch(function () { /* ignore */ });
   }
 
   function fellowHasEmail(f) {
@@ -5536,11 +5758,68 @@
           '<span id="settings-status" class="settings-status" aria-live="polite"></span>' +
         '</div>' +
       '</form>' +
+      '<div class="settings-section" id="settings-export-section">' +
+        '<h3 class="settings-section-title">Your saved data</h3>' +
+        '<p class="settings-hint">' +
+          'Download a copy of <code>relationships.db</code> — your saved groups, ' +
+          'group notes, fellow tags, and settings. ' +
+          'The app also auto-snapshots this file before every app upgrade ' +
+          '(rotated to keep the newest 3); see Diagnostics for the current list.' +
+        '</p>' +
+        '<button type="button" id="settings-download-userdata" class="settings-download">' +
+          '⬇ Download my user data' +
+        '</button>' +
+        '<span id="settings-download-status" class="settings-status" aria-live="polite"></span>' +
+      '</div>' +
       '</div>';
     detailEl.innerHTML = html;
     var input = document.getElementById('settings-self-email');
     var status = document.getElementById('settings-status');
     var form = document.getElementById('settings-form');
+    var downloadBtn = document.getElementById('settings-download-userdata');
+    var downloadStatus = document.getElementById('settings-download-status');
+    var exportSection = document.getElementById('settings-export-section');
+
+    if (downloadBtn) {
+      downloadBtn.addEventListener('click', function () {
+        if (!dataProvider || typeof dataProvider.exportRelationshipsBytes !== 'function') {
+          if (downloadStatus) downloadStatus.textContent = 'Export not available in this mode.';
+          return;
+        }
+        downloadBtn.disabled = true;
+        downloadBtn.textContent = 'Preparing…';
+        dataProvider.exportRelationshipsBytes()
+          .then(function (bytes) {
+            if (!bytes || !bytes.byteLength) {
+              if (downloadStatus) downloadStatus.textContent = 'No data yet to download.';
+              return;
+            }
+            var ts = new Date().toISOString().replace(/[:.]/g, '-');
+            var filename = 'relationships-' + ts + '.db';
+            var blob = new Blob([bytes], { type: 'application/octet-stream' });
+            return downloadBlob(blob, filename).then(function () {
+              if (downloadStatus) {
+                downloadStatus.textContent =
+                  'Downloaded ' + filename + ' (' + bytes.byteLength + ' bytes).';
+              }
+            });
+          })
+          .catch(function (err) {
+            if (err && err.localDataUnavailable) {
+              if (exportSection) exportSection.style.display = 'none';
+              return;
+            }
+            if (downloadStatus) {
+              downloadStatus.textContent =
+                'Could not export: ' + (err && err.message || String(err));
+            }
+          })
+          .then(function () {
+            downloadBtn.disabled = false;
+            downloadBtn.textContent = '⬇ Download my user data';
+          });
+      });
+    }
 
     function showUnsupportedAndDisable() {
       detailEl.innerHTML = renderLocalDataUnavailablePanel('settings');
@@ -6532,6 +6811,10 @@
         // relationships.settings (durable). PR 5: needed by the export
         // "email it to me" feature; safe to fire-and-forget.
         reconcileSelfEmailOnBoot();
+        // Same pattern for the has-email filter pref. Migrates
+        // ehf_has_email_only from localStorage-only into the durable
+        // relationships.settings store on first post-PR-D boot.
+        reconcileHasEmailFilterOnBoot();
         setSetupStatus('Loading…');
         return provider.getList().catch(function (err) {
           if (isAuthFailure(err)) return tryListFromCache(err);

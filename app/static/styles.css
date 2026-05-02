@@ -2694,6 +2694,44 @@ a.group-action-btn--primary {
   color: #5a5a5a;
 }
 
+/* "Your saved data" section below the email field. Visually grouped
+   with the form so it reads as a related action, not a navigation
+   sibling. */
+.settings-section {
+  margin-top: 2rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.settings-section-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 0.4rem;
+  color: var(--text-strong, #0f172a);
+}
+
+.settings-download {
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0.35rem 0.85rem;
+  background: #fff;
+  color: var(--text-strong, #0f172a);
+  border: 1px solid #94a3b8;
+  border-radius: 3px;
+  cursor: pointer;
+  font-weight: 600;
+  margin-top: 0.5rem;
+}
+
+.settings-download:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+
+.settings-download:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
 /* ===== Local-data-unavailable panel ===================================
    Shown when groups/settings can't be reached locally — typically a
    browser too old for OPFS+SyncAccessHandle on the production server

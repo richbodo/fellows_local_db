@@ -362,8 +362,7 @@ elsewhere.](images/users_manual/07_export_done.png)
 
 ## Settings
 
-Open `#/settings` (linked from the navigation). Today there's one
-setting:
+Open `#/settings` (linked from the navigation).
 
 - **Your email ("me" email)** — used by group export, "email it to me"
   links, and any other place the app needs to address something *to you*.
@@ -371,12 +370,20 @@ setting:
   users will never need to touch this page. Override it here if you'd
   rather receive exports at a different mailbox than the one you sign in
   with.
+- **Your saved data → Download my user data** — saves a single file
+  (`relationships-<date>.db`) to your Downloads folder containing all
+  your saved groups, group notes, fellow tags, and settings. Useful as
+  a backup before a major change, or if you want to keep an off-device
+  copy. The app also auto-snapshots the same file before every app
+  upgrade and keeps the newest 3 — Diagnostics shows the current list.
+  (A user-facing **Restore** flow isn't built yet — if you ever need to
+  recover from a backup, contact the maintainer.)
 
-The setting is stored in the app's local user-data store and survives
+Settings are stored in the app's local user-data store and survive
 both app updates and **Clear App Cache**.
 
-![Settings page: one field today, the "me" email used by group
-exports.](images/users_manual/11_settings.png)
+![Settings page with the "me" email field and the new "Your saved data"
+section below it.](images/users_manual/11_settings.png)
 
 ---
 

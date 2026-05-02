@@ -14,8 +14,10 @@ shared mental model when triaging "why did my X disappear?" reports.
 | IndexedDB `fellows-local-db` | Offline-fallback full fellow rows | Regenerated on every successful boot | Yes |
 | OPFS `fellows.db` | Imported Knack contact data | **Re-imported** every boot from `/fellows.db` | **No** (gap; see "Open questions") |
 | OPFS `relationships.db` | Groups, group members, fellow_tags, fellow_notes, settings — all user-authored | **Never** — that's the whole point of this file | **No** |
+| OPFS `relationships.db.bak.<ISO>` | Pre-upgrade snapshots of `relationships.db`, rotated to keep newest 3 | Auto-created on every boot where the build SHA differs from `last_seen_sha.txt` | **No** (preserved alongside `relationships.db` for recovery) |
+| OPFS `last_seen_sha.txt` | Tracks which build SHA the user last booted under (sentinel for the auto-backup logic) | Updated after each successful backup or first boot | **No** |
 | localStorage `fellows_authenticated_once` | "this origin has authenticated at least once" marker | Untouched | **Preserved by name** in `clearAllAppData` |
-| localStorage `ehf_has_email_only` | Has-email filter pref | Untouched | Cleared |
+| localStorage `ehf_has_email_only` | Has-email filter pref (mirrored to `relationships.settings.has_email_only` for durability across Clear App Cache) | Untouched | Cleared, but rehydrated from `relationships.settings` on next boot |
 | localStorage `ehf.group_draft` | In-progress group composer state | Untouched | Cleared (acceptable: drafts are unsaved) |
 | localStorage `fellows_self_email` | User's "me" email for `mailto:?to=…` | Untouched | Cleared, but rehydrated from `relationships.settings` on next boot |
 | Cookie `fellows_session` (HttpOnly) | HMAC'd session, 7-day TTL, contains `token_issued_at` | Untouched (still valid until TTL) | Cleared via `POST /api/logout` (server sends a clearing `Set-Cookie`). `clearCookiesBestEffort()` also runs from JS as a fallback for any non-HttpOnly cookies. |
@@ -72,6 +74,48 @@ What gets replaced (intentionally):
 - `fellows.db` in OPFS (re-imported from `/fellows.db`; this is how
   new fellow data reaches the user).
 - IndexedDB cache (regenerated on next successful `getList`).
+
+## Auto-backup of `relationships.db` on upgrade
+
+`relationships.db` is the only local file that's neither replaced on
+upgrade (like `fellows.db`) nor easy to recover from a botched
+migration or OPFS glitch (since it's per-user, never synced). To make
+"upgrade ate my groups" a recoverable scenario rather than a
+data-loss scenario, the boot path auto-snapshots it before any code
+opens it for app use.
+
+Mechanism (`maybeBackupRelationshipsDb` in `app.js`, runs after
+`installOpfsSAHPoolVfs` returns and before `new OpfsSAHPoolDb('relationships.db')`):
+
+1. Read `bootBuildMeta.git_sha` (the SHA of the running app).
+2. Read `last_seen_sha.txt` from the OPFS root (or `null` if missing).
+3. If `relationships.db` doesn't exist in the SAH-pool's file map →
+   first install; write the sentinel and return.
+4. If the sentinel matches the current SHA → no upgrade, no backup.
+5. Otherwise (different SHA, or no sentinel — first boot post-PR-D):
+   - `bytes = poolUtil.exportFile('relationships.db')` — snapshot read.
+   - Write to OPFS root file `relationships.db.bak.<ISO timestamp>`.
+   - Rotate: list backup files, sort by name (ISO timestamps sort
+     chronologically), `removeEntry` the oldest until ≤3 remain.
+   - Write the current SHA into `last_seen_sha.txt`.
+
+Backups live at the OPFS **root**, not inside the SAH pool — so they
+survive normal sqlite-wasm operations (which only touch the pool dir)
+but get cleaned up by `clearEverything()`'s root-iteration removal
+along with the rest of OPFS.
+
+The Settings page exposes the live `relationships.db` as a download
+("Your saved data" → "⬇ Download my user data") so the user can stash
+a copy off-device. Diagnostics lists the backup files with sizes and
+mtimes.
+
+What this does NOT cover yet (deferred):
+- **Restore from backup.** If you find a corrupt `relationships.db`
+  and want to revert to a `.bak.*` snapshot, today the path is manual
+  (`chrome://settings → site data → fellows...` to wipe, then re-import,
+  or copy the bytes via the OPFS root API in DevTools). A user-facing
+  restore button is on the roadmap; export-only is shipped as v1
+  because the typical recovery path so far has been "email Rich".
 
 ## Per-user customization (or lack thereof)
 
