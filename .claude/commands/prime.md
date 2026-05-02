@@ -3,6 +3,8 @@
 
 ## Run
 git ls-files
+git checkout main
+git pull
 
 ## Read
 README.md
