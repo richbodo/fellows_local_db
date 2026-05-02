@@ -45,7 +45,11 @@ class TestBugReportInApp:
         assert "What actually happened?" in body
         # Sync diagnostics block populated with expected fields
         assert "diagnostics" in body
-        assert "app: diag-" in body         # FELLOWS_UI_DIAG marker
+        # FELLOWS_UI_DIAG format is <YYYY-MM-DD>-<short-sha>[-<label>]
+        # since PR #80; assert structure, not a specific tag.
+        import re
+        assert re.search(r"app: \d{4}-\d{2}-\d{2}-[0-9a-f]+", body), \
+            "diagnostics should include 'app: <YYYY-MM-DD>-<sha>' line, got: " + repr(body)
         assert "userAgent:" in body          # browser fingerprint
         assert "display: standalone" in body  # standalone fixture in use
         assert "url: " in body

@@ -41,7 +41,13 @@ class TestDirectoryPage:
         badge = page.locator("#build-badge")
         expect(badge).to_be_visible()
         client_line = page.locator("#build-badge-client")
-        expect(client_line).to_contain_text("app: diag-")
+        # FELLOWS_UI_DIAG format is <YYYY-MM-DD>-<short-sha>[-<label>]
+        # since PR #80; assert structure rather than a specific tag so
+        # this stays green across bumps.
+        import re
+        text = client_line.inner_text()
+        assert re.match(r"^app: \d{4}-\d{2}-\d{2}-[0-9a-f]+", text), \
+            "build badge should show 'app: <YYYY-MM-DD>-<sha>' format, got: " + repr(text)
         server_line = page.locator("#build-badge-server")
         expect(server_line).to_be_visible()
 

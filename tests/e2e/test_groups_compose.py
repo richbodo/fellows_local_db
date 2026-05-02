@@ -149,7 +149,21 @@ class TestGroupComposer:
         (search query OR has-email checked) and hides when the unfiltered
         list is showing — "too easy to mis-click" otherwise."""
         page = standalone_page
+        # Reset has_email_only state from prior tests in this session.
+        # PR D mirrors the filter pref into relationships.settings, which
+        # the dev server persists across tests in a single session;
+        # without this reset, an earlier test that unchecked the box
+        # leaves has_email_only='0' in settings, and
+        # reconcileHasEmailFilterOnBoot flips this test's checkbox to
+        # unchecked on boot.
         page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+        page.evaluate(
+            "() => fetch('/api/settings/has_email_only', "
+            "{method: 'PUT', headers: {'Content-Type': 'application/json'}, "
+            "body: JSON.stringify({value: '1'})}).catch(() => {})"
+        )
+        page.evaluate("() => localStorage.setItem('ehf_has_email_only', '1')")
+        page.reload()
         _wait_for_directory(page)
         bar = page.locator("#bulk-select-bar")
         # has-email is on by default → bar is visible from boot.
