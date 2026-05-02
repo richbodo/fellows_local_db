@@ -308,7 +308,10 @@ The app checks for new versions automatically:
 - **Once an hour** while the app is open, a background check confirms
   you're still on the latest build.
 - You can also force a check from the **About** page → **Check for
-  updates**.
+  updates**. The same About page shows the **Build** line (the app
+  constant your tab is running and the server SHA + timestamp it last
+  fetched), which is handy when reporting a bug or confirming a deploy
+  reached you.
 
 When an update is available, a banner appears across the top of the app:
 **"New version available — Reload."** Click Reload to apply it.

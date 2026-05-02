@@ -963,6 +963,28 @@ h1 {
   margin: 0 0 0.75rem 0;
 }
 
+.about-build {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.85rem;
+  color: var(--text-muted, #555);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: baseline;
+}
+
+.about-build-label {
+  font-weight: 600;
+}
+
+.about-build-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  background: var(--surface-subtle, #f0f3f7);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+}
+
 .about-repo a {
   display: inline-flex;
   align-items: center;
