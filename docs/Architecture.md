@@ -115,8 +115,6 @@ User-facing screen behavior, navigation, and UX flows live in [`users_manual.md`
 - **`related_applications`** — if a stale or wrong app ID lands here, Android's WebAPK pipeline tries to verify it against the Play Store and fails with the cryptic "Older Version of Android" install error. Don't add unless we actually ship a Play Store companion.
 - **`share_target` with `method: "POST"`** — some Samsung/Chromium WebAPK servers reject POST share targets and the install silently fails. If a future feature needs a share target, use `method: "GET"`.
 
-Longer treatment of these and other PWA-installability traps is in [`pwa_tips.md`](pwa_tips.md).
-
 ## Database Schema
 
 Produced by `build/restore_from_knack_scrapefile.py` (matches `sqlite3 app/fellows.db ".schema"` for the app-defined objects). Slug uniqueness is enforced with an index rather than an inline `UNIQUE` column constraint.
