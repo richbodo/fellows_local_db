@@ -482,8 +482,11 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header("Cache-Control", "no-cache")
         elif pl.endswith(".webmanifest") or pl.rsplit("/", 1)[-1] == "manifest.webmanifest":
             self.send_header("Cache-Control", "no-cache")
-        elif pl.rsplit("/", 1)[-1] in ("app.js", "styles.css"):
+        elif pl.rsplit("/", 1)[-1] in ("app.js", "styles.css") or pl.endswith("/vendor/sqlite-worker.js"):
             # App shell: must revalidate so browsers (and SW networkFirst) get auth UX updates.
+            # sqlite-worker.js is tightly versioned with app.js (same release cycle, same
+            # postMessage protocol) — keep it on the no-cache rail so a prod deploy can't
+            # leave a stale worker running against new app.js for up to 7 days.
             self.send_header("Cache-Control", "no-cache")
         elif pl.rsplit("/", 1)[-1] == "build-meta.json":
             self.send_header("Cache-Control", "no-cache")
