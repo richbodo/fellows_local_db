@@ -323,9 +323,9 @@ smoke url="":
 check-env:
     ./scripts/check_deploy_env.sh
 
-# Show local HEAD, on-disk CACHE_VERSION + FELLOWS_UI_DIAG, the most
-# recent 'chore(version):' commit, prod's build-meta, and a refresh
-# cheat-sheet for the SW shell-cache gotcha.
+# Show local HEAD, the build label that the next 'just build' would
+# stamp into the bundle, prod's build-meta, and a refresh cheat-sheet
+# for the SW shell-cache gotcha.
 #
 # Show local + prod build versions and refresh tips.
 [group('prod')]
