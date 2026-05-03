@@ -1156,7 +1156,14 @@
   // HTML string. Caller decides which container to drop it into.
   // `feature` is what the user was trying to do — "groups", "this group",
   // "settings", "save this group". Used in the headline only.
-  function renderLocalDataUnavailablePanel(feature) {
+  // `opts.runtimeFailure` (optional) means the OPFS path *should* have
+  // worked on this browser version but failed at runtime (e.g. the page
+  // loaded before the dev server picked up COOP/COEP, or a transient
+  // sqlite-wasm glitch). When set AND the detected version meets the
+  // floor, we render a different copy that doesn't tell a Chrome-130
+  // user to upgrade Chrome.
+  function renderLocalDataUnavailablePanel(feature, opts) {
+    opts = opts || {};
     var b = detectBrowserSupport();
     var label = feature || 'this feature';
     var browserHuman =
@@ -1168,8 +1175,32 @@
       b.name === 'samsung' ? 'Samsung Internet' :
       'your browser';
     var versionTxt = b.versionString ? (' ' + b.versionString) : '';
+    // "Version meets the floor we ship for": if both numbers are known
+    // and version >= minVersion. Used to decide whether the "you need a
+    // newer browser" copy applies, or whether the runtime-failure copy
+    // is a better fit.
+    var versionLooksOk =
+      b.version != null && b.minVersion != null && b.version >= b.minVersion;
     var detailLines = [];
-    if (b.onIos) {
+    if (opts.runtimeFailure && versionLooksOk) {
+      // Browser is recent enough on paper. Most likely cause: the page
+      // loaded before the server sent the cross-origin-isolation headers
+      // OPFS-SAH-Pool needs (Cross-Origin-Opener-Policy: same-origin +
+      // Cross-Origin-Embedder-Policy: require-corp). A hard reload almost
+      // always fixes it. If not, Diagnostics has the boot trace.
+      detailLines.push(
+        'You\'re running ' + browserHuman + versionTxt + ', which is recent enough — ' +
+        'so this is unusual. The local-storage layer (OPFS) didn\'t initialize on this load. ' +
+        'The most common cause is the page loading before the server finished sending the ' +
+        'cross-origin-isolation headers OPFS needs.'
+      );
+      detailLines.push(
+        'Try a <b>hard reload</b>: <kbd>Cmd-Shift-R</kbd> on macOS, ' +
+        '<kbd>Ctrl-Shift-R</kbd> on Windows/Linux. ' +
+        'If that doesn\'t fix it, open <b>Diagnostics</b> (lower-left button) and copy the boot trace — ' +
+        'the OPFS gates section shows exactly which capability check failed.'
+      );
+    } else if (b.onIos) {
       // iOS forces every browser engine to WebKit, so the only fix is to
       // upgrade iOS itself (iOS 16.4+ ships Safari 16.4+).
       detailLines.push(
@@ -1237,14 +1268,21 @@
       );
     }
     var detailHtml = detailLines.map(function (l) { return '<p>' + l + '</p>'; }).join('');
+    var isRuntime = !!(opts.runtimeFailure && versionLooksOk);
+    var headline = isRuntime
+      ? 'Can\'t open ' + escapeHtml(label) + ' right now'
+      : 'Can\'t open ' + escapeHtml(label) + ' on this browser';
+    var lede = isRuntime
+      ? 'Saved groups and per-device settings live in your browser\'s local storage (OPFS). ' +
+        'On this load, that storage didn\'t initialize — so the rest of the app works, but ' +
+        escapeHtml(label) + ' can\'t until it does.'
+      : 'Saved groups and per-device settings live in your browser\'s local storage. ' +
+        'On this device, that storage isn\'t available — so the rest of the app works, but ' +
+        escapeHtml(label) + ' can\'t.';
     return (
       '<div class="local-data-unavailable">' +
-        '<h3>Can\'t open ' + escapeHtml(label) + ' on this browser</h3>' +
-        '<p class="local-data-unavailable-lede">' +
-          'Saved groups and per-device settings live in your browser\'s local storage. ' +
-          'On this device, that storage isn\'t available — so the rest of the app works, but ' +
-          escapeHtml(label) + ' can\'t.' +
-        '</p>' +
+        '<h3>' + headline + '</h3>' +
+        '<p class="local-data-unavailable-lede">' + lede + '</p>' +
         detailHtml +
         '<p class="local-data-unavailable-foot">' +
           'If none of these options work for you, please reach out — we\'re happy to help.' +
@@ -6138,18 +6176,28 @@
     var exportSection = document.getElementById('settings-export-section');
 
     // Backup + restore both depend on the OPFS-backed sqlite provider —
-    // the API provider has no live relationships.db to export or
-    // overwrite. Hide both sections up front when we're on the API
-    // provider (typical on dev localhost without the SAH-pool VFS, or
-    // any browser that fell back to API mode). PR #84's behavior was
-    // to hide the export section only on click rejection; this matches
-    // it for both sections at render time so users don't see broken
-    // affordances. The localDataUnavailable click-rejection paths
-    // below remain for paranoia / late provider downgrades.
+    // the API provider (dev fallback) operates on a server-side
+    // relationships.db that isn't the user's data, and prod doesn't
+    // serve those routes at all. So when we're on the API provider we
+    // can't honor a click on "Download my user data" or "Restore from
+    // a file"; PR #84 hid the export section on click rejection and
+    // PR #92 hid both sections proactively at render time. That avoided
+    // broken affordances but turned the failure silent — a user who
+    // arrived hoping to restore got an email field and no explanation.
+    // Now: render the existing local-data-unavailable panel into the
+    // export section (covering "backup and restore" together), hide
+    // the restore section, and let the panel tell the user what to do.
+    // The late `localDataUnavailable` click-handler paths below remain
+    // for paranoia / late provider downgrades.
     var localPersistenceAvailable = !!(dataProvider && dataProvider.kind === 'sqlite');
     if (!localPersistenceAvailable) {
       var preExport = document.getElementById('settings-export-section');
-      if (preExport) preExport.style.display = 'none';
+      if (preExport) {
+        preExport.innerHTML = renderLocalDataUnavailablePanel(
+          'backup and restore',
+          { runtimeFailure: true }
+        );
+      }
       var preRestore = document.getElementById('settings-restore-section');
       if (preRestore) preRestore.style.display = 'none';
     }
