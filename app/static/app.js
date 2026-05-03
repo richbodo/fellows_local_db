@@ -3227,6 +3227,293 @@
     });
   }
 
+  // ===== Hybrid (API + worker) provider ====================================
+  //
+  // When main-thread SAH-pool init fails because Chrome's main thread strips
+  // FileSystemFileHandle.prototype.createSyncAccessHandle from the prototype
+  // (PR #95–#98 found this on a vanilla Chrome 147 install), we spin up
+  // app/static/sqlite-worker.js and run sqlite-wasm in worker scope. The
+  // worker exposes ONLY the relationships side of the data provider; the
+  // fellows directory continues to come from the API provider on the main
+  // thread, so we don't pay the cost of re-downloading fellows.db into the
+  // worker just to read it.
+  //
+  // Result: dataProvider.kind === 'api+worker' — directory methods come
+  // from the API provider unchanged, relationships/backup/restore come
+  // from the worker via RPC. Settings page treats this as
+  // "local persistence available" and renders the backup section.
+
+  function createSqliteWorkerRpc(worker) {
+    var nextId = 0;
+    var pending = new Map();
+    worker.onmessage = function (ev) {
+      var msg = ev.data || {};
+      var slot = pending.get(msg.id);
+      if (!slot) return;
+      pending.delete(msg.id);
+      if (msg.ok) {
+        slot.resolve(msg.result);
+      } else {
+        var err = new Error(msg.error || 'worker rpc error');
+        if (msg.errorName) err.name = msg.errorName;
+        if (msg.stack) err.workerStack = msg.stack;
+        slot.reject(err);
+      }
+    };
+    worker.onerror = function (ev) {
+      bootDebugPush('sqlite-worker error: ' + (ev && ev.message || 'unknown'));
+    };
+    return {
+      call: function (op, args, transferables) {
+        var id = ++nextId;
+        return new Promise(function (resolve, reject) {
+          pending.set(id, { resolve: resolve, reject: reject });
+          try {
+            worker.postMessage({ id: id, op: op, args: args }, transferables || []);
+          } catch (e) {
+            pending.delete(id);
+            reject(e);
+          }
+        });
+      },
+      terminate: function () { try { worker.terminate(); } catch (e) {} }
+    };
+  }
+
+  // Resolve member record_ids to {record_id, name} pairs using the
+  // main-thread fellowsBySlug cache. Worker-side getGroup returns
+  // members without names (worker has no fellows.db) — main thread
+  // attaches them here, the same way the existing main-thread sqlite
+  // provider does (attachMemberNames inside createSqliteDataProvider).
+  function attachMemberNamesFromCache(members) {
+    if (!Array.isArray(members)) return [];
+    var out = members.map(function (m) {
+      var rid = m && m.record_id;
+      var fellow = fellowsBySlug.get(rid);
+      return { record_id: rid, name: fellow ? fellow.name : rid };
+    });
+    out.sort(function (a, b) {
+      var an = (a.name || '').toLowerCase(), bn = (b.name || '').toLowerCase();
+      return an < bn ? -1 : (an > bn ? 1 : 0);
+    });
+    return out;
+  }
+
+  // Build the hybrid provider. Strategy: for every method, try API first;
+  // if API rejects with localDataUnavailable (the marker for "this server
+  // can't serve this route" — dev's app/server.py serves /api/groups but
+  // prod's deploy/server.py 404s it), fall through to the sqlite worker.
+  //
+  // - Directory methods (getList etc.): API works in both dev and prod, no
+  //   worker involvement.
+  // - Groups + settings: API in dev, worker in prod. The first failed call
+  //   in prod warms the API provider's groupsRouteSupported cache, so
+  //   subsequent calls fail fast (no network round-trip) and fall through
+  //   to the worker without overhead.
+  // - Backup/restore (exportRelationshipsBytes, importRelationshipsBytes,
+  //   etc.): no API equivalent in either dev OR prod, always rejects with
+  //   localDataUnavailable, always falls through to worker.
+  //
+  // The worker is spawned LAZILY — on first call that needs it, not at
+  // boot. Eager spawn was breaking Playwright e2e (worker init kept the
+  // page from networkidle for too long); lazy means tests that never
+  // touch backup/restore (or groups in prod) never spawn it. Real users
+  // pay a one-time ~1s init on first click of a worker-only feature.
+  function createHybridApiAndWorkerProvider(apiProvider) {
+    var rpcPromise = null;  // null = not started; Promise = pending or resolved
+    function getRpc() {
+      if (!rpcPromise) {
+        rpcPromise = (function () {
+          bootDebugPush('worker sqlite: lazy init starting');
+          var worker;
+          try { worker = new Worker('/vendor/sqlite-worker.js'); }
+          catch (ce) {
+            return Promise.reject(new Error('worker construction failed: ' + (ce && ce.message || ce)));
+          }
+          var rpc = createSqliteWorkerRpc(worker);
+          var sha = (bootBuildMeta && bootBuildMeta.git_sha) || null;
+          return rpc.call('init', { gitSha: sha }).then(function (initResult) {
+            bootDebugPush('worker sqlite: lazy init OK relDb=' + !!(initResult && initResult.relDbOpen));
+            if (initResult && initResult.trace && initResult.trace.length) {
+              bootDebugPush('--- begin worker trace ---');
+              for (var i = 0; i < initResult.trace.length; i++) {
+                bootDebugPush('  ' + initResult.trace[i]);
+              }
+              bootDebugPush('--- end worker trace ---');
+            }
+            return rpc;
+          }).catch(function (err) {
+            try { rpc.terminate(); } catch (e) {}
+            // Reset so a future call can retry — useful if the failure was
+            // transient (network blip, etc.).
+            rpcPromise = null;
+            bootDebugPush('worker sqlite: lazy init failed: ' + (err && err.message || err));
+            throw err;
+          });
+        })();
+      }
+      return rpcPromise;
+    }
+    function workerCall(op, args, transferables) {
+      return getRpc().then(function (rpc) { return rpc.call(op, args, transferables); });
+    }
+    // Try API first; on localDataUnavailable, fall through to worker.
+    // `apiThunk` is a closure that calls the API provider method; `workerOp`
+    // is the worker RPC name; `argsForWorker` (and `transferables`) get
+    // passed through to the worker if we fall through.
+    function apiOrWorker(apiThunk, workerOp, argsForWorker, transferables) {
+      return apiThunk().catch(function (err) {
+        if (err && err.localDataUnavailable) {
+          return workerCall(workerOp, argsForWorker, transferables);
+        }
+        throw err;
+      });
+    }
+    function withResolvedMembers(group) {
+      if (!group) return null;
+      group.members = attachMemberNamesFromCache(group.members || []);
+      return group;
+    }
+    return {
+      kind: 'api+worker',
+      // Directory — API only.
+      getList: apiProvider.getList.bind(apiProvider),
+      getFull: apiProvider.getFull.bind(apiProvider),
+      getOne: apiProvider.getOne.bind(apiProvider),
+      search: apiProvider.search.bind(apiProvider),
+      getStats: apiProvider.getStats.bind(apiProvider),
+      // Groups — API in dev, worker in prod. attachMemberNamesFromCache
+      // only runs on the worker fallback (API already returns names).
+      listGroups: function () {
+        return apiOrWorker(
+          function () { return apiProvider.listGroups(); },
+          'listGroups'
+        );
+      },
+      getGroup: function (id) {
+        return apiOrWorker(
+          function () { return apiProvider.getGroup(id); },
+          'getGroup',
+          { id: id }
+        ).then(function (g) {
+          // API returns members already with names; worker returns
+          // record_ids only. Detect by checking if any member already has
+          // a name, and skip if so.
+          if (!g || !g.members || !g.members.length) return g;
+          var first = g.members[0];
+          if (first && typeof first.name === 'string') return g;
+          g.members = attachMemberNamesFromCache(g.members);
+          return g;
+        });
+      },
+      createGroup: function (data) {
+        return apiOrWorker(
+          function () { return apiProvider.createGroup(data); },
+          'createGroup',
+          data
+        ).then(function (g) {
+          if (!g || !g.members || !g.members.length) return g;
+          var first = g.members[0];
+          if (first && typeof first.name === 'string') return g;
+          g.members = attachMemberNamesFromCache(g.members);
+          return g;
+        });
+      },
+      updateGroup: function (id, patch) {
+        return apiOrWorker(
+          function () { return apiProvider.updateGroup(id, patch); },
+          'updateGroup',
+          { id: id, patch: patch }
+        ).then(function (g) {
+          if (!g || !g.members || !g.members.length) return g;
+          var first = g.members[0];
+          if (first && typeof first.name === 'string') return g;
+          g.members = attachMemberNamesFromCache(g.members);
+          return g;
+        });
+      },
+      deleteGroup: function (id) {
+        return apiOrWorker(
+          function () { return apiProvider.deleteGroup(id); },
+          'deleteGroup',
+          { id: id }
+        );
+      },
+      // Settings — API in dev, worker in prod.
+      getSetting: function (key) {
+        return apiOrWorker(
+          function () { return apiProvider.getSetting(key); },
+          'getSetting',
+          { key: key }
+        );
+      },
+      getSettings: function () {
+        return apiOrWorker(
+          function () { return apiProvider.getSettings(); },
+          'getSettings'
+        );
+      },
+      setSetting: function (key, value) {
+        return apiOrWorker(
+          function () { return apiProvider.setSetting(key, value); },
+          'setSetting',
+          { key: key, value: value }
+        );
+      },
+      // Backup / restore — no API equivalent. The API thunks always
+      // reject with localDataUnavailable, so apiOrWorker always falls
+      // through to the worker.
+      exportRelationshipsBytes: function () {
+        return apiOrWorker(
+          function () { return apiProvider.exportRelationshipsBytes(); },
+          'exportRelationshipsBytes'
+        );
+      },
+      inspectRelationshipsBytes: function (bytes) {
+        return apiOrWorker(
+          function () { return apiProvider.inspectRelationshipsBytes(bytes); },
+          'inspectRelationshipsBytes',
+          { bytes: bytes },
+          [bytes.buffer]
+        );
+      },
+      countRelationships: function () {
+        return apiOrWorker(
+          function () { return apiProvider.countRelationships(); },
+          'countRelationships'
+        );
+      },
+      importRelationshipsBytes: function (bytes) {
+        return apiOrWorker(
+          function () { return apiProvider.importRelationshipsBytes(bytes); },
+          'importRelationshipsBytes',
+          { bytes: bytes },
+          [bytes.buffer]
+        );
+      },
+      listRelationshipsBackups: function () {
+        return apiOrWorker(
+          function () { return apiProvider.listRelationshipsBackups(); },
+          'listRelationshipsBackups'
+        );
+      },
+      restoreRelationshipsBackup: function (name) {
+        return apiOrWorker(
+          function () {
+            return apiProvider.restoreRelationshipsBackup
+              ? apiProvider.restoreRelationshipsBackup(name)
+              : Promise.reject(localDataUnavailableError('restore-backup'));
+          },
+          'restoreRelationshipsBackup',
+          { name: name }
+        );
+      },
+      // Diagnostics — pulls the worker's own boot trace. Only used by
+      // diagnostics / panel rendering; safe to spawn the worker here.
+      _getWorkerTrace: function () { return workerCall('getTrace'); }
+    };
+  }
+
   function pickDataProvider() {
     bootDebugPush('pickDataProvider: start');
     bootDebugPush('gates (one line): ' + describeOpfsGates().replace(/\n/g, ' | '));
@@ -3237,23 +3524,29 @@
     bootDebugPush('trying OPFS + sqlite-wasm');
     return initOpfsDataProvider().catch(function (e) {
       var errMsg = e && e.message ? e.message : String(e);
-      bootDebugPush('OPFS path failed → API fallback: ' + errMsg);
-      console.warn('Local SQLite / OPFS unavailable, using API:', e);
-      // If the failure was "Missing required OPFS APIs.", probe a worker
-      // to see whether the worker thread has the API the main thread
-      // lacks. We don't act on the result yet — this PR is data-gathering
-      // for the Worker-based fallback rewrite that follows. The probe
-      // result lands in the boot trace and renders inline in the panel.
+      bootDebugPush('main-thread OPFS path failed: ' + errMsg);
+      console.warn('Main-thread SQLite/OPFS unavailable:', e);
+      // Specific failure mode: main thread is missing
+      // FileSystemFileHandle.prototype.createSyncAccessHandle (or one of
+      // the other 4 sqlite-wasm pre-flight APIs). Workers expose those
+      // even when the main thread doesn't, so try the worker fallback.
       if (/Missing required OPFS APIs/.test(errMsg)) {
         return probeOpfsInWorker().then(function (probe) {
-          try {
-            bootDebugPush('worker probe: ' + JSON.stringify(probe));
-          } catch (jsonErr) {
-            bootDebugPush('worker probe: (could not serialize result)');
+          try { bootDebugPush('worker probe: ' + JSON.stringify(probe)); }
+          catch (jsonErr) { bootDebugPush('worker probe: (could not serialize)'); }
+          var workerHasSah = probe && probe.ok && probe.createSyncAccessHandle === 'function';
+          var apiProvider = createApiDataProvider();
+          if (!workerHasSah) {
+            bootDebugPush('worker probe says createSyncAccessHandle unavailable in worker too → API only');
+            return apiProvider;
           }
-          return createApiDataProvider();
+          // Hybrid provider — worker spawns lazily on first OPFS-required
+          // call, so plain directory navigation pays no worker cost.
+          bootDebugPush('worker probe positive → hybrid provider (lazy worker)');
+          return createHybridApiAndWorkerProvider(apiProvider);
         });
       }
+      bootDebugPush('OPFS path failed → API fallback: ' + errMsg);
       return createApiDataProvider();
     });
   }
@@ -6395,7 +6688,16 @@
     // the restore section, and let the panel tell the user what to do.
     // The late `localDataUnavailable` click-handler paths below remain
     // for paranoia / late provider downgrades.
-    var localPersistenceAvailable = !!(dataProvider && dataProvider.kind === 'sqlite');
+    // 'sqlite' = main-thread SAH-pool succeeded; 'api+worker' = main-thread
+    // SAH-pool failed but the dedicated sqlite-worker.js came up (PR-this).
+    // Both expose working backup/restore; only the plain 'api' fallback
+    // needs the unavailable-panel.
+    var localPersistenceAvailable = !!(
+      dataProvider && (
+        dataProvider.kind === 'sqlite' ||
+        dataProvider.kind === 'api+worker'
+      )
+    );
     if (!localPersistenceAvailable) {
       var preExport = document.getElementById('settings-export-section');
       if (preExport) {

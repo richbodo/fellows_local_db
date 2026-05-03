@@ -141,68 +141,76 @@ class TestSettingsPage:
         addr = page.locator("#export-self-email-addr")
         expect(addr).to_have_value("rich@example.com")
 
-    def test_userdata_sections_in_dom_and_exposed_in_api_mode(
+    def test_userdata_sections_in_dom_and_failure_is_never_silent(
         self, standalone_page, base_url_fixture
     ):
         """The Settings page emits both the "Your saved data" (PR #84) and
         "Restore from backup" (PR #88) sections in the DOM. Their *content*
-        depends on the data provider:
-        - OPFS-backed sqlite provider → original markup (Download button +
-          Restore picker + recent-backups list).
-        - API provider → the export section is replaced by the
-          local-data-unavailable panel (PR-this), and the restore section
-          is hidden. This keeps the failure visible to the user with the
-          existing browser-aware copy ("Try a hard reload, open Diagnostics,
-          …") instead of silently disappearing both sections.
+        depends on which backend the data provider picked:
 
-        Dev e2e runs in API-provider mode (Playwright's chromium does not
-        expose `FileSystemFileHandle.prototype.createSyncAccessHandle` on the
-        main thread, so the SAH-pool VFS can't install). The OPFS round-trip
-        is verified on prod manually — see issue #85 test plan."""
+        - main-thread sqlite ('sqlite') → original markup (Download +
+          Restore + recent-backups list).
+        - hybrid api+worker ('api+worker', this-PR) → SAME markup as
+          sqlite mode — backup actually works via the dedicated worker
+          even though the main thread couldn't install SAH-pool.
+        - plain API fallback ('api') → the export section is replaced by
+          the local-data-unavailable panel (PR #95), and the restore
+          section is hidden.
+
+        The shipped guarantee from PR #95 is that the failure is never
+        silent: a user who came to back up their data either sees a
+        working backup section OR sees an explanation of what's wrong.
+        This test asserts that invariant — exactly one of the two
+        renders, regardless of which backend Playwright's chromium ends
+        up with. (Playwright's chromium worker has historically had
+        FileSystemFileHandle.prototype.createSyncAccessHandle, so the
+        hybrid path is the expected outcome here, but tests shouldn't
+        couple to that detail.)"""
         page = standalone_page
         page.goto(f"{base_url_fixture}/#/settings", wait_until="domcontentloaded")
         _wait_for_directory(page)
         export_section = page.locator("#settings-export-section")
         restore_section = page.locator("#settings-restore-section")
-        # Both sections must be in the DOM (so OPFS-mode users get them
-        # back when the provider is sqlite — same gate from PR #92).
+        # Both sections must be in the DOM regardless of mode.
         expect(export_section).to_have_count(1)
         expect(restore_section).to_have_count(1)
-        # In dev (API provider), the export section is replaced by the
-        # unavailable-panel, and the restore section is hidden.
+        # Markup that doesn't depend on which mode we're in.
+        file_input = page.locator("#settings-restore-file")
+        expect(file_input).to_have_count(1)
+        accept = file_input.get_attribute("accept") or ""
+        assert ".db" in accept and ".sqlite" in accept
+
+        # The shipped guarantee: either backup works or we say why.
+        download_btn = page.locator("#settings-download-userdata")
         panel = export_section.locator(".local-data-unavailable")
-        expect(panel).to_have_count(1)
-        # The panel headline ends with either "right now" (runtime-failure
-        # branch — Playwright's chromium reports as Chrome >= 102) or
-        # "on this browser" (browser-too-old branch). Either way it's a
-        # visible, user-readable message — the bug we're fixing was
-        # silent disappearance, not the specific copy.
-        headline = panel.locator("h3").inner_text()
-        assert "backup and restore" in headline.lower(), headline
-        # Restore section stays hidden so the panel is the single source
-        # of "what's wrong + what to do."
-        assert restore_section.evaluate("el => el.style.display") == "none", (
-            "expected restore section hidden in API-provider mode"
+        button_visible = download_btn.count() == 1 and download_btn.is_visible()
+        panel_present = panel.count() == 1
+
+        assert button_visible or panel_present, (
+            "expected EITHER a working Download button (sqlite/hybrid mode) "
+            "OR the local-data-unavailable panel (api fallback) — got neither"
         )
-        # The download button is gone (its containing section was overwritten
-        # by the panel). The restore-pick button still exists in the DOM
-        # because the restore section is hidden via display:none rather than
-        # rewritten — but it isn't reachable from the user's perspective
-        # because its parent section is hidden, so the panel is the only
-        # thing they actually see.
-        expect(page.locator("#settings-download-userdata")).to_have_count(0)
-        expect(page.locator("#settings-restore-pick")).not_to_be_visible()
-        # When the panel is in runtime-failure mode (which it is in dev e2e —
-        # Chrome reports as supported but the SAH-pool can't install on the
-        # main thread), it embeds a <details> with the boot trace + OPFS
-        # gates inline so the maintainer doesn't need to ask the user to
-        # also click the Diagnostics button.
-        trace = panel.locator("details.local-data-unavailable-trace")
-        expect(trace).to_have_count(1)
-        # The pre block carries the gate output. We use text_content (not
-        # inner_text) because the <details> is collapsed by default —
-        # inner_text would return '' until a click. We don't assert
-        # specific text; the gate values vary per environment.
-        trace_text = trace.locator("pre").text_content() or ""
-        assert len(trace_text.strip()) > 0, "expected non-empty boot trace"
-        assert "opfs" in trace_text.lower(), trace_text
+        assert not (button_visible and panel_present), (
+            "didn't expect both the Download button AND the panel to render; "
+            "they're mutually exclusive states"
+        )
+
+        if panel_present:
+            # API-only fallback (no worker available). PR #95 invariants.
+            headline = panel.locator("h3").inner_text()
+            assert "backup and restore" in headline.lower(), headline
+            assert restore_section.evaluate("el => el.style.display") == "none", (
+                "panel mode should hide the restore section"
+            )
+            # PR #96 invariant — boot trace is embedded inline, not
+            # buried behind a Diagnostics click.
+            trace = panel.locator("details.local-data-unavailable-trace")
+            expect(trace).to_have_count(1)
+            trace_text = trace.locator("pre").text_content() or ""
+            assert len(trace_text.strip()) > 0, "expected non-empty boot trace"
+            assert "opfs" in trace_text.lower(), trace_text
+        else:
+            # sqlite or api+worker mode — backup section is real.
+            # Restore section visible, picker button present.
+            expect(restore_section).to_be_visible()
+            expect(page.locator("#settings-restore-pick")).to_be_visible()
