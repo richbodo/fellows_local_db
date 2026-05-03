@@ -1,4 +1,10 @@
-const CACHE_VERSION = 'v16';
+// CACHE_VERSION + the FELLOWS_UI_DIAG constant in app.js are placeholders
+// substituted at build time by build/build_pwa.py (and at request time by
+// the dev server in app/server.py) with the current git short SHA. So
+// every build/deploy gets a unique cache name and visible build label
+// without needing a hand-maintained chore(version) commit on main. See
+// docs/DevOps.md for the routine deploy flow.
+const CACHE_VERSION = '__CACHE_VERSION__';
 const APP_SHELL_CACHE = `fellows-app-shell-${CACHE_VERSION}`;
 // Separate cache so shell-version bumps don't evict the ~34 MB of profile images.
 const IMAGES_CACHE = 'fellows-images-v1';

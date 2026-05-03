@@ -21,26 +21,80 @@ DB_SRC = REPO_ROOT / "app" / "fellows.db"
 IMAGES_SRC = REPO_ROOT / "app" / "fellow_profile_images_by_name"
 IMAGES_FALLBACK = REPO_ROOT / "final_fellows_set" / "fellow_profile_images_by_name"
 
+# Source-tracked placeholders in app/static/app.js and app/static/sw.js,
+# substituted at build time (here) and at request time (app/server.py for
+# dev). Format of the substituted value: <YYYY-MM-DD>-<short-sha>. Both
+# substitutions use compute_build_label() below so dev and prod agree on
+# what the badge shows.
+PLACEHOLDER_UI_DIAG = "__FELLOWS_UI_DIAG__"
+PLACEHOLDER_CACHE_VERSION = "__CACHE_VERSION__"
 
-def write_build_meta(dest: Path) -> None:
-    """Fingerprint for deploy debugging (client vs server bundle drift)."""
-    git_sha = None
+
+def get_short_sha(repo_root: Path = REPO_ROOT) -> str | None:
+    """Current git short SHA, or None if git isn't available."""
     try:
         r = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
-            cwd=str(REPO_ROOT),
+            cwd=str(repo_root),
             capture_output=True,
             text=True,
             timeout=5,
             check=False,
         )
         if r.returncode == 0 and (r.stdout or "").strip():
-            git_sha = (r.stdout or "").strip()
+            return (r.stdout or "").strip()
     except (OSError, subprocess.SubprocessError):
         pass
+    return None
+
+
+def compute_build_label(repo_root: Path = REPO_ROOT) -> str:
+    """`<YYYY-MM-DD>-<short-sha>` — what gets baked into the bundle.
+
+    Falls back to `<YYYY-MM-DD>-unknown` if git isn't reachable so the
+    placeholder never survives substitution. The SHA piece is what makes
+    each build uniquely identifiable; the date piece is for human eyes
+    on the build badge.
+    """
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    sha = get_short_sha(repo_root) or "unknown"
+    return f"{today}-{sha}"
+
+
+def substitute_build_label(text: str, label: str) -> str:
+    """Replace both PWA placeholders with `label`. Pure function — same
+    text in dev and dist as long as the label matches."""
+    return text.replace(PLACEHOLDER_UI_DIAG, label).replace(
+        PLACEHOLDER_CACHE_VERSION, label
+    )
+
+
+def stamp_static_assets(dist_dir: Path, label: str) -> None:
+    """Substitute `__FELLOWS_UI_DIAG__` and `__CACHE_VERSION__` in the
+    two files that carry them. No-op if the placeholders aren't present
+    (e.g., a partial rebuild on already-stamped output)."""
+    for relpath in ("app.js", "sw.js"):
+        target = dist_dir / relpath
+        if not target.is_file():
+            continue
+        original = target.read_text(encoding="utf-8")
+        stamped = substitute_build_label(original, label)
+        if stamped != original:
+            target.write_text(stamped, encoding="utf-8")
+
+
+def write_build_meta(dest: Path, label: str) -> None:
+    """Fingerprint for deploy debugging (client vs server bundle drift).
+
+    The git_sha here matches the SHA-half of the build label so a single
+    server response can be cross-referenced against a single source
+    revision. built_at is UTC, ISO-8601, second-resolution.
+    """
+    sha = label.rsplit("-", 1)[-1] if label else None
     meta = {
         "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "git_sha": git_sha,
+        "git_sha": sha,
+        "build_label": label,
         "generator": "build/build_pwa.py",
     }
     dest.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
@@ -79,7 +133,9 @@ def main() -> int:
     if DIST_DIR.exists():
         shutil.rmtree(DIST_DIR)
     shutil.copytree(STATIC_DIR, DIST_DIR)
-    write_build_meta(DIST_DIR / "build-meta.json")
+    label = compute_build_label()
+    stamp_static_assets(DIST_DIR, label)
+    write_build_meta(DIST_DIR / "build-meta.json", label)
     if DB_SRC.is_file():
         shutil.copy2(DB_SRC, DIST_DIR / "fellows.db")
         write_allowed_email_hashes(DB_SRC, DIST_DIR / "allowed_emails.json")
@@ -93,7 +149,7 @@ def main() -> int:
             if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png", ".gif", ".webp"):
                 shutil.copy2(p, dest / p.name)
     nfiles = sum(1 for p in DIST_DIR.rglob("*") if p.is_file())
-    print(f"Wrote {DIST_DIR} ({nfiles} files)")
+    print(f"Wrote {DIST_DIR} ({nfiles} files)  build_label={label}")
     return 0
 
 

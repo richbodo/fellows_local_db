@@ -106,16 +106,28 @@ Adhoc commands that don't need root require `ANSIBLE_BECOME=false` (because beco
 
 ## Routine operations
 
-From the repo root:
+The standard "ship current main to prod" flow is one command:
 
 ```bash
-just deploy             # most common: build + push + restart + HTTPS smoke
-just ship               # test-fast → deploy (safest daily push)
-just ship-fast          # deploy-fast + smoke (reuse existing deploy/dist/)
-just deploy-check       # Ansible --check mode: what would change, no writes
+git checkout main && git pull         # confirm merges are local
+just ship                             # build + test + deploy + smoke (one shot)
+just whats-running                    # confirm prod's git_sha matches HEAD
 ```
 
-Under the hood these call `./scripts/deploy_pwa.sh --ask-become-pass`, which runs the `ansible/deploy_pwa.yml` playbook. Equivalent manual form:
+`just ship` runs `test-fast` → `deploy`, and `just deploy` itself runs the full ansible playbook (build → rsync → restart → HTTPS smoke). The build step (`build/build_pwa.py`) stamps the current `git rev-parse --short HEAD` into the `FELLOWS_UI_DIAG` and `CACHE_VERSION` placeholders in `app/static/app.js` and `app/static/sw.js` as it copies them to `deploy/dist/`. Format: `<YYYY-MM-DD>-<short-sha>`. Result: every deploy carries a unique label tied to the code being shipped — no manual bump step, no `chore(version):` commits cluttering `main`.
+
+What's deployed lives in the response, not in `git log`. Use `just drift` for the local-vs-prod SHA comparison (reads `/build-meta.json` on prod) and `just whats-running` for a side-by-side snapshot.
+
+The other deploy recipes:
+
+```bash
+just deploy             # build + ansible + smoke (no test step)
+just deploy-fast        # ansible + smoke, reusing the existing deploy/dist/
+just ship-fast          # deploy-fast + smoke (skip rebuild AND tests)
+just deploy-check       # ansible --check mode: what would change, no writes
+```
+
+Under the hood `just deploy` calls `./scripts/deploy_pwa.sh --ask-become-pass`, which runs the `ansible/deploy_pwa.yml` playbook. Equivalent manual form:
 
 ```bash
 python build/build_pwa.py
