@@ -192,3 +192,17 @@ class TestSettingsPage:
         # thing they actually see.
         expect(page.locator("#settings-download-userdata")).to_have_count(0)
         expect(page.locator("#settings-restore-pick")).not_to_be_visible()
+        # When the panel is in runtime-failure mode (which it is in dev e2e —
+        # Chrome reports as supported but the SAH-pool can't install on the
+        # main thread), it embeds a <details> with the boot trace + OPFS
+        # gates inline so the maintainer doesn't need to ask the user to
+        # also click the Diagnostics button.
+        trace = panel.locator("details.local-data-unavailable-trace")
+        expect(trace).to_have_count(1)
+        # The pre block carries the gate output. We use text_content (not
+        # inner_text) because the <details> is collapsed by default —
+        # inner_text would return '' until a click. We don't assert
+        # specific text; the gate values vary per environment.
+        trace_text = trace.locator("pre").text_content() or ""
+        assert len(trace_text.strip()) > 0, "expected non-empty boot trace"
+        assert "opfs" in trace_text.lower(), trace_text
