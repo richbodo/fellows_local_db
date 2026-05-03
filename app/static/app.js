@@ -1582,8 +1582,28 @@
         (navigator.storage && typeof navigator.storage.getDirectory)
     );
     lines.push('isSecureContext: ' + globalThis.isSecureContext);
+    lines.push('crossOriginIsolated: ' + (typeof globalThis.crossOriginIsolated !== 'undefined' ? globalThis.crossOriginIsolated : '(unset)'));
     lines.push('navigator.onLine: ' + navigator.onLine);
     lines.push('shouldTryOpfsProvider(): ' + shouldTryOpfsProvider());
+    // sqlite-wasm's installOpfsSAHPoolVfs has a stricter check than ours:
+    // it requires all of FileSystemHandle / FileSystemDirectoryHandle /
+    // FileSystemFileHandle / FileSystemFileHandle.prototype.createSyncAccessHandle
+    // (vendor/sqlite3.js:11971-11977). When any are missing it throws
+    // "Missing required OPFS APIs." with no breakdown of which one. Probe
+    // them individually so the boot trace pins the actual gap.
+    lines.push('--- sqlite-wasm SAH-pool API surface ---');
+    lines.push('FileSystemHandle: ' + typeof globalThis.FileSystemHandle);
+    lines.push('FileSystemDirectoryHandle: ' + typeof globalThis.FileSystemDirectoryHandle);
+    lines.push('FileSystemFileHandle: ' + typeof globalThis.FileSystemFileHandle);
+    var sahType = '(FileSystemFileHandle missing)';
+    try {
+      sahType = globalThis.FileSystemFileHandle
+        ? typeof globalThis.FileSystemFileHandle.prototype.createSyncAccessHandle
+        : '(FileSystemFileHandle missing)';
+    } catch (e) {
+      sahType = '(probe threw: ' + (e && e.message || e) + ')';
+    }
+    lines.push('FileSystemFileHandle.prototype.createSyncAccessHandle: ' + sahType);
     return lines.join('\n');
   }
 
