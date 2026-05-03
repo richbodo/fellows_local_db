@@ -104,27 +104,24 @@ Export them or inline: `FELLOWS_BASE_URL=https://staging.example.com just smoke`
 
 ### build
 
-- **`build`** — assemble `deploy/dist/` (runs `build/build_pwa.py`).
-- **`build-meta`** — print `deploy/dist/build-meta.json` (timestamp + git sha
-  of the last build). Useful to pair with `drift`.
-- **`bump [LABEL]`** — bump `CACHE_VERSION` (sw.js) and `FELLOWS_UI_DIAG`
-  (app.js) in lock-step, then commit with a `chore(version):` prefix. The
-  diag string becomes `<YYYY-MM-DD>-<short-sha>[-<LABEL>]`. Run before
-  `just deploy` so the in-app build label matches the code being shipped.
-  Requires a clean working tree (the bump commit is just the version
-  files). The `_bump-guard` (gated on `deploy` and `deploy-fast`) finds
-  the bump commit via `git log --grep=^chore\(version\):`.
+- **`build`** — assemble `deploy/dist/` (runs `build/build_pwa.py`). The
+  build stamps the current `git rev-parse --short HEAD` into the
+  `__FELLOWS_UI_DIAG__` and `__CACHE_VERSION__` placeholders in
+  `app.js` and `sw.js` as it copies them. Format: `<YYYY-MM-DD>-<short-sha>`.
+  No manual bump step; every build label matches HEAD.
+- **`build-meta`** — print `deploy/dist/build-meta.json` (build_label,
+  git_sha, built_at). Useful to pair with `drift`.
 
 ### deploy
 
 - **`deploy`** — full prod deploy. Wraps `./scripts/deploy_pwa.sh --ask-become-pass`,
   which runs `ansible/deploy_pwa.yml`: build → rsync → restart → HTTPS smoke.
-  Refuses if HEAD has commits past the most recent `chore(version):` bump
-  (run `just bump` first). Bypass with `BUMP_GUARD=skip just deploy` for
-  hotfixes where you accept the in-app label staying behind.
+  No bump-guard step — the build label is auto-stamped from HEAD by the
+  `build` recipe inside the playbook.
 - **`deploy-fast`** — deploy without rebuilding `deploy/dist/` (sets
-  `fellows_skip_build=true`). Use when the bundle is already fresh. Same
-  bump guard as `deploy`.
+  `fellows_skip_build=true`). Re-pushes whatever was last stamped into
+  `deploy/dist/`; surprising if HEAD has moved since the last build.
+  Use after a manual `just build` when you want to skip the rebuild.
 - **`deploy-check`** — Ansible `--check` mode: reports what would change, but
   doesn't touch anything. Good before a risky deploy.
 - **`ship`** — **`test-fast` → `deploy`**. The full "build-test-deploy-test"
@@ -157,10 +154,11 @@ Export them or inline: `FELLOWS_BASE_URL=https://staging.example.com just smoke`
   this recipe just doesn't use it any more (the header value is the
   build timestamp; the SHA from `/build-meta.json` is more useful for
   side-by-side comparison with `git log`).
-- **`whats-running`** — full version report: local HEAD, on-disk
-  `CACHE_VERSION` + `FELLOWS_UI_DIAG`, the most recent `chore(version):`
-  commit and how many commits HEAD is past it, prod's `/build-meta.json`,
-  and a refresh cheat-sheet (Cmd-Shift-R bypasses the SW shell cache;
+- **`whats-running`** — local-vs-prod version snapshot: local HEAD,
+  the build label that the next `just build` would stamp into the bundle
+  (`<YYYY-MM-DD>-<short-sha>`), prod's `/build-meta.json` (build_label /
+  git_sha / built_at), and a drift line if HEAD is ahead of prod. Plus
+  a refresh cheat-sheet (Cmd-Shift-R bypasses the SW shell cache;
   Clear App Cache preserves OPFS; incognito is the nuclear baseline).
   Use when "is this the version I think it is?" comes up.
 - **`prod-logs [UNIT]`** — SSH + `journalctl -u UNIT -f`. Default unit
@@ -220,10 +218,10 @@ Export them or inline: `FELLOWS_BASE_URL=https://staging.example.com just smoke`
 - **Reset after dev-DB got weird**: `just reset` (stop, snapshot, canonical
   rebuild, start, open browser).
 - **Before merging to main**: `just test` (all tests, port-safe).
-- **Ship a PR to prod**: `just bump [<label>]` then `just ship` (the
-  bump guard refuses if you skip the bump). Bump is its own commit so
-  the in-app `app: …` build label always tracks the code that was
-  shipped — no more "which PR is this badge from?" guessing.
+- **Ship a PR to prod**: `git checkout main && git pull` then `just ship`.
+  The build step auto-stamps the current HEAD's short SHA into the
+  in-app `app: …` build label, so the badge always tracks the code being
+  shipped — no separate bump step.
 - **Check whether prod is current**: `just drift` (one-line diff) or
   `just whats-running` (full local + prod report with refresh tips).
 - **How is prod doing?** `just prod-stats` (last 24h of page loads,

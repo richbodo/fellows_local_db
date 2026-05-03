@@ -11,7 +11,6 @@ Then open http://localhost:8765/
 import json
 import re
 import sqlite3
-import subprocess
 import sys
 import urllib.parse
 from datetime import datetime, timezone
@@ -32,9 +31,16 @@ if str(REPO_ROOT) not in sys.path:
 _DEPLOY_DIR = str(REPO_ROOT / "deploy")
 if _DEPLOY_DIR not in sys.path:
     sys.path.insert(0, _DEPLOY_DIR)
+# build/ exposes the build-label substitution helpers shared with prod's
+# build_pwa.py — keeps dev and dist identical on what gets stamped into
+# app.js / sw.js.
+_BUILD_DIR = str(REPO_ROOT / "build")
+if _BUILD_DIR not in sys.path:
+    sys.path.insert(0, _BUILD_DIR)
 
 from app import relationships  # noqa: E402  (after sys.path manipulation)
 import client_error_sanitizer as ces  # noqa: E402
+import build_pwa as _build_pwa  # noqa: E402  (build-label helpers)
 DB_PATH = APP_DIR / "fellows.db"
 STATIC_DIR = APP_DIR / "static"
 IMAGES_DIR = APP_DIR / "fellow_profile_images_by_name"
@@ -43,37 +49,26 @@ IMAGES_DIR_FALLBACK = REPO_ROOT / "final_fellows_set" / "fellow_profile_images_b
 PORT = 8765
 
 
-def _dev_build_meta() -> dict:
+def _dev_build_meta(label: str) -> dict:
     """Synthesize a build-meta blob for the dev server.
 
     Mirrors the shape of `deploy/dist/build-meta.json` (written by
     `build/build_pwa.py`) so the PWA's drift-check, diagnostics panel,
-    and build badge work identically in dev. The `git_sha` reflects
-    the currently checked-out commit when the server was started;
-    `built_at` is the server start time.
+    and build badge work identically in dev. The `git_sha` half of
+    `label` reflects the currently checked-out commit when the server
+    was started; `built_at` is the server start time.
     """
-    git_sha = None
-    try:
-        r = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=str(REPO_ROOT),
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-        if r.returncode == 0 and (r.stdout or "").strip():
-            git_sha = (r.stdout or "").strip()
-    except (OSError, subprocess.SubprocessError):
-        pass
+    sha = label.rsplit("-", 1)[-1] if label else None
     return {
         "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "git_sha": git_sha,
+        "git_sha": sha,
+        "build_label": label,
         "generator": "app/server.py (dev)",
     }
 
 
-BUILD_META: dict = _dev_build_meta()
+BUILD_LABEL: str = _build_pwa.compute_build_label(REPO_ROOT)
+BUILD_META: dict = _dev_build_meta(BUILD_LABEL)
 
 # Columns in fellows table (exclude extra_json for row dict)
 FELLOW_COLUMNS = [
@@ -752,6 +747,17 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             self.send_error_404()
             return
+        # Build-label substitution mirrors what build/build_pwa.py does
+        # for deploy/dist/. Source has '__FELLOWS_UI_DIAG__' /
+        # '__CACHE_VERSION__' placeholders so dev and dist agree on the
+        # same substitution path; replacing here keeps the build badge,
+        # SW cache name, and image cache-bust query string consistent
+        # with the current git HEAD without a hand-maintained chore(version)
+        # commit.
+        if file_path.name in ("app.js", "sw.js"):
+            text = data.decode("utf-8")
+            stamped = _build_pwa.substitute_build_label(text, BUILD_LABEL)
+            data = stamped.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))

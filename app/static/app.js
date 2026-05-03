@@ -161,8 +161,16 @@
   };
   /** Bump on every meaningful UI / diagnostics change. Rendered in the
    *  always-visible build badge so a dev can tell at a glance which app.js
-   *  is actually running vs what the server was deployed with. */
-  var FELLOWS_UI_DIAG = '2026-05-02-6a74fa5-initial';
+   *  is actually running vs what the server was deployed with.
+   *
+   *  '__FELLOWS_UI_DIAG__' is a build-time placeholder.
+   *  build/build_pwa.py replaces it with `<YYYY-MM-DD>-<short-sha>` when
+   *  assembling deploy/dist/; the dev server in app/server.py does the
+   *  same substitution when serving /app.js. If you see the literal
+   *  placeholder in the running app, the bundle wasn't built — you're
+   *  either looking at raw source or hit a build step that didn't run.
+   *  See docs/DevOps.md. */
+  var FELLOWS_UI_DIAG = '__FELLOWS_UI_DIAG__';
 
   // Persistent marker: "this origin has been authenticated successfully at
   // least once." Preserved across clearAllAppData. Used by startBrowserUx's

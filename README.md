@@ -311,18 +311,17 @@ After PRs merge to `main`, deploy with:
 
 ```bash
 git checkout main && git pull         # confirm merges are local
-just bump [<label>]                   # one chore(version): commit on main
-git push                              # push the bump to origin/main
-just ship                             # build → test → deploy → smoke (refuses if you forgot to bump)
+just ship                             # build → test → deploy → smoke
 just whats-running                    # confirm prod's git SHA matches local HEAD
 ```
 
-A few rules of thumb:
+That's the whole flow. The build label (`<YYYY-MM-DD>-<short-sha>`) is stamped into `FELLOWS_UI_DIAG` and `CACHE_VERSION` automatically by `build/build_pwa.py` from the current `git HEAD`, so every deploy gets a unique label tied to the code being shipped — no separate bump step, no `chore(version):` commit.
 
-- **Bump on `main`, not on a PR branch.** The bump is a deploy marker, not a PR marker. Bumping on a feature branch creates noise (every PR carries its own bump, only the last-merged wins) and obscures the deploy boundary in `main`'s history. The exception is PR #80's own bump infrastructure — the very first deploy after that merged needs `just bump initial` once, then the normal rubric.
-- **The label is optional but useful.** `just bump groups-fab` produces `2026-05-02-<sha>-groups-fab`, which reads more memorably in the build badge than a bare timestamp + SHA.
+A few notes:
+
+- **The dev server stamps the same label.** `python app/server.py` (and `just serve`) substitutes the placeholder when serving `app.js` and `sw.js`, using the current `git HEAD` short SHA. So the build badge in dev shows the live source SHA. If you see the literal `__FELLOWS_UI_DIAG__` in the badge, something is wrong with the substitution path — likely a stale `deploy/dist/` served raw or an unbuilt bundle in front of you.
 - **Test on prod, not localhost, when the change touches auth or session state.** The dev server returns `authEnabled: false` and skips the email gate entirely — checks like "Clear App Cache lands me at the gate" don't reproduce locally. The Playwright e2e suite (`just test-e2e ...`) mocks the prod auth path; `https://fellows.globaldonut.com` is the real verification.
-- **Hotfix override.** `BUMP_GUARD=skip just deploy` bypasses the bump guard for a fix that can't wait. The in-app version label stays behind one deploy until you bump and re-ship.
+- **What's deployed lives in the response, not in `git log`.** Use `just drift` to compare prod's `X-Fellows-Build` / `build_label` to local main, and `just whats-running` for the local + prod snapshot.
 
 ## Local Dev Notes
 

@@ -256,91 +256,24 @@ build:
 build-meta:
     @if [ -f deploy/dist/build-meta.json ]; then cat deploy/dist/build-meta.json; else echo "No deploy/dist/build-meta.json — run 'just build' first."; fi
 
-# Bump CACHE_VERSION (sw.js) and FELLOWS_UI_DIAG (app.js) and commit.
-#
-# The diag string becomes <YYYY-MM-DD>-<short-sha>[-<label>]. Examples:
-#   just bump                    -> '2026-05-02-7b5f548'
-#   just bump groups-fab         -> '2026-05-02-7b5f548-groups-fab'
-#
-# Requires a clean working tree so the bump commit is just the version
-# files. The bump commit message starts with 'chore(version):' so the
-# deploy guard can find it via git log --grep.
-#
-# Bump versions and commit so 'just deploy' will let you ship.
-[group('build')]
-bump label="":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if ! git diff --quiet || ! git diff --cached --quiet; then
-        echo "ERROR: working tree has uncommitted changes."
-        echo "Commit or stash first; 'just bump' should be its own commit."
-        exit 1
-    fi
-    sha=$(git rev-parse --short HEAD)
-    today=$(date +%Y-%m-%d)
-    label="{{label}}"
-    if [ -n "${label}" ]; then
-        new_diag="${today}-${sha}-${label}"
-    else
-        new_diag="${today}-${sha}"
-    fi
-    cur_n=$(grep -oE "CACHE_VERSION = 'v[0-9]+'" app/static/sw.js | grep -oE '[0-9]+' | head -1)
-    if [ -z "${cur_n}" ]; then
-        echo "ERROR: could not parse CACHE_VERSION from app/static/sw.js"
-        exit 1
-    fi
-    new_n=$((cur_n + 1))
-    new_cache="v${new_n}"
-    sed -i.bak -E "s|CACHE_VERSION = 'v[0-9]+'|CACHE_VERSION = '${new_cache}'|" app/static/sw.js
-    sed -i.bak -E "s|var FELLOWS_UI_DIAG = '[^']*'|var FELLOWS_UI_DIAG = '${new_diag}'|" app/static/app.js
-    rm -f app/static/sw.js.bak app/static/app.js.bak
-    grep -F "CACHE_VERSION = '${new_cache}'" app/static/sw.js >/dev/null || { echo "ERROR: sw.js bump did not apply"; exit 1; }
-    grep -F "FELLOWS_UI_DIAG = '${new_diag}'" app/static/app.js >/dev/null || { echo "ERROR: app.js bump did not apply"; exit 1; }
-    git add app/static/sw.js app/static/app.js
-    git commit -m "chore(version): bump to ${new_diag} (cache ${new_cache})"
-    echo
-    echo "Bumped to: ${new_diag}"
-    echo "         CACHE_VERSION = ${new_cache}"
-    echo "         FELLOWS_UI_DIAG = ${new_diag}"
-    echo "         commit $(git rev-parse --short HEAD)"
-    echo
-    echo "Push when ready:  git push"
-
-# Internal: refuse to deploy if HEAD has commits past the most recent
-# 'chore(version):' commit. Bypass with BUMP_GUARD=skip for emergencies
-# (e.g. a hotfix where you accept the version label staying behind).
-_bump-guard:
-    #!/usr/bin/env bash
-    set -uo pipefail
-    if [ "${BUMP_GUARD:-}" = "skip" ]; then
-        echo "WARN: bump guard skipped via BUMP_GUARD=skip"
-        exit 0
-    fi
-    bump=$(git log --grep='^chore(version):' -1 --format=%H 2>/dev/null || true)
-    if [ -z "${bump}" ]; then
-        echo "ERROR: no chore(version) commit found in history."
-        echo "Run:  just bump [<label>]"
-        echo "Override: BUMP_GUARD=skip just deploy"
-        exit 1
-    fi
-    n=$(git rev-list "${bump}..HEAD" --count)
-    if [ "${n}" -gt 0 ]; then
-        echo "ERROR: ${n} commit(s) on HEAD past last version bump (${bump:0:7})."
-        echo "Run:  just bump [<label>]   to bump versions to current HEAD."
-        echo "      just whats-running    to see drift detail."
-        echo "Override: BUMP_GUARD=skip just deploy"
-        exit 1
-    fi
-    echo "[bump-guard] OK: HEAD is the latest version bump."
-
 # Deploy to prod (build + ansible + HTTPS smoke, via ansible/deploy_pwa.yml).
+#
+# The build step (build/build_pwa.py) stamps the current git short SHA into
+# FELLOWS_UI_DIAG and CACHE_VERSION as it copies to deploy/dist/, so every
+# deploy automatically gets a unique label tied to HEAD — no manual bump
+# step. See docs/DevOps.md for the routine flow and `just whats-running`
+# for the local-vs-prod label snapshot.
 [group('deploy')]
-deploy: _bump-guard
+deploy:
     ./scripts/deploy_pwa.sh --ask-become-pass
 
 # Deploy, reusing existing deploy/dist/ (skips the build step).
+# Skips the rebuild, so the label baked into deploy/dist/ is whatever was
+# stamped on the last `just build` — usually fine for re-pushing the
+# same code, surprising if HEAD has moved. Run `just build` first if in
+# doubt, or use `just deploy` for the rebuild-then-push path.
 [group('deploy')]
-deploy-fast: _bump-guard
+deploy-fast:
     ansible-playbook ansible/deploy_pwa.yml --ask-become-pass --extra-vars "fellows_skip_build=true"
 
 # Ansible --check (dry run, no changes made).
@@ -401,24 +334,29 @@ whats-running:
     set -uo pipefail
     head_sha=$(git rev-parse --short HEAD)
     head_subject=$(git log -1 --format=%s HEAD)
-    cache_v=$(grep -oE "CACHE_VERSION = 'v[0-9]+'" app/static/sw.js | grep -oE 'v[0-9]+' | head -1)
-    diag=$(grep -E "var FELLOWS_UI_DIAG = '[^']*'" app/static/app.js | head -1 | sed -E "s|.*'([^']*)'.*|\\1|")
-    last_bump=$(git log --grep='^chore(version):' -1 --format='%h %ci %s' 2>/dev/null || echo "(none)")
-    drift_n=$(if [ -n "$(git log --grep='^chore(version):' -1 --format=%H 2>/dev/null)" ]; then git rev-list "$(git log --grep='^chore(version):' -1 --format=%H)..HEAD" --count; else echo "?"; fi)
+    today=$(date -u +%Y-%m-%d)
+    next_label="${today}-${head_sha}"
     echo "Local"
     echo "  HEAD:                ${head_sha} ${head_subject}"
-    echo "  CACHE_VERSION:       ${cache_v}"
-    echo "  FELLOWS_UI_DIAG:     ${diag}"
-    echo "  Last version bump:   ${last_bump}"
-    echo "  Commits past bump:   ${drift_n}"
+    echo "  Build label (next):  ${next_label}"
+    echo "                       (auto-stamped into FELLOWS_UI_DIAG + CACHE_VERSION"
+    echo "                        by build/build_pwa.py on the next 'just build' or 'just deploy')"
     echo
     echo "Prod ({{base_url}})"
     if curl -sf "{{base_url}}/build-meta.json" -o /tmp/_fellows_bm.json 2>/dev/null; then
         prod_sha=$(python3 -c "import json,sys; print(json.load(open('/tmp/_fellows_bm.json')).get('git_sha','?'))" 2>/dev/null || echo '?')
         prod_built=$(python3 -c "import json,sys; print(json.load(open('/tmp/_fellows_bm.json')).get('built_at','?'))" 2>/dev/null || echo '?')
+        prod_label=$(python3 -c "import json,sys; print(json.load(open('/tmp/_fellows_bm.json')).get('build_label','?'))" 2>/dev/null || echo '?')
+        echo "  build_label:         ${prod_label}"
         echo "  git_sha:             ${prod_sha}"
         echo "  built_at:            ${prod_built}"
         rm -f /tmp/_fellows_bm.json
+        if [ "${prod_sha}" != "?" ] && [ "${prod_sha}" != "${head_sha}" ]; then
+            commits_ahead=$(git rev-list "${prod_sha}..HEAD" --count 2>/dev/null || echo '?')
+            echo "  drift:               local HEAD is ${commits_ahead} commits ahead of prod"
+        elif [ "${prod_sha}" = "${head_sha}" ]; then
+            echo "  drift:               none — prod matches local HEAD"
+        fi
     else
         echo "  (could not fetch /build-meta.json)"
     fi
