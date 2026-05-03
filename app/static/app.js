@@ -3151,6 +3151,82 @@
       });
   }
 
+  // When the SAH-pool main-thread init fails with "Missing required OPFS
+  // APIs.", we want to know whether the same APIs would be available
+  // inside a Worker — because if they are, the canonical workaround is
+  // to run sqlite-wasm in a dedicated worker (workers expose the full
+  // OPFS surface even when the main thread strips
+  // FileSystemFileHandle.prototype.createSyncAccessHandle, e.g. on
+  // Chrome configurations where extensions/policy/flags hide it).
+  //
+  // The probe is a one-shot blob worker that reports its own API
+  // surface, then terminates. No sqlite-wasm involved — we're just
+  // asking the platform "does the worker thread have these APIs?".
+  // Returns a Promise<object> that always resolves (never rejects) so
+  // it's safe to chain into a fallback decision.
+  function probeOpfsInWorker() {
+    return new Promise(function (resolve) {
+      var worker;
+      var timer;
+      var url;
+      var done = false;
+      function finish(payload) {
+        if (done) return;
+        done = true;
+        try { if (timer) clearTimeout(timer); } catch (e) {}
+        try { if (worker) worker.terminate(); } catch (e) {}
+        try { if (url) URL.revokeObjectURL(url); } catch (e) {}
+        resolve(payload);
+      }
+      try {
+        if (typeof Worker !== 'function') {
+          return finish({ ok: false, reason: 'Worker constructor unavailable' });
+        }
+        var script =
+          '(async function () {' +
+          '  try {' +
+          '    var hasFFH = !!self.FileSystemFileHandle;' +
+          '    var sah = hasFFH && typeof self.FileSystemFileHandle.prototype.createSyncAccessHandle;' +
+          '    var nav = self.navigator;' +
+          '    var dirCallable = false;' +
+          '    var dirError = null;' +
+          '    try {' +
+          '      var dh = await nav.storage.getDirectory();' +
+          '      dirCallable = !!dh;' +
+          '    } catch (e) {' +
+          '      dirError = String(e && e.message || e);' +
+          '    }' +
+          '    self.postMessage({' +
+          '      ok: true,' +
+          '      crossOriginIsolated: typeof self.crossOriginIsolated !== "undefined" ? self.crossOriginIsolated : "(unset)",' +
+          '      isSecureContext: self.isSecureContext,' +
+          '      FileSystemHandle: typeof self.FileSystemHandle,' +
+          '      FileSystemDirectoryHandle: typeof self.FileSystemDirectoryHandle,' +
+          '      FileSystemFileHandle: typeof self.FileSystemFileHandle,' +
+          '      createSyncAccessHandle: hasFFH ? sah : "(FFH missing)",' +
+          '      navigatorStorage: typeof nav.storage,' +
+          '      getDirectory: nav.storage ? typeof nav.storage.getDirectory : "(no storage)",' +
+          '      getDirectoryCallable: dirCallable,' +
+          '      getDirectoryError: dirError,' +
+          '    });' +
+          '  } catch (e) {' +
+          '    self.postMessage({ ok: false, reason: "probe threw: " + (e && e.message || e) });' +
+          '  }' +
+          '})();';
+        var blob = new Blob([script], { type: 'application/javascript' });
+        url = URL.createObjectURL(blob);
+        worker = new Worker(url);
+        worker.onmessage = function (ev) { finish(ev.data || { ok: false, reason: 'empty message' }); };
+        worker.onerror = function (ev) {
+          finish({ ok: false, reason: 'worker error: ' + (ev && ev.message || 'unknown') });
+        };
+        timer = setTimeout(function () { finish({ ok: false, reason: 'probe timeout (2s)' }); }, 2000);
+      } catch (e) {
+        finish({ ok: false, reason: 'probe setup failed: ' + (e && e.message || e) });
+      }
+    });
+  }
+
   function pickDataProvider() {
     bootDebugPush('pickDataProvider: start');
     bootDebugPush('gates (one line): ' + describeOpfsGates().replace(/\n/g, ' | '));
@@ -3160,10 +3236,24 @@
     }
     bootDebugPush('trying OPFS + sqlite-wasm');
     return initOpfsDataProvider().catch(function (e) {
-      bootDebugPush(
-        'OPFS path failed → API fallback: ' + (e && e.message ? e.message : String(e))
-      );
+      var errMsg = e && e.message ? e.message : String(e);
+      bootDebugPush('OPFS path failed → API fallback: ' + errMsg);
       console.warn('Local SQLite / OPFS unavailable, using API:', e);
+      // If the failure was "Missing required OPFS APIs.", probe a worker
+      // to see whether the worker thread has the API the main thread
+      // lacks. We don't act on the result yet — this PR is data-gathering
+      // for the Worker-based fallback rewrite that follows. The probe
+      // result lands in the boot trace and renders inline in the panel.
+      if (/Missing required OPFS APIs/.test(errMsg)) {
+        return probeOpfsInWorker().then(function (probe) {
+          try {
+            bootDebugPush('worker probe: ' + JSON.stringify(probe));
+          } catch (jsonErr) {
+            bootDebugPush('worker probe: (could not serialize result)');
+          }
+          return createApiDataProvider();
+        });
+      }
       return createApiDataProvider();
     });
   }
