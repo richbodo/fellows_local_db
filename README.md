@@ -295,7 +295,7 @@ Most common commands, from the repo root:
 just deploy             # test-agnostic deploy: build + ansible + HTTPS smoke
 just ship               # test-fast → deploy (the full build-test-deploy-test sequence)
 just ship-fast          # deploy-fast → smoke (reuse existing deploy/dist/, skip tests)
-just drift              # prod X-Fellows-Build vs local HEAD + origin/main
+just drift              # prod git SHA vs local HEAD + origin/main (SHA-aligned)
 just smoke              # HTTPS smoke check against prod
 just prod-status        # systemctl status fellows-pwa caddy
 just prod-logs          # journalctl -u fellows-pwa -f (over SSH)
@@ -321,7 +321,7 @@ A few notes:
 
 - **The dev server stamps the same label.** `python app/server.py` (and `just serve`) substitutes the placeholder when serving `app.js` and `sw.js`, using the current `git HEAD` short SHA. So the build badge in dev shows the live source SHA. If you see the literal `__FELLOWS_UI_DIAG__` in the badge, something is wrong with the substitution path — likely a stale `deploy/dist/` served raw or an unbuilt bundle in front of you.
 - **Test on prod, not localhost, when the change touches auth or session state.** The dev server returns `authEnabled: false` and skips the email gate entirely — checks like "Clear App Cache lands me at the gate" don't reproduce locally. The Playwright e2e suite (`just test-e2e ...`) mocks the prod auth path; `https://fellows.globaldonut.com` is the real verification.
-- **What's deployed lives in the response, not in `git log`.** Use `just drift` to compare prod's `X-Fellows-Build` / `build_label` to local main, and `just whats-running` for the local + prod snapshot.
+- **What's deployed lives in the response, not in `git log`.** Use `just drift` to compare prod's `git_sha` (read from `/build-meta.json`) to local `HEAD` and `origin/main` — three SHA-aligned lines so a glance tells you whether all three match. The `X-Fellows-Build` response header still exists for DevTools / journald correlation; it's just not the canonical no-drift signal any more. `just whats-running` is the fuller local + prod snapshot.
 
 ## Local Dev Notes
 
