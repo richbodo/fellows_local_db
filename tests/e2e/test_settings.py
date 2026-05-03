@@ -141,16 +141,19 @@ class TestSettingsPage:
         addr = page.locator("#export-self-email-addr")
         expect(addr).to_have_value("rich@example.com")
 
-    def test_userdata_sections_in_dom_and_hidden_in_api_mode(
+    def test_userdata_sections_in_dom_and_exposed_in_api_mode(
         self, standalone_page, base_url_fixture
     ):
         """The Settings page emits both the "Your saved data" (PR #84) and
-        "Restore from backup" (PR #88) sections in the DOM. Their *visibility*
+        "Restore from backup" (PR #88) sections in the DOM. Their *content*
         depends on the data provider:
-        - OPFS-backed sqlite provider → both sections visible.
-        - API provider → both sections hidden up front, because there's no
-          live relationships.db to export or overwrite (PR #88's fix to the
-          silent-fail Download bug).
+        - OPFS-backed sqlite provider → original markup (Download button +
+          Restore picker + recent-backups list).
+        - API provider → the export section is replaced by the
+          local-data-unavailable panel (PR-this), and the restore section
+          is hidden. This keeps the failure visible to the user with the
+          existing browser-aware copy ("Try a hard reload, open Diagnostics,
+          …") instead of silently disappearing both sections.
 
         Dev e2e runs in API-provider mode (Playwright's chromium does not
         expose `FileSystemFileHandle.prototype.createSyncAccessHandle` on the
@@ -161,20 +164,31 @@ class TestSettingsPage:
         _wait_for_directory(page)
         export_section = page.locator("#settings-export-section")
         restore_section = page.locator("#settings-restore-section")
-        # Both sections must be in the DOM (so OPFS-mode users see them).
+        # Both sections must be in the DOM (so OPFS-mode users get them
+        # back when the provider is sqlite — same gate from PR #92).
         expect(export_section).to_have_count(1)
         expect(restore_section).to_have_count(1)
-        # Markup details that don't depend on visibility.
-        expect(page.locator("#settings-download-userdata")).to_have_count(1)
-        expect(page.locator("#settings-restore-pick")).to_have_count(1)
-        file_input = page.locator("#settings-restore-file")
-        expect(file_input).to_have_count(1)
-        accept = file_input.get_attribute("accept") or ""
-        assert ".db" in accept and ".sqlite" in accept
-        # In dev (API provider), proactive hide kicks in.
-        assert export_section.evaluate("el => el.style.display") == "none", (
-            "expected export section hidden in API-provider mode"
-        )
+        # In dev (API provider), the export section is replaced by the
+        # unavailable-panel, and the restore section is hidden.
+        panel = export_section.locator(".local-data-unavailable")
+        expect(panel).to_have_count(1)
+        # The panel headline ends with either "right now" (runtime-failure
+        # branch — Playwright's chromium reports as Chrome >= 102) or
+        # "on this browser" (browser-too-old branch). Either way it's a
+        # visible, user-readable message — the bug we're fixing was
+        # silent disappearance, not the specific copy.
+        headline = panel.locator("h3").inner_text()
+        assert "backup and restore" in headline.lower(), headline
+        # Restore section stays hidden so the panel is the single source
+        # of "what's wrong + what to do."
         assert restore_section.evaluate("el => el.style.display") == "none", (
             "expected restore section hidden in API-provider mode"
         )
+        # The download button is gone (its containing section was overwritten
+        # by the panel). The restore-pick button still exists in the DOM
+        # because the restore section is hidden via display:none rather than
+        # rewritten — but it isn't reachable from the user's perspective
+        # because its parent section is hidden, so the panel is the only
+        # thing they actually see.
+        expect(page.locator("#settings-download-userdata")).to_have_count(0)
+        expect(page.locator("#settings-restore-pick")).not_to_be_visible()
