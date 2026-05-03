@@ -2848,6 +2848,32 @@ a.group-action-btn--primary {
   color: #6a5800;
 }
 
+.local-data-unavailable-trace {
+  margin: 0.75rem 0 0;
+  font-size: 0.85rem;
+}
+
+.local-data-unavailable-trace > summary {
+  cursor: pointer;
+  color: #6a5800;
+  user-select: none;
+}
+
+.local-data-unavailable-trace > pre {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0.75rem;
+  background: #fff3c7;
+  border: 1px solid #e7c873;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 18rem;
+  overflow: auto;
+}
+
 /* =========================================================================
  * Mobile redesign — Phase 3 step 2: shell chrome (appbar, tab nav, kebab
  * bottom-sheet) and focus-mode-by-default at the mobile breakpoint.

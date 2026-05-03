@@ -1279,11 +1279,47 @@
       : 'Saved groups and per-device settings live in your browser\'s local storage. ' +
         'On this device, that storage isn\'t available — so the rest of the app works, but ' +
         escapeHtml(label) + ' can\'t.';
+    // On the runtime-failure path, embed the OPFS gates + boot trace
+    // inline so the user (and the maintainer triaging) can see the
+    // actual reason without clicking elsewhere. Collapsed by default
+    // so the panel stays scannable; always present when isRuntime.
+    var traceHtml = '';
+    if (isRuntime) {
+      var traceParts = [];
+      try {
+        traceParts.push('Provider chosen: ' +
+          (dataProvider && dataProvider.kind ? dataProvider.kind : '(none yet)'));
+      } catch (e) {}
+      try {
+        traceParts.push('OPFS capability gates:');
+        traceParts.push(describeOpfsGates());
+      } catch (e) {
+        traceParts.push('(could not read gates: ' + String(e && e.message || e) + ')');
+      }
+      try {
+        if (bootDebugLines && bootDebugLines.length) {
+          traceParts.push('');
+          traceParts.push('Boot trace (chronological):');
+          traceParts.push(bootDebugLines.join('\n'));
+        } else {
+          traceParts.push('');
+          traceParts.push('Boot trace: (empty — nothing recorded yet)');
+        }
+      } catch (e) {
+        traceParts.push('Boot trace error: ' + String(e && e.message || e));
+      }
+      traceHtml =
+        '<details class="local-data-unavailable-trace">' +
+          '<summary>Show what failed (boot trace)</summary>' +
+          '<pre>' + escapeHtml(traceParts.join('\n')) + '</pre>' +
+        '</details>';
+    }
     return (
       '<div class="local-data-unavailable">' +
         '<h3>' + headline + '</h3>' +
         '<p class="local-data-unavailable-lede">' + lede + '</p>' +
         detailHtml +
+        traceHtml +
         '<p class="local-data-unavailable-foot">' +
           'If none of these options work for you, please reach out — we\'re happy to help.' +
         '</p>' +
@@ -1876,6 +1912,43 @@
         String((document.cookie || '').length)
     );
     lines.push('');
+    // OPFS / sqlite-wasm boot state. The Settings page hides backup/restore
+    // when this fell through to API mode; this section answers "and why?".
+    // Showing it before SW state because it's the first place we look when
+    // a "no backup section" report comes in.
+    lines.push('--- OPFS / sqlite-wasm boot state ---');
+    try {
+      lines.push('dataProvider.kind: ' +
+        (dataProvider && dataProvider.kind ? dataProvider.kind : '(none — boot incomplete)'));
+    } catch (e) {
+      lines.push('dataProvider.kind: (unavailable: ' + String(e && e.message || e) + ')');
+    }
+    try {
+      lines.push('directoryDataSource: ' +
+        (typeof directoryDataSource !== 'undefined' ? directoryDataSource : '(unset)'));
+    } catch (e) {}
+    try {
+      lines.push('OPFS capability gates:');
+      var gateLines = describeOpfsGates().split('\n');
+      for (var gi = 0; gi < gateLines.length; gi++) {
+        lines.push('  ' + gateLines[gi]);
+      }
+    } catch (e) {
+      lines.push('OPFS capability gates: (error — ' + String(e && e.message || e) + ')');
+    }
+    try {
+      if (bootDebugLines && bootDebugLines.length) {
+        lines.push('Boot trace (chronological, ' + bootDebugLines.length + ' lines):');
+        for (var bli = 0; bli < bootDebugLines.length; bli++) {
+          lines.push('  ' + bootDebugLines[bli]);
+        }
+      } else {
+        lines.push('Boot trace: (empty — boot has not run, or trace not yet captured)');
+      }
+    } catch (e) {
+      lines.push('Boot trace: (error — ' + String(e && e.message || e) + ')');
+    }
+    lines.push('');
     if ('serviceWorker' in navigator) {
       try {
         var regs = await navigator.serviceWorker.getRegistrations();
@@ -2167,6 +2240,29 @@
     try {
       lines.push('directoryDataSource: ' +
         (typeof directoryDataSource !== 'undefined' ? directoryDataSource : '(unset)'));
+    } catch (e) {}
+    // OPFS / sqlite-wasm boot state. Critical for triaging
+    // "backup/restore section says 'OPFS didn't initialize' — but why?".
+    // Without these the bug-report tells us the failure was visible to
+    // the user but not which gate failed or what the SAH-pool threw.
+    try {
+      lines.push(
+        'dataProvider: ' +
+          (dataProvider && dataProvider.kind ? dataProvider.kind : '(none)')
+      );
+    } catch (e) {}
+    try {
+      lines.push('opfs gates: ' + describeOpfsGates().replace(/\n/g, ' | '));
+    } catch (e) {}
+    try {
+      if (bootDebugLines && bootDebugLines.length) {
+        lines.push('boot trace (' + bootDebugLines.length + ' lines):');
+        for (var bdi = 0; bdi < bootDebugLines.length; bdi++) {
+          lines.push('  ' + bootDebugLines[bdi]);
+        }
+      } else {
+        lines.push('boot trace: (empty — boot has not run, or trace not yet captured)');
+      }
     } catch (e) {}
     if (lastSubmitInfo.emailHashPrefix && lastSubmitInfo.submittedAt) {
       // Join key into deploy/server.py's event=send_unlock_email log.
