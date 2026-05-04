@@ -5,7 +5,7 @@ Pins:
   banner appears, rail flips to "editing group" / "Done editing",
   members are pre-selected, has-email filter is unchecked, search is
   cleared.
-- Toggling +/✓ in edit mode auto-saves via the worker updateGroup RPC;
+- Toggling +/✕ in edit mode auto-saves via the worker updateGroup RPC;
   the group's membership reflects the change immediately.
 - Done editing navigates to #/groups/<id>; banner hides; rail returns
   to compose mode.
@@ -241,7 +241,7 @@ class TestComposeDraftSurvivesEdit:
         expect(page.locator("#group-rail-title")).to_have_value("My in-progress group")
         chip = page.locator("#group-rail-members .group-rail-member-name").first
         expect(chip).to_have_text("Aaron Bird")
-        expect(_aaron_row(page).locator(".dir-mark")).to_have_text("✓")
+        expect(_aaron_row(page).locator(".dir-mark")).to_have_text("✕")
 
 
 class TestReloadDuringEdit:

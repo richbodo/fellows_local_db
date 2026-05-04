@@ -1578,17 +1578,17 @@ h1 {
 }
 
 .dir-mark {
-  flex: 0 0 18px;
-  width: 18px;
-  height: 18px;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
   padding: 0;
-  font-size: 0.95rem;
+  font-size: 1.25rem;
   line-height: 1;
   font-weight: 700;
   background: transparent;
   border: 0;
   cursor: pointer;
-  color: #bbb;
+  color: #555;
   text-align: center;
   font-family: inherit;
 }
@@ -1636,20 +1636,32 @@ h1 {
   user-select: none;
 }
 
-/* "add to group" / "remove from group" link beside the detail-card name. */
+/* + / ✕ icon-toggle beside the detail-card name. Same affordance as the
+ * directory list .dir-mark, sized to sit alongside the larger heading. */
 .detail-add-to-group {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
   margin-left: 0.5rem;
-  font-size: 0.85rem;
-  font-weight: 400;
-  color: #0066cc;
-  text-decoration: underline;
+  font-size: 1.4rem;
+  font-weight: 700;
+  line-height: 1;
+  color: #555;
+  text-decoration: none;
   vertical-align: middle;
   cursor: pointer;
+  border-radius: 4px;
 }
 
 .detail-add-to-group:hover {
-  color: #004499;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.detail-add-to-group--on {
+  color: var(--accent);
 }
 
 /* Mobile: stack the rail below the detail (existing 700px breakpoint

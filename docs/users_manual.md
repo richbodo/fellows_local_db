@@ -94,8 +94,9 @@ fellows match.](images/users_manual/01_directory_search.png)
 screenshot; the app renders them normally.](images/users_manual/04_fellow_detail.png)
 
 Click a name (in the directory or any group) to open the profile. The
-**← →** arrows step through the directory alphabetically. **add to
-group** drops the fellow into your current selection (see Groups below).
+**← →** arrows step through the directory alphabetically. The **+**
+beside the name drops the fellow into your current selection (see
+Groups below); once added it flips to **✕** — tap again to remove.
 
 ---
 
@@ -111,7 +112,7 @@ App Cache**.
 The directory page is where you build groups.
 
 1. Search or filter.
-2. Tap **+** beside a fellow.
+2. Tap **+** beside a fellow (it flips to **✕** once they're in the draft).
 3. Run another search — your selection persists.
 4. Name the group and click **Create new group**.
 
@@ -149,6 +150,8 @@ and an action bar.
 
 - **Rename** — pencil ✎ next to the title.
 - **Note** — auto-saves on edit.
+- **Visual directory** — small text link in the breadcrumb opens the
+  yearbook-style portrait grid for the same group (see below).
 - **Delete** — kebab → *Delete*; confirms before removing. Only the
   group is deleted; fellows themselves are untouched.
 
