@@ -4,8 +4,21 @@ Local web app to quickly browse Edmund Hillary Fellowship fellow profiles, organ
 
 Data and assets are local-first (SQLite + static files), served by Python stdlib. User-authored data (groups, notes, settings) lives in a separate per-user SQLite file (`app/relationships.db`) that's durable across app updates.
 
+## Design Stance: Local-Only, Not SaaS
+
+**This app must never become a SaaS.** It is a single-user, local-only directory. The PWA + magic-link delivery is a *distribution and update channel*, not a service: production exists to hand a fellow the bundle and the contact DB, then get out of the way.
+
+After install, the app must keep working without further server contact. Concretely:
+
+- **All user-authored state** (groups, notes, tags, settings) lives in the user's browser (`relationships.db` in OPFS). Production's `deploy/server.py` does not expose `/api/groups` or `/api/settings` — there are no per-user resources on the server, no per-user storage to back up, no multi-tenant model to defend.
+- **Reads of contact data** run against the locally-cached `fellows.db` (OPFS) and the IndexedDB fallback cache. A stale session or an offline server must not lock the user out of data they've already downloaded — see [`docs/email_gate.md`](docs/email_gate.md) invariant 10.
+- **Server contact is bounded to two purposes only:** (1) the magic-link gate that authorizes a download, and (2) fetching new bundle / DB bytes on update. Anything else added server-side needs a strong justification against this constraint.
+
+What this rules out, even if individually convenient: cross-device sync, server-side backups of `relationships.db`, an "edit once, see it everywhere" share feature, real-time collaboration, an admin console showing other users' groups, telemetry beyond the unauthenticated client-error sink. If a feature requires per-user state on the server, it doesn't belong in this app.
+
 ## Table of Contents
 
+- [Design Stance: Local-Only, Not SaaS](#design-stance-local-only-not-saas)
 - [Data Note](#data-note)
 - [Architecture](#architecture)
 - [Setup](#setup)

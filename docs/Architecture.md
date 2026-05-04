@@ -1,5 +1,24 @@
 # Architecture
 
+## Design constraint: local-only, not SaaS
+
+**This app is single-user and local-only by design. It must never become a SaaS.** The PWA + magic-link distribution exists so a fellow can pull down the bundle and contact DB once, then run the app indefinitely against that local copy. Production is a delivery channel, not a service.
+
+Operationally that means server contact is restricted to two responsibilities:
+
+1. **Authorize a download** (magic-link gate, allowlist check, session cookie) so the bundle and `fellows.db` only reach EHF fellows.
+2. **Serve fresh bytes on update** (new bundle when the SHA changes; re-imported `fellows.db` on every successful boot).
+
+Everything else runs on the device:
+
+- **No per-user resources on the server.** `deploy/server.py` does not implement `/api/groups` or `/api/settings` — the dev server's routes for those exist only for the local round-trip. The canonical store for user-authored data is OPFS (`relationships.db`).
+- **Stale-session must not lock users out of cached data.** A 401 on `/api/fellows` falls back to the IndexedDB cache; the directory, search, and profile views keep working. See `email_gate.md` invariant 10.
+- **No server-side persistence of anything user-authored.** No backups of `relationships.db`, no server-stored notes, no shared groups, no cross-device sync. The unauthenticated client-error sink (`/api/client-errors`) is the only structured journald write driven by client behavior, and it is sanitized to remove identifiers.
+
+What this rules out as features, even when individually attractive: cross-device sync, "share this group with another fellow", an admin console, server-side activity history, analytics beyond the install-funnel events already documented in `email_gate.md`. Adding any per-user RW endpoint on prod is the bright line that turns this from a delivery channel into a SaaS — don't cross it without a deliberate change to this section.
+
+The architectural decisions below — separate `relationships.db` file, `ATTACH DATABASE ?mode=ro`, OPFS in both standalone and browser-tab modes, the unsupported-browser panel for missing OPFS — all flow from this constraint.
+
 ## Tech Stack
 
 - **Server**: Python stdlib `http.server` — single file, no framework
