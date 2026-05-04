@@ -193,6 +193,13 @@ function dbRun(db, sql, bind) {
 }
 
 function bootstrapRelationshipsSchema(db) {
+  // PRAGMA foreign_keys is per-connection and defaults OFF. Without it,
+  // group_members.group_id's `ON DELETE CASCADE` is silently inert and
+  // deleteGroup leaves orphan rows in OPFS forever. Mirrors
+  // app/relationships.py:296. Must run on every relDb open (init +
+  // post-restore importRelationshipsBytes) since this resets each time
+  // a connection is closed.
+  db.exec('PRAGMA foreign_keys = ON;');
   db.exec(RELATIONSHIPS_SCHEMA_SQL);
   db.exec('PRAGMA user_version = ' + RELATIONSHIPS_SCHEMA_VERSION);
 }
