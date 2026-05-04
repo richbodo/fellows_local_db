@@ -144,8 +144,15 @@ var BACKUP_DEBOUNCE_MS = 60 * 60 * 1000;
 // the first boot of a P1+ build.
 var LEGACY_SENTINEL = 'last_seen_sha.txt';
 
-var RESTORE_STAGING_SLOT = 'relationships.db.restore-staging';
-var FELLOWS_STAGING_SLOT = 'fellows.db.staging';
+// SAH-pool VFS internally canonicalizes filenames to leading-slash form,
+// so importDb('foo') stores under 'foo' but new OpfsSAHPoolDb('foo')
+// opens '/foo'. The mismatch silently allocates a fresh empty SAH for
+// '/foo', and the imported bytes are unreachable. Use leading-slash
+// names consistently so importDb and OpfsSAHPoolDb hit the same SAH.
+var RELATIONSHIPS_DB_SLOT = '/relationships.db';
+var FELLOWS_DB_SLOT = '/fellows.db';
+var RESTORE_STAGING_SLOT = '/relationships.db.restore-staging';
+var FELLOWS_STAGING_SLOT = '/fellows.db.staging';
 var FELLOWS_META_FILE = 'fellows.db.meta.json';
 
 var REQUIRED_RESTORE_TABLES = ['groups', 'group_members', 'fellow_tags', 'fellow_notes', 'settings'];
@@ -320,7 +327,7 @@ async function _rotateRelationshipsBackups() {
 async function maybeBackupRelationshipsDb() {
   var poolFiles = [];
   try { poolFiles = poolUtil.getFileNames(); } catch (e) {}
-  if (poolFiles.indexOf('relationships.db') === -1) {
+  if (poolFiles.indexOf(RELATIONSHIPS_DB_SLOT) === -1) {
     trace('backup: skipped (no relationships.db yet — first install)');
     return { backedUp: false, reason: 'first install' };
   }
@@ -336,7 +343,7 @@ async function maybeBackupRelationshipsDb() {
     }
   }
   var bytes;
-  try { bytes = poolUtil.exportFile('relationships.db'); }
+  try { bytes = poolUtil.exportFile(RELATIONSHIPS_DB_SLOT); }
   catch (e) {
     trace('backup: exportFile failed: ' + (e && e.message || e));
     return { backedUp: false, reason: 'export failed' };
@@ -359,11 +366,11 @@ async function maybeBackupRelationshipsDb() {
 async function snapshotRelationshipsDbToBackup() {
   var poolFiles = [];
   try { poolFiles = poolUtil.getFileNames(); } catch (e) {}
-  if (poolFiles.indexOf('relationships.db') === -1) {
+  if (poolFiles.indexOf(RELATIONSHIPS_DB_SLOT) === -1) {
     return { backedUp: false, reason: 'no relationships.db' };
   }
   var bytes;
-  try { bytes = poolUtil.exportFile('relationships.db'); }
+  try { bytes = poolUtil.exportFile(RELATIONSHIPS_DB_SLOT); }
   catch (e) { return { backedUp: false, reason: 'export failed: ' + (e && e.message || e) }; }
   if (!bytes || !bytes.byteLength) return { backedUp: false, reason: 'empty file' };
   var ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -450,11 +457,11 @@ async function inspectBytes(bytes) {
 function _openFellowsDbIfPresent() {
   var poolFiles = [];
   try { poolFiles = poolUtil.getFileNames(); } catch (e) {}
-  if (poolFiles.indexOf('fellows.db') === -1) {
+  if (poolFiles.indexOf(FELLOWS_DB_SLOT) === -1) {
     return false;
   }
   try {
-    fellowsDb = new poolUtil.OpfsSAHPoolDb('fellows.db');
+    fellowsDb = new poolUtil.OpfsSAHPoolDb(FELLOWS_DB_SLOT);
     trace('fellows.db: open OK');
     return true;
   } catch (e) {
@@ -493,7 +500,7 @@ handlers.init = async function () {
 
   var hasRelationshipsDb = false;
   try {
-    relDb = new poolUtil.OpfsSAHPoolDb('relationships.db');
+    relDb = new poolUtil.OpfsSAHPoolDb(RELATIONSHIPS_DB_SLOT);
     bootstrapRelationshipsSchema(relDb);
     hasRelationshipsDb = true;
     trace('relationships.db: open + schema OK');
@@ -644,7 +651,7 @@ handlers.setSetting = async function (args) {
 
 handlers.exportRelationshipsBytes = async function () {
   if (!poolUtil) throw new Error('pool util unavailable');
-  return poolUtil.exportFile('relationships.db');
+  return poolUtil.exportFile(RELATIONSHIPS_DB_SLOT);
 };
 
 handlers.inspectRelationshipsBytes = async function (args) {
@@ -676,8 +683,8 @@ handlers.importRelationshipsBytes = async function (args) {
     try { relDb.close(); } catch (e) {}
     relDb = null;
   }
-  poolUtil.importDb('relationships.db', bytes);
-  relDb = new poolUtil.OpfsSAHPoolDb('relationships.db');
+  poolUtil.importDb(RELATIONSHIPS_DB_SLOT, bytes);
+  relDb = new poolUtil.OpfsSAHPoolDb(RELATIONSHIPS_DB_SLOT);
   bootstrapRelationshipsSchema(relDb);
   return {
     counts: inspection.counts,
@@ -929,8 +936,8 @@ handlers.ensureFellowsDb = async function () {
   }
   if (verifyDb) { try { verifyDb.close(); } catch (e3) {} }
   // Promote staging → live slot.
-  poolUtil.importDb('fellows.db', bytes);
-  fellowsDb = new poolUtil.OpfsSAHPoolDb('fellows.db');
+  poolUtil.importDb(FELLOWS_DB_SLOT, bytes);
+  fellowsDb = new poolUtil.OpfsSAHPoolDb(FELLOWS_DB_SLOT);
   trace('ensureFellowsDb: imported ' + bytes.byteLength + ' bytes, opened fellows.db');
   // P1 records sha=null (Phase 3 emits a real SHA on the server side and
   // wires the comparison). The shape stays stable so P3 just fills sha.
