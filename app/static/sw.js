@@ -114,6 +114,20 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(cacheFirstInto(request, APP_SHELL_CACHE));
 });
 
+// Cache API rejects PUT/POST/DELETE/PATCH at cache.put. Without this guard
+// the verify-token / send-unlock / client-errors / logout POSTs all fired
+// an unhandled rejection ("Failed to execute 'put' on 'Cache': Request
+// method 'POST' is unsupported") on every API call. The response was still
+// returned correctly, but the console flood made real errors hard to spot.
+// .catch() on the cache write covers quota / private-mode / corrupted-cache
+// cases the same way — cache misses are never fatal.
+function safeCachePut(cacheName, request, response) {
+  if (request.method !== 'GET') return;
+  caches.open(cacheName)
+    .then((cache) => cache.put(request, response))
+    .catch(() => { /* quota / private mode / etc. — non-fatal */ });
+}
+
 function cacheFirstInto(request, cacheName) {
   return caches.match(request).then((cached) => {
     if (cached) {
@@ -123,10 +137,7 @@ function cacheFirstInto(request, cacheName) {
       if (!response || response.status !== 200 || response.type !== 'basic') {
         return response;
       }
-      const responseToCache = response.clone();
-      caches.open(cacheName).then((cache) => {
-        cache.put(request, responseToCache);
-      });
+      safeCachePut(cacheName, request, response.clone());
       return response;
     });
   });
@@ -136,10 +147,7 @@ function networkFirst(request) {
   return fetch(request)
     .then((response) => {
       if (response && response.ok && response.status === 200) {
-        const responseClone = response.clone();
-        caches.open(APP_SHELL_CACHE).then((cache) => {
-          cache.put(request, responseClone);
-        });
+        safeCachePut(APP_SHELL_CACHE, request, response.clone());
       }
       return response;
     })

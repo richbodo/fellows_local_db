@@ -28,6 +28,9 @@ tests/e2e/mobile/current_state/
 .aider*
 .server.pid
 
+# Claude Code agent worktrees (per-agent isolated copies of the repo)
+.claude/worktrees/
+
 # Ansible local inventory (copy from inventory/hosts.ini.example)
 ansible/inventory/hosts.ini
 
