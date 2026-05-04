@@ -964,6 +964,58 @@ handlers.getVersions = async function () {
   };
 };
 
+// Reset Everything's nuclear path. Closes both DB handles, tears down the
+// SAH-pool VFS via removeVfs() (which releases every SAH and recursively
+// removes the pool's opaque storage dir), then sweeps sibling files we
+// create at OPFS root (relationships.db.bak.*, fellows.db.meta.json, any
+// orphaned LEGACY_SENTINEL). Caller is expected to reload the page after
+// — the worker is unusable post-wipe (poolUtil reset to null).
+//
+// Restores the pre-cutover Reset Everything semantics: L1 forbids the
+// page from opening OPFS, so the page can't iterate the root itself.
+// This op is the worker-side replacement.
+handlers.wipeAll = async function () {
+  if (relDb) {
+    try { relDb.close(); } catch (e) {}
+    relDb = null;
+  }
+  if (fellowsDb) {
+    try { fellowsDb.close(); } catch (e) {}
+    fellowsDb = null;
+  }
+  var removedVfs = false;
+  if (poolUtil) {
+    try { removedVfs = await poolUtil.removeVfs(); }
+    catch (e) { trace('wipeAll: removeVfs failed: ' + (e && e.message || e)); }
+  }
+  var rootEntriesRemoved = [];
+  var rootEntriesFailed = [];
+  try {
+    var root = await self.navigator.storage.getDirectory();
+    var names = [];
+    for await (var entry of root.values()) names.push(entry.name);
+    for (var i = 0; i < names.length; i++) {
+      try {
+        await root.removeEntry(names[i], { recursive: true });
+        rootEntriesRemoved.push(names[i]);
+      } catch (e2) {
+        rootEntriesFailed.push({ name: names[i], error: (e2 && e2.message) || String(e2) });
+        trace('wipeAll: removeEntry ' + names[i] + ' failed: ' + (e2 && e2.message || e2));
+      }
+    }
+  } catch (e3) {
+    trace('wipeAll: root iteration failed: ' + (e3 && e3.message || e3));
+  }
+  poolUtil = null;
+  trace('wipeAll: removedVfs=' + removedVfs + ' rootRemoved=' + rootEntriesRemoved.length +
+        ' rootFailed=' + rootEntriesFailed.length);
+  return {
+    removedVfs: removedVfs,
+    rootEntriesRemoved: rootEntriesRemoved,
+    rootEntriesFailed: rootEntriesFailed
+  };
+};
+
 // Returns a snapshot of every OPFS root entry plus the SAH-pool slot
 // inventory. Used by the ?diag=1 panel post-Phase-1 so the maintainer
 // can see exactly what's on disk without main-thread OPFS access.

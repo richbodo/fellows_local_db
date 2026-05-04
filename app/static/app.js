@@ -1215,16 +1215,21 @@
         });
       } catch (e) { /* offline / dev / network — proceed */ }
 
-      // OPFS wipe: removed in Phase 1 of the local-first worker cutover —
-      // the worker is the sole OPFS owner (L1) and has no general-purpose
-      // wipeAll RPC yet, and the page is no longer permitted to open the
-      // OPFS root directly. The worker bundle re-imports
-      // fellows.db on next boot if it's missing or stale (Phase 3 wires
-      // the SHA-keyed refresh on top), but relationships.db survives a
-      // Reset Everything — known regression vs. pre-cutover behavior, to
-      // be addressed by a follow-up that adds a worker-side wipe op.
-      // SW unregister + cache clear below still nukes the JS bundle so
-      // the next page load is from a fresh fetch.
+      // OPFS wipe — delegated to the worker via the wipeAll RPC. L1
+      // forbids the page from opening OPFS, so the worker's removeVfs()
+      // tear-down + root-iteration sweep is the only path that nukes
+      // relationships.db, fellows.db, the bak.<ISO> rotation, and the
+      // fellows.db.meta.json sidecar in one shot. Best-effort: a missing
+      // dataProvider (worker spawn failure on this very session) means
+      // there's nothing to wipe via RPC anyway, and the SW unregister +
+      // cache clear below still nukes the JS bundle.
+      try {
+        if (dataProvider && typeof dataProvider.wipeAll === 'function') {
+          await dataProvider.wipeAll();
+        }
+      } catch (wipeErr) {
+        console.error('[Fellows] worker wipeAll failed:', wipeErr);
+      }
 
       // Full local-storage clear — DON'T preserve AUTH_ONCE_KEY here.
       // Reset Everything is the explicit "treat me like a brand-new
@@ -2426,6 +2431,10 @@
         return refuseIfVersionSkew('restoreRelationshipsBackup') ||
           rpc.call('restoreRelationshipsBackup', { name: name });
       },
+      // Reset Everything — closes both DBs, tears down SAH-pool VFS,
+      // sweeps OPFS root siblings. Not version-gated: explicit user
+      // intent to nuke state always wins. Page must reload after.
+      wipeAll: function () { return rpc.call('wipeAll'); },
       // Diagnostics — pulls the worker's own boot trace + OPFS inventory.
       _getWorkerTrace: function () { return rpc.call('getTrace'); },
       _getOpfsInventory: function () { return rpc.call('getOpfsInventory'); },
