@@ -12,7 +12,7 @@ Environment variables used in this section:
 |---|---|
 | `FELLOWS_SESSION_SECRET` | Long random signing key. Generate with `python -c "import secrets; print(secrets.token_urlsafe(48))"`. |
 | `FELLOWS_POSTMARK_TOKEN` | Postmark Server API token from the server's settings page. |
-| `FELLOWS_MAIL_FROM` | Sender address that users see on the magic-link email. Defaults to `admin@fellows.globaldonut.com` — must be a verified Sender Signature (or an address on a domain-verified domain) in Postmark. **Do not use `noreply@` addresses** — Postmark actively refuses them and they hurt your sender reputation. |
+| `FELLOWS_MAIL_FROM` | Sender that users see on the magic-link email. Defaults to `EHF Directory <admin@fellows.globaldonut.com>` — the display name (`EHF Directory`) is what shows in the inbox; the address part must be a verified Sender Signature (or an address on a domain-verified domain) in Postmark. Pass either a bare address or the same `Display Name <addr>` shape. **Do not use `noreply@` addresses** — Postmark actively refuses them and they hurt your sender reputation. |
 | `FELLOWS_REPLY_TO` | Optional. When set, becomes the `Reply-To` header. Use this to route replies to a real operator mailbox (e.g. `richbodo+fellows@gmail.com`) while `admin@fellows.globaldonut.com` is the visible sender. When unset, replies go to `FELLOWS_MAIL_FROM`. |
 | `FELLOWS_PUBLIC_ORIGIN` | Public HTTPS origin for the deployed app, for example `https://fellows.globaldonut.com`. Used to build the magic-link URL in the email body. |
 
@@ -108,7 +108,7 @@ If you do want the address to appear in Postmark's Signatures list (so the dashb
 ssh -p 52221 rsb@fellows.globaldonut.com
 sudo nano /etc/fellows/fellows-pwa.env
 # Edit:
-#   FELLOWS_MAIL_FROM=admin@fellows.globaldonut.com
+#   FELLOWS_MAIL_FROM=EHF Directory <admin@fellows.globaldonut.com>
 #   FELLOWS_REPLY_TO=richbodo+fellows@gmail.com   # or any mailbox you check
 sudo systemctl restart fellows-pwa
 ```
@@ -124,7 +124,7 @@ just prod-env           # confirms the change landed (values shown raw — copy/
 
 1. Open `https://fellows.globaldonut.com/?gate=1` in a fresh incognito window (forces the email gate even if you already have a session cookie).
 2. Submit a known-allowlisted address.
-3. Check the inbox — the `From:` header should read `admin@fellows.globaldonut.com`. If you click Reply, your MUA should pre-fill `FELLOWS_REPLY_TO`.
+3. Check the inbox — the sender column should show `EHF Directory` and the `From:` header should read `EHF Directory <admin@fellows.globaldonut.com>`. If you click Reply, your MUA should pre-fill `FELLOWS_REPLY_TO`.
 4. From your laptop:
    ```bash
    just email-debug '10 minutes ago'

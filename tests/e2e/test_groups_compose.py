@@ -2,7 +2,7 @@
 
 Pins the user-visible contract:
 - Right rail is present on the directory page.
-- +/✓ markers next to every fellow toggle draft membership; click does
+- +/✕ markers next to every fellow toggle draft membership; click does
   not navigate the row.
 - Picked fellows appear as chips in the rail; create button enables.
 - Title field auto-follows the search until the user types, then flips
@@ -53,7 +53,7 @@ class TestGroupComposer:
         expect(mark).to_have_text("+")
         expect(mark).to_have_attribute("aria-pressed", "false")
         mark.click()
-        expect(mark).to_have_text("✓")
+        expect(mark).to_have_text("✕")
         expect(mark).to_have_attribute("aria-pressed", "true")
         expect(mark).to_have_class(re.compile(r"\bdir-mark--on\b"))
         chip = page.locator("#group-rail-members .group-rail-member-name").first
@@ -61,7 +61,7 @@ class TestGroupComposer:
         expect(page.locator("#group-rail-create")).to_be_enabled()
 
     def test_marker_click_does_not_navigate_row(self, worker_data, base_url_fixture):
-        """The +/✓ click is intercepted via stopPropagation; URL hash stays put."""
+        """The +/✕ click is intercepted via stopPropagation; URL hash stays put."""
         page = worker_data.page
         _wait_for_directory(page)
         starting_url = page.url
@@ -76,7 +76,7 @@ class TestGroupComposer:
         row = _aaron_row(page)
         mark = row.locator(".dir-mark")
         mark.click()
-        expect(mark).to_have_text("✓")
+        expect(mark).to_have_text("✕")
         # Chip × removes; marker flips back.
         page.locator("#group-rail-members .group-rail-member-remove").first.click()
         expect(mark).to_have_text("+")
@@ -114,7 +114,7 @@ class TestGroupComposer:
         worker_data.wait()
         _wait_for_directory(page)
         # Marker comes up already on; chip restored from localStorage.
-        expect(_aaron_row(page).locator(".dir-mark")).to_have_text("✓")
+        expect(_aaron_row(page).locator(".dir-mark")).to_have_text("✕")
         expect(page.locator("#group-rail-members .group-rail-member-name").first).to_have_text(
             "Aaron Bird"
         )

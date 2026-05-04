@@ -3594,7 +3594,8 @@
       mark.dataset.recordId = rid;
       mark.setAttribute('aria-pressed', on ? 'true' : 'false');
       mark.title = on ? 'remove from group' : 'add to group';
-      mark.textContent = on ? '✓' : '+';
+      mark.setAttribute('aria-label', on ? 'remove from group' : 'add to group');
+      mark.textContent = on ? '✕' : '+';
       mark.addEventListener('click', function (ev) {
         // Marker is inside the row but must NOT trigger row navigation.
         ev.stopPropagation();
@@ -3706,9 +3707,13 @@
     var demo = [fellow.gender_pronouns, fellow.ethnicity].filter(Boolean).join(' | ');
     leftTop += '<h2 class="detail-name">' + escapeHtml(name);
     if (rid) {
-      leftTop += ' <a href="#" class="detail-add-to-group" data-record-id="' +
-        escapeHtml(rid) + '">' +
-        (inDraft ? 'remove from group' : 'add to group') +
+      var addLabel = inDraft ? 'remove from group' : 'add to group';
+      leftTop += ' <a href="#" class="detail-add-to-group' +
+        (inDraft ? ' detail-add-to-group--on' : '') +
+        '" data-record-id="' + escapeHtml(rid) + '"' +
+        ' role="button" aria-pressed="' + (inDraft ? 'true' : 'false') + '"' +
+        ' aria-label="' + addLabel + '" title="' + addLabel + '">' +
+        (inDraft ? '✕' : '+') +
         '</a>';
     }
     leftTop += '</h2>';
@@ -4047,8 +4052,9 @@
 
   function setMarkerEl(markEl, on) {
     if (!markEl) return;
-    markEl.textContent = on ? '✓' : '+';
+    markEl.textContent = on ? '✕' : '+';
     markEl.title = on ? 'remove from group' : 'add to group';
+    markEl.setAttribute('aria-label', on ? 'remove from group' : 'add to group');
     markEl.setAttribute('aria-pressed', on ? 'true' : 'false');
     if (on) {
       markEl.classList.add('dir-mark--on');
@@ -4073,7 +4079,13 @@
     if (!link) return;
     var rid = link.dataset.recordId;
     var on = !!(rid && groupDraft.members.has(rid));
-    link.textContent = on ? 'remove from group' : 'add to group';
+    var label = on ? 'remove from group' : 'add to group';
+    link.textContent = on ? '✕' : '+';
+    link.title = label;
+    link.setAttribute('aria-label', label);
+    link.setAttribute('aria-pressed', on ? 'true' : 'false');
+    if (on) link.classList.add('detail-add-to-group--on');
+    else link.classList.remove('detail-add-to-group--on');
   }
 
   function toggleDraftMember(rid, name) {
@@ -5073,6 +5085,10 @@
           '<a href="#" class="group-detail-title-edit" id="group-detail-title-edit" role="button" ' +
             'aria-label="Rename group" title="Rename group">✎</a>' +
         '</h2>' +
+        '<p class="group-detail-visual-link-row">' +
+          '<a href="#/groups/' + escapeHtml(String(group.id)) +
+            '/directory" class="group-detail-visual-link">view as visual directory</a>' +
+        '</p>' +
         '<p class="group-detail-meta">' +
           escapeHtml(String(memberCount)) + memberWord +
           ' · created ' + escapeHtml((group.created_at || '').slice(0, 10)) +

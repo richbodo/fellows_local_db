@@ -158,16 +158,20 @@ def install_recently_allowed(token_issued_at: Optional[float], now: Optional[flo
     return (now - token_issued_at) < INSTALL_WINDOW
 
 
-DEFAULT_MAIL_FROM = "admin@fellows.globaldonut.com"
+DEFAULT_MAIL_FROM = "EHF Directory <admin@fellows.globaldonut.com>"
 
 
 def build_postmark_body(to_email: str, magic_url: str) -> dict:
     """Construct the Postmark /email payload. Pure function; no network.
 
-    From address defaults to admin@fellows.globaldonut.com. Override via
-    FELLOWS_MAIL_FROM. Reply-To is taken from FELLOWS_REPLY_TO when set —
-    useful when admin@ doesn't route to a human mailbox yet and replies
-    should land with the operator directly.
+    From defaults to ``EHF Directory <admin@fellows.globaldonut.com>``.
+    Postmark validates the address part against the verified Sender
+    Signature / domain; the display name is what fellows actually see in
+    their inbox (``admin`` alone reads as spam-adjacent). Override via
+    FELLOWS_MAIL_FROM — pass either a bare address or the same
+    ``Display Name <addr>`` shape. Reply-To is taken from
+    FELLOWS_REPLY_TO when set — useful when admin@ doesn't route to a
+    human mailbox yet and replies should land with the operator directly.
     """
     from_addr = os.environ.get("FELLOWS_MAIL_FROM", DEFAULT_MAIL_FROM).strip()
     reply_to = os.environ.get("FELLOWS_REPLY_TO", "").strip()
