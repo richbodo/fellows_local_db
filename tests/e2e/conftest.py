@@ -172,11 +172,30 @@ class WorkerDataHelper:
         Equivalent to the previous _wipe_groups + _wipe_settings HTTP
         helpers; used by per-test autouse fixtures so tests are
         order-independent.
+
+        Race quirk this handles: app.js's reconcileHasEmailFilterOnBoot
+        is fire-and-forget — on boot, if `has_email_only` isn't in
+        settings yet, it writes the localStorage default ('1') in the
+        background. If wipe runs before that promise resolves, the
+        write lands AFTER the wipe and the test sees a leaked setting.
+        We wait up to 1s for the reconcile-driven write to land
+        (getSetting returns non-null) before clearing, so the wipe
+        catches it.
         """
         return self.page.evaluate("""
         async () => {
           var dp = window.__dataProvider;
           if (!dp) return { groups_deleted: 0, settings_cleared: 0 };
+          // Drain any in-flight boot writes (reconcileHasEmailFilterOnBoot,
+          // reconcileSelfEmailOnBoot). Both fire on bootDirectoryAsApp and
+          // are fire-and-forget; we poll up to 1s for has_email_only to
+          // appear (it's the marker that reconcile has executed at least
+          // once on this page load).
+          for (var attempt = 0; attempt < 20; attempt++) {
+            var probe = await dp.getSetting('has_email_only');
+            if (probe === '0' || probe === '1') break;
+            await new Promise(function (r) { setTimeout(r, 50); });
+          }
           var groups = await dp.listGroups();
           var gn = 0;
           for (var i = 0; i < (groups || []).length; i++) {
