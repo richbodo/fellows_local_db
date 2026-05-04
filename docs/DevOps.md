@@ -127,6 +127,8 @@ just ship-fast          # deploy-fast + smoke (skip rebuild AND tests)
 just deploy-check       # ansible --check mode: what would change, no writes
 ```
 
+**`just ship` / `just deploy` only roll the `fellows_app` role.** Changes to `ansible/roles/caddy/templates/Caddyfile.j2`, anything in the `common` role (users / packages / UFW / SSH hardening), or any other system-wide template land on disk via the bootstrap path — not the deploy path. To pick those up on the droplet, run `just bootstrap` (idempotent — safe to re-run; rolls every role and fires the `Reload caddy` / restart handlers as needed). If `curl -s -I https://fellows.globaldonut.com/ | grep -i <header>` doesn't show a header you just added to `Caddyfile.j2`, this is the cause.
+
 Under the hood `just deploy` calls `./scripts/deploy_pwa.sh --ask-become-pass`, which runs the `ansible/deploy_pwa.yml` playbook. Equivalent manual form:
 
 ```bash

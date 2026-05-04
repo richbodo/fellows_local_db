@@ -10,6 +10,10 @@ fellows.globaldonut.com {
 	header {
 		# Optional: enable after you are sure HTTPS-only is permanent.
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		# Required for sqlite3-wasm's OPFS-SAH-Pool VFS in the dedicated
+		# worker. See ansible/roles/caddy/templates/Caddyfile.j2 for context.
+		Cross-Origin-Opener-Policy "same-origin"
+		Cross-Origin-Embedder-Policy "require-corp"
 	}
 	reverse_proxy 127.0.0.1:8765
 }

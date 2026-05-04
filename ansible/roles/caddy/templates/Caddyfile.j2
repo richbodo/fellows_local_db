@@ -7,6 +7,15 @@
 	encode gzip
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		# Cross-origin isolation. sqlite3-wasm's OPFS-SAH-Pool VFS gates
+		# SharedArrayBuffer / Atomics on crossOriginIsolated being true; the
+		# dedicated worker that owns OPFS needs both these headers on every
+		# top-level navigation. Mirrors what app/server.py:end_headers sets
+		# in dev so dev and prod behave identically. The app is fully
+		# first-party so require-corp is safe (no cross-origin scripts /
+		# fonts / images to break).
+		Cross-Origin-Opener-Policy "same-origin"
+		Cross-Origin-Embedder-Policy "require-corp"
 	}
 	# App binds 127.0.0.1:8765 only (see fellows-pwa.service).
 	reverse_proxy 127.0.0.1:8765
