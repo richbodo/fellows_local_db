@@ -1116,7 +1116,58 @@
     });
   }
 
+  // Re-entrancy + repeat-call guards for clearAllAppData / clearEverything.
+  // 2026-05-04 incident: an OPFS-state-induced boot pathology made the
+  // post-Clear-App-Cache reload re-enter clearAllAppData on the next page
+  // load — the URL kept getting bumped to /?cache_reset=<new timestamp> in
+  // a slow loop and the page flashed visibly. We never identified the exact
+  // trigger; Reset Everything (clearEverything → wipes OPFS via worker
+  // wipeAll RPC) broke it. Defense in depth:
+  //
+  //   - Across-reload guard: if the URL already carries a recent
+  //     ?cache_reset= timestamp from a previous run, refuse to fire again.
+  //     The URL is the only state the previous run guarantees survives the
+  //     reload (sessionStorage + localStorage are both cleared inside the
+  //     run itself, so they can't carry the lock).
+  //   - Within-tab guard: a flag prevents double-fire if the click handler
+  //     somehow runs twice before the navigate completes.
+  var clearInProgress = false;
+  var REPEAT_RUN_WINDOW_MS = 5000;
+
+  function recentCacheResetMs() {
+    // clearAllAppData uses ?cache_reset=<ts>; clearEverything uses
+    // ?cache_reset=full&t=<ts> (and ?cache_reset=force / =full-force on
+    // the error paths). The timestamp lands in `cache_reset` if numeric,
+    // otherwise in `t` — pick whichever parses as a Date.now() value.
+    try {
+      var u = new URL(window.location.href);
+      var raw = u.searchParams.get('cache_reset');
+      var prev = raw ? parseInt(raw, 10) : 0;
+      if (!prev) {
+        var t = u.searchParams.get('t');
+        prev = t ? parseInt(t, 10) : 0;
+      }
+      if (!prev) return null;
+      var age = Date.now() - prev;
+      return age >= 0 && age < REPEAT_RUN_WINDOW_MS ? age : null;
+    } catch (e) { return null; }
+  }
+
   async function clearAllAppData() {
+    var recent = recentCacheResetMs();
+    if (recent !== null) {
+      console.warn(
+        '[Fellows] clearAllAppData suppressed: cache_reset URL marker is ' +
+          recent + 'ms old (< ' + REPEAT_RUN_WINDOW_MS + 'ms repeat-run window). ' +
+          'See the 2026-05-04 OPFS boot-loop incident comment.'
+      );
+      return;
+    }
+    if (clearInProgress) {
+      console.warn('[Fellows] clearAllAppData already in progress; ignoring re-entrant call');
+      return;
+    }
+    clearInProgress = true;
     try {
       // Server-side cookie clear. The session cookie is HttpOnly so JS can't
       // see or unset it — clearCookiesBestEffort() below only handles
@@ -1203,6 +1254,23 @@
   // fellows_authenticated_once marker so the next load starts at the
   // email gate as if the URL had never been visited.
   async function clearEverything() {
+    // Same re-entrancy guards as clearAllAppData (see comment above its
+    // definition for the 2026-05-04 incident). clearEverything also
+    // navigates to /?cache_reset=full&t=<timestamp> at the end, so the
+    // URL marker check covers it too.
+    var recent = recentCacheResetMs();
+    if (recent !== null) {
+      console.warn(
+        '[Fellows] clearEverything suppressed: cache_reset URL marker is ' +
+          recent + 'ms old (< ' + REPEAT_RUN_WINDOW_MS + 'ms repeat-run window).'
+      );
+      return;
+    }
+    if (clearInProgress) {
+      console.warn('[Fellows] clearEverything blocked: another clear is in progress');
+      return;
+    }
+    clearInProgress = true;
     try {
       // Server-side cookie clear: see clearAllAppData for the same
       // rationale (HttpOnly cookie can't be touched from JS).
