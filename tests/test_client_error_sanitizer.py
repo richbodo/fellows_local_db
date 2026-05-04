@@ -173,6 +173,21 @@ def test_sanitize_payload_accepts_install_kind():
     assert out["events"][1]["extra"] == "android"
 
 
+def test_sanitize_payload_accepts_worker_kind():
+    """Worker spawn / init-handshake outcomes ride the same sink so the
+    operator can grep journald for `event=client_error` lines with
+    `"kind": "worker"`. Same free-text sanitization as other kinds."""
+    body = {"events": [
+        {"kind": "worker", "msg": "spawn_failed", "extra": "init timed out"},
+        {"kind": "worker", "msg": "spawn_ok", "extra": "rpc=1 schema=1"},
+    ]}
+    out = ces.sanitize_payload(body)
+    assert len(out["events"]) == 2
+    assert all(e["kind"] == "worker" for e in out["events"])
+    assert out["events"][0]["msg"] == "spawn_failed"
+    assert out["events"][1]["extra"] == "rpc=1 schema=1"
+
+
 def test_sanitize_payload_install_kind_still_redacts_email_in_msg():
     """The kind allowlist doesn't bypass the email-redaction rule on
     free-text fields. A buggy caller that tries to send the user's
