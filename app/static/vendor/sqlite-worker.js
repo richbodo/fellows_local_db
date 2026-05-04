@@ -549,6 +549,19 @@ handlers.restoreRelationshipsBackup = async function (args) {
 // Diagnostics — pulls the worker's own boot trace.
 handlers.getTrace = async function () { return bootTrace.slice(); };
 
+// TEMPORARY: Phase 0 COOP/COEP precheck. Verifies the worker scope inherits
+// crossOriginIsolated from the owner page (Caddy + dev server set COOP/COEP).
+// SAH-pool gates SharedArrayBuffer / Atomics on this, so a false here means
+// the local-first worker plan stalls until the proxy/server is fixed. Remove
+// this handler once dev + prod return both flags true.
+handlers.probeCoi = async function () {
+  return {
+    crossOriginIsolated:
+      typeof self.crossOriginIsolated !== 'undefined' ? self.crossOriginIsolated : null,
+    hasSAB: typeof SharedArrayBuffer !== 'undefined'
+  };
+};
+
 // ===== Dispatcher ===========================================================
 
 self.onmessage = async function (ev) {
