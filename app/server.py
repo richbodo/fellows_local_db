@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """
 EHF Fellows local directory server.
-Serves static files, /api/fellows, /api/search, /api/groups, and
+Serves static files, /api/fellows, /api/search, /api/stats, and
 /images/<slug>.<ext>.
+
+Per Phase 1 of plans/local_first_worker_architecture.md the dev server no
+longer serves /api/groups or /api/settings — relationships data lives in
+the worker-owned OPFS-stored relationships.db, and dev was the only
+deployment that ever shipped those routes. Tests drive the worker via
+window.__dataProvider; see tests/e2e/conftest.py.
 
 Run from repo root: python app/server.py
 Then open http://localhost:8765/
@@ -38,7 +44,6 @@ _BUILD_DIR = str(REPO_ROOT / "build")
 if _BUILD_DIR not in sys.path:
     sys.path.insert(0, _BUILD_DIR)
 
-from app import relationships  # noqa: E402  (after sys.path manipulation)
 import client_error_sanitizer as ces  # noqa: E402
 import build_pwa as _build_pwa  # noqa: E402  (build-label helpers)
 DB_PATH = APP_DIR / "fellows.db"
@@ -303,7 +308,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"Not Found")
 
-    # --- Helpers for /api/groups CRUD --------------------------------------
+    # --- Helpers ----------------------------------------------------------
 
     def _read_json_body(self, max_bytes=64 * 1024):
         """Parse a JSON request body. Returns the parsed value or None on error."""
@@ -322,75 +327,11 @@ class Handler(BaseHTTPRequestHandler):
         except (json.JSONDecodeError, UnicodeDecodeError):
             return None
 
-    def _send_json_error(self, status, message):
-        self.send_json({"error": message}, status=status)
-
-    @staticmethod
-    def _validate_group_payload(body, *, require_name=True):
-        """Light validation. Returns (clean_dict, error_str)."""
-        if not isinstance(body, dict):
-            return None, "body must be a JSON object"
-        out = {}
-        if "name" in body:
-            name = body["name"]
-            if not isinstance(name, str):
-                return None, "name must be a string"
-            name = name.strip()
-            if not name or len(name) > 200:
-                return None, "name must be 1-200 characters"
-            out["name"] = name
-        elif require_name:
-            return None, "name is required"
-        if "note" in body:
-            note = body["note"]
-            if not isinstance(note, str):
-                return None, "note must be a string"
-            if len(note) > 4000:
-                return None, "note must be at most 4000 characters"
-            out["note"] = note
-        if "fellow_record_ids" in body:
-            ids = body["fellow_record_ids"]
-            if not isinstance(ids, list):
-                return None, "fellow_record_ids must be a list"
-            for rid in ids:
-                if not isinstance(rid, str) or not rid.strip():
-                    return None, "fellow_record_ids must be non-empty strings"
-            out["fellow_record_ids"] = [rid.strip() for rid in ids]
-        return out, None
-
-    def _open_relationships_db(self):
-        """Open relationships.db with fellows.db ATTACHed read-only."""
-        try:
-            return relationships.open_db()
-        except FileNotFoundError:
-            return None
-
     # --- Method dispatch ---------------------------------------------------
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
-        if path == "/api/groups":
-            body = self._read_json_body()
-            if body is None:
-                return self._send_json_error(400, "invalid JSON body")
-            clean, err = self._validate_group_payload(body, require_name=True)
-            if err:
-                return self._send_json_error(400, err)
-            conn = self._open_relationships_db()
-            if conn is None:
-                return self._send_json_error(503, "relationships db unavailable")
-            try:
-                gid = relationships.create_group(
-                    conn,
-                    name=clean["name"],
-                    note=clean.get("note", ""),
-                    fellow_record_ids=clean.get("fellow_record_ids"),
-                )
-                full = relationships.get_group(conn, gid, attached=True)
-            finally:
-                conn.close()
-            return self.send_json(full, status=201)
         if path == "/api/client-errors":
             # Dev stub mirrors deploy/server.py:_handle_client_errors so
             # the round-trip works locally (`just serve-fg` tails the
@@ -411,87 +352,6 @@ class Handler(BaseHTTPRequestHandler):
                 event = {"event": "client_error", "client_ip_prefix": ""}
                 event.update(sanitized)
                 print(json.dumps(event), file=sys.stderr)
-            self.send_response(204)
-            self.end_headers()
-            return
-        self.send_error_404()
-
-    def do_PUT(self):
-        parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path.rstrip("/") or "/"
-        # PUT /api/settings/<key> {value: "..."} — upsert one setting.
-        if path.startswith("/api/settings/"):
-            key = path[len("/api/settings/"):].strip("/")
-            if not key:
-                return self.send_error_404()
-            body = self._read_json_body()
-            if body is None or not isinstance(body, dict):
-                return self._send_json_error(400, "invalid JSON body")
-            val = body.get("value")
-            if val is not None and not isinstance(val, str):
-                return self._send_json_error(400, "value must be a string")
-            if isinstance(val, str) and len(val) > 4000:
-                return self._send_json_error(400, "value must be at most 4000 chars")
-            conn = self._open_relationships_db()
-            if conn is None:
-                return self._send_json_error(503, "relationships db unavailable")
-            try:
-                relationships.set_setting(conn, key, val)
-            finally:
-                conn.close()
-            return self.send_json({"key": key, "value": val})
-        self.send_error_404()
-
-    def do_PATCH(self):
-        parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path.rstrip("/") or "/"
-        if path.startswith("/api/groups/"):
-            try:
-                gid = int(path[len("/api/groups/"):].strip("/"))
-            except ValueError:
-                return self.send_error_404()
-            body = self._read_json_body()
-            if body is None:
-                return self._send_json_error(400, "invalid JSON body")
-            clean, err = self._validate_group_payload(body, require_name=False)
-            if err:
-                return self._send_json_error(400, err)
-            conn = self._open_relationships_db()
-            if conn is None:
-                return self._send_json_error(503, "relationships db unavailable")
-            try:
-                ok = relationships.update_group(
-                    conn,
-                    gid,
-                    name=clean.get("name"),
-                    note=clean.get("note"),
-                    fellow_record_ids=clean.get("fellow_record_ids"),
-                )
-                if not ok:
-                    return self.send_error_404()
-                full = relationships.get_group(conn, gid, attached=True)
-            finally:
-                conn.close()
-            return self.send_json(full)
-        self.send_error_404()
-
-    def do_DELETE(self):
-        parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path.rstrip("/") or "/"
-        if path.startswith("/api/groups/"):
-            try:
-                gid = int(path[len("/api/groups/"):].strip("/"))
-            except ValueError:
-                return self.send_error_404()
-            conn = self._open_relationships_db()
-            if conn is None:
-                return self._send_json_error(503, "relationships db unavailable")
-            try:
-                ok = relationships.delete_group(conn, gid)
-            finally:
-                conn.close()
-            if not ok:
-                return self.send_error_404()
             self.send_response(204)
             self.end_headers()
             return
@@ -549,73 +409,11 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
             return
 
-        # API: groups list
-        if path == "/api/groups":
-            conn = self._open_relationships_db()
-            if conn is None:
-                # No fellows.db on disk yet → empty list, not an error
-                self.send_json([])
-                return
-            try:
-                groups = relationships.list_groups(conn)
-            finally:
-                conn.close()
-            self.send_json(groups)
-            return
-
-        # API: settings — full bag, GET only. PUT lands the value (see do_PUT).
-        if path == "/api/settings":
-            conn = self._open_relationships_db()
-            if conn is None:
-                self.send_json({})
-                return
-            try:
-                bag = relationships.list_settings(conn)
-            finally:
-                conn.close()
-            self.send_json(bag)
-            return
-
-        # API: settings — one key. Returns 404 if not set, else {key, value}.
-        if path.startswith("/api/settings/"):
-            key = path[len("/api/settings/"):].strip("/")
-            if not key:
-                self.send_error_404()
-                return
-            conn = self._open_relationships_db()
-            if conn is None:
-                self.send_error_404()
-                return
-            try:
-                val = relationships.get_setting(conn, key)
-            finally:
-                conn.close()
-            if val is None:
-                self.send_error_404()
-                return
-            self.send_json({"key": key, "value": val})
-            return
-
-        # API: one group by id
-        if path.startswith("/api/groups/"):
-            try:
-                gid = int(path[len("/api/groups/"):].strip("/"))
-            except ValueError:
-                self.send_error_404()
-                return
-            conn = self._open_relationships_db()
-            if conn is None:
-                self.send_error_404()
-                return
-            try:
-                group = relationships.get_group(conn, gid, attached=True)
-            finally:
-                conn.close()
-            if group is None:
-                self.send_error_404()
-                return
-            self.send_json(group)
-            return
+        # /api/groups and /api/settings retired in Phase 1 of the
+        # local-first worker cutover (plans/local_first_worker_architecture.md).
+        # The worker (vendor/sqlite-worker.js) is the sole owner of
+        # relationships.db; tests drive it via window.__dataProvider rather
+        # than HTTP. See tests/e2e/conftest.py:worker_data.
 
         # API: auth status stub — dev server has no auth, but the PWA client
         # (app/static/app.js) probes this on every non-standalone load.
@@ -754,7 +552,12 @@ class Handler(BaseHTTPRequestHandler):
         # SW cache name, and image cache-bust query string consistent
         # with the current git HEAD without a hand-maintained chore(version)
         # commit.
-        if file_path.name in ("app.js", "sw.js"):
+        # vendor/sqlite-worker.js carries the same BUILD_LABEL placeholder
+        # so the worker handshake (init response → buildLabel) reflects
+        # the running build for diagnostics.
+        path_rel = file_path.relative_to(STATIC_DIR.resolve())
+        path_rel_str = str(path_rel).replace("\\", "/")
+        if file_path.name in ("app.js", "sw.js") or path_rel_str == "vendor/sqlite-worker.js":
             text = data.decode("utf-8")
             stamped = _build_pwa.substitute_build_label(text, BUILD_LABEL)
             data = stamped.encode("utf-8")
