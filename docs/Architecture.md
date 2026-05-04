@@ -1,5 +1,26 @@
 # Architecture
 
+> **Doc-state note:** the "Worker-owned OPFS" subsection and the "Non-goals (worker-owned OPFS)" section below describe the architecture as of Phase 1 of [`plans/local_first_worker_architecture.md`](../plans/local_first_worker_architecture.md) — runtime catches up when the cutover ships. Remove this banner when P1 lands.
+
+## Design constraint: local-only, not SaaS
+
+**This app is single-user and local-only by design. It must never become a SaaS.** The PWA + magic-link distribution exists so a fellow can pull down the bundle and contact DB once, then run the app indefinitely against that local copy. Production is a delivery channel, not a service.
+
+Operationally that means server contact is restricted to two responsibilities:
+
+1. **Authorize a download** (magic-link gate, allowlist check, session cookie) so the bundle and `fellows.db` only reach EHF fellows.
+2. **Serve fresh bytes on update** (new bundle when the SHA changes; re-imported `fellows.db` on every successful boot).
+
+Everything else runs on the device:
+
+- **No per-user resources on the server.** `deploy/server.py` does not implement `/api/groups` or `/api/settings` — the dev server's routes for those exist only for the local round-trip. The canonical store for user-authored data is OPFS (`relationships.db`).
+- **Stale-session must not lock users out of cached data.** A 401 on `/api/fellows` falls back to the IndexedDB cache; the directory, search, and profile views keep working. See `email_gate.md` invariant 10.
+- **No server-side persistence of anything user-authored.** No backups of `relationships.db`, no server-stored notes, no shared groups, no cross-device sync. The unauthenticated client-error sink (`/api/client-errors`) is the only structured journald write driven by client behavior, and it is sanitized to remove identifiers.
+
+What this rules out as features, even when individually attractive: cross-device sync, "share this group with another fellow", an admin console, server-side activity history, analytics beyond the install-funnel events already documented in `email_gate.md`. Adding any per-user RW endpoint on prod is the bright line that turns this from a delivery channel into a SaaS — don't cross it without a deliberate change to this section.
+
+The architectural decisions below — separate `relationships.db` file, `ATTACH DATABASE ?mode=ro`, OPFS in both standalone and browser-tab modes, the unsupported-browser panel for missing OPFS — all flow from this constraint.
+
 ## Tech Stack
 
 - **Server**: Python stdlib `http.server` — single file, no framework
@@ -81,6 +102,89 @@ events, plus the standard upgrade flow) lives in
 [`docs/persistence_and_upgrades.md`](persistence_and_upgrades.md).
 Read that when adding a feature that touches storage, or when
 triaging a "why did my X disappear?" report.
+
+### Worker-owned OPFS
+
+A single dedicated worker
+(`app/static/vendor/sqlite-worker.js`) owns every OPFS handle and
+every `sqlite3.wasm` instance. The main thread is an RPC client: it
+posts `{id, op, args}` messages and awaits `{id, ok, result|error}`
+responses. The same worker handles both `relationships.db`
+(read-write user-authored data) and `fellows.db` (read-only contact
+data, re-imported on update). No other context — not the main
+thread, not the service worker, not a future render worker — is
+permitted to call `navigator.storage.getDirectory` or open a
+`FileSystemSyncAccessHandle`.
+
+This single-owner rule lets us reason about the database without
+worrying about cross-context coordination, and makes the SAH-pool's
+per-file serialization a non-issue: there is exactly one opener.
+
+**Why a worker rather than the main thread.** Real-browser evidence
+(Safari, intermittent Firefox, vanilla Chrome 147 — see PRs #95–#99)
+shows the main-thread OPFS path is the brittle layer. Several
+browser configurations strip
+`FileSystemFileHandle.prototype.createSyncAccessHandle` from the
+main-thread prototype while still exposing it inside dedicated
+workers. The worker context is also easier to keep network-free and
+gate-aware: the worker's `init` op does sqlite3 init, OPFS attach,
+and the auto-backup pass with no HTTP traffic, while a separate
+page-driven `ensureFellowsDb` op covers the bundle fetch only after
+the gate decision tree resolves to directory mode.
+
+**Compatibility gates between page and worker.** Two narrow,
+worker-internal constants govern whether a mismatched page may
+mutate state:
+
+- `WORKER_RPC_VERSION` — bumped only when the request/response
+  shape of any RPC changes.
+- `RELATIONSHIPS_SCHEMA_VERSION` — same value as
+  `relationships.db`'s `PRAGMA user_version` (currently `1`); bumped
+  only on schema migrations.
+
+The page reads both during the worker `init` handshake and refuses
+mutating RPCs (`createGroup`, `setSetting`,
+`importRelationshipsBytes`, …) on mismatch. Reads still work so the
+user can browse cached data while the service worker's existing
+"New version available — Reload" banner does its job. The build
+label is **not** consulted for this gate — see [the plan's "Why
+build label is not the gate" section](../plans/local_first_worker_architecture.md#why-build-label-is-not-the-gate).
+
+**Cross-DB joins still happen, but in the worker.** What the dev
+server used to do via `ATTACH DATABASE 'fellows.db' AS f ?mode=ro`
+on a per-request basis, the worker now does once per init. The
+read-only enforcement at the SQLite layer is preserved.
+
+**Capability detection runs in the worker.** When OPFS or
+`FileSystemSyncAccessHandle` is unavailable (older Safari, missing
+SAH, insecure context), the worker reports `opfsCapable: false`
+during `init`; the main thread reads that field and surfaces the
+unsupported-browser panel via `renderLocalDataUnavailablePanel()`.
+See [`docs/browser_support.md`](browser_support.md).
+
+### Non-goals (worker-owned OPFS)
+
+Bright lines for the codebase, not just the plan:
+
+- **The service worker never owns a SQLite DB.** SW lifecycle
+  (idle eviction, multi-instance, restart on push) is hostile to
+  storage ownership. SW is app-shell + update detection only.
+- **No parallel main-thread OPFS access.** After the Phase 1
+  cutover, opening OPFS from anywhere other than the dedicated
+  worker is a bug.
+- **No server-side per-user state.** Production never gains
+  `/api/groups`, `/api/settings`, server-side `relationships.db`
+  storage, server-side backup, cross-device sync, or admin views.
+  The dev-server routes for groups/settings (`app/server.py`) are
+  retired in Phase 1 — they were only ever a dev-round-trip
+  scaffold and become dead code once the worker is sole owner.
+- **No silent cross-device sync substrate.** Any future sync
+  becomes an explicit, opt-in feature with its own design doc.
+- **No multi-tab concurrent ownership.** OPFS sync access handles
+  serialize per file; two tabs both opening `relationships.db`
+  race on the SAH. Today's behavior — second tab fails to acquire
+  — is preserved. A graceful "another instance is open" UI is a
+  follow-up, not a goal.
 
 ## Two-Phase Load
 

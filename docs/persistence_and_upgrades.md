@@ -1,5 +1,7 @@
 # Persistence and Upgrades
 
+> **Doc-state note:** the storage table's "Owner" column, the `fellows.db.meta.json` row, the new auto-backup trigger semantics (per-boot debounced, 5-slot rotation), and the removal of the `last_seen_sha.txt` row reflect the target architecture as of Phase 1 of [`plans/local_first_worker_architecture.md`](../plans/local_first_worker_architecture.md). The runtime catches up when the cutover ships. Until then, `app/static/app.js` still drives auto-backup from the main thread on a build-SHA-change trigger and writes `last_seen_sha.txt`. Remove this banner when P1 lands.
+
 The PWA stores user state across several layers, each with different
 survival semantics. This doc captures what survives what — so future
 features can land without surprising existing users, and so we have a
@@ -7,20 +9,30 @@ shared mental model when triaging "why did my X disappear?" reports.
 
 ## Storage layers
 
-| Layer | Holds | Replaced on app update | Cleared by **Clear App Cache** button |
-|---|---|---|---|
-| Cache API `fellows-app-shell-vN` | HTML, JS, CSS, SW, manifest, icons, sqlite3.wasm | Yes — every CACHE_VERSION bump | Yes |
-| Cache API `fellows-images-v1` | Profile photos | No (separate cache name) — re-fetched as needed | Yes |
-| IndexedDB `fellows-local-db` | Offline-fallback full fellow rows | Regenerated on every successful boot | Yes |
-| OPFS `fellows.db` | Imported Knack contact data | **Re-imported** every boot from `/fellows.db` | **No** (gap; see "Open questions") |
-| OPFS `relationships.db` | Groups, group members, fellow_tags, fellow_notes, settings — all user-authored | **Never** — that's the whole point of this file | **No** |
-| OPFS `relationships.db.bak.<ISO>` | Pre-upgrade snapshots of `relationships.db`, rotated to keep newest 3 | Auto-created on every boot where the build SHA differs from `last_seen_sha.txt` | **No** (preserved alongside `relationships.db` for recovery) |
-| OPFS `last_seen_sha.txt` | Tracks which build SHA the user last booted under (sentinel for the auto-backup logic) | Updated after each successful backup or first boot | **No** |
-| localStorage `fellows_authenticated_once` | "this origin has authenticated at least once" marker | Untouched | **Preserved by name** in `clearAllAppData` |
-| localStorage `ehf_has_email_only` | Has-email filter pref (mirrored to `relationships.settings.has_email_only` for durability across Clear App Cache) | Untouched | Cleared, but rehydrated from `relationships.settings` on next boot |
-| localStorage `ehf.group_draft` | In-progress group composer state | Untouched | Cleared (acceptable: drafts are unsaved) |
-| localStorage `fellows_self_email` | User's "me" email for `mailto:?to=…` | Untouched | Cleared, but rehydrated from `relationships.settings` on next boot |
-| Cookie `fellows_session` (HttpOnly) | HMAC'd session, 7-day TTL, contains `token_issued_at` | Untouched (still valid until TTL) | Cleared via `POST /api/logout` (server sends a clearing `Set-Cookie`). `clearCookiesBestEffort()` also runs from JS as a fallback for any non-HttpOnly cookies. |
+The "Owner" column names the JS context that reads and writes the
+layer (per [Architecture.md § Worker-owned OPFS](Architecture.md#worker-owned-opfs)).
+"server" means an HttpOnly cookie that no JS context can see.
+
+| Layer | Owner | Holds | Replaced on app update | Cleared by **Clear App Cache** button |
+|---|---|---|---|---|
+| Cache API `fellows-app-shell-vN` | service worker | HTML, JS, CSS, SW, manifest, icons, sqlite3.wasm, `vendor/sqlite-worker.js` | Yes — every CACHE_VERSION bump | Yes |
+| Cache API `fellows-images-v1` | service worker | Profile photos | No (separate cache name) — re-fetched as needed | Yes |
+| IndexedDB `fellows-local-db` | main (retired in Phase 6) | Offline-fallback full fellow rows | Regenerated on every successful boot | Yes |
+| OPFS `fellows.db` | worker | Imported Knack contact data | **Re-imported** when `fellows.db.meta.json:sha` differs from `build-meta.json:fellows_db_sha` (Phase 3); otherwise reused | **No** (gap; see "Open questions") |
+| OPFS `fellows.db.meta.json` | worker | `{sha, fetched_at, last_failure_at, last_failure_reason}` — the freshness sidecar that gates re-import of `fellows.db`. Sibling of `fellows.db` at the OPFS root, outside the SAH-pool dir, so a `relationships.db` restore can't desync it. | Updated after each successful re-import; otherwise untouched | **No** |
+| OPFS `relationships.db` | worker | Groups, group members, fellow_tags, fellow_notes, settings — all user-authored | **Never** — that's the whole point of this file | **No** |
+| OPFS `relationships.db.bak.<ISO>` | worker | Snapshots of `relationships.db`, rotated to keep newest 5 | Auto-created on every boot when the most recent backup is more than 1 hour old (debounced); pruned to 5 newest | **No** (preserved alongside `relationships.db` for recovery) |
+| localStorage `fellows_authenticated_once` | main | "this origin has authenticated at least once" marker | Untouched | **Preserved by name** in `clearAllAppData` |
+| localStorage `ehf_has_email_only` | main | Has-email filter pref (mirrored to `relationships.settings.has_email_only` for durability across Clear App Cache) | Untouched | Cleared, but rehydrated from `relationships.settings` on next boot |
+| localStorage `ehf.group_draft` | main | In-progress group composer state | Untouched | Cleared (acceptable: drafts are unsaved) |
+| localStorage `fellows_self_email` | main | User's "me" email for `mailto:?to=…` | Untouched | Cleared, but rehydrated from `relationships.settings` on next boot |
+| Cookie `fellows_session` (HttpOnly) | server | HMAC'd session, 7-day TTL, contains `token_issued_at` | Untouched (still valid until TTL) | Cleared via `POST /api/logout` (server sends a clearing `Set-Cookie`). `clearCookiesBestEffort()` also runs from JS as a fallback for any non-HttpOnly cookies. |
+
+Note: `last_seen_sha.txt` (the build-SHA sentinel previously used to
+gate auto-backup) is retired in the target architecture. The newest
+`relationships.db.bak.<ISO>` filename's timestamp is the new
+debounce input. The worker's `init` op cleans up any orphaned
+sentinel file from older bundles on first boot of a P1+ build.
 
 **Reset Everything** (kebab → bottom item / desktop link below the red
 button) clears every row above *including* the two OPFS files and the
@@ -70,34 +82,50 @@ What survives the reload, end-to-end:
 - All localStorage keys (drafts, filter prefs, etc.).
 
 What gets replaced (intentionally):
-- App shell HTML, JS, CSS, SW, manifest.
-- `fellows.db` in OPFS (re-imported from `/fellows.db`; this is how
-  new fellow data reaches the user).
-- IndexedDB cache (regenerated on next successful `getList`).
+- App shell HTML, JS, CSS, SW, manifest, and `vendor/sqlite-worker.js`
+  (precached together; CACHE_VERSION-busted as one unit).
+- `fellows.db` in OPFS, **only when** `build-meta.json:fellows_db_sha`
+  differs from the locally-recorded `fellows.db.meta.json:sha` — the
+  worker's `ensureFellowsDb` op runs an atomic staging-slot import on
+  mismatch and updates the sidecar. Two consecutive boots against an
+  unchanged server produce zero `/fellows.db` requests.
+- IndexedDB cache (regenerated on next successful `getList`; retired
+  in Phase 6 per [`plans/local_first_worker_architecture.md`](../plans/local_first_worker_architecture.md#phase-6--retire-indexeddb)).
 
-## Auto-backup of `relationships.db` on upgrade
+## Auto-backup of `relationships.db`
 
 `relationships.db` is the only local file that's neither replaced on
 upgrade (like `fellows.db`) nor easy to recover from a botched
 migration or OPFS glitch (since it's per-user, never synced). To make
-"upgrade ate my groups" a recoverable scenario rather than a
-data-loss scenario, the boot path auto-snapshots it before any code
-opens it for app use.
+"upgrade ate my groups" — and "I just deleted the wrong group" — a
+recoverable scenario rather than a data-loss scenario, the worker's
+`init` op auto-snapshots it before serving any app RPC.
 
-Mechanism (`maybeBackupRelationshipsDb` in `app.js`, runs after
-`installOpfsSAHPoolVfs` returns and before `new OpfsSAHPoolDb('relationships.db')`):
+Mechanism (worker-internal, in `vendor/sqlite-worker.js`'s `init`,
+runs after `installOpfsSAHPoolVfs` returns and before
+`new OpfsSAHPoolDb('relationships.db')`):
 
-1. Read `bootBuildMeta.git_sha` (the SHA of the running app).
-2. Read `last_seen_sha.txt` from the OPFS root (or `null` if missing).
-3. If `relationships.db` doesn't exist in the SAH-pool's file map →
-   first install; write the sentinel and return.
-4. If the sentinel matches the current SHA → no upgrade, no backup.
-5. Otherwise (different SHA, or no sentinel — first boot post-PR-D):
+1. List the OPFS root for `relationships.db.bak.*` siblings.
+2. If `relationships.db` doesn't exist in the SAH-pool's file map →
+   first install, no source to back up; return.
+3. If the most-recent `bak.<ISO>` file's timestamp is **less than 1
+   hour old** → debounced; return without writing a new snapshot.
+   This keeps debug-session reloads from thrashing the rotation.
+4. Otherwise:
    - `bytes = poolUtil.exportFile('relationships.db')` — snapshot read.
    - Write to OPFS root file `relationships.db.bak.<ISO timestamp>`.
    - Rotate: list backup files, sort by name (ISO timestamps sort
-     chronologically), `removeEntry` the oldest until ≤3 remain.
-   - Write the current SHA into `last_seen_sha.txt`.
+     chronologically), `removeEntry` the oldest until ≤5 remain.
+5. On any boot where `last_seen_sha.txt` exists from an older
+   bundle, remove it (one-time cleanup) and never write it again.
+
+The trigger is **per-boot debounced**, not per-deploy. A
+build-SHA-change trigger is keyed to deploy cadence, but the
+recovery use case ("undo something I just did") is keyed to
+user-edit cadence; debouncing per boot is more sensitive to that
+without thrashing the rotation when a user reloads three times in
+five minutes. Files are tiny (tens of KB even for an active user),
+so a 5-slot rotation is cheap.
 
 Backups live at the OPFS **root**, not inside the SAH pool — so they
 survive normal sqlite-wasm operations (which only touch the pool dir)

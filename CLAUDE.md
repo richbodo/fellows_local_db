@@ -22,6 +22,7 @@ Read README.md for project setup, API docs, and test commands. Read docs/Archite
 - Always run relevant tests after changes.
 - For deploy- or infra-related work, put **manual QA steps for the maintainer** (smoke scripts, DNS/TLS checks, browser install flow) in the **PR description**, not only in commits or docs.
 - **UI/UX changes belong in `docs/users_manual.md`.** When a feature PR changes user-visible behavior (new screen, new flow, changed control, new option), include the corresponding users-manual update in the same PR — accepting the PR accepts the doc change with it. The user guide is the source of truth for UI/UX from a user's perspective; the app links to it from the About page.
+- **OPFS access only via the dedicated worker; main thread is an RPC client.** All `relationships.db` and `fellows.db` reads/writes go through `app/static/vendor/sqlite-worker.js`. The main thread does not call `navigator.storage.getDirectory`, does not load `sqlite3.wasm`, and does not hold any `FileSystemSyncAccessHandle`. (Phase 1 of `plans/local_first_worker_architecture.md` enforces this in code; until then `app/static/app.js` still has the legacy main-thread paths and this convention applies to *new* code.)
 
 ## Two-DB architecture
 
