@@ -56,9 +56,13 @@ MAX_BUILD_LEN = 64
 # `install` carries install-funnel telemetry from the install landing
 # page (beforeinstallprompt fired / never arrived, button clicked,
 # accept/dismiss outcome, app installed, "use in tab" escape hatch,
-# iOS Safari advisory). The privacy boundary is the same — same
-# free-text sanitization on `msg` and `extra` — so adding the kind
-# doesn't widen what a caller can put in the journald log.
+# iOS Safari advisory). `worker` carries spawn / init-handshake
+# outcomes for the OPFS worker (vendor/sqlite-worker.js) — the worker
+# is the sole OPFS owner post-Phase-1, so a spawn failure means the
+# user dropped to the API+IDB fallback and we want to know. Privacy
+# boundary is the same — same free-text sanitization on `msg` and
+# `extra` — so adding kinds doesn't widen what a caller can put in
+# the journald log.
 ALLOWED_EVENT_KINDS = frozenset({
     "http",
     "sw",
@@ -66,6 +70,7 @@ ALLOWED_EVENT_KINDS = frozenset({
     "unhandledrejection",
     "console.error",
     "install",
+    "worker",
 })
 
 ALLOWED_DISPLAY_MODES = frozenset({"standalone", "browser-tab"})

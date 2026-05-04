@@ -1161,10 +1161,22 @@
           recent + 'ms old (< ' + REPEAT_RUN_WINDOW_MS + 'ms repeat-run window). ' +
           'See the 2026-05-04 OPFS boot-loop incident comment.'
       );
+      // Tee into the bug-report ring so a user who hits the suppression
+      // and then files a bug report carries the signal with them. The
+      // 2026-05-04 incident never reproduced in DevTools — field reports
+      // are the only way we'll catch the underlying trigger.
+      pushBugReportError(
+        'clear-suppressed',
+        'clearAllAppData suppressed (' + recent + 'ms < ' + REPEAT_RUN_WINDOW_MS + 'ms window)'
+      );
       return;
     }
     if (clearInProgress) {
       console.warn('[Fellows] clearAllAppData already in progress; ignoring re-entrant call');
+      pushBugReportError(
+        'clear-suppressed',
+        'clearAllAppData re-entrant call blocked'
+      );
       return;
     }
     clearInProgress = true;
@@ -1264,10 +1276,18 @@
         '[Fellows] clearEverything suppressed: cache_reset URL marker is ' +
           recent + 'ms old (< ' + REPEAT_RUN_WINDOW_MS + 'ms repeat-run window).'
       );
+      pushBugReportError(
+        'clear-suppressed',
+        'clearEverything suppressed (' + recent + 'ms < ' + REPEAT_RUN_WINDOW_MS + 'ms window)'
+      );
       return;
     }
     if (clearInProgress) {
       console.warn('[Fellows] clearEverything blocked: another clear is in progress');
+      pushBugReportError(
+        'clear-suppressed',
+        'clearEverything re-entrant call blocked'
+      );
       return;
     }
     clearInProgress = true;
@@ -1287,13 +1307,28 @@
       // forbids the page from opening OPFS, so the worker's removeVfs()
       // tear-down + root-iteration sweep is the only path that nukes
       // relationships.db, fellows.db, the bak.<ISO> rotation, and the
-      // fellows.db.meta.json sidecar in one shot. Best-effort: a missing
-      // dataProvider (worker spawn failure on this very session) means
-      // there's nothing to wipe via RPC anyway, and the SW unregister +
-      // cache clear below still nukes the JS bundle.
+      // fellows.db.meta.json sidecar in one shot.
+      //
+      // Two providers can be active here:
+      //   1. The worker provider — has wipeAll directly.
+      //   2. The api+idb fallback (auth-failure cold-start path in
+      //      pickDataProvider) — does NOT have wipeAll, but the worker
+      //      that produced the 401 is still alive and still owns OPFS.
+      //      Reach it through warmWorker.rpc so Reset Everything still
+      //      wipes the user's groups/notes/tags/settings instead of
+      //      silently leaving them on disk.
+      // Worker spawn failure on this very session leaves nothing to
+      // wipe via RPC; the SW unregister + cache clear below still nukes
+      // the JS bundle.
       try {
+        var wipeFn = null;
         if (dataProvider && typeof dataProvider.wipeAll === 'function') {
-          await dataProvider.wipeAll();
+          wipeFn = function () { return dataProvider.wipeAll(); };
+        } else if (warmWorker && warmWorker.rpc) {
+          wipeFn = function () { return warmWorker.rpc.call('wipeAll'); };
+        }
+        if (wipeFn) {
+          await wipeFn();
         }
       } catch (wipeErr) {
         console.error('[Fellows] worker wipeAll failed:', wipeErr);
@@ -1533,41 +1568,77 @@
     lines.push('');
     // Worker handshake + OPFS inventory. Worker is the OPFS owner
     // post-Phase-1; the main thread reads its inventory via RPC.
-    if (dataProvider && dataProvider.kind === 'worker' && dataProvider._init) {
+    //
+    // The active dataProvider can be 'worker' (happy path) or 'api+idb'
+    // (worker spawn failed, OR ensureFellowsDb returned 401 and the
+    // page fell back). In the auth-fallback case the worker is still
+    // alive in `warmWorker` even though dataProvider is api+idb. We
+    // surface spawn state from warmWorker / warmWorkerError directly
+    // so the panel is informative whichever path you're on — and so
+    // the version handshake values land in the bug report even when
+    // the worker isn't the active provider.
+    var activeKind = (dataProvider && dataProvider.kind) || '(none)';
+    lines.push('active dataProvider: ' + activeKind);
+    if (warmWorker && warmWorker.init) {
+      var wi = warmWorker.init;
+      var versionOk = (
+        wi.workerRpcVersion === EXPECTED_WORKER_RPC_VERSION &&
+        wi.schemaVersion === EXPECTED_RELATIONSHIPS_SCHEMA_VERSION
+      );
       lines.push(
-        'worker rpc=' + dataProvider._init.workerRpcVersion +
+        'worker spawn: OK rpc=' + wi.workerRpcVersion +
         ' (page expects ' + EXPECTED_WORKER_RPC_VERSION + ')' +
-        ' schema=' + dataProvider._init.schemaVersion +
+        ' schema=' + wi.schemaVersion +
         ' (page expects ' + EXPECTED_RELATIONSHIPS_SCHEMA_VERSION + ')' +
-        ' build=' + dataProvider._init.buildLabel
+        ' build=' + wi.buildLabel
       );
       lines.push('worker version compatibility: ' +
-        (dataProvider._versionOk ? 'OK' : 'SKEW — mutating ops refused, reads work'));
-      try {
-        var inv = await dataProvider._getOpfsInventory();
-        if (inv && Array.isArray(inv.root)) {
-          lines.push('OPFS root entries (worker view):');
-          if (!inv.root.length) {
-            lines.push('  (empty)');
-          } else {
-            for (var ri = 0; ri < inv.root.length; ri++) {
-              var e = inv.root[ri];
-              var sz = (e.size != null ? ' — ' + e.size + ' bytes' : '');
-              var mt = (e.lastModified ? ' (mtime ' + new Date(e.lastModified).toISOString() + ')' : '');
-              lines.push('  ' + e.kind + ' ' + e.name + sz + mt);
+        (versionOk ? 'OK' : 'SKEW — mutating ops refused, reads work'));
+      lines.push(
+        'worker capabilities: opfsCapable=' + !!wi.opfsCapable +
+        ' hasFellowsDb=' + !!wi.hasFellowsDb +
+        ' hasRelDb=' + !!wi.hasRelationshipsDb
+      );
+      // Inventory call: prefer the active provider (so we exercise the
+      // same code path the rest of the app uses); fall back to the warm
+      // worker rpc when the active provider is api+idb (auth-fallback).
+      var invSource = null;
+      if (dataProvider && typeof dataProvider._getOpfsInventory === 'function') {
+        invSource = dataProvider._getOpfsInventory();
+      } else if (warmWorker && warmWorker.rpc) {
+        invSource = warmWorker.rpc.call('getOpfsInventory');
+      }
+      if (invSource) {
+        try {
+          var inv = await invSource;
+          if (inv && Array.isArray(inv.root)) {
+            lines.push('OPFS root entries (worker view):');
+            if (!inv.root.length) {
+              lines.push('  (empty)');
+            } else {
+              for (var ri = 0; ri < inv.root.length; ri++) {
+                var e = inv.root[ri];
+                var sz = (e.size != null ? ' — ' + e.size + ' bytes' : '');
+                var mt = (e.lastModified ? ' (mtime ' + new Date(e.lastModified).toISOString() + ')' : '');
+                lines.push('  ' + e.kind + ' ' + e.name + sz + mt);
+              }
             }
           }
+          if (inv && Array.isArray(inv.poolFiles)) {
+            lines.push('SAH-pool slots: ' + inv.poolFiles.join(', '));
+          }
+        } catch (invErr) {
+          lines.push('worker getOpfsInventory failed: ' + String(invErr && invErr.message || invErr));
         }
-        if (inv && Array.isArray(inv.poolFiles)) {
-          lines.push('SAH-pool slots: ' + inv.poolFiles.join(', '));
-        }
-      } catch (invErr) {
-        lines.push('worker getOpfsInventory failed: ' + String(invErr && invErr.message || invErr));
       }
+    } else if (warmWorkerError) {
+      lines.push('worker spawn: FAILED — ' +
+        String((warmWorkerError && warmWorkerError.message) || warmWorkerError));
+      lines.push('  (page expects rpc=' + EXPECTED_WORKER_RPC_VERSION +
+        ' schema=' + EXPECTED_RELATIONSHIPS_SCHEMA_VERSION +
+        '; reported via /api/client-errors event=client_error kind=worker)');
     } else {
-      lines.push('worker inventory: (provider is ' +
-        (dataProvider && dataProvider.kind ? dataProvider.kind : '(none)') +
-        ' — no worker)');
+      lines.push('worker spawn: pending (init not yet resolved)');
     }
     // L6: persisted-storage state (best-effort). Visible whether persist()
     // succeeded, was denied, or wasn't asked.
@@ -2986,6 +3057,47 @@
       ua: String(navigator.userAgent || ''),
       build: build,
       route: '#install-landing',
+      displayMode: isStandaloneDisplayMode() ? 'standalone' : 'browser-tab'
+    };
+    try { payload.online = Boolean(navigator.onLine); } catch (e) {}
+    try {
+      fetch('/api/client-errors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(payload),
+        keepalive: true
+      }).catch(function () { /* ignore — telemetry is best-effort */ });
+    } catch (e) { /* ignore */ }
+  }
+
+  // Reports a single worker spawn/init outcome to /api/client-errors so
+  // the operator can grep journald for `event=client_error` lines with
+  // `"kind": "worker"` to answer questions like "what fraction of boots
+  // dropped to the API+IDB fallback because the worker couldn't come
+  // up?" Fire-and-forget; never blocks boot. Server-side sanitizer
+  // (deploy/client_error_sanitizer.py) is the privacy boundary — same
+  // email-redaction + length cap rules as the other kinds.
+  //
+  // Cardinality is one event per spawn outcome (success or failure);
+  // the warm-worker spawn fires once per page load, the re-spawn case
+  // (install-landing → use-in-tab) adds at most one more.
+  function reportWorkerEvent(name, extra) {
+    if (!name) return;
+    var build = '';
+    if (bootBuildMeta && (bootBuildMeta.git_sha || bootBuildMeta.built_at)) {
+      build = (bootBuildMeta.git_sha || '') +
+        (bootBuildMeta.built_at ? ' @ ' + bootBuildMeta.built_at : '');
+    }
+    var ev = { kind: 'worker', msg: String(name) };
+    if (extra) ev.extra = String(extra).slice(0, 200);
+    var route = '';
+    try { route = String(location.hash || location.pathname || ''); } catch (e) {}
+    var payload = {
+      events: [ev],
+      ua: String(navigator.userAgent || ''),
+      build: build,
+      route: route,
       displayMode: isStandaloneDisplayMode() ? 'standalone' : 'browser-tab'
     };
     try { payload.online = Boolean(navigator.onLine); } catch (e) {}
@@ -7264,9 +7376,30 @@
   var warmWorkerConsumed = false; // true once bootDirectoryAsApp adopts it
   var warmWorkerPromise = spawnWorkerAndInit().then(function (handle) {
     warmWorker = handle;
+    // Tee a success summary into the bug-report ring so a later bug
+    // report carries the version handshake context. Don't fire to
+    // /api/client-errors — that would generate one event per page load
+    // for the happy path, which drowns the failure signal.
+    var init = (handle && handle.init) || {};
+    pushBugReportError(
+      'worker',
+      'spawn_ok',
+      'rpc=' + init.workerRpcVersion + ' schema=' + init.schemaVersion +
+        ' opfsCapable=' + !!init.opfsCapable +
+        ' hasFellowsDb=' + !!init.hasFellowsDb +
+        ' hasRelDb=' + !!init.hasRelationshipsDb
+    );
     return handle;
   }).catch(function (err) {
     warmWorkerError = err;
+    // Spawn or init failed — user is about to drop to the API+IDB
+    // fallback (or boot-failure panel). Tee + ship to journald so the
+    // operator sees the failure rate without needing the user to send
+    // diagnostics. Cardinality is bounded: warm spawn fires once per
+    // page load, re-spawn fires at most once more.
+    var msg = (err && err.message) || String(err);
+    pushBugReportError('worker', 'spawn_failed', msg.slice(0, 200));
+    reportWorkerEvent('spawn_failed', msg);
     throw err;
   });
 
@@ -7329,8 +7462,12 @@
           // Auth-related cold-start failures: the user is signed out
           // server-side. Per email_gate.md invariant 10, fall through to
           // the IDB cache so a previously-authed install still renders
-          // the directory. The worker stays in OPFS-owner role for any
-          // groups/settings work; we just can't populate fellows.db.
+          // the directory. The active dataProvider becomes api+idb;
+          // groups/settings round-trip through the API path (which 404s
+          // in prod, surfacing the unsupported panel) rather than the
+          // worker. The worker process is left alive — it still owns
+          // OPFS and clearEverything reaches it through warmWorker.rpc
+          // for the OPFS wipe.
           if (e && (e.httpStatus === 401 || e.httpStatus === 403)) {
             bootDebugPush(
               'ensureFellowsDb: auth failure → fall back to API+IDB for directory'
