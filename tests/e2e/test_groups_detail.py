@@ -12,52 +12,25 @@ Pins:
 - Export panel toggles open / closed; Export button is disabled with a
   PR 5 hint.
 - Edit button navigates to #/edit/<id>; placeholder route renders.
-- Inline note edit saves via PATCH and persists across reload; cancel
-  restores the original.
+- Inline note edit saves via the worker updateGroup RPC and persists
+  across reload; cancel restores the original.
+
+Phase 1 (plans/local_first_worker_architecture.md): setup that
+previously went through the dev /api/groups HTTP route now drives the
+worker via the worker_data fixture.
 """
 from __future__ import annotations
 
-import json
 import re
-from http.client import HTTPConnection
-from urllib.parse import urlparse
 
 import pytest
 from playwright.sync_api import expect
 
 
-def _conn(base_url):
-    parsed = urlparse(base_url)
-    return HTTPConnection(parsed.hostname, parsed.port, timeout=10)
-
-
-def _wipe_groups(base_url):
-    c = _conn(base_url)
-    c.request("GET", "/api/groups")
-    r = c.getresponse()
-    body = r.read()
-    c.close()
-    if r.status != 200:
-        return
-    try:
-        groups = json.loads(body)
-    except ValueError:
-        return
-    for g in groups:
-        c2 = _conn(base_url)
-        c2.request("DELETE", f"/api/groups/{g['id']}")
-        c2.getresponse().read()
-        c2.close()
-
-
-def _real_fellows(base_url, with_email=True):
-    """Return a list of (record_id, name, contact_email) tuples from the dev API."""
-    c = _conn(base_url)
-    c.request("GET", "/api/fellows?full=1")
-    r = c.getresponse()
-    body = r.read()
-    c.close()
-    rows = json.loads(body)
+def _real_fellows(worker_data, with_email=True):
+    """Return a list of (record_id, name, contact_email) tuples from the
+    worker's fellows.db (the canonical local read source post-cutover)."""
+    rows = worker_data.get_full_fellows()
     out = []
     for row in rows:
         rid = row.get("record_id")
@@ -69,26 +42,6 @@ def _real_fellows(base_url, with_email=True):
     return out
 
 
-def _create_group(base_url, *, name, fellow_record_ids, note=""):
-    c = _conn(base_url)
-    payload = json.dumps({
-        "name": name,
-        "note": note,
-        "fellow_record_ids": fellow_record_ids,
-    }).encode("utf-8")
-    c.request(
-        "POST",
-        "/api/groups",
-        body=payload,
-        headers={"Content-Type": "application/json", "Content-Length": str(len(payload))},
-    )
-    r = c.getresponse()
-    body = r.read()
-    c.close()
-    assert r.status == 201, body
-    return json.loads(body)
-
-
 def _wait_for_directory(page):
     page.locator("#loading").wait_for(state="hidden", timeout=10000)
     # #app-wrap rather than #directory: the directory rail is now
@@ -97,24 +50,18 @@ def _wait_for_directory(page):
     page.locator("#app-wrap").wait_for(state="visible", timeout=5000)
 
 
-@pytest.fixture(autouse=True)
-def _reset_relationships_db(base_url_fixture):
-    _wipe_groups(base_url_fixture)
-    yield
-
-
 class TestGroupDetailActionBar:
     def test_action_bar_renders_three_buttons(
-        self, standalone_page, base_url_fixture
+        self, worker_data, base_url_fixture
     ):
-        page = standalone_page
-        fellows = _real_fellows(base_url_fixture)
-        g = _create_group(
-            base_url_fixture,
-            name="Action bar test",
+        page = worker_data.page
+        fellows = _real_fellows(worker_data)
+        g = worker_data.create_group(
+            "Action bar test",
             fellow_record_ids=[f[0] for f in fellows[:1]],
         )
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
+        worker_data.wait()
         _wait_for_directory(page)
         bar = page.locator(".group-action-bar")
         expect(bar).to_be_visible(timeout=5000)
@@ -130,17 +77,17 @@ class TestGroupDetailActionBar:
         expect(bcc_pill).not_to_have_class(re.compile(r"\bgroup-mode-pill--active\b"))
 
     def test_contact_href_under_threshold_is_mailto_cc(
-        self, standalone_page, base_url_fixture
+        self, worker_data, base_url_fixture
     ):
-        page = standalone_page
-        fellows = _real_fellows(base_url_fixture)
+        page = worker_data.page
+        fellows = _real_fellows(worker_data)
         chosen = fellows[:3]
-        g = _create_group(
-            base_url_fixture,
-            name="Mailto small",
+        g = worker_data.create_group(
+            "Mailto small",
             fellow_record_ids=[f[0] for f in chosen],
         )
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
+        worker_data.wait()
         _wait_for_directory(page)
         contact = page.locator("#group-action-contact")
         expect(contact).to_have_attribute(
@@ -148,16 +95,16 @@ class TestGroupDetailActionBar:
         )
 
     def test_cc_bcc_toggle_rewrites_href(
-        self, standalone_page, base_url_fixture
+        self, worker_data, base_url_fixture
     ):
-        page = standalone_page
-        fellows = _real_fellows(base_url_fixture)
-        g = _create_group(
-            base_url_fixture,
-            name="Toggle test",
+        page = worker_data.page
+        fellows = _real_fellows(worker_data)
+        g = worker_data.create_group(
+            "Toggle test",
             fellow_record_ids=[f[0] for f in fellows[:2]],
         )
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
+        worker_data.wait()
         _wait_for_directory(page)
         expect(page.locator("#group-action-contact")).to_have_attribute(
             "href", re.compile(r"^mailto:\?cc=")
@@ -175,19 +122,19 @@ class TestGroupDetailActionBar:
         )
 
     def test_soft_warning_banner_at_warn_threshold(
-        self, standalone_page, base_url_fixture
+        self, worker_data, base_url_fixture
     ):
-        page = standalone_page
-        fellows = _real_fellows(base_url_fixture)
+        page = worker_data.page
+        fellows = _real_fellows(worker_data)
         # 60 recipients — comfortably between WARN (50) and HARD (100).
         chosen = fellows[:60]
         assert len(chosen) == 60, "dev dataset must have ≥ 60 fellows with emails"
-        g = _create_group(
-            base_url_fixture,
-            name="Soft warn",
+        g = worker_data.create_group(
+            "Soft warn",
             fellow_record_ids=[f[0] for f in chosen],
         )
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
+        worker_data.wait()
         _wait_for_directory(page)
         soft = page.locator(".group-contact-banner--soft")
         expect(soft).to_be_visible(timeout=5000)
@@ -198,7 +145,7 @@ class TestGroupDetailActionBar:
         )
 
     def test_hard_threshold_strips_href_and_copies_to_clipboard(
-        self, standalone_page, base_url_fixture, context
+        self, worker_data, base_url_fixture, context
     ):
         # navigator.clipboard.writeText needs the permission in headless
         # Chromium. Granting at the browser-context level keeps this
@@ -206,16 +153,16 @@ class TestGroupDetailActionBar:
         context.grant_permissions(
             ["clipboard-read", "clipboard-write"], origin=base_url_fixture
         )
-        page = standalone_page
-        fellows = _real_fellows(base_url_fixture)
+        page = worker_data.page
+        fellows = _real_fellows(worker_data)
         chosen = fellows[:120]
         assert len(chosen) == 120, "dev dataset must have ≥ 120 fellows with emails"
-        g = _create_group(
-            base_url_fixture,
-            name="Hard limit",
+        g = worker_data.create_group(
+            "Hard limit",
             fellow_record_ids=[f[0] for f in chosen],
         )
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
+        worker_data.wait()
         _wait_for_directory(page)
         # Hard banner visible.
         hard = page.locator(".group-contact-banner--hard")
@@ -238,25 +185,24 @@ class TestGroupDetailActionBar:
 
 class TestGroupDetailExportPanel:
     def test_export_panel_toggles_open_and_closed(
-        self, standalone_page, base_url_fixture
+        self, worker_data, base_url_fixture
     ):
         """Panel show/hide. Actual export downloads are exercised in
-        tests/e2e/test_groups_export.py once PR 5 wires the action."""
-        page = standalone_page
-        fellows = _real_fellows(base_url_fixture)
-        g = _create_group(
-            base_url_fixture,
-            name="Export panel",
+        tests/e2e/test_groups_export.py."""
+        page = worker_data.page
+        fellows = _real_fellows(worker_data)
+        g = worker_data.create_group(
+            "Export panel",
             fellow_record_ids=[f[0] for f in fellows[:1]],
         )
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
+        worker_data.wait()
         _wait_for_directory(page)
         panel = page.locator("#group-export-panel")
         expect(panel).to_be_hidden()
         page.locator("#group-action-export").click()
         expect(panel).to_be_visible()
-        # PR 5 wires the Export button — it must be enabled (downloads
-        # are tested separately).
+        # Export button is enabled.
         expect(page.locator(".group-export-go")).to_be_enabled()
         # Cancel hides it again.
         page.locator(".group-export-cancel").click()
@@ -265,20 +211,20 @@ class TestGroupDetailExportPanel:
 
 class TestGroupDetailEditNav:
     def test_edit_button_navigates_and_enters_edit_mode(
-        self, standalone_page, base_url_fixture
+        self, worker_data, base_url_fixture
     ):
         """Click ✎ Edit members on the detail page → URL flips to
         #/edit/<id> and the yellow edit-mode banner appears.
         Deeper edit-mode behaviour (auto-save, cancel-edits, etc.)
         is covered in tests/e2e/test_groups_edit.py."""
-        page = standalone_page
-        fellows = _real_fellows(base_url_fixture)
-        g = _create_group(
-            base_url_fixture,
-            name="Edit nav",
+        page = worker_data.page
+        fellows = _real_fellows(worker_data)
+        g = worker_data.create_group(
+            "Edit nav",
             fellow_record_ids=[f[0] for f in fellows[:1]],
         )
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
+        worker_data.wait()
         _wait_for_directory(page)
         page.locator("#group-action-edit").click()
         page.wait_for_url(lambda u: f"#/edit/{g['id']}" in u, timeout=3000)
@@ -289,16 +235,16 @@ class TestGroupDetailEditNav:
 
 class TestGroupDetailNoteEdit:
     def test_inline_note_edit_saves_and_persists(
-        self, standalone_page, base_url_fixture
+        self, worker_data, base_url_fixture
     ):
-        page = standalone_page
-        fellows = _real_fellows(base_url_fixture)
-        g = _create_group(
-            base_url_fixture,
-            name="Note flow",
+        page = worker_data.page
+        fellows = _real_fellows(worker_data)
+        g = worker_data.create_group(
+            "Note flow",
             fellow_record_ids=[f[0] for f in fellows[:1]],
         )
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
+        worker_data.wait()
         _wait_for_directory(page)
         # No note → "add a note" link.
         edit_link = page.locator("#group-detail-note-edit")
@@ -315,23 +261,24 @@ class TestGroupDetailNoteEdit:
         expect(page.locator("#group-detail-note-edit")).to_have_text("edit")
         # Persists across reload.
         page.reload(wait_until="domcontentloaded")
+        worker_data.wait()
         _wait_for_directory(page)
         expect(page.locator(".group-detail-note-text")).to_contain_text(
             "for the Wellington roundtable"
         )
 
     def test_inline_note_edit_cancel_restores_original(
-        self, standalone_page, base_url_fixture
+        self, worker_data, base_url_fixture
     ):
-        page = standalone_page
-        fellows = _real_fellows(base_url_fixture)
-        g = _create_group(
-            base_url_fixture,
-            name="Cancel flow",
+        page = worker_data.page
+        fellows = _real_fellows(worker_data)
+        g = worker_data.create_group(
+            "Cancel flow",
             note="original note",
             fellow_record_ids=[f[0] for f in fellows[:1]],
         )
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
+        worker_data.wait()
         _wait_for_directory(page)
         expect(page.locator(".group-detail-note-text")).to_contain_text("original note")
         page.locator("#group-detail-note-edit").click()
