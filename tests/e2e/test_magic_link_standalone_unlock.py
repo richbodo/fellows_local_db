@@ -125,8 +125,13 @@ def test_standalone_unlock_lands_session_cookie_and_loads_directory(
     assert "/unlock/" not in deploy_page.evaluate("location.hash")
 
     # 4. Directory mounted (not the gate). #app-wrap drops `hidden` once the
-    #    directory route renders; #directory-list is its inner list container.
-    deploy_page.wait_for_selector("#directory-list", state="attached", timeout=8000)
+    #    directory route renders; wait on the visibility flip explicitly
+    #    (rather than just on #directory-list being attached, which is
+    #    static markup and resolves before bootDirectoryAsApp runs).
+    deploy_page.wait_for_function(
+        "() => { var el = document.getElementById('app-wrap'); return el && !el.classList.contains('hidden'); }",
+        timeout=8000,
+    )
     app_wrap_hidden = deploy_page.evaluate(
         "document.getElementById('app-wrap')?.classList.contains('hidden')"
     )

@@ -191,22 +191,32 @@ class TestBugReportHttpCapture:
         self, context, base_url_fixture
     ):
         page = context.new_page()
-        # Marker set + standalone fixture path forces app boot via API
-        # provider on dev (where fellows.db isn't fetched in OPFS by default).
+        # Marker set: shouldActAsApp() returns true → bootDirectoryAsApp.
+        # Post-cutover the worker tries /fellows.db first; route both that
+        # and /api/fellows + /api/auth/status to push the boot through to
+        # the email-gate fallback where the bug-report button lives.
         page.add_init_script(
             "window.localStorage.setItem('fellows_authenticated_once', '1');"
+        )
+        page.route(
+            "**/fellows.db",
+            lambda r: r.fulfill(status=404, body="Not Found"),
         )
         page.route(
             "**/api/fellows*",
             lambda r: r.fulfill(status=404, body="Not Found"),
         )
+        page.route(
+            "**/api/auth/status",
+            lambda r: r.fulfill(status=503, body="auth check unavailable"),
+        )
         try:
             page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
             # Boot will fail; surfaces will switch to email gate fallback.
-            # Wait for some quiescence and then click the gate's bug-report
-            # button (which is reliably present in the gate fallback DOM).
+            # The chain is longer post-cutover (worker spawn + ensureFellowsDb
+            # before falling through), so wait up to 15s.
             page.locator("#install-gate-private").wait_for(
-                state="visible", timeout=5000
+                state="visible", timeout=15000
             )
             page.locator("#bug-report-button-gate").click()
             body = page.locator("#bug-report-textarea").input_value()

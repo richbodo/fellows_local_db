@@ -1,10 +1,14 @@
 """E2E: session-expired / 401 response serves cached data instead of booting to the email gate.
 
 PR #50 ("install once, works forever"): a stale session must not lock a
-user out of data they already downloaded. When /api/fellows returns 401,
-the boot chain falls back to the IndexedDB cache populated by a prior
-successful boot. The build badge's server line flips to "offline · using
-cache" to keep the user oriented.
+user out of data they already downloaded. The implementation moved with
+Phase 1 of plans/local_first_worker_architecture.md — the directory
+data source is now the worker-owned fellows.db, not /api/fellows
+directly. The user-visible invariant is unchanged. To trigger the
+fallback path post-cutover both /fellows.db (worker source) AND
+/api/fellows (api+idb fallback source) need to fail; the IDB cache
+remains the third-tier fallback that backs invariant 10 until Phase 6
+retires it.
 """
 import json
 
@@ -15,6 +19,7 @@ from conftest import _STANDALONE_DISPLAY_INIT
 
 
 API_FELLOWS = "**/api/fellows**"
+FELLOWS_DB = "**/fellows.db"
 
 
 def _seed_indexeddb_with_fellows(page, fellows):
@@ -81,29 +86,41 @@ class TestOfflineOnlyMode:
     """Behaviour when /api/fellows returns 401 during boot."""
 
     def test_401_with_cached_data_shows_directory_from_cache(self, context, base_url_fixture):
+        # Post-cutover, the worker stores fellows.db in OPFS so a
+        # returning visit with 401 still shows real data (the worker
+        # doesn't re-fetch). To exercise the IDB-cache fallback path
+        # explicitly, this test simulates a profile where the worker's
+        # OPFS cache is empty (cold-start equivalent) by routing
+        # /fellows.db to 401 BEFORE any successful boot, plus seeding
+        # IDB before any boot — so the boot's only local data source
+        # is the IDB seed.
         page = _make_standalone_page(context)
         try:
-            # First visit with the real dev server — this populates IndexedDB
-            # with dev-sample fellows via the app's normal boot. We then
-            # overwrite IndexedDB with a known payload before the 401 reload.
-            page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
-            page.locator("#loading").wait_for(state="hidden", timeout=10000)
-            # Wait until the real API has completed getFull + the IndexedDB
-            # save scheduled from it. Without this, our overwrite can race
-            # with the (asynchronous) save, and the app's fresh-server data
-            # wins on reload.
-            page.wait_for_function(
-                "() => !!(window.indexedDB)",
-                timeout=5000,
+            # Route 401 BEFORE first navigation so the worker never
+            # successfully populates its OPFS cache.
+            context.route(
+                FELLOWS_DB,
+                lambda r: r.fulfill(status=401, body="session expired"),
             )
-            page.wait_for_timeout(500)
-
-            _seed_indexeddb_with_fellows(page, SAMPLE_FELLOWS)
-
             context.route(
                 API_FELLOWS,
                 lambda r: r.fulfill(status=401, body="session expired"),
             )
+            # Navigate once to set up a context where IndexedDB exists
+            # (we need to be on the origin to be able to seed it). The
+            # boot will fail to load fellows from anywhere; we'll seed
+            # IDB and reload to get the cache-fallback render.
+            page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+            # Don't wait for #loading hide here — boot may render the
+            # boot-failure panel. We just need the origin to be loaded
+            # so indexedDB is reachable.
+            page.wait_for_function(
+                "() => !!(window.indexedDB)",
+                timeout=5000,
+            )
+            _seed_indexeddb_with_fellows(page, SAMPLE_FELLOWS)
+            # Reload — boot path now sees IDB cache populated, falls back
+            # to it after worker + api both 401.
             page.reload(wait_until="domcontentloaded")
             page.locator("#loading").wait_for(state="hidden", timeout=10000)
 
@@ -121,6 +138,7 @@ class TestOfflineOnlyMode:
             expect(page.locator("#install-landing")).to_be_hidden()
             expect(page.locator("#auth-error-panel")).to_be_hidden()
         finally:
+            context.unroute(FELLOWS_DB)
             context.unroute(API_FELLOWS)
             page.close()
 
@@ -133,6 +151,12 @@ class TestOfflineOnlyMode:
         # No standalone init — this is the browser-tab-as-app path.
         page.add_init_script(
             "window.localStorage.setItem('fellows_authenticated_once', '1');"
+        )
+        # Both /fellows.db (worker source) and /api/fellows (api+idb
+        # fallback) need to fail to reach the no-cache code path.
+        context.route(
+            FELLOWS_DB,
+            lambda r: r.fulfill(status=401, body="session expired"),
         )
         context.route(
             API_FELLOWS,
@@ -156,11 +180,15 @@ class TestOfflineOnlyMode:
         )
         try:
             page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
-            page.wait_for_timeout(500)
-            # No cache → fall back to email gate via startBrowserUx.
-            expect(page.locator("#install-gate-private")).to_be_visible()
+            # Wait for the gate fallback to render. The boot path:
+            # (a) worker tries ensureFellowsDb → 401 → falls back to api+idb.
+            # (b) api+idb getList → 401 → tryListFromCache → no IDB cache.
+            # (c) bootDirectoryAsApp catch → !standalone + hasAuth → startBrowserUx.
+            # (d) startBrowserUx sees authStatus=200 unauthenticated → email gate.
+            page.locator("#install-gate-private").wait_for(state="visible", timeout=10000)
             expect(page.locator("#auth-error-panel")).to_be_hidden()
         finally:
+            context.unroute(FELLOWS_DB)
             context.unroute(API_FELLOWS)
             context.unroute("**/api/auth/status")
             page.close()
