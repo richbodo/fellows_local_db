@@ -2286,7 +2286,17 @@
       }
     };
     worker.onerror = function (ev) {
-      bootDebugPush('sqlite-worker error: ' + (ev && ev.message || 'unknown'));
+      var msg = (ev && ev.message) || 'unknown';
+      bootDebugPush('sqlite-worker error: ' + msg);
+      // A worker-script error (e.g. importScripts failed because the
+      // bundle 404'd) silently breaks every pending RPC otherwise. Fail
+      // them all so the caller can fall back instead of hanging.
+      pending.forEach(function (slot) {
+        var e = new Error('worker error: ' + msg);
+        e.workerScriptError = true;
+        slot.reject(e);
+      });
+      pending.clear();
     };
     return {
       call: function (op, args, transferables) {
@@ -2464,6 +2474,14 @@
   // can't be brought up. If the gate decision lands at email-gate or
   // install-landing, the caller terminates the worker (no network
   // requests have happened yet; it's safe to throw away).
+  // Worker init timeout. A bundle-load failure (404 / network error /
+  // syntax error in the worker) can leave the Worker constructor
+  // succeeding but no script ever running, so the init RPC never gets
+  // a response. 8s covers a slow first-load on cold cache; anything
+  // longer means something is really wrong and we should bail to the
+  // API+IDB fallback rather than hang the boot.
+  var WORKER_INIT_TIMEOUT_MS = 8000;
+
   function spawnWorkerAndInit() {
     bootDebugPush('worker: spawn + init starting');
     var worker;
@@ -2474,7 +2492,13 @@
       return Promise.reject(new Error('worker construction failed: ' + (ce && ce.message || ce)));
     }
     var rpc = createSqliteWorkerRpc(worker);
-    return rpc.call('init', {}).then(function (initResult) {
+    var initPromise = rpc.call('init', {});
+    var timeoutPromise = new Promise(function (_, reject) {
+      setTimeout(function () {
+        reject(new Error('worker init timed out after ' + WORKER_INIT_TIMEOUT_MS + 'ms'));
+      }, WORKER_INIT_TIMEOUT_MS);
+    });
+    return Promise.race([initPromise, timeoutPromise]).then(function (initResult) {
       bootDebugPush(
         'worker: init OK rpc=' + (initResult && initResult.workerRpcVersion) +
         ' schema=' + (initResult && initResult.schemaVersion) +
