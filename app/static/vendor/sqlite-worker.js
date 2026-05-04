@@ -1,35 +1,56 @@
-// EHF Fellows local DB — sqlite-wasm worker (relationships.db only).
+// EHF Fellows local DB — sqlite-wasm worker (sole OPFS owner).
 //
-// Runs sqlite-wasm + OPFS-SAH-Pool in dedicated-worker scope. Used as a
-// fallback when the main thread can't init SAH-pool because Chrome's
-// configuration strips FileSystemFileHandle.prototype.createSyncAccessHandle
-// from the main-thread prototype (PR #95–#98 found this on a vanilla
-// Chrome 147 install). Workers expose the API even when the main thread
-// hides it.
+// Runs sqlite-wasm + OPFS-SAH-Pool in dedicated-worker scope and is the
+// only context in the app permitted to call navigator.storage.getDirectory
+// or open a FileSystemSyncAccessHandle. The main thread is an RPC client
+// per plans/local_first_worker_architecture.md (Phase 1) and
+// docs/Architecture.md § Worker-owned OPFS.
 //
-// Scope: relationships.db only. The fellows directory (read-only contact
-// data) keeps using the API provider on the main thread — no need to
-// re-download a ~1.5MB fellows.db into the worker just to read it.
-// The hybrid provider on the main thread (createHybridApiAndWorkerProvider
-// in app.js) routes fellows queries to API and relationships queries here.
+// Two databases live here:
+//   - relationships.db (read-write user-authored data: groups, members,
+//     fellow_tags, fellow_notes, settings)
+//   - fellows.db (read-only contact data; cached locally, refreshed by the
+//     page-driven ensureFellowsDb RPC; SHA-keyed refresh ships in Phase 3)
 //
 // Protocol:
 //   main → worker: { id, op, args }
 //   worker → main: { id, ok: true,  result }
 //                  { id, ok: false, error, errorName?, stack? }
 //
-// First message must be op='init' with { gitSha }.
+// First message must be op='init'. The init response is a handshake blob:
+//   { ok, workerRpcVersion, schemaVersion, buildLabel,
+//     opfsCapable, hasFellowsDb, hasRelationshipsDb,
+//     poolFiles, trace }
+// The page reads workerRpcVersion + schemaVersion and refuses mutating
+// RPCs on mismatch (passive — the SW's existing reload banner is the
+// canonical update affordance).
 
 'use strict';
 
 // Sibling import — this file lives in /vendor/ alongside sqlite3.js.
 // The relative path is what makes sqlite-wasm's scriptDirectory resolve
 // to /vendor/, so its internal locateFile('sqlite3.wasm') finds the
-// companion /vendor/sqlite3.wasm. (Earlier this worker lived at
-// /sqlite-worker.js and the wasm look-up resolved to /sqlite3.wasm — 404.)
+// companion /vendor/sqlite3.wasm.
 importScripts('./sqlite3.js');
 
-// ===== Constants (mirrored from app.js — keep in sync) ======================
+// ===== Compatibility constants ==============================================
+// Bumped only when the request/response shape of any RPC changes (parameters,
+// return shape, error semantics). A pure code refactor that preserves the
+// wire shape leaves it alone. Page reads this in the init handshake and
+// refuses mutating RPCs on mismatch.
+var WORKER_RPC_VERSION = 1;
+
+// Same value as relationships.db's PRAGMA user_version. Bumped only on
+// schema migrations. Mirrored from app/relationships.py:SCHEMA_VERSION.
+var RELATIONSHIPS_SCHEMA_VERSION = 1;
+
+// Substituted at build time by build/build_pwa.py and at serve time by
+// app/server.py (same substitution path as app.js / sw.js). If you ever
+// see the literal `__FELLOWS_UI_DIAG__` in diagnostics, the build pipeline
+// didn't touch this file.
+var BUILD_LABEL = '__FELLOWS_UI_DIAG__';
+
+// ===== Schema (mirrored from app.js — keep in sync) =========================
 
 var RELATIONSHIPS_SCHEMA_SQL =
   'CREATE TABLE IF NOT EXISTS groups (' +
@@ -62,10 +83,71 @@ var RELATIONSHIPS_SCHEMA_SQL =
   '  value TEXT' +
   ');';
 
+// ===== Fellows.db column / label tables (mirrored from app/server.py) =======
+
+var FELLOW_COLUMNS = [
+  'record_id', 'slug', 'name', 'bio_tagline', 'fellow_type', 'cohort',
+  'contact_email', 'key_links', 'key_links_urls', 'image_url',
+  'currently_based_in', 'search_tags', 'fellow_status', 'gender_pronouns',
+  'ethnicity', 'primary_citizenship', 'global_regions_currently_based_in',
+  'has_image'
+];
+
+// Friendly labels used by getStats — mirror app/server.py:get_stats.
+var COL_LABELS = {
+  name: 'Name',
+  bio_tagline: 'Bio / Tagline',
+  fellow_type: 'Fellow Type',
+  cohort: 'Cohort',
+  contact_email: 'Contact Email',
+  key_links: 'Key Links',
+  image_url: 'Image URL',
+  currently_based_in: 'Currently Based In',
+  search_tags: 'Search Tags',
+  fellow_status: 'Fellow Status',
+  gender_pronouns: 'Gender / Pronouns',
+  ethnicity: 'Ethnicity',
+  primary_citizenship: 'Primary Citizenship',
+  global_regions_currently_based_in: 'Global Regions Based In'
+};
+
+var EXTRA_LABELS = {
+  all_citizenships: 'All Citizenships',
+  ventures: 'Ventures',
+  industries: 'Industries',
+  career_highlights: 'Career Highlights',
+  key_networks: 'Key Networks',
+  how_im_looking_to_support_the_nz_ecosystem: 'How Supporting NZ Ecosystem',
+  what_is_your_main_mode_of_working: 'Main Mode of Working',
+  do_you_consider_yourself_an_investor_in_one_or_more_of_these_categories: 'Investor Categories',
+  mobile_number: 'Mobile Number',
+  five_things_to_know: 'Five Things to Know',
+  skills_to_give: 'Skills to Give',
+  skills_to_receive: 'Skills to Receive'
+};
+
+// ===== Backup / staging / meta-file constants ===============================
+
 var BACKUP_PREFIX = 'relationships.db.bak.';
-var BACKUP_SENTINEL = 'last_seen_sha.txt';
-var BACKUP_KEEP = 3;
+// Per Phase 0 Q-C resolution: rotation increased from 3 to 5 (files are
+// tiny — tens of KB even for an active user). Rationale lives in
+// docs/persistence_and_upgrades.md § Auto-backup of `relationships.db`.
+var BACKUP_KEEP = 5;
+// Per Phase 0 Q-C: skip the per-boot snapshot if the most recent
+// backup is younger than this. Keeps debug-session reloads from
+// thrashing the rotation.
+var BACKUP_DEBOUNCE_MS = 60 * 60 * 1000;
+
+// One-time cleanup target. The pre-Phase-1 main-thread auto-backup wrote
+// this sentinel; the worker-owned debounce derives its trigger from the
+// newest bak.<ISO> filename instead. Kept so we can removeEntry() it on
+// the first boot of a P1+ build.
+var LEGACY_SENTINEL = 'last_seen_sha.txt';
+
 var RESTORE_STAGING_SLOT = 'relationships.db.restore-staging';
+var FELLOWS_STAGING_SLOT = 'fellows.db.staging';
+var FELLOWS_META_FILE = 'fellows.db.meta.json';
+
 var REQUIRED_RESTORE_TABLES = ['groups', 'group_members', 'fellow_tags', 'fellow_notes', 'settings'];
 
 // ===== State ================================================================
@@ -73,7 +155,7 @@ var REQUIRED_RESTORE_TABLES = ['groups', 'group_members', 'fellow_tags', 'fellow
 var sqlite3 = null;
 var poolUtil = null;
 var relDb = null;
-var gitSha = null;
+var fellowsDb = null;
 var bootTrace = [];
 
 function trace(msg) { bootTrace.push(new Date().toISOString() + ' ' + String(msg)); }
@@ -105,7 +187,7 @@ function dbRun(db, sql, bind) {
 
 function bootstrapRelationshipsSchema(db) {
   db.exec(RELATIONSHIPS_SCHEMA_SQL);
-  db.exec('PRAGMA user_version = 1');
+  db.exec('PRAGMA user_version = ' + RELATIONSHIPS_SCHEMA_VERSION);
 }
 
 function nowIsoSecond() {
@@ -122,6 +204,33 @@ function dedupeRecordIds(ids) {
     if (!s || seen[s]) continue;
     seen[s] = 1;
     out.push(s);
+  }
+  return out;
+}
+
+// Mirrors app/server.py:row_to_fellow. Parses the key_links_urls JSON
+// column and merges extra_json into the top-level object so the API
+// returns all original fields without per-field schema knowledge.
+function rowToFellow(row) {
+  var out = {};
+  for (var i = 0; i < FELLOW_COLUMNS.length; i++) {
+    var key = FELLOW_COLUMNS[i];
+    var val = row[key];
+    if (key === 'key_links_urls' && val !== null && val !== undefined) {
+      try { out[key] = JSON.parse(val); } catch (e) { out[key] = val; }
+    } else {
+      out[key] = val !== undefined ? val : null;
+    }
+  }
+  if (row.extra_json) {
+    try {
+      var extra = JSON.parse(row.extra_json);
+      if (extra && typeof extra === 'object' && !Array.isArray(extra)) {
+        for (var k in extra) {
+          if (Object.prototype.hasOwnProperty.call(extra, k)) out[k] = extra[k];
+        }
+      }
+    } catch (e2) {}
   }
   return out;
 }
@@ -162,6 +271,16 @@ async function _opfsReadBinary(name) {
   return new Uint8Array(await f.arrayBuffer());
 }
 
+async function _opfsRemoveEntry(name) {
+  try {
+    var root = await _opfsRoot();
+    await root.removeEntry(name);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 async function listRelationshipsBackups() {
   try {
     var root = await _opfsRoot();
@@ -191,23 +310,30 @@ async function _rotateRelationshipsBackups() {
   }
 }
 
+// ===== Auto-backup (debounced per-boot) =====================================
+
+// Per Phase 0 Q-C: trigger flips from "build-SHA differs" to "newest
+// bak.<ISO> older than 1 hour." Recovery use case ("undo what I just
+// did") is keyed to user-edit cadence, not deploy cadence. The
+// last_seen_sha.txt sentinel is retired; debounce reads the most recent
+// bak filename's timestamp instead.
 async function maybeBackupRelationshipsDb() {
-  if (!gitSha) {
-    trace('backup: skipped (no build SHA)');
-    return { backedUp: false, reason: 'no SHA' };
-  }
   var poolFiles = [];
   try { poolFiles = poolUtil.getFileNames(); } catch (e) {}
-  var hasRelDb = poolFiles.indexOf('relationships.db') !== -1;
-  var prevSha = await _opfsReadText(BACKUP_SENTINEL);
-  if (!hasRelDb) {
-    try { await _opfsWriteText(BACKUP_SENTINEL, gitSha); } catch (e) {}
-    trace('backup: skipped (no relationships.db yet)');
+  if (poolFiles.indexOf('relationships.db') === -1) {
+    trace('backup: skipped (no relationships.db yet — first install)');
     return { backedUp: false, reason: 'first install' };
   }
-  if (prevSha === gitSha) {
-    trace('backup: skipped (no SHA change)');
-    return { backedUp: false, reason: 'no SHA change' };
+  var backups = await listRelationshipsBackups();
+  if (backups.length) {
+    var newest = backups[backups.length - 1];
+    var ageMs = Date.now() - newest.lastModified;
+    if (ageMs >= 0 && ageMs < BACKUP_DEBOUNCE_MS) {
+      trace('backup: skipped (newest ' + newest.name + ' is ' +
+            Math.round(ageMs / 1000) + 's old, debounce ' +
+            Math.round(BACKUP_DEBOUNCE_MS / 1000) + 's)');
+      return { backedUp: false, reason: 'debounced' };
+    }
   }
   var bytes;
   try { bytes = poolUtil.exportFile('relationships.db'); }
@@ -216,7 +342,6 @@ async function maybeBackupRelationshipsDb() {
     return { backedUp: false, reason: 'export failed' };
   }
   if (!bytes || !bytes.byteLength) {
-    try { await _opfsWriteText(BACKUP_SENTINEL, gitSha); } catch (e) {}
     return { backedUp: false, reason: 'empty file' };
   }
   var ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -227,11 +352,7 @@ async function maybeBackupRelationshipsDb() {
     return { backedUp: false, reason: 'write failed' };
   }
   await _rotateRelationshipsBackups();
-  try { await _opfsWriteText(BACKUP_SENTINEL, gitSha); } catch (e) {}
-  trace(
-    'backup: wrote ' + backupName + ' (' + bytes.byteLength + ' bytes); ' +
-    'sentinel ' + (prevSha || '<none>') + ' → ' + gitSha
-  );
+  trace('backup: wrote ' + backupName + ' (' + bytes.byteLength + ' bytes)');
   return { backedUp: true, name: backupName, size: bytes.byteLength };
 }
 
@@ -253,6 +374,28 @@ async function snapshotRelationshipsDbToBackup() {
   trace('snapshot: wrote ' + backupName + ' (' + bytes.byteLength + ' bytes)');
   return { backedUp: true, name: backupName, size: bytes.byteLength };
 }
+
+// ===== fellows.db.meta.json (freshness sidecar) =============================
+// Sibling of fellows.db at the OPFS root, outside the SAH-pool dir, so a
+// relationships.db restore can't desync fellows.db freshness. Phase 1 just
+// records {sha, fetched_at} on initial cold-start fetch; Phase 3 layers the
+// SHA-keyed refresh on top.
+
+async function readFellowsMeta() {
+  var raw = await _opfsReadText(FELLOWS_META_FILE);
+  if (!raw) return null;
+  try {
+    var obj = JSON.parse(raw);
+    if (obj && typeof obj === 'object') return obj;
+  } catch (e) {}
+  return null;
+}
+
+async function writeFellowsMeta(meta) {
+  await _opfsWriteText(FELLOWS_META_FILE, JSON.stringify(meta));
+}
+
+// ===== Inspect bytes (used by import + listRelationshipsBackups) =============
 
 async function inspectBytes(bytes) {
   if (!poolUtil) return { valid: false, error: 'pool util unavailable' };
@@ -302,14 +445,31 @@ async function inspectBytes(bytes) {
   }
 }
 
+// ===== fellows.db lifecycle =================================================
+
+function _openFellowsDbIfPresent() {
+  var poolFiles = [];
+  try { poolFiles = poolUtil.getFileNames(); } catch (e) {}
+  if (poolFiles.indexOf('fellows.db') === -1) {
+    return false;
+  }
+  try {
+    fellowsDb = new poolUtil.OpfsSAHPoolDb('fellows.db');
+    trace('fellows.db: open OK');
+    return true;
+  } catch (e) {
+    trace('fellows.db: open failed (' + (e && e.message || e) + ')');
+    fellowsDb = null;
+    return false;
+  }
+}
+
 // ===== RPC handlers =========================================================
 
 var handlers = {};
 
-handlers.init = async function (args) {
-  args = args || {};
-  gitSha = args.gitSha || null;
-  trace('init: starting');
+handlers.init = async function () {
+  trace('init: starting (build=' + BUILD_LABEL + ')');
   if (typeof globalThis.sqlite3InitModule !== 'function') {
     throw new Error('sqlite3InitModule missing in worker (vendor/sqlite3.js failed to load?)');
   }
@@ -321,22 +481,41 @@ handlers.init = async function (args) {
   poolUtil = await sqlite3.installOpfsSAHPoolVfs();
   trace('installOpfsSAHPoolVfs: OK');
 
-  // Auto-backup before opening relationships.db for app use, mirrors what
-  // the main-thread sqlite provider does on initOpfsDataProvider.
+  // One-time cleanup of the pre-P1 build-SHA sentinel (now retired).
+  // No-op on profiles that never had it (clean installs, post-P1 boots).
+  var sentinelRemoved = await _opfsRemoveEntry(LEGACY_SENTINEL);
+  if (sentinelRemoved) trace('cleanup: removed legacy ' + LEGACY_SENTINEL);
+
+  // Auto-backup runs before opening relationships.db for app use, so the
+  // snapshot reflects the user's last-saved state, not anything mutated
+  // this session. Failure is non-fatal — logged via bootTrace.
   await maybeBackupRelationshipsDb();
 
+  var hasRelationshipsDb = false;
   try {
     relDb = new poolUtil.OpfsSAHPoolDb('relationships.db');
     bootstrapRelationshipsSchema(relDb);
+    hasRelationshipsDb = true;
     trace('relationships.db: open + schema OK');
   } catch (relErr) {
     trace('relationships.db: open failed (' + (relErr && relErr.message || relErr) + ')');
     relDb = null;
   }
 
+  // Open fellows.db if it's already on disk. Cold-start fetch is the
+  // page-driven ensureFellowsDb RPC, gated behind directory-mode commit
+  // (per L4a). Init is network-free.
+  var hasFellowsDb = _openFellowsDbIfPresent();
+
   return {
     ok: true,
-    relDbOpen: !!relDb,
+    workerRpcVersion: WORKER_RPC_VERSION,
+    schemaVersion: RELATIONSHIPS_SCHEMA_VERSION,
+    buildLabel: BUILD_LABEL,
+    opfsCapable: true,
+    hasRelationshipsDb: hasRelationshipsDb,
+    relDbOpen: hasRelationshipsDb,
+    hasFellowsDb: hasFellowsDb,
     poolFiles: (function () { try { return poolUtil.getFileNames(); } catch (e) { return []; } })(),
     trace: bootTrace.slice()
   };
@@ -362,8 +541,7 @@ handlers.getGroup = async function (args) {
   var row = dbSelectOne(relDb, 'SELECT * FROM groups WHERE id = ?', [id]);
   if (!row) return null;
   // Members come back as record_ids only; main thread resolves names from
-  // its in-memory cache (populated by getList/getFull). Mirrors how the
-  // main-thread sqlite provider does it (attachMemberNames in app.js).
+  // its in-memory cache (populated by getList/getFull).
   var members = dbSelectAll(
     relDb, 'SELECT fellow_record_id AS record_id FROM group_members WHERE group_id = ?', [id]
   );
@@ -546,8 +724,263 @@ handlers.restoreRelationshipsBackup = async function (args) {
   return await handlers.importRelationshipsBytes({ bytes: bytes });
 };
 
-// Diagnostics — pulls the worker's own boot trace.
+// ----- fellows.db query handlers (sole local read source post-cutover) ------
+
+function _requireFellowsDb() {
+  if (!fellowsDb) {
+    var err = new Error('fellows.db not open — page must call ensureFellowsDb first');
+    err.code = 'fellows_db_not_open';
+    throw err;
+  }
+  return fellowsDb;
+}
+
+handlers.getList = async function () {
+  var db = _requireFellowsDb();
+  var rows = dbSelectAll(
+    db,
+    'SELECT record_id, slug, name, ' +
+      "CASE WHEN contact_email IS NOT NULL AND contact_email != '' THEN 1 ELSE 0 END " +
+      'AS has_contact_email FROM fellows ORDER BY name ASC',
+    null
+  );
+  return rows.map(function (r) {
+    return {
+      record_id: r.record_id,
+      slug: r.slug,
+      name: r.name,
+      has_contact_email: !!r.has_contact_email
+    };
+  });
+};
+
+handlers.getFull = async function () {
+  var db = _requireFellowsDb();
+  var rows = dbSelectAll(db, 'SELECT * FROM fellows ORDER BY name ASC', null);
+  return rows.map(rowToFellow);
+};
+
+handlers.getOne = async function (args) {
+  var db = _requireFellowsDb();
+  var slugOrId = args && args.slug;
+  if (!slugOrId) return null;
+  var row = dbSelectOne(
+    db,
+    'SELECT * FROM fellows WHERE slug = ? OR record_id = ? LIMIT 1',
+    [slugOrId, slugOrId]
+  );
+  return row ? rowToFellow(row) : null;
+};
+
+handlers.search = async function (args) {
+  var db = _requireFellowsDb();
+  var q = args && args.q;
+  if (!q || !q.replace(/^\s+|\s+$/g, '')) return [];
+  q = q.replace(/^\s+|\s+$/g, '');
+  if (q.length > 200) q = q.slice(0, 200);
+  var rows = dbSelectAll(
+    db,
+    'SELECT f.* FROM fellows f WHERE f.rowid IN (' +
+      'SELECT rowid FROM fellows_fts WHERE fellows_fts MATCH ?' +
+      ') ORDER BY f.name ASC',
+    [q]
+  );
+  return rows.map(rowToFellow);
+};
+
+handlers.getStats = async function () {
+  var db = _requireFellowsDb();
+  var total = dbSelectOne(db, 'SELECT COUNT(*) AS n FROM fellows', null).n;
+
+  function groupCounts(sql) {
+    return dbSelectAll(db, sql, null).map(function (r) {
+      // sqlite-wasm returns objects keyed by column expression string when
+      // there's no alias. Pull the first non-COUNT key as the label.
+      var keys = Object.keys(r);
+      var labelKey = null;
+      var countKey = null;
+      for (var i = 0; i < keys.length; i++) {
+        var k = keys[i];
+        if (k.toUpperCase().indexOf('COUNT') === 0) countKey = k;
+        else labelKey = k;
+      }
+      return { label: r[labelKey], count: r[countKey] };
+    });
+  }
+
+  // Region counts: split comma-separated global_regions_currently_based_in
+  // so dual-region fellows are counted in each region.
+  var regionRows = dbSelectAll(
+    db,
+    'SELECT global_regions_currently_based_in AS regions FROM fellows ' +
+      "WHERE global_regions_currently_based_in IS NOT NULL " +
+      "AND global_regions_currently_based_in != ''",
+    null
+  );
+  var regionCounter = {};
+  for (var i = 0; i < regionRows.length; i++) {
+    var parts = String(regionRows[i].regions).split(',');
+    for (var j = 0; j < parts.length; j++) {
+      var region = parts[j].replace(/^\s+|\s+$/g, '');
+      if (region) regionCounter[region] = (regionCounter[region] || 0) + 1;
+    }
+  }
+  var byRegion = Object.keys(regionCounter)
+    .map(function (r) { return { label: r, count: regionCounter[r] }; })
+    .sort(function (a, b) { return b.count - a.count; });
+
+  // Field completeness: count non-empty values for each DB column and
+  // each known extra_json key.
+  var fieldCounts = [];
+  var colKeys = Object.keys(COL_LABELS);
+  for (var ci = 0; ci < colKeys.length; ci++) {
+    var col = colKeys[ci];
+    // Column names come from a controlled allow-list (COL_LABELS keys), so
+    // string concat is safe — same pattern as app/server.py:get_stats.
+    var n = dbSelectOne(
+      db,
+      'SELECT COUNT(*) AS n FROM fellows WHERE ' + col + ' IS NOT NULL AND ' + col + ' != \'\'',
+      null
+    ).n;
+    fieldCounts.push({ label: COL_LABELS[col], count: n });
+  }
+  var extraKeys = Object.keys(EXTRA_LABELS);
+  for (var ei = 0; ei < extraKeys.length; ei++) {
+    var ekey = extraKeys[ei];
+    var jsonPath = '$.' + ekey;
+    var n2 = dbSelectOne(
+      db,
+      'SELECT COUNT(*) AS n FROM fellows WHERE extra_json IS NOT NULL ' +
+        "AND json_extract(extra_json, ?) IS NOT NULL " +
+        "AND json_extract(extra_json, ?) != ''",
+      [jsonPath, jsonPath]
+    ).n;
+    fieldCounts.push({ label: EXTRA_LABELS[ekey], count: n2 });
+  }
+  fieldCounts.sort(function (a, b) { return b.count - a.count; });
+
+  return {
+    total: total,
+    by_fellow_type: groupCounts(
+      'SELECT fellow_type, COUNT(*) FROM fellows ' +
+        'WHERE fellow_type IS NOT NULL ' +
+        'GROUP BY fellow_type ORDER BY COUNT(*) DESC'
+    ),
+    by_cohort: groupCounts(
+      'SELECT cohort, COUNT(*) FROM fellows ' +
+        'WHERE cohort IS NOT NULL ' +
+        'GROUP BY cohort ORDER BY COUNT(*) DESC'
+    ),
+    by_region: byRegion,
+    field_completeness: fieldCounts
+  };
+};
+
+// ----- ensureFellowsDb (page-driven cold-start fetch) -----------------------
+// Per Phase 1 plan: page calls this exactly once per session, only after
+// the gate decision tree resolves to directory mode. P1 behavior:
+//   - hasFellowsDb=true → no-op (Phase 3 layers SHA-keyed refresh on top)
+//   - hasFellowsDb=false → fetch /fellows.db, validate, atomic staging
+//     swap, write fellows.db.meta.json, open fellowsDb
+
+handlers.ensureFellowsDb = async function () {
+  if (fellowsDb) {
+    var meta = await readFellowsMeta();
+    return { hasFellowsDb: true, refreshed: false, meta: meta || null };
+  }
+  trace('ensureFellowsDb: cold-start fetch /fellows.db');
+  var resp;
+  try {
+    resp = await fetch('/fellows.db', { credentials: 'include', cache: 'no-store' });
+  } catch (e) {
+    var nerr = new Error('Network fetch /fellows.db failed: ' + (e && e.message || e));
+    nerr.code = 'fellows_db_fetch_network';
+    throw nerr;
+  }
+  if (!resp.ok) {
+    var herr = new Error('GET /fellows.db returned HTTP ' + resp.status);
+    herr.code = 'fellows_db_fetch_http';
+    herr.httpStatus = resp.status;
+    throw herr;
+  }
+  var buf = await resp.arrayBuffer();
+  var bytes = new Uint8Array(buf);
+  if (!bytes.byteLength) {
+    var eerr = new Error('Empty /fellows.db response');
+    eerr.code = 'fellows_db_fetch_empty';
+    throw eerr;
+  }
+  // Atomic staging-slot import: if anything fails mid-flight, the previous
+  // (absent here, since hasFellowsDb=false) DB is unaffected.
+  var verifyDb = null;
+  try {
+    poolUtil.importDb(FELLOWS_STAGING_SLOT, bytes);
+    verifyDb = new poolUtil.OpfsSAHPoolDb(FELLOWS_STAGING_SLOT);
+    var qc = dbSelectOne(verifyDb, 'PRAGMA quick_check', null);
+    var qcResult = qc && (qc.quick_check || qc['quick_check']);
+    if (qcResult !== 'ok') {
+      throw new Error('quick_check failed: ' + (qcResult || 'unknown'));
+    }
+  } catch (verr) {
+    if (verifyDb) { try { verifyDb.close(); } catch (e2) {} }
+    var ierr = new Error('Validation of fetched fellows.db failed: ' + (verr && verr.message || verr));
+    ierr.code = 'fellows_db_invalid';
+    throw ierr;
+  }
+  if (verifyDb) { try { verifyDb.close(); } catch (e3) {} }
+  // Promote staging → live slot.
+  poolUtil.importDb('fellows.db', bytes);
+  fellowsDb = new poolUtil.OpfsSAHPoolDb('fellows.db');
+  trace('ensureFellowsDb: imported ' + bytes.byteLength + ' bytes, opened fellows.db');
+  // P1 records sha=null (Phase 3 emits a real SHA on the server side and
+  // wires the comparison). The shape stays stable so P3 just fills sha.
+  var newMeta = {
+    sha: null,
+    fetched_at: new Date().toISOString(),
+    last_failure_at: null,
+    last_failure_reason: null
+  };
+  try { await writeFellowsMeta(newMeta); }
+  catch (we) { trace('ensureFellowsDb: meta write failed: ' + (we && we.message || we)); }
+  return { hasFellowsDb: true, refreshed: true, meta: newMeta };
+};
+
+// ----- Diagnostics ----------------------------------------------------------
+
 handlers.getTrace = async function () { return bootTrace.slice(); };
+
+handlers.getVersions = async function () {
+  return {
+    workerRpcVersion: WORKER_RPC_VERSION,
+    schemaVersion: RELATIONSHIPS_SCHEMA_VERSION,
+    buildLabel: BUILD_LABEL
+  };
+};
+
+// Returns a snapshot of every OPFS root entry plus the SAH-pool slot
+// inventory. Used by the ?diag=1 panel post-Phase-1 so the maintainer
+// can see exactly what's on disk without main-thread OPFS access.
+handlers.getOpfsInventory = async function () {
+  var rootEntries = [];
+  try {
+    var root = await _opfsRoot();
+    for await (var entry of root.values()) {
+      var item = { name: entry.name, kind: entry.kind };
+      if (entry.kind === 'file') {
+        try {
+          var f = await entry.getFile();
+          item.size = f.size;
+          item.lastModified = f.lastModified;
+        } catch (fe) {}
+      }
+      rootEntries.push(item);
+    }
+    rootEntries.sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
+  } catch (e) {}
+  var poolFiles = [];
+  try { poolFiles = poolUtil.getFileNames(); } catch (e2) {}
+  return { root: rootEntries, poolFiles: poolFiles };
+};
 
 // ===== Dispatcher ===========================================================
 
@@ -569,6 +1002,8 @@ self.onmessage = async function (ev) {
       id: id, ok: false,
       error: (e && e.message) || String(e),
       errorName: e && e.name,
+      errorCode: e && e.code,
+      httpStatus: e && e.httpStatus,
       stack: e && e.stack
     });
   }
