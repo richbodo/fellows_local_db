@@ -1664,6 +1664,7 @@
     var toggle = document.getElementById('diag-toggle');
     var closeBtn = document.getElementById('diag-close');
     var refreshBtn = document.getElementById('diag-refresh');
+    var copyBtn = document.getElementById('diag-copy');
 
     async function refresh() {
       if (!pre) return;
@@ -1697,6 +1698,25 @@
     if (refreshBtn) {
       refreshBtn.addEventListener('click', function () {
         refresh();
+      });
+    }
+    if (copyBtn) {
+      var copyBtnDefaultLabel = copyBtn.textContent;
+      var copyBtnRevertTimer = null;
+      copyBtn.addEventListener('click', function () {
+        if (!pre) return;
+        var text = pre.textContent || '';
+        function flash(msg) {
+          copyBtn.textContent = msg;
+          if (copyBtnRevertTimer) clearTimeout(copyBtnRevertTimer);
+          copyBtnRevertTimer = setTimeout(function () {
+            copyBtn.textContent = copyBtnDefaultLabel;
+          }, 1500);
+        }
+        copyToClipboard(text).then(
+          function () { flash('Copied'); },
+          function () { flash('Copy failed'); }
+        );
       });
     }
 
