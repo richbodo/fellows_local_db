@@ -1,5 +1,7 @@
 # Browser Support
 
+> **Doc-state note:** the "How a user without OPFS reaches the panel" section below describes the architecture as of Phase 1 of [`plans/local_first_worker_architecture.md`](../plans/local_first_worker_architecture.md) — capability detection moves from the main-thread `pickDataProvider()` to the worker's `init` handshake. The runtime catches up when the cutover ships. Remove this banner when P1 lands.
+
 How we triage long-tail browser-compatibility issues for this app. The
 audience is small (~hundreds of fellows) and the distribution model is
 "by emailed magic link, install once" — but each one of those users
@@ -61,24 +63,41 @@ panel says this explicitly when it detects iOS.
 
 ## How a user without OPFS reaches the panel
 
-1. They open the app — install landing or browser-tab.
-2. `pickDataProvider()` runs the OPFS gates. They fail (older browser,
-   insecure context, etc.).
-3. Provider falls back to the API provider.
-4. On dev, the API provider serves `/api/groups` and `/api/settings`,
-   so groups/settings work for the dev round-trip.
-5. **On prod** (`deploy/server.py`), those routes don't exist. The
-   first call (typically `listGroups`) gets a 404, the API provider
-   marks the route unsupported, and every subsequent groups/settings
-   call rejects with `localDataUnavailableError`.
-6. The render path catches the error and calls
+Capability detection happens in the worker, not the main thread —
+`navigator.storage.getDirectory` and `installOpfsSAHPoolVfs` run
+inside `vendor/sqlite-worker.js`'s `init` op, which reports an
+`opfsCapable` boolean back to the page in the init handshake. This
+mirrors PRs #95–#99: several browser configurations strip
+`createSyncAccessHandle` from the main-thread prototype while
+exposing it inside dedicated workers, so the worker is the only
+context where the answer to "can we run SAH-pool?" is reliable.
+
+1. The user opens the app — install landing or browser-tab.
+2. The page spawns the dedicated worker and posts `init`.
+3. Inside `init`, the worker runs the OPFS gates. They fail (older
+   browser, insecure context, missing `FileSystemSyncAccessHandle`,
+   `crossOriginIsolated` false, etc.). The worker returns
+   `{opfsCapable: false, reason: "<short identifier>"}`.
+4. The main thread reads the handshake. For any feature that
+   depends on `relationships.db` (groups, settings) — and, after
+   the Phase 6 IndexedDB retirement, the directory itself — the
+   render path calls
    `renderLocalDataUnavailablePanel(feature)`, which builds an
    HTML panel keyed off `detectBrowserSupport()` — browser name,
    parsed version, and an iOS flag — and renders concrete next
    steps.
+5. The browser-mode "URL-just-works" path
+   ([`email_gate.md` invariant 9](email_gate.md#invariants))
+   still reaches the directory while the IndexedDB fallback exists
+   (Phase 1–5). Once Phase 6 retires that fallback, an
+   OPFS-incapable browser sees the panel for the directory too.
 
-The directory itself, search, and fellow profiles still work. Only
-the local-data features (groups, settings) show the panel.
+The transitional Phase 1–5 behavior: worker is sole owner of
+`relationships.db` and (cached) `fellows.db`, but the IndexedDB
+cache stays as a third-tier offline-read fallback for invariant 10.
+So an OPFS-incapable browser still has a usable directory if it has
+ever successfully booted before; only groups and settings show the
+panel. After Phase 6, the panel covers everything.
 
 ## Adding a new local-data feature: checklist
 
