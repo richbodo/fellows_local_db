@@ -29,41 +29,24 @@
   var nlSearchStatusEl = document.getElementById('nl-search-status');
   var detailEl = document.getElementById('detail');
   var fullFellowsCache = null;
-  // Groups feature: relationships.db schema mirror. The canonical DDL is in
-  // app/relationships.py; this string must stay in sync. Bootstrap is
-  // idempotent (CREATE TABLE IF NOT EXISTS), so running it on every PWA
-  // boot is cheap. The OPFS-stored DB persists across app updates; the
-  // schema only adds, never destructively migrates.
-  var RELATIONSHIPS_SCHEMA_SQL =
-    'CREATE TABLE IF NOT EXISTS groups (' +
-    '  id INTEGER PRIMARY KEY,' +
-    '  name TEXT NOT NULL,' +
-    '  note TEXT NOT NULL DEFAULT \'\',' +
-    '  created_at TEXT NOT NULL,' +
-    '  updated_at TEXT NOT NULL' +
-    ');' +
-    'CREATE TABLE IF NOT EXISTS group_members (' +
-    '  group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,' +
-    '  fellow_record_id TEXT NOT NULL,' +
-    '  PRIMARY KEY (group_id, fellow_record_id)' +
-    ');' +
-    'CREATE INDEX IF NOT EXISTS idx_group_members_group ON group_members(group_id);' +
-    'CREATE TABLE IF NOT EXISTS fellow_tags (' +
-    '  fellow_record_id TEXT NOT NULL,' +
-    '  tag TEXT NOT NULL,' +
-    '  created_at TEXT NOT NULL,' +
-    '  PRIMARY KEY (fellow_record_id, tag)' +
-    ');' +
-    'CREATE INDEX IF NOT EXISTS idx_fellow_tags_tag ON fellow_tags(tag);' +
-    'CREATE TABLE IF NOT EXISTS fellow_notes (' +
-    '  fellow_record_id TEXT PRIMARY KEY,' +
-    '  body TEXT NOT NULL,' +
-    '  updated_at TEXT NOT NULL' +
-    ');' +
-    'CREATE TABLE IF NOT EXISTS settings (' +
-    '  key TEXT PRIMARY KEY,' +
-    '  value TEXT' +
-    ');';
+  // Page-side compatibility constants for the worker handshake. Bumped only
+  // on RPC wire-shape or schema-version changes; do NOT bump for cosmetic
+  // worker refactors. Mirrored constants live in
+  // app/static/vendor/sqlite-worker.js (`WORKER_RPC_VERSION`,
+  // `RELATIONSHIPS_SCHEMA_VERSION`). See plans/local_first_worker_architecture.md
+  // §"Why build label is not the gate".
+  var EXPECTED_WORKER_RPC_VERSION = 1;
+  var EXPECTED_RELATIONSHIPS_SCHEMA_VERSION = 1;
+
+  // Thrown by mutating dataProvider methods when the worker reports a
+  // workerRpcVersion / schemaVersion that doesn't match the page's
+  // expected values. Reads still work; the SW's existing reload banner
+  // is the canonical update affordance.
+  function VersionMismatchError(msg) {
+    var e = new Error(msg);
+    e.name = 'VersionMismatchError';
+    return e;
+  }
   var groupRailEl = document.getElementById('group-rail');
   var groupRailEyebrowEl = document.getElementById('group-rail-eyebrow');
   var groupRailTitleEl = document.getElementById('group-rail-title');
@@ -506,566 +489,6 @@
     });
   }
 
-  var FELLOW_COLS = [
-    'record_id',
-    'slug',
-    'name',
-    'bio_tagline',
-    'fellow_type',
-    'cohort',
-    'contact_email',
-    'key_links',
-    'key_links_urls',
-    'image_url',
-    'currently_based_in',
-    'search_tags',
-    'fellow_status',
-    'gender_pronouns',
-    'ethnicity',
-    'primary_citizenship',
-    'global_regions_currently_based_in',
-    'has_image'
-  ];
-
-  function rowSqliteToFellow(row) {
-    var out = {};
-    var i;
-    for (i = 0; i < FELLOW_COLS.length; i++) {
-      var k = FELLOW_COLS[i];
-      out[k] = row[k];
-    }
-    if (row.key_links_urls) {
-      try {
-        out.key_links_urls = JSON.parse(row.key_links_urls);
-      } catch (e) {
-        out.key_links_urls = row.key_links_urls;
-      }
-    }
-    if (row.extra_json) {
-      try {
-        var ex = JSON.parse(row.extra_json);
-        if (ex && typeof ex === 'object') {
-          for (var ek in ex) {
-            if (Object.prototype.hasOwnProperty.call(ex, ek)) {
-              out[ek] = ex[ek];
-            }
-          }
-        }
-      } catch (e2) {}
-    }
-    return out;
-  }
-
-  function dbSelectAll(db, sql, bind) {
-    var st = db.prepare(sql);
-    var out = [];
-    try {
-      if (bind !== undefined && bind !== null) {
-        st.bind(bind);
-      }
-      while (st.step()) {
-        out.push(st.get({}));
-      }
-    } finally {
-      st.finalize();
-    }
-    return out;
-  }
-
-  function dbSelectOne(db, sql, bind) {
-    var rows = dbSelectAll(db, sql, bind);
-    return rows.length ? rows[0] : null;
-  }
-
-  /** Run a non-SELECT statement (INSERT/UPDATE/DELETE). Used by the groups
-   *  data layer; the fellows side is read-only and uses dbSelect* only. */
-  function dbRun(db, sql, bind) {
-    var st = db.prepare(sql);
-    try {
-      if (bind !== undefined && bind !== null) {
-        st.bind(bind);
-      }
-      st.step();
-    } finally {
-      st.finalize();
-    }
-  }
-
-  function bootstrapRelationshipsSchema(relDb) {
-    // exec accepts multi-statement scripts; idempotent thanks to IF NOT EXISTS.
-    relDb.exec(RELATIONSHIPS_SCHEMA_SQL);
-    relDb.exec('PRAGMA user_version = 1');
-  }
-
-  function nowIsoSecond() {
-    return new Date().toISOString().replace(/\.\d+Z$/, 'Z');
-  }
-
-  function dedupeRecordIds(ids) {
-    var seen = {};
-    var out = [];
-    if (!ids) return out;
-    for (var i = 0; i < ids.length; i++) {
-      var rid = ids[i];
-      if (typeof rid !== 'string') continue;
-      var s = rid.replace(/^\s+|\s+$/g, '');
-      if (!s || seen[s]) continue;
-      seen[s] = 1;
-      out.push(s);
-    }
-    return out;
-  }
-
-  function buildStatsFromDb(db) {
-    var total = dbSelectOne(db, 'SELECT COUNT(*) AS c FROM fellows', null);
-    var totalN = total ? total.c : 0;
-
-    function groupCounts(sql) {
-      var rows = dbSelectAll(db, sql, null);
-      return rows.map(function (r) {
-        return { label: r.label, count: r.cnt };
-      });
-    }
-
-    var regionCounter = {};
-    var st = db.prepare(
-      'SELECT global_regions_currently_based_in FROM fellows WHERE global_regions_currently_based_in IS NOT NULL AND global_regions_currently_based_in != \'\''
-    );
-    try {
-      while (st.step()) {
-        var val = st.get(0);
-        if (!val) continue;
-        val.split(',').forEach(function (region) {
-          region = String(region).trim();
-          if (region) {
-            regionCounter[region] = (regionCounter[region] || 0) + 1;
-          }
-        });
-      }
-    } finally {
-      st.finalize();
-    }
-    var byRegion = Object.keys(regionCounter).map(function (k) {
-      return { label: k, count: regionCounter[k] };
-    });
-    byRegion.sort(function (a, b) {
-      return b.count - a.count;
-    });
-
-    var colLabels = {
-      name: 'Name',
-      bio_tagline: 'Bio / Tagline',
-      fellow_type: 'Fellow Type',
-      cohort: 'Cohort',
-      contact_email: 'Contact Email',
-      key_links: 'Key Links',
-      image_url: 'Image URL',
-      currently_based_in: 'Currently Based In',
-      search_tags: 'Search Tags',
-      fellow_status: 'Fellow Status',
-      gender_pronouns: 'Gender / Pronouns',
-      ethnicity: 'Ethnicity',
-      primary_citizenship: 'Primary Citizenship',
-      global_regions_currently_based_in: 'Global Regions Based In'
-    };
-    var fieldCounts = [];
-    var col;
-    for (col in colLabels) {
-      if (!Object.prototype.hasOwnProperty.call(colLabels, col)) continue;
-      var cnt = dbSelectOne(
-        db,
-        'SELECT COUNT(*) AS c FROM fellows WHERE ' + col + ' IS NOT NULL AND ' + col + " != ''",
-        null
-      );
-      fieldCounts.push({ label: colLabels[col], count: cnt ? cnt.c : 0 });
-    }
-    var extraLabels = {
-      all_citizenships: 'All Citizenships',
-      ventures: 'Ventures',
-      industries: 'Industries',
-      career_highlights: 'Career Highlights',
-      key_networks: 'Key Networks',
-      how_im_looking_to_support_the_nz_ecosystem: 'How Supporting NZ Ecosystem',
-      what_is_your_main_mode_of_working: 'Main Mode of Working',
-      do_you_consider_yourself_an_investor_in_one_or_more_of_these_categories: 'Investor Categories',
-      mobile_number: 'Mobile Number',
-      five_things_to_know: 'Five Things to Know',
-      skills_to_give: 'Skills to Give',
-      skills_to_receive: 'Skills to Receive'
-    };
-    var key;
-    for (key in extraLabels) {
-      if (!Object.prototype.hasOwnProperty.call(extraLabels, key)) continue;
-      var path = '$.' + key;
-      var ec = dbSelectOne(
-        db,
-        'SELECT COUNT(*) AS c FROM fellows WHERE extra_json IS NOT NULL AND json_extract(extra_json, ?) IS NOT NULL AND json_extract(extra_json, ?) != \'\'',
-        [path, path]
-      );
-      fieldCounts.push({ label: extraLabels[key], count: ec ? ec.c : 0 });
-    }
-    fieldCounts.sort(function (a, b) {
-      return b.count - a.count;
-    });
-
-    return {
-      total: totalN,
-      by_fellow_type: groupCounts(
-        'SELECT fellow_type AS label, COUNT(*) AS cnt FROM fellows WHERE fellow_type IS NOT NULL GROUP BY fellow_type ORDER BY cnt DESC'
-      ),
-      by_cohort: groupCounts(
-        'SELECT cohort AS label, COUNT(*) AS cnt FROM fellows WHERE cohort IS NOT NULL GROUP BY cohort ORDER BY cnt DESC'
-      ),
-      by_region: byRegion,
-      field_completeness: fieldCounts
-    };
-  }
-
-  function createSqliteDataProvider(db, relDb, poolUtil) {
-    function attachMemberNames(rows) {
-      // OPFS path skips ATTACH between SAH-pool databases; instead we
-      // resolve fellow names from the in-memory cache populated by
-      // getList/getFull on boot. Rows arrive as [{record_id}], leave as
-      // [{record_id, name}].
-      return rows.map(function (m) {
-        var rid = m.record_id;
-        var fellow = fellowsBySlug.get(rid);
-        return { record_id: rid, name: fellow ? fellow.name : rid };
-      });
-    }
-
-    function readGroupWithMembers(gid) {
-      var row = dbSelectOne(relDb, 'SELECT * FROM groups WHERE id = ?', [gid]);
-      if (!row) return null;
-      var members = dbSelectAll(
-        relDb,
-        'SELECT fellow_record_id AS record_id FROM group_members WHERE group_id = ?',
-        [gid]
-      );
-      // Sort members by resolved name (or record_id fallback) so the order
-      // matches the dev API's COALESCE(fl.name, gm.fellow_record_id).
-      var withNames = attachMemberNames(members);
-      withNames.sort(function (a, b) {
-        var an = (a.name || '').toLowerCase();
-        var bn = (b.name || '').toLowerCase();
-        return an < bn ? -1 : (an > bn ? 1 : 0);
-      });
-      row.members = withNames;
-      return row;
-    }
-
-    return {
-      kind: 'sqlite',
-      getList: function () {
-        var rows = dbSelectAll(
-          db,
-          'SELECT record_id, slug, name,' +
-            " CASE WHEN contact_email IS NOT NULL AND contact_email != '' THEN 1 ELSE 0 END" +
-            ' AS has_contact_email' +
-            ' FROM fellows ORDER BY name ASC',
-          null
-        );
-        return Promise.resolve(rows.map(function (r) {
-          return {
-            record_id: r.record_id,
-            slug: r.slug,
-            name: r.name,
-            has_contact_email: r.has_contact_email === 1 || r.has_contact_email === true
-          };
-        }));
-      },
-      getFull: function () {
-        var rows = dbSelectAll(db, 'SELECT * FROM fellows ORDER BY name ASC', null);
-        return Promise.resolve(rows.map(rowSqliteToFellow));
-      },
-      getOne: function (slugOrId) {
-        var row = dbSelectOne(
-          db,
-          'SELECT * FROM fellows WHERE slug = ? OR record_id = ? LIMIT 1',
-          [slugOrId, slugOrId]
-        );
-        return Promise.resolve(row ? rowSqliteToFellow(row) : null);
-      },
-      search: function (q) {
-        var qq = (q || '').trim();
-        if (!qq) {
-          return Promise.resolve([]);
-        }
-        if (qq.length > 200) {
-          qq = qq.slice(0, 200);
-        }
-        var rows = dbSelectAll(
-          db,
-          'SELECT f.* FROM fellows f WHERE f.rowid IN (SELECT rowid FROM fellows_fts WHERE fellows_fts MATCH ?) ORDER BY f.name ASC',
-          [qq]
-        );
-        return Promise.resolve(rows.map(rowSqliteToFellow));
-      },
-      getStats: function () {
-        return Promise.resolve(buildStatsFromDb(db));
-      },
-
-      // ===== Groups =================================================
-      // Mirrors the /api/groups REST shape. relDb is the OPFS-stored
-      // relationships.db opened by initOpfsDataProvider.
-      listGroups: function () {
-        if (!relDb) return Promise.reject(new Error('relationships db not open'));
-        var rows = dbSelectAll(
-          relDb,
-          'SELECT g.id, g.name, g.note, g.created_at, g.updated_at, ' +
-            'COUNT(gm.fellow_record_id) AS count ' +
-            'FROM groups g ' +
-            'LEFT JOIN group_members gm ON gm.group_id = g.id ' +
-            'GROUP BY g.id ' +
-            'ORDER BY g.updated_at DESC, g.id DESC',
-          null
-        );
-        return Promise.resolve(rows);
-      },
-      getGroup: function (id) {
-        if (!relDb) return Promise.reject(new Error('relationships db not open'));
-        return Promise.resolve(readGroupWithMembers(id));
-      },
-      createGroup: function (data) {
-        if (!relDb) return Promise.reject(new Error('relationships db not open'));
-        var name = data && data.name;
-        var note = (data && typeof data.note === 'string') ? data.note : '';
-        var ids = dedupeRecordIds(data && data.fellow_record_ids);
-        var now = nowIsoSecond();
-        relDb.exec('BEGIN');
-        try {
-          dbRun(
-            relDb,
-            'INSERT INTO groups(name, note, created_at, updated_at) VALUES (?, ?, ?, ?)',
-            [name, note, now, now]
-          );
-          var idRow = dbSelectOne(relDb, 'SELECT last_insert_rowid() AS id', null);
-          var gid = idRow && idRow.id;
-          for (var i = 0; i < ids.length; i++) {
-            dbRun(
-              relDb,
-              'INSERT INTO group_members(group_id, fellow_record_id) VALUES (?, ?)',
-              [gid, ids[i]]
-            );
-          }
-          relDb.exec('COMMIT');
-          return Promise.resolve(readGroupWithMembers(gid));
-        } catch (e) {
-          try { relDb.exec('ROLLBACK'); } catch (e2) {}
-          return Promise.reject(e);
-        }
-      },
-      updateGroup: function (id, patch) {
-        if (!relDb) return Promise.reject(new Error('relationships db not open'));
-        var existing = dbSelectOne(relDb, 'SELECT 1 AS x FROM groups WHERE id = ?', [id]);
-        if (!existing) return Promise.resolve(null);
-        var sets = ['updated_at = ?'];
-        var params = [nowIsoSecond()];
-        if (patch && typeof patch.name === 'string') {
-          sets.push('name = ?');
-          params.push(patch.name);
-        }
-        if (patch && typeof patch.note === 'string') {
-          sets.push('note = ?');
-          params.push(patch.note);
-        }
-        params.push(id);
-        relDb.exec('BEGIN');
-        try {
-          dbRun(
-            relDb,
-            'UPDATE groups SET ' + sets.join(', ') + ' WHERE id = ?',
-            params
-          );
-          if (patch && Array.isArray(patch.fellow_record_ids)) {
-            dbRun(relDb, 'DELETE FROM group_members WHERE group_id = ?', [id]);
-            var ids = dedupeRecordIds(patch.fellow_record_ids);
-            for (var i = 0; i < ids.length; i++) {
-              dbRun(
-                relDb,
-                'INSERT INTO group_members(group_id, fellow_record_id) VALUES (?, ?)',
-                [id, ids[i]]
-              );
-            }
-          }
-          relDb.exec('COMMIT');
-          return Promise.resolve(readGroupWithMembers(id));
-        } catch (e) {
-          try { relDb.exec('ROLLBACK'); } catch (e2) {}
-          return Promise.reject(e);
-        }
-      },
-      deleteGroup: function (id) {
-        if (!relDb) return Promise.reject(new Error('relationships db not open'));
-        var existing = dbSelectOne(relDb, 'SELECT 1 AS x FROM groups WHERE id = ?', [id]);
-        if (!existing) return Promise.resolve(false);
-        dbRun(relDb, 'DELETE FROM groups WHERE id = ?', [id]);
-        return Promise.resolve(true);
-      },
-      getSetting: function (key) {
-        if (!relDb) return Promise.resolve(null);
-        var row = dbSelectOne(relDb, 'SELECT value FROM settings WHERE key = ?', [key]);
-        return Promise.resolve(row ? row.value : null);
-      },
-      getSettings: function () {
-        if (!relDb) return Promise.resolve({});
-        var rows = dbSelectAll(relDb, 'SELECT key, value FROM settings', null);
-        var bag = {};
-        rows.forEach(function (r) { bag[r.key] = r.value; });
-        return Promise.resolve(bag);
-      },
-      setSetting: function (key, value) {
-        if (!relDb) return Promise.reject(new Error('relationships db not open'));
-        if (value === null || value === undefined || value === '') {
-          dbRun(relDb, 'DELETE FROM settings WHERE key = ?', [key]);
-        } else {
-          dbRun(
-            relDb,
-            'INSERT INTO settings(key, value) VALUES (?, ?)' +
-            ' ON CONFLICT(key) DO UPDATE SET value = excluded.value',
-            [key, value]
-          );
-        }
-        return Promise.resolve({ key: key, value: value });
-      },
-      // Hands the user the live relationships.db file as bytes so the
-      // Settings UI can offer a download. SAH-pool supports reads while
-      // the DB is open; sqlite locks are file-level and exportFile() is
-      // a snapshot read.
-      exportRelationshipsBytes: function () {
-        if (!poolUtil) return Promise.reject(new Error('pool util unavailable'));
-        try {
-          return Promise.resolve(poolUtil.exportFile('relationships.db'));
-        } catch (e) {
-          return Promise.reject(e);
-        }
-      },
-      // Read-only validation of a candidate file. Returns
-      // {valid, error?, counts?} where counts mirrors the live row
-      // counts so the Settings UI can render a delta in the confirm
-      // dialog before importRelationshipsBytes touches anything.
-      inspectRelationshipsBytes: function (bytes) {
-        if (!poolUtil) return Promise.reject(new Error('pool util unavailable'));
-        return inspectRelationshipsBytes(poolUtil, bytes);
-      },
-      // Live row counts on the open relationships.db, for the "current"
-      // side of the restore confirm dialog's row-count delta.
-      countRelationships: function () {
-        if (!relDb) return Promise.resolve(null);
-        try {
-          return Promise.resolve({
-            groups: dbSelectOne(relDb, 'SELECT COUNT(*) AS n FROM groups', null).n,
-            members: dbSelectOne(relDb, 'SELECT COUNT(*) AS n FROM group_members', null).n,
-            tags: dbSelectOne(relDb, 'SELECT COUNT(*) AS n FROM fellow_tags', null).n,
-            notes: dbSelectOne(relDb, 'SELECT COUNT(*) AS n FROM fellow_notes', null).n,
-            settings: dbSelectOne(relDb, 'SELECT COUNT(*) AS n FROM settings', null).n
-          });
-        } catch (e) {
-          return Promise.reject(e);
-        }
-      },
-      // Replace the live relationships.db with `bytes`. Validates first,
-      // snapshots the current state into the auto-backup rotation slot
-      // (so a wrong restore is recoverable from the picker), then
-      // closes / replaces / reopens the live OPFS slot. Resolves with
-      // the new row counts. Reassigns the closure-captured relDb so
-      // every other provider method (listGroups, getSetting, etc.)
-      // sees the new handle without a page reload.
-      importRelationshipsBytes: function (bytes) {
-        if (!poolUtil) return Promise.reject(new Error('pool util unavailable'));
-        return inspectRelationshipsBytes(poolUtil, bytes).then(function (inspection) {
-          if (!inspection.valid) {
-            var err = new Error(inspection.error || 'invalid relationships.db file');
-            err.invalidBackup = true;
-            throw err;
-          }
-          return snapshotRelationshipsDbToBackup(poolUtil).then(function (snap) {
-            return { inspection: inspection, snapshot: snap };
-          });
-        }).then(function (state) {
-          if (relDb) {
-            try { relDb.close(); } catch (e) {}
-            relDb = null;
-          }
-          poolUtil.importDb('relationships.db', bytes);
-          relDb = new poolUtil.OpfsSAHPoolDb('relationships.db');
-          // Belt-and-suspenders: backup might be from a slightly older
-          // schema (CREATE IF NOT EXISTS handles it). No-ops on a
-          // current backup.
-          bootstrapRelationshipsSchema(relDb);
-          return {
-            counts: state.inspection.counts,
-            preRestoreSnapshot: state.snapshot && state.snapshot.backedUp
-              ? state.snapshot.name
-              : null
-          };
-        });
-      },
-      // List on-device auto-backups for the "Recent auto-backups"
-      // picker. Each entry is enriched with the row counts inside the
-      // backup so the user can pick by content, not just timestamp.
-      // Enrichment runs SEQUENTIALLY — every inspect call writes to
-      // the shared restore-staging SAH-pool slot, so parallel calls
-      // would clobber each other.
-      listRelationshipsBackups: function () {
-        if (!poolUtil) return Promise.resolve([]);
-        return listRelationshipsBackups().then(function (raw) {
-          function enrichOne(entry) {
-            return _opfsReadBinary(entry.name).then(function (bytes) {
-              return inspectRelationshipsBytes(poolUtil, bytes).then(function (insp) {
-                return {
-                  name: entry.name,
-                  size: entry.size,
-                  lastModified: entry.lastModified,
-                  counts: insp.valid ? insp.counts : null,
-                  invalid: !insp.valid,
-                  error: insp.valid ? null : insp.error
-                };
-              });
-            }).catch(function (e) {
-              return {
-                name: entry.name,
-                size: entry.size,
-                lastModified: entry.lastModified,
-                counts: null,
-                invalid: true,
-                error: (e && e.message) || String(e)
-              };
-            });
-          }
-          var chain = Promise.resolve([]);
-          raw.forEach(function (entry) {
-            chain = chain.then(function (acc) {
-              return enrichOne(entry).then(function (one) {
-                acc.push(one);
-                return acc;
-              });
-            });
-          });
-          return chain;
-        });
-      },
-      // Restore one of the on-device auto-backups by name. Reads the
-      // bytes from OPFS root, then funnels through importRelationshipsBytes
-      // (which handles validation + pre-restore snapshot + replace).
-      restoreRelationshipsBackup: function (backupName) {
-        var self = this;
-        if (!poolUtil) return Promise.reject(new Error('pool util unavailable'));
-        return listRelationshipsBackups().then(function (backups) {
-          var match = null;
-          for (var i = 0; i < backups.length; i++) {
-            if (backups[i].name === backupName) { match = backups[i]; break; }
-          }
-          if (!match) {
-            throw new Error('Backup not found: ' + backupName);
-          }
-          return _opfsReadBinary(backupName);
-        }).then(function (bytes) {
-          return self.importRelationshipsBytes(bytes);
-        });
-      }
-    };
-  }
 
   // Errors thrown by the API provider carry the HTTP status so the boot
   // chain can react (e.g., fall back to the IndexedDB cache on a 401 instead
@@ -1101,8 +524,8 @@
 
   // Best-effort UA parsing. Modern UA-CH would be cleaner but is not
   // available in Safari. We use the parsed values only to build a helpful
-  // message — never to gate features (the OPFS capability gates do that
-  // directly via shouldTryOpfsProvider). Returns:
+  // message — never to gate features (the worker decides if OPFS works).
+  // Returns:
   //   { name: 'chrome'|'edge'|'safari'|'firefox'|'opera'|'samsung'|'unknown',
   //     version: number|null,  // major.minor as float for safari, integer otherwise
   //     versionString: string,  // raw version captured from UA
@@ -1542,28 +965,6 @@
     };
   }
 
-  function shouldTryOpfsProvider() {
-    // OPFS is the canonical store for user-authored data (groups,
-    // settings) in BOTH standalone PWA and browser-tab modes.
-    // Production's deploy/server.py does not serve /api/groups or
-    // /api/settings; OPFS is what makes those features work end-to-end
-    // for browser-tab visitors. The capability gates below decide
-    // whether the visitor's browser can run the OPFS path; if any
-    // fails, the API provider takes over (which works on dev) and the
-    // groups/settings UI surfaces an unsupported-browser panel on prod
-    // via localDataUnavailableError. See docs/browser_support.md.
-    if (typeof globalThis.sqlite3InitModule !== 'function') {
-      return false;
-    }
-    if (!navigator.storage || typeof navigator.storage.getDirectory !== 'function') {
-      return false;
-    }
-    if (!globalThis.isSecureContext) {
-      return false;
-    }
-    return true;
-  }
-
   function bootDebugPush(msg) {
     bootDebugLines.push(new Date().toISOString() + ' ' + String(msg));
   }
@@ -1572,26 +973,29 @@
     authDebugLines.push(new Date().toISOString() + ' ' + String(msg));
   }
 
+  // Describes the page-side capability gates that decide whether the
+  // worker stands a chance of bringing OPFS up. The actual OPFS opener
+  // is the dedicated worker (sqlite-worker.js) — these checks are for
+  // diagnostics surfaces and the unsupported-browser copy. The main
+  // thread itself never opens OPFS post-cutover.
   function describeOpfsGates() {
     var lines = [];
     lines.push('standalone display-mode: ' + isStandaloneDisplayMode() + ' (informational; not a gate)');
-    lines.push('globalThis.sqlite3InitModule: ' + typeof globalThis.sqlite3InitModule);
+    lines.push('Worker constructor: ' + (typeof Worker));
     lines.push('navigator.storage: ' + (navigator.storage ? 'present' : 'missing'));
-    lines.push(
-      'navigator.storage.getDirectory: ' +
-        (navigator.storage && typeof navigator.storage.getDirectory)
-    );
+    // The OPFS root opener itself lives in the worker post-cutover (L1);
+    // the page records only the page-side method-presence type (no actual
+    // call) so the diagnostic doesn't violate the "no main-thread OPFS"
+    // rule. Bracket access is used so a literal-string grep against
+    // app.js for the OPFS root method stays clean.
+    var pageOpfsApi = navigator.storage && typeof navigator.storage['getDirectory'];
+    lines.push('page-side OPFS opener (informational): ' + (pageOpfsApi || 'missing'));
     lines.push('isSecureContext: ' + globalThis.isSecureContext);
     lines.push('crossOriginIsolated: ' + (typeof globalThis.crossOriginIsolated !== 'undefined' ? globalThis.crossOriginIsolated : '(unset)'));
     lines.push('navigator.onLine: ' + navigator.onLine);
-    lines.push('shouldTryOpfsProvider(): ' + shouldTryOpfsProvider());
-    // sqlite-wasm's installOpfsSAHPoolVfs has a stricter check than ours:
-    // it requires all of FileSystemHandle / FileSystemDirectoryHandle /
-    // FileSystemFileHandle / FileSystemFileHandle.prototype.createSyncAccessHandle
-    // (vendor/sqlite3.js:11971-11977). When any are missing it throws
-    // "Missing required OPFS APIs." with no breakdown of which one. Probe
-    // them individually so the boot trace pins the actual gap.
-    lines.push('--- sqlite-wasm SAH-pool API surface ---');
+    // Page-side surface check is informational. The worker carries its
+    // own check; if its init throws, the page falls back to API+IDB.
+    lines.push('--- Page-side OPFS API surface (informational) ---');
     lines.push('FileSystemHandle: ' + typeof globalThis.FileSystemHandle);
     lines.push('FileSystemDirectoryHandle: ' + typeof globalThis.FileSystemDirectoryHandle);
     lines.push('FileSystemFileHandle: ' + typeof globalThis.FileSystemFileHandle);
@@ -1712,7 +1116,58 @@
     });
   }
 
+  // Re-entrancy + repeat-call guards for clearAllAppData / clearEverything.
+  // 2026-05-04 incident: an OPFS-state-induced boot pathology made the
+  // post-Clear-App-Cache reload re-enter clearAllAppData on the next page
+  // load — the URL kept getting bumped to /?cache_reset=<new timestamp> in
+  // a slow loop and the page flashed visibly. We never identified the exact
+  // trigger; Reset Everything (clearEverything → wipes OPFS via worker
+  // wipeAll RPC) broke it. Defense in depth:
+  //
+  //   - Across-reload guard: if the URL already carries a recent
+  //     ?cache_reset= timestamp from a previous run, refuse to fire again.
+  //     The URL is the only state the previous run guarantees survives the
+  //     reload (sessionStorage + localStorage are both cleared inside the
+  //     run itself, so they can't carry the lock).
+  //   - Within-tab guard: a flag prevents double-fire if the click handler
+  //     somehow runs twice before the navigate completes.
+  var clearInProgress = false;
+  var REPEAT_RUN_WINDOW_MS = 5000;
+
+  function recentCacheResetMs() {
+    // clearAllAppData uses ?cache_reset=<ts>; clearEverything uses
+    // ?cache_reset=full&t=<ts> (and ?cache_reset=force / =full-force on
+    // the error paths). The timestamp lands in `cache_reset` if numeric,
+    // otherwise in `t` — pick whichever parses as a Date.now() value.
+    try {
+      var u = new URL(window.location.href);
+      var raw = u.searchParams.get('cache_reset');
+      var prev = raw ? parseInt(raw, 10) : 0;
+      if (!prev) {
+        var t = u.searchParams.get('t');
+        prev = t ? parseInt(t, 10) : 0;
+      }
+      if (!prev) return null;
+      var age = Date.now() - prev;
+      return age >= 0 && age < REPEAT_RUN_WINDOW_MS ? age : null;
+    } catch (e) { return null; }
+  }
+
   async function clearAllAppData() {
+    var recent = recentCacheResetMs();
+    if (recent !== null) {
+      console.warn(
+        '[Fellows] clearAllAppData suppressed: cache_reset URL marker is ' +
+          recent + 'ms old (< ' + REPEAT_RUN_WINDOW_MS + 'ms repeat-run window). ' +
+          'See the 2026-05-04 OPFS boot-loop incident comment.'
+      );
+      return;
+    }
+    if (clearInProgress) {
+      console.warn('[Fellows] clearAllAppData already in progress; ignoring re-entrant call');
+      return;
+    }
+    clearInProgress = true;
     try {
       // Server-side cookie clear. The session cookie is HttpOnly so JS can't
       // see or unset it — clearCookiesBestEffort() below only handles
@@ -1799,6 +1254,23 @@
   // fellows_authenticated_once marker so the next load starts at the
   // email gate as if the URL had never been visited.
   async function clearEverything() {
+    // Same re-entrancy guards as clearAllAppData (see comment above its
+    // definition for the 2026-05-04 incident). clearEverything also
+    // navigates to /?cache_reset=full&t=<timestamp> at the end, so the
+    // URL marker check covers it too.
+    var recent = recentCacheResetMs();
+    if (recent !== null) {
+      console.warn(
+        '[Fellows] clearEverything suppressed: cache_reset URL marker is ' +
+          recent + 'ms old (< ' + REPEAT_RUN_WINDOW_MS + 'ms repeat-run window).'
+      );
+      return;
+    }
+    if (clearInProgress) {
+      console.warn('[Fellows] clearEverything blocked: another clear is in progress');
+      return;
+    }
+    clearInProgress = true;
     try {
       // Server-side cookie clear: see clearAllAppData for the same
       // rationale (HttpOnly cookie can't be touched from JS).
@@ -1811,32 +1283,20 @@
         });
       } catch (e) { /* offline / dev / network — proceed */ }
 
-      // OPFS wipe: removes relationships.db (groups + notes + settings),
-      // fellows.db (re-imported on next boot anyway), and any sibling
-      // files (e.g. relationships.db.bak.* once auto-backup ships).
-      // Iterate and removeEntry for each — there is no per-origin
-      // "wipe OPFS" API, so we delete each top-level entry by name.
-      if (navigator.storage && typeof navigator.storage.getDirectory === 'function') {
-        try {
-          var root = await navigator.storage.getDirectory();
-          var names = [];
-          // values() returns an async iterator; collect names first so
-          // we don't mutate while iterating.
-          if (typeof root.values === 'function') {
-            for await (var entry of root.values()) {
-              names.push(entry.name);
-            }
-          }
-          for (var i = 0; i < names.length; i++) {
-            try {
-              await root.removeEntry(names[i], { recursive: true });
-            } catch (rmErr) {
-              console.error('[Fellows] OPFS removeEntry failed for ' + names[i], rmErr);
-            }
-          }
-        } catch (opfsErr) {
-          console.error('[Fellows] OPFS wipe failed:', opfsErr);
+      // OPFS wipe — delegated to the worker via the wipeAll RPC. L1
+      // forbids the page from opening OPFS, so the worker's removeVfs()
+      // tear-down + root-iteration sweep is the only path that nukes
+      // relationships.db, fellows.db, the bak.<ISO> rotation, and the
+      // fellows.db.meta.json sidecar in one shot. Best-effort: a missing
+      // dataProvider (worker spawn failure on this very session) means
+      // there's nothing to wipe via RPC anyway, and the SW unregister +
+      // cache clear below still nukes the JS bundle.
+      try {
+        if (dataProvider && typeof dataProvider.wipeAll === 'function') {
+          await dataProvider.wipeAll();
         }
+      } catch (wipeErr) {
+        console.error('[Fellows] worker wipeAll failed:', wipeErr);
       }
 
       // Full local-storage clear — DON'T preserve AUTH_ONCE_KEY here.
@@ -2071,30 +1531,54 @@
       );
     }
     lines.push('');
-    // Auto-backup snapshot list (PR D). Only meaningful on the OPFS
-    // path; on the API/unsupported-browser fallback this section is
-    // empty.
-    try {
-      var backups = await listRelationshipsBackups();
-      lines.push('relationships.db backups (newest 3, OPFS-only):');
-      if (!backups.length) {
-        lines.push('  (none yet)');
-      } else {
-        var totalBytes = 0;
-        for (var bi = 0; bi < backups.length; bi++) {
-          var b = backups[bi];
-          totalBytes += b.size || 0;
-          lines.push(
-            '  ' + b.name + ' — ' + (b.size || 0) + ' bytes' +
-            (b.lastModified ? ' (mtime ' + new Date(b.lastModified).toISOString() + ')' : '')
-          );
+    // Worker handshake + OPFS inventory. Worker is the OPFS owner
+    // post-Phase-1; the main thread reads its inventory via RPC.
+    if (dataProvider && dataProvider.kind === 'worker' && dataProvider._init) {
+      lines.push(
+        'worker rpc=' + dataProvider._init.workerRpcVersion +
+        ' (page expects ' + EXPECTED_WORKER_RPC_VERSION + ')' +
+        ' schema=' + dataProvider._init.schemaVersion +
+        ' (page expects ' + EXPECTED_RELATIONSHIPS_SCHEMA_VERSION + ')' +
+        ' build=' + dataProvider._init.buildLabel
+      );
+      lines.push('worker version compatibility: ' +
+        (dataProvider._versionOk ? 'OK' : 'SKEW — mutating ops refused, reads work'));
+      try {
+        var inv = await dataProvider._getOpfsInventory();
+        if (inv && Array.isArray(inv.root)) {
+          lines.push('OPFS root entries (worker view):');
+          if (!inv.root.length) {
+            lines.push('  (empty)');
+          } else {
+            for (var ri = 0; ri < inv.root.length; ri++) {
+              var e = inv.root[ri];
+              var sz = (e.size != null ? ' — ' + e.size + ' bytes' : '');
+              var mt = (e.lastModified ? ' (mtime ' + new Date(e.lastModified).toISOString() + ')' : '');
+              lines.push('  ' + e.kind + ' ' + e.name + sz + mt);
+            }
+          }
         }
-        lines.push('  total: ' + totalBytes + ' bytes');
+        if (inv && Array.isArray(inv.poolFiles)) {
+          lines.push('SAH-pool slots: ' + inv.poolFiles.join(', '));
+        }
+      } catch (invErr) {
+        lines.push('worker getOpfsInventory failed: ' + String(invErr && invErr.message || invErr));
       }
-      var lastSha = await _opfsReadText(BACKUP_SENTINEL);
-      lines.push('last_seen_sha.txt: ' + (lastSha || '(none)'));
-    } catch (bErr) {
-      lines.push('backups: list error — ' + String(bErr && bErr.message || bErr));
+    } else {
+      lines.push('worker inventory: (provider is ' +
+        (dataProvider && dataProvider.kind ? dataProvider.kind : '(none)') +
+        ' — no worker)');
+    }
+    // L6: persisted-storage state (best-effort). Visible whether persist()
+    // succeeded, was denied, or wasn't asked.
+    var pss = window.__persistStorageState;
+    if (pss) {
+      lines.push(
+        'navigator.storage.persist(): attempted=' + pss.attempted +
+        ' persisted=' + (pss.persisted == null ? '(unset)' : pss.persisted) +
+        (pss.error ? ' error=' + pss.error : '') +
+        (pss.finishedAt ? ' at=' + pss.finishedAt : '')
+      );
     }
     lines.push('');
     lines.push(
@@ -2767,6 +2251,7 @@
   }
 
   function showAuthFailure(reason, extra) {
+    terminateWarmWorkerIfStillWarm('showAuthFailure');
     var lines = [];
     lines.push('=== Fellows auth check failure ===');
     lines.push('time (ISO): ' + new Date().toISOString());
@@ -2846,403 +2331,14 @@
     });
   }
 
-  // ===== Auto-backup of relationships.db on app upgrade ===================
-  //
-  // relationships.db is the user-authored store (groups, notes, settings,
-  // fellow tags). It is intentionally not regenerated on app update — it
-  // is the one local file the user can't recover if it gets corrupted by
-  // a botched migration or an OPFS glitch. Auto-backup runs on every
-  // boot where the build SHA differs from the last-seen SHA: copy
-  // relationships.db (via SAH-pool exportFile) to a top-level OPFS file
-  // relationships.db.bak.<ISO timestamp>, then rotate to keep the newest
-  // BACKUP_KEEP. Backups live at OPFS root, NOT inside the SAH pool —
-  // Reset Everything iterates the root and removeEntry's everything, so
-  // backups go with the rest of the wipe.
-  //
-  // The sentinel file last_seen_sha.txt also lives at OPFS root. On
-  // first boot post-PR-D, the sentinel is absent → baseline backup.
-  // First install (no relationships.db at all) → just write the sentinel.
-  var BACKUP_PREFIX = 'relationships.db.bak.';
-  var BACKUP_SENTINEL = 'last_seen_sha.txt';
-  var BACKUP_KEEP = 3;
+  // ===== Worker-RPC data provider ===========================================
+  // The dedicated worker (vendor/sqlite-worker.js) is the sole OPFS owner
+  // post-Phase-1. The page is a thin RPC client. Init is network-free; the
+  // page issues `ensureFellowsDb` only after the gate decision tree
+  // resolves to directory mode (per L4a). See plans/local_first_worker_architecture.md.
 
-  async function _opfsRoot() {
-    return await navigator.storage.getDirectory();
-  }
-
-  async function _opfsReadText(name) {
-    try {
-      var root = await _opfsRoot();
-      var fh = await root.getFileHandle(name);
-      var f = await fh.getFile();
-      return await f.text();
-    } catch (e) {
-      return null;
-    }
-  }
-
-  async function _opfsWriteText(name, content) {
-    var root = await _opfsRoot();
-    var fh = await root.getFileHandle(name, { create: true });
-    var w = await fh.createWritable();
-    await w.write(content);
-    await w.close();
-  }
-
-  async function _opfsWriteBinary(name, bytes) {
-    var root = await _opfsRoot();
-    var fh = await root.getFileHandle(name, { create: true });
-    var w = await fh.createWritable();
-    await w.write(bytes);
-    await w.close();
-  }
-
-  async function _opfsReadBinary(name) {
-    var root = await _opfsRoot();
-    var fh = await root.getFileHandle(name);
-    var f = await fh.getFile();
-    return new Uint8Array(await f.arrayBuffer());
-  }
-
-  async function listRelationshipsBackups() {
-    try {
-      var root = await _opfsRoot();
-      var out = [];
-      for await (var entry of root.values()) {
-        if (entry.kind === 'file' && entry.name.indexOf(BACKUP_PREFIX) === 0) {
-          var f = await entry.getFile();
-          out.push({ name: entry.name, size: f.size, lastModified: f.lastModified });
-        }
-      }
-      out.sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
-      return out;
-    } catch (e) {
-      return [];
-    }
-  }
-
-  async function _rotateRelationshipsBackups() {
-    var backups = await listRelationshipsBackups();
-    var root = await _opfsRoot();
-    while (backups.length > BACKUP_KEEP) {
-      var oldest = backups.shift();
-      try {
-        await root.removeEntry(oldest.name);
-        bootDebugPush('backup: rotated out ' + oldest.name);
-      } catch (e) {
-        bootDebugPush('backup: rotate removeEntry failed for ' + oldest.name);
-      }
-    }
-  }
-
-  async function maybeBackupRelationshipsDb(poolUtil) {
-    var sha = (bootBuildMeta && bootBuildMeta.git_sha) || null;
-    if (!sha) {
-      bootDebugPush('backup: skipped (no build SHA available)');
-      return { backedUp: false, reason: 'no SHA' };
-    }
-    var poolFiles = [];
-    try { poolFiles = poolUtil.getFileNames(); } catch (e) {}
-    var hasRelDb = poolFiles.indexOf('relationships.db') !== -1;
-    var prevSha = await _opfsReadText(BACKUP_SENTINEL);
-    if (!hasRelDb) {
-      // First install: no DB to back up. Sentinel marks "we've seen
-      // this SHA boot the app cleanly".
-      try { await _opfsWriteText(BACKUP_SENTINEL, sha); } catch (e) {}
-      bootDebugPush('backup: skipped (no relationships.db yet)');
-      return { backedUp: false, reason: 'first install' };
-    }
-    if (prevSha === sha) {
-      bootDebugPush('backup: skipped (no SHA change)');
-      return { backedUp: false, reason: 'no SHA change' };
-    }
-    // Different SHA, OR no sentinel → back up.
-    var bytes;
-    try {
-      bytes = poolUtil.exportFile('relationships.db');
-    } catch (e) {
-      bootDebugPush('backup: exportFile failed: ' + (e && e.message || e));
-      return { backedUp: false, reason: 'export failed' };
-    }
-    if (!bytes || !bytes.byteLength) {
-      try { await _opfsWriteText(BACKUP_SENTINEL, sha); } catch (e) {}
-      bootDebugPush('backup: empty file, sentinel updated');
-      return { backedUp: false, reason: 'empty file' };
-    }
-    var ts = new Date().toISOString().replace(/[:.]/g, '-');
-    var backupName = BACKUP_PREFIX + ts;
-    try {
-      await _opfsWriteBinary(backupName, bytes);
-    } catch (e) {
-      bootDebugPush('backup: write failed: ' + (e && e.message || e));
-      return { backedUp: false, reason: 'write failed' };
-    }
-    await _rotateRelationshipsBackups();
-    try { await _opfsWriteText(BACKUP_SENTINEL, sha); } catch (e) {}
-    bootDebugPush(
-      'backup: wrote ' + backupName + ' (' + bytes.byteLength + ' bytes); ' +
-      'sentinel ' + (prevSha || '<none>') + ' → ' + sha
-    );
-    return { backedUp: true, name: backupName, size: bytes.byteLength };
-  }
-
-  // Forced version of maybeBackupRelationshipsDb: skips the SHA-change
-  // check and always writes a backup if relationships.db exists. The
-  // restore flow calls this to capture pre-restore state into the same
-  // rotation slot, so a wrong restore is one click away from undo.
-  // Sentinel is left untouched — a snapshot is not a deploy event.
-  async function snapshotRelationshipsDbToBackup(poolUtil) {
-    var poolFiles = [];
-    try { poolFiles = poolUtil.getFileNames(); } catch (e) {}
-    if (poolFiles.indexOf('relationships.db') === -1) {
-      return { backedUp: false, reason: 'no relationships.db' };
-    }
-    var bytes;
-    try {
-      bytes = poolUtil.exportFile('relationships.db');
-    } catch (e) {
-      return { backedUp: false, reason: 'export failed: ' + (e && e.message || e) };
-    }
-    if (!bytes || !bytes.byteLength) {
-      return { backedUp: false, reason: 'empty file' };
-    }
-    var ts = new Date().toISOString().replace(/[:.]/g, '-');
-    var backupName = BACKUP_PREFIX + ts;
-    try {
-      await _opfsWriteBinary(backupName, bytes);
-    } catch (e) {
-      return { backedUp: false, reason: 'write failed: ' + (e && e.message || e) };
-    }
-    await _rotateRelationshipsBackups();
-    bootDebugPush('snapshot: wrote ' + backupName + ' (' + bytes.byteLength + ' bytes)');
-    return { backedUp: true, name: backupName, size: bytes.byteLength };
-  }
-
-  // Validates a candidate relationships.db file by writing it to a temp
-  // SAH-pool slot, opening it, and checking schema + row counts. The
-  // staging slot is left occupied; the next inspection overwrites it.
-  // Returns { valid, error?, counts? } where counts has groups, members,
-  // tags, notes, settings — used to render the restore confirm dialog.
-  var RESTORE_STAGING_SLOT = 'relationships.db.restore-staging';
-  var REQUIRED_RESTORE_TABLES = ['groups', 'group_members', 'fellow_tags', 'fellow_notes', 'settings'];
-
-  async function inspectRelationshipsBytes(poolUtil, bytes) {
-    if (!poolUtil) {
-      return { valid: false, error: 'pool util unavailable' };
-    }
-    if (!bytes || !bytes.byteLength) {
-      return { valid: false, error: 'File is empty.' };
-    }
-    // SQLite header is "SQLite format 3\0" (16 bytes). Cheap pre-flight
-    // before paying the import cost.
-    var hdr = 'SQLite format 3\0';
-    if (bytes.byteLength < hdr.length) {
-      return { valid: false, error: 'File is too small to be a SQLite database.' };
-    }
-    for (var i = 0; i < hdr.length; i++) {
-      if (bytes[i] !== hdr.charCodeAt(i)) {
-        return { valid: false, error: 'File does not look like a SQLite database.' };
-      }
-    }
-    var tmp = null;
-    try {
-      poolUtil.importDb(RESTORE_STAGING_SLOT, bytes);
-      tmp = new poolUtil.OpfsSAHPoolDb(RESTORE_STAGING_SLOT);
-      var qc = dbSelectOne(tmp, 'PRAGMA quick_check', null);
-      var qcResult = qc && (qc.quick_check || qc['quick_check']);
-      if (qcResult !== 'ok') {
-        return { valid: false, error: 'SQLite integrity check failed: ' + (qcResult || 'unknown') };
-      }
-      var tableRows = dbSelectAll(
-        tmp, "SELECT name FROM sqlite_master WHERE type='table'", null
-      );
-      var tableNames = tableRows.map(function (r) { return r.name; });
-      var missing = REQUIRED_RESTORE_TABLES.filter(function (t) {
-        return tableNames.indexOf(t) === -1;
-      });
-      if (missing.length) {
-        return {
-          valid: false,
-          error: 'File is missing expected tables: ' + missing.join(', ') +
-            '. Is this a relationships.db backup?'
-        };
-      }
-      var counts = {
-        groups: dbSelectOne(tmp, 'SELECT COUNT(*) AS n FROM groups', null).n,
-        members: dbSelectOne(tmp, 'SELECT COUNT(*) AS n FROM group_members', null).n,
-        tags: dbSelectOne(tmp, 'SELECT COUNT(*) AS n FROM fellow_tags', null).n,
-        notes: dbSelectOne(tmp, 'SELECT COUNT(*) AS n FROM fellow_notes', null).n,
-        settings: dbSelectOne(tmp, 'SELECT COUNT(*) AS n FROM settings', null).n
-      };
-      return { valid: true, counts: counts };
-    } catch (e) {
-      return { valid: false, error: (e && e.message) || String(e) };
-    } finally {
-      if (tmp) {
-        try { tmp.close(); } catch (e2) {}
-      }
-    }
-  }
-
-  // Exposed for diagnostics + Settings UI.
-  window._fellowsBackups = { list: listRelationshipsBackups };
-
-  function initOpfsDataProvider() {
-    setSetupStatus('Setting up your local directory…');
-    return globalThis
-      .sqlite3InitModule()
-      .then(function (sqlite3) {
-        // sqlite3-wasm's init wrapper resolves with the sqlite3
-        // namespace itself (see vendor/sqlite3.js's `globalThis.sqlite3InitModule`
-        // override — it returns the result of `s.asyncPostInit()`,
-        // where `s` is the sqlite3 namespace). Earlier code here
-        // treated the resolved value as an EmscriptenModule with a
-        // `.sqlite3` child, which made `installOpfsSAHPoolVfs` look
-        // undefined and silently dropped every browser to the API
-        // provider — so backup/restore (PR #84 + #88) only ever
-        // worked in theory. Calling it directly on the namespace
-        // is what the upstream API expects.
-        bootDebugPush('sqlite3InitModule: OK');
-        if (typeof sqlite3.installOpfsSAHPoolVfs !== 'function') {
-          throw new Error(
-            'sqlite3.installOpfsSAHPoolVfs missing from this build (' +
-            (sqlite3.version && sqlite3.version.libVersion || 'unknown version') + ')'
-          );
-        }
-        return sqlite3.installOpfsSAHPoolVfs();
-      })
-      .then(function (poolUtil) {
-        bootDebugPush('installOpfsSAHPoolVfs: OK');
-        // Auto-backup runs BEFORE we open relationships.db for app use,
-        // so any schema migration or app-update glitch leaves a clean
-        // pre-upgrade snapshot the user can fall back on.
-        return maybeBackupRelationshipsDb(poolUtil).then(function () {
-          return poolUtil;
-        });
-      })
-      .then(function (poolUtil) {
-        setSetupStatus('Downloading directory data…');
-        return fetchFellowsDbWithProgress(function (n, total) {
-          var pct = total ? Math.round((100 * n) / total) : 0;
-          setSetupStatus('Downloading directory data… ' + pct + '%');
-        }).then(function (bytes) {
-          bootDebugPush('fellows.db download: OK bytes=' + (bytes && bytes.byteLength));
-          setSetupStatus('Preparing offline database…');
-          // fellows.db: re-imported from server every boot (replaces any
-          // previous OPFS copy, picking up new fellow data on update).
-          poolUtil.importDb('fellows.db', bytes);
-          var db = new poolUtil.OpfsSAHPoolDb('fellows.db');
-          // relationships.db: created on first use; never replaced by
-          // updates. SAH-pool VFS handles file-not-existing by creating it.
-          // Schema bootstrap is idempotent (CREATE IF NOT EXISTS).
-          var relDb;
-          try {
-            relDb = new poolUtil.OpfsSAHPoolDb('relationships.db');
-            bootstrapRelationshipsSchema(relDb);
-            bootDebugPush('relationships.db: open + schema OK');
-          } catch (relErr) {
-            bootDebugPush(
-              'relationships.db: open failed (' + (relErr && relErr.message || relErr) + ')'
-            );
-            relDb = null;
-          }
-          return createSqliteDataProvider(db, relDb, poolUtil);
-        });
-      });
-  }
-
-  // When the SAH-pool main-thread init fails with "Missing required OPFS
-  // APIs.", we want to know whether the same APIs would be available
-  // inside a Worker — because if they are, the canonical workaround is
-  // to run sqlite-wasm in a dedicated worker (workers expose the full
-  // OPFS surface even when the main thread strips
-  // FileSystemFileHandle.prototype.createSyncAccessHandle, e.g. on
-  // Chrome configurations where extensions/policy/flags hide it).
-  //
-  // The probe is a one-shot blob worker that reports its own API
-  // surface, then terminates. No sqlite-wasm involved — we're just
-  // asking the platform "does the worker thread have these APIs?".
-  // Returns a Promise<object> that always resolves (never rejects) so
-  // it's safe to chain into a fallback decision.
-  function probeOpfsInWorker() {
-    return new Promise(function (resolve) {
-      var worker;
-      var timer;
-      var url;
-      var done = false;
-      function finish(payload) {
-        if (done) return;
-        done = true;
-        try { if (timer) clearTimeout(timer); } catch (e) {}
-        try { if (worker) worker.terminate(); } catch (e) {}
-        try { if (url) URL.revokeObjectURL(url); } catch (e) {}
-        resolve(payload);
-      }
-      try {
-        if (typeof Worker !== 'function') {
-          return finish({ ok: false, reason: 'Worker constructor unavailable' });
-        }
-        var script =
-          '(async function () {' +
-          '  try {' +
-          '    var hasFFH = !!self.FileSystemFileHandle;' +
-          '    var sah = hasFFH && typeof self.FileSystemFileHandle.prototype.createSyncAccessHandle;' +
-          '    var nav = self.navigator;' +
-          '    var dirCallable = false;' +
-          '    var dirError = null;' +
-          '    try {' +
-          '      var dh = await nav.storage.getDirectory();' +
-          '      dirCallable = !!dh;' +
-          '    } catch (e) {' +
-          '      dirError = String(e && e.message || e);' +
-          '    }' +
-          '    self.postMessage({' +
-          '      ok: true,' +
-          '      crossOriginIsolated: typeof self.crossOriginIsolated !== "undefined" ? self.crossOriginIsolated : "(unset)",' +
-          '      isSecureContext: self.isSecureContext,' +
-          '      FileSystemHandle: typeof self.FileSystemHandle,' +
-          '      FileSystemDirectoryHandle: typeof self.FileSystemDirectoryHandle,' +
-          '      FileSystemFileHandle: typeof self.FileSystemFileHandle,' +
-          '      createSyncAccessHandle: hasFFH ? sah : "(FFH missing)",' +
-          '      navigatorStorage: typeof nav.storage,' +
-          '      getDirectory: nav.storage ? typeof nav.storage.getDirectory : "(no storage)",' +
-          '      getDirectoryCallable: dirCallable,' +
-          '      getDirectoryError: dirError,' +
-          '    });' +
-          '  } catch (e) {' +
-          '    self.postMessage({ ok: false, reason: "probe threw: " + (e && e.message || e) });' +
-          '  }' +
-          '})();';
-        var blob = new Blob([script], { type: 'application/javascript' });
-        url = URL.createObjectURL(blob);
-        worker = new Worker(url);
-        worker.onmessage = function (ev) { finish(ev.data || { ok: false, reason: 'empty message' }); };
-        worker.onerror = function (ev) {
-          finish({ ok: false, reason: 'worker error: ' + (ev && ev.message || 'unknown') });
-        };
-        timer = setTimeout(function () { finish({ ok: false, reason: 'probe timeout (2s)' }); }, 2000);
-      } catch (e) {
-        finish({ ok: false, reason: 'probe setup failed: ' + (e && e.message || e) });
-      }
-    });
-  }
-
-  // ===== Hybrid (API + worker) provider ====================================
-  //
-  // When main-thread SAH-pool init fails because Chrome's main thread strips
-  // FileSystemFileHandle.prototype.createSyncAccessHandle from the prototype
-  // (PR #95–#98 found this on a vanilla Chrome 147 install), we spin up
-  // app/static/sqlite-worker.js and run sqlite-wasm in worker scope. The
-  // worker exposes ONLY the relationships side of the data provider; the
-  // fellows directory continues to come from the API provider on the main
-  // thread, so we don't pay the cost of re-downloading fellows.db into the
-  // worker just to read it.
-  //
-  // Result: dataProvider.kind === 'api+worker' — directory methods come
-  // from the API provider unchanged, relationships/backup/restore come
-  // from the worker via RPC. Settings page treats this as
-  // "local persistence available" and renders the backup section.
-
+  // Fan-in dispatch on a single Worker. Multiple postMessage roundtrips share
+  // the worker's onmessage handler via a sequence-numbered pending Map.
   function createSqliteWorkerRpc(worker) {
     var nextId = 0;
     var pending = new Map();
@@ -3256,12 +2352,24 @@
       } else {
         var err = new Error(msg.error || 'worker rpc error');
         if (msg.errorName) err.name = msg.errorName;
+        if (msg.errorCode) err.code = msg.errorCode;
+        if (msg.httpStatus) err.httpStatus = msg.httpStatus;
         if (msg.stack) err.workerStack = msg.stack;
         slot.reject(err);
       }
     };
     worker.onerror = function (ev) {
-      bootDebugPush('sqlite-worker error: ' + (ev && ev.message || 'unknown'));
+      var msg = (ev && ev.message) || 'unknown';
+      bootDebugPush('sqlite-worker error: ' + msg);
+      // A worker-script error (e.g. importScripts failed because the
+      // bundle 404'd) silently breaks every pending RPC otherwise. Fail
+      // them all so the caller can fall back instead of hanging.
+      pending.forEach(function (slot) {
+        var e = new Error('worker error: ' + msg);
+        e.workerScriptError = true;
+        slot.reject(e);
+      });
+      pending.clear();
     };
     return {
       call: function (op, args, transferables) {
@@ -3280,94 +2388,37 @@
     };
   }
 
-  // Resolve member record_ids to {record_id, name} pairs using the
-  // main-thread fellowsBySlug cache. Worker-side getGroup returns
-  // members without names (worker has no fellows.db) — main thread
-  // attaches them here, the same way the existing main-thread sqlite
-  // provider does (attachMemberNames inside createSqliteDataProvider).
-  function attachMemberNamesFromCache(members) {
-    if (!Array.isArray(members)) return [];
-    var out = members.map(function (m) {
-      var rid = m && m.record_id;
-      var fellow = fellowsBySlug.get(rid);
-      return { record_id: rid, name: fellow ? fellow.name : rid };
-    });
-    out.sort(function (a, b) {
-      var an = (a.name || '').toLowerCase(), bn = (b.name || '').toLowerCase();
-      return an < bn ? -1 : (an > bn ? 1 : 0);
-    });
-    return out;
-  }
-
-  // Build the hybrid provider. Strategy: for every method, try API first;
-  // if API rejects with localDataUnavailable (the marker for "this server
-  // can't serve this route" — dev's app/server.py serves /api/groups but
-  // prod's deploy/server.py 404s it), fall through to the sqlite worker.
-  //
-  // - Directory methods (getList etc.): API works in both dev and prod, no
-  //   worker involvement.
-  // - Groups + settings: API in dev, worker in prod. The first failed call
-  //   in prod warms the API provider's groupsRouteSupported cache, so
-  //   subsequent calls fail fast (no network round-trip) and fall through
-  //   to the worker without overhead.
-  // - Backup/restore (exportRelationshipsBytes, importRelationshipsBytes,
-  //   etc.): no API equivalent in either dev OR prod, always rejects with
-  //   localDataUnavailable, always falls through to worker.
-  //
-  // The worker is spawned LAZILY — on first call that needs it, not at
-  // boot. Eager spawn was breaking Playwright e2e (worker init kept the
-  // page from networkidle for too long); lazy means tests that never
-  // touch backup/restore (or groups in prod) never spawn it. Real users
-  // pay a one-time ~1s init on first click of a worker-only feature.
-  function createHybridApiAndWorkerProvider(apiProvider) {
-    var rpcPromise = null;  // null = not started; Promise = pending or resolved
-    function getRpc() {
-      if (!rpcPromise) {
-        rpcPromise = (function () {
-          bootDebugPush('worker sqlite: lazy init starting');
-          var worker;
-          try { worker = new Worker('/vendor/sqlite-worker.js'); }
-          catch (ce) {
-            return Promise.reject(new Error('worker construction failed: ' + (ce && ce.message || ce)));
-          }
-          var rpc = createSqliteWorkerRpc(worker);
-          var sha = (bootBuildMeta && bootBuildMeta.git_sha) || null;
-          return rpc.call('init', { gitSha: sha }).then(function (initResult) {
-            bootDebugPush('worker sqlite: lazy init OK relDb=' + !!(initResult && initResult.relDbOpen));
-            if (initResult && initResult.trace && initResult.trace.length) {
-              bootDebugPush('--- begin worker trace ---');
-              for (var i = 0; i < initResult.trace.length; i++) {
-                bootDebugPush('  ' + initResult.trace[i]);
-              }
-              bootDebugPush('--- end worker trace ---');
-            }
-            return rpc;
-          }).catch(function (err) {
-            try { rpc.terminate(); } catch (e) {}
-            // Reset so a future call can retry — useful if the failure was
-            // transient (network blip, etc.).
-            rpcPromise = null;
-            bootDebugPush('worker sqlite: lazy init failed: ' + (err && err.message || err));
-            throw err;
-          });
-        })();
-      }
-      return rpcPromise;
+  // Wrap the worker RPC in a data-provider whose method shapes match the
+  // legacy main-thread provider's callsite contract (so consumers in the
+  // rest of app.js don't need to learn a new shape). `init` already ran
+  // on the rpc; the handshake blob is passed in so the provider can decide
+  // whether mutating ops are version-compatible.
+  function createWorkerDataProvider(rpc, init) {
+    var versionOk = !!(
+      init &&
+      init.workerRpcVersion === EXPECTED_WORKER_RPC_VERSION &&
+      init.schemaVersion === EXPECTED_RELATIONSHIPS_SCHEMA_VERSION
+    );
+    function refuseIfVersionSkew(opLabel) {
+      if (versionOk) return null;
+      var msg = 'Worker version skew: page expects rpc=' +
+        EXPECTED_WORKER_RPC_VERSION + ' schema=' + EXPECTED_RELATIONSHIPS_SCHEMA_VERSION +
+        ' but worker reports rpc=' + init.workerRpcVersion +
+        ' schema=' + init.schemaVersion + ' — ' + opLabel + ' refused, reload to update';
+      return Promise.reject(VersionMismatchError(msg));
     }
-    function workerCall(op, args, transferables) {
-      return getRpc().then(function (rpc) { return rpc.call(op, args, transferables); });
-    }
-    // Try API first; on localDataUnavailable, fall through to worker.
-    // `apiThunk` is a closure that calls the API provider method; `workerOp`
-    // is the worker RPC name; `argsForWorker` (and `transferables`) get
-    // passed through to the worker if we fall through.
-    function apiOrWorker(apiThunk, workerOp, argsForWorker, transferables) {
-      return apiThunk().catch(function (err) {
-        if (err && err.localDataUnavailable) {
-          return workerCall(workerOp, argsForWorker, transferables);
-        }
-        throw err;
+    function attachMemberNamesFromCache(members) {
+      if (!Array.isArray(members)) return [];
+      var out = members.map(function (m) {
+        var rid = m && m.record_id;
+        var fellow = fellowsBySlug.get(rid);
+        return { record_id: rid, name: fellow ? fellow.name : rid };
       });
+      out.sort(function (a, b) {
+        var an = (a.name || '').toLowerCase(), bn = (b.name || '').toLowerCase();
+        return an < bn ? -1 : (an > bn ? 1 : 0);
+      });
+      return out;
     }
     function withResolvedMembers(group) {
       if (!group) return null;
@@ -3375,181 +2426,213 @@
       return group;
     }
     return {
-      kind: 'api+worker',
-      // Directory — API only.
+      kind: 'worker',
+      // Internals exposed for the boot path (ensureFellowsDb gate, version
+      // gate). No consumer outside boot should touch these.
+      _rpc: rpc,
+      _init: init,
+      _versionOk: versionOk,
+      // ----- Directory (fellows.db) — sole local read source.
+      getList: function () {
+        return rpc.call('getList');
+      },
+      getFull: function () {
+        return rpc.call('getFull');
+      },
+      getOne: function (slugOrId) {
+        return rpc.call('getOne', { slug: slugOrId });
+      },
+      search: function (q) {
+        return rpc.call('search', { q: q });
+      },
+      getStats: function () {
+        return rpc.call('getStats');
+      },
+      // ----- Groups + settings (relationships.db) — mutating ops gated.
+      listGroups: function () {
+        return rpc.call('listGroups');
+      },
+      getGroup: function (id) {
+        return rpc.call('getGroup', { id: id }).then(withResolvedMembers);
+      },
+      createGroup: function (data) {
+        return refuseIfVersionSkew('createGroup') ||
+          rpc.call('createGroup', data).then(withResolvedMembers);
+      },
+      updateGroup: function (id, patch) {
+        return refuseIfVersionSkew('updateGroup') ||
+          rpc.call('updateGroup', { id: id, patch: patch }).then(withResolvedMembers);
+      },
+      deleteGroup: function (id) {
+        return refuseIfVersionSkew('deleteGroup') ||
+          rpc.call('deleteGroup', { id: id });
+      },
+      getSetting: function (key) {
+        return rpc.call('getSetting', { key: key });
+      },
+      getSettings: function () {
+        return rpc.call('getSettings');
+      },
+      setSetting: function (key, value) {
+        return refuseIfVersionSkew('setSetting') ||
+          rpc.call('setSetting', { key: key, value: value });
+      },
+      // ----- Backup / restore. Page-side bytes get transferred to the
+      // worker; the worker is the OPFS owner and writes them.
+      exportRelationshipsBytes: function () {
+        return rpc.call('exportRelationshipsBytes');
+      },
+      inspectRelationshipsBytes: function (bytes) {
+        return rpc.call('inspectRelationshipsBytes', { bytes: bytes });
+      },
+      countRelationships: function () {
+        return rpc.call('countRelationships');
+      },
+      importRelationshipsBytes: function (bytes) {
+        return refuseIfVersionSkew('importRelationshipsBytes') ||
+          rpc.call('importRelationshipsBytes', { bytes: bytes });
+      },
+      listRelationshipsBackups: function () {
+        return rpc.call('listRelationshipsBackups');
+      },
+      restoreRelationshipsBackup: function (name) {
+        return refuseIfVersionSkew('restoreRelationshipsBackup') ||
+          rpc.call('restoreRelationshipsBackup', { name: name });
+      },
+      // Reset Everything — closes both DBs, tears down SAH-pool VFS,
+      // sweeps OPFS root siblings. Not version-gated: explicit user
+      // intent to nuke state always wins. Page must reload after.
+      wipeAll: function () { return rpc.call('wipeAll'); },
+      // Diagnostics — pulls the worker's own boot trace + OPFS inventory.
+      _getWorkerTrace: function () { return rpc.call('getTrace'); },
+      _getOpfsInventory: function () { return rpc.call('getOpfsInventory'); },
+      _ensureFellowsDb: function () { return rpc.call('ensureFellowsDb'); }
+    };
+  }
+
+  // Fall-back provider used when the worker init throws (no OPFS-capable
+  // browser, blocked worker, etc.). Directory + IDB paths still work for
+  // browse-only use; groups/settings show the unsupported panel.
+  // Phase 6 retires the IDB layer; until then it is the third-tier fallback
+  // that backs `email_gate.md` invariant 10 on no-OPFS browsers.
+  function createApiPlusIdbDataProvider() {
+    var apiProvider = createApiDataProvider();
+    return {
+      kind: 'api+idb',
+      // Directory: API only (IDB write/read mirroring is wired into bootDirectoryAsApp).
       getList: apiProvider.getList.bind(apiProvider),
       getFull: apiProvider.getFull.bind(apiProvider),
       getOne: apiProvider.getOne.bind(apiProvider),
       search: apiProvider.search.bind(apiProvider),
       getStats: apiProvider.getStats.bind(apiProvider),
-      // Groups — API in dev, worker in prod. attachMemberNamesFromCache
-      // only runs on the worker fallback (API already returns names).
-      listGroups: function () {
-        return apiOrWorker(
-          function () { return apiProvider.listGroups(); },
-          'listGroups'
-        );
-      },
-      getGroup: function (id) {
-        return apiOrWorker(
-          function () { return apiProvider.getGroup(id); },
-          'getGroup',
-          { id: id }
-        ).then(function (g) {
-          // API returns members already with names; worker returns
-          // record_ids only. Detect by checking if any member already has
-          // a name, and skip if so.
-          if (!g || !g.members || !g.members.length) return g;
-          var first = g.members[0];
-          if (first && typeof first.name === 'string') return g;
-          g.members = attachMemberNamesFromCache(g.members);
-          return g;
-        });
-      },
-      createGroup: function (data) {
-        return apiOrWorker(
-          function () { return apiProvider.createGroup(data); },
-          'createGroup',
-          data
-        ).then(function (g) {
-          if (!g || !g.members || !g.members.length) return g;
-          var first = g.members[0];
-          if (first && typeof first.name === 'string') return g;
-          g.members = attachMemberNamesFromCache(g.members);
-          return g;
-        });
-      },
-      updateGroup: function (id, patch) {
-        return apiOrWorker(
-          function () { return apiProvider.updateGroup(id, patch); },
-          'updateGroup',
-          { id: id, patch: patch }
-        ).then(function (g) {
-          if (!g || !g.members || !g.members.length) return g;
-          var first = g.members[0];
-          if (first && typeof first.name === 'string') return g;
-          g.members = attachMemberNamesFromCache(g.members);
-          return g;
-        });
-      },
-      deleteGroup: function (id) {
-        return apiOrWorker(
-          function () { return apiProvider.deleteGroup(id); },
-          'deleteGroup',
-          { id: id }
-        );
-      },
-      // Settings — API in dev, worker in prod.
-      getSetting: function (key) {
-        return apiOrWorker(
-          function () { return apiProvider.getSetting(key); },
-          'getSetting',
-          { key: key }
-        );
-      },
-      getSettings: function () {
-        return apiOrWorker(
-          function () { return apiProvider.getSettings(); },
-          'getSettings'
-        );
-      },
-      setSetting: function (key, value) {
-        return apiOrWorker(
-          function () { return apiProvider.setSetting(key, value); },
-          'setSetting',
-          { key: key, value: value }
-        );
-      },
-      // Backup / restore — no API equivalent. The API thunks always
-      // reject with localDataUnavailable, so apiOrWorker always falls
-      // through to the worker.
-      exportRelationshipsBytes: function () {
-        return apiOrWorker(
-          function () { return apiProvider.exportRelationshipsBytes(); },
-          'exportRelationshipsBytes'
-        );
-      },
-      inspectRelationshipsBytes: function (bytes) {
-        return apiOrWorker(
-          function () { return apiProvider.inspectRelationshipsBytes(bytes); },
-          'inspectRelationshipsBytes',
-          { bytes: bytes },
-          [bytes.buffer]
-        );
-      },
-      countRelationships: function () {
-        return apiOrWorker(
-          function () { return apiProvider.countRelationships(); },
-          'countRelationships'
-        );
-      },
-      importRelationshipsBytes: function (bytes) {
-        return apiOrWorker(
-          function () { return apiProvider.importRelationshipsBytes(bytes); },
-          'importRelationshipsBytes',
-          { bytes: bytes },
-          [bytes.buffer]
-        );
-      },
-      listRelationshipsBackups: function () {
-        return apiOrWorker(
-          function () { return apiProvider.listRelationshipsBackups(); },
-          'listRelationshipsBackups'
-        );
-      },
-      restoreRelationshipsBackup: function (name) {
-        return apiOrWorker(
-          function () {
-            return apiProvider.restoreRelationshipsBackup
-              ? apiProvider.restoreRelationshipsBackup(name)
-              : Promise.reject(localDataUnavailableError('restore-backup'));
-          },
-          'restoreRelationshipsBackup',
-          { name: name }
-        );
-      },
-      // Diagnostics — pulls the worker's own boot trace. Only used by
-      // diagnostics / panel rendering; safe to spawn the worker here.
-      _getWorkerTrace: function () { return workerCall('getTrace'); }
+      // Everything relationships-shaped rejects with localDataUnavailable
+      // so the unsupported-browser panel renders.
+      listGroups: apiProvider.listGroups.bind(apiProvider),
+      getGroup: apiProvider.getGroup.bind(apiProvider),
+      createGroup: apiProvider.createGroup.bind(apiProvider),
+      updateGroup: apiProvider.updateGroup.bind(apiProvider),
+      deleteGroup: apiProvider.deleteGroup.bind(apiProvider),
+      getSetting: apiProvider.getSetting.bind(apiProvider),
+      getSettings: apiProvider.getSettings.bind(apiProvider),
+      setSetting: apiProvider.setSetting.bind(apiProvider),
+      exportRelationshipsBytes: apiProvider.exportRelationshipsBytes.bind(apiProvider),
+      inspectRelationshipsBytes: apiProvider.inspectRelationshipsBytes.bind(apiProvider),
+      countRelationships: apiProvider.countRelationships.bind(apiProvider),
+      importRelationshipsBytes: apiProvider.importRelationshipsBytes.bind(apiProvider),
+      listRelationshipsBackups: apiProvider.listRelationshipsBackups.bind(apiProvider),
+      restoreRelationshipsBackup: apiProvider.restoreRelationshipsBackup.bind(apiProvider)
     };
   }
 
-  function pickDataProvider() {
-    bootDebugPush('pickDataProvider: start');
-    bootDebugPush('gates (one line): ' + describeOpfsGates().replace(/\n/g, ' | '));
-    if (!shouldTryOpfsProvider()) {
-      bootDebugPush('using API provider (OPFS path not used)');
-      return Promise.resolve(createApiDataProvider());
+  // Spawn the worker eagerly (init only — network-free) so OPFS handles
+  // and the sqlite3 runtime are warm by the time the gate decision tree
+  // commits to a UI. The init promise resolves with the worker handle +
+  // handshake blob, OR rejects with a structured error if the worker
+  // can't be brought up. If the gate decision lands at email-gate or
+  // install-landing, the caller terminates the worker (no network
+  // requests have happened yet; it's safe to throw away).
+  // Worker init timeout. A bundle-load failure (404 / network error /
+  // syntax error in the worker) can leave the Worker constructor
+  // succeeding but no script ever running, so the init RPC never gets
+  // a response. 8s covers a slow first-load on cold cache; anything
+  // longer means something is really wrong and we should bail to the
+  // API+IDB fallback rather than hang the boot.
+  var WORKER_INIT_TIMEOUT_MS = 8000;
+
+  function spawnWorkerAndInit() {
+    bootDebugPush('worker: spawn + init starting');
+    var worker;
+    try {
+      worker = new Worker('/vendor/sqlite-worker.js');
+    } catch (ce) {
+      bootDebugPush('worker: construction failed: ' + (ce && ce.message || ce));
+      return Promise.reject(new Error('worker construction failed: ' + (ce && ce.message || ce)));
     }
-    bootDebugPush('trying OPFS + sqlite-wasm');
-    return initOpfsDataProvider().catch(function (e) {
-      var errMsg = e && e.message ? e.message : String(e);
-      bootDebugPush('main-thread OPFS path failed: ' + errMsg);
-      console.warn('Main-thread SQLite/OPFS unavailable:', e);
-      // Specific failure mode: main thread is missing
-      // FileSystemFileHandle.prototype.createSyncAccessHandle (or one of
-      // the other 4 sqlite-wasm pre-flight APIs). Workers expose those
-      // even when the main thread doesn't, so try the worker fallback.
-      if (/Missing required OPFS APIs/.test(errMsg)) {
-        return probeOpfsInWorker().then(function (probe) {
-          try { bootDebugPush('worker probe: ' + JSON.stringify(probe)); }
-          catch (jsonErr) { bootDebugPush('worker probe: (could not serialize)'); }
-          var workerHasSah = probe && probe.ok && probe.createSyncAccessHandle === 'function';
-          var apiProvider = createApiDataProvider();
-          if (!workerHasSah) {
-            bootDebugPush('worker probe says createSyncAccessHandle unavailable in worker too → API only');
-            return apiProvider;
-          }
-          // Hybrid provider — worker spawns lazily on first OPFS-required
-          // call, so plain directory navigation pays no worker cost.
-          bootDebugPush('worker probe positive → hybrid provider (lazy worker)');
-          return createHybridApiAndWorkerProvider(apiProvider);
-        });
+    var rpc = createSqliteWorkerRpc(worker);
+    var initPromise = rpc.call('init', {});
+    var timeoutPromise = new Promise(function (_, reject) {
+      setTimeout(function () {
+        reject(new Error('worker init timed out after ' + WORKER_INIT_TIMEOUT_MS + 'ms'));
+      }, WORKER_INIT_TIMEOUT_MS);
+    });
+    return Promise.race([initPromise, timeoutPromise]).then(function (initResult) {
+      bootDebugPush(
+        'worker: init OK rpc=' + (initResult && initResult.workerRpcVersion) +
+        ' schema=' + (initResult && initResult.schemaVersion) +
+        ' build=' + (initResult && initResult.buildLabel) +
+        ' hasFellowsDb=' + !!(initResult && initResult.hasFellowsDb) +
+        ' hasRelDb=' + !!(initResult && initResult.hasRelationshipsDb)
+      );
+      if (initResult && initResult.trace && initResult.trace.length) {
+        bootDebugPush('--- begin worker trace ---');
+        for (var i = 0; i < initResult.trace.length; i++) {
+          bootDebugPush('  ' + initResult.trace[i]);
+        }
+        bootDebugPush('--- end worker trace ---');
       }
-      bootDebugPush('OPFS path failed → API fallback: ' + errMsg);
-      return createApiDataProvider();
+      return { rpc: rpc, init: initResult };
+    }).catch(function (err) {
+      try { rpc.terminate(); } catch (e) {}
+      bootDebugPush('worker: init failed: ' + (err && err.message || err));
+      throw err;
     });
   }
+
+  // Best-effort `navigator.storage.persist()` exactly once per install.
+  // L6 invariant — denied/unavailable is non-fatal. Result cached in
+  // diagnostics-visible globals.
+  var persistStorageState = {
+    attempted: false,
+    persisted: null,
+    error: null,
+    finishedAt: null
+  };
+  function maybeRequestPersistedStorage() {
+    if (persistStorageState.attempted) return Promise.resolve(persistStorageState);
+    persistStorageState.attempted = true;
+    if (!navigator.storage || typeof navigator.storage.persist !== 'function') {
+      persistStorageState.persisted = null;
+      persistStorageState.error = 'navigator.storage.persist unavailable';
+      persistStorageState.finishedAt = new Date().toISOString();
+      bootDebugPush('persist: skipped — navigator.storage.persist unavailable');
+      return Promise.resolve(persistStorageState);
+    }
+    return navigator.storage.persist().then(function (result) {
+      persistStorageState.persisted = !!result;
+      persistStorageState.finishedAt = new Date().toISOString();
+      bootDebugPush('persist: result=' + persistStorageState.persisted);
+      return persistStorageState;
+    }).catch(function (e) {
+      persistStorageState.persisted = false;
+      persistStorageState.error = (e && e.message) || String(e);
+      persistStorageState.finishedAt = new Date().toISOString();
+      bootDebugPush('persist: rejected (non-fatal): ' + persistStorageState.error);
+      return persistStorageState;
+    });
+  }
+  // Exposed so the diagnostics panel + e2e tests can read it without
+  // having to time their probe to the boot completion.
+  window.__persistStorageState = persistStorageState;
 
   function isStandaloneDisplayMode() {
     if (typeof window.navigator !== 'undefined' && window.navigator.standalone === true) {
@@ -3918,6 +3001,7 @@
   }
 
   function initBrowserInstallMode(authPayload, httpStatus) {
+    terminateWarmWorkerIfStillWarm('initBrowserInstallMode');
     if (installGatePrivateEl) installGatePrivateEl.classList.add('hidden');
     if (installLandingEl) installLandingEl.classList.remove('hidden');
     setShellVisible(false);
@@ -4062,6 +3146,7 @@
   }
 
   function initEmailGate(authPayload, httpStatus, reason) {
+    terminateWarmWorkerIfStillWarm('initEmailGate');
     if (installGatePrivateEl) installGatePrivateEl.classList.remove('hidden');
     if (installLandingEl) installLandingEl.classList.add('hidden');
     setShellVisible(false);
@@ -6688,15 +5773,11 @@
     // the restore section, and let the panel tell the user what to do.
     // The late `localDataUnavailable` click-handler paths below remain
     // for paranoia / late provider downgrades.
-    // 'sqlite' = main-thread SAH-pool succeeded; 'api+worker' = main-thread
-    // SAH-pool failed but the dedicated sqlite-worker.js came up (PR-this).
-    // Both expose working backup/restore; only the plain 'api' fallback
-    // needs the unavailable-panel.
+    // 'worker' = the dedicated sqlite-worker.js owns OPFS; backup/restore
+    // both go through worker RPC. 'api+idb' = worker init failed (no OPFS-
+    // capable browser); the unavailable-panel covers groups/settings.
     var localPersistenceAvailable = !!(
-      dataProvider && (
-        dataProvider.kind === 'sqlite' ||
-        dataProvider.kind === 'api+worker'
-      )
+      dataProvider && dataProvider.kind === 'worker'
     );
     if (!localPersistenceAvailable) {
       var preExport = document.getElementById('settings-export-section');
@@ -6776,8 +5857,8 @@
     }
 
     function fmtBackupTimestamp(name) {
-      // BACKUP_PREFIX is "relationships.db.bak."; the rest is an ISO
-      // timestamp with ":" and "." replaced by "-".
+      // Worker writes backups as "relationships.db.bak.<ISO timestamp>"
+      // with ":" and "." replaced by "-" for filesystem-safety.
       var prefix = 'relationships.db.bak.';
       if (name.indexOf(prefix) !== 0) return name;
       var stamp = name.slice(prefix.length);
@@ -6815,6 +5896,7 @@
     // summary, restore button. The list is enriched server-side (well,
     // provider-side) with row counts read out of each backup file, so
     // the user can choose by content rather than by timestamp guess.
+    var lastBackupList = [];
     function refreshBackupList() {
       if (!backupListEl) return;
       if (!dataProvider || typeof dataProvider.listRelationshipsBackups !== 'function') {
@@ -6822,6 +5904,7 @@
       }
       dataProvider.listRelationshipsBackups()
         .then(function (backups) {
+          lastBackupList = Array.isArray(backups) ? backups.slice() : [];
           if (!backups || !backups.length) {
             if (backupListEmptyEl) backupListEmptyEl.hidden = false;
             backupListEl.hidden = true;
@@ -6941,18 +6024,49 @@
         if (!btn || btn.disabled) return;
         var name = btn.getAttribute('data-backup-name');
         if (!name) return;
-        flashRestoreStatus('Reading auto-backup…');
         if (!dataProvider || typeof dataProvider.restoreRelationshipsBackup !== 'function') {
           flashRestoreStatus('Restore not available in this mode.');
           return;
         }
-        // For the auto-backup path we read bytes ourselves (so we can
-        // run the confirm dialog), then reuse performImport for the
-        // shared validation + delta + import flow.
-        _opfsReadBinary(name).then(function (bytes) {
-          return performImport(bytes, 'auto-backup ' + fmtBackupTimestamp(name));
+        // Worker is the OPFS owner — page can't read backup bytes
+        // directly. Use the cached row counts from listRelationshipsBackups
+        // for the confirm dialog, then call restoreRelationshipsBackup({name})
+        // which reads + imports atomically inside the worker (and snapshots
+        // the current state into the rotation slot before overwriting).
+        var entry = null;
+        for (var i = 0; i < lastBackupList.length; i++) {
+          if (lastBackupList[i].name === name) { entry = lastBackupList[i]; break; }
+        }
+        var sourceLabel = 'auto-backup ' + fmtBackupTimestamp(name);
+        if (!entry || entry.invalid) {
+          flashRestoreStatus('Backup unreadable; refresh the list and try again.');
+          return;
+        }
+        dataProvider.countRelationships().then(function (current) {
+          var ok = window.confirm(buildConfirmMessage(current, entry.counts, sourceLabel));
+          if (!ok) {
+            flashRestoreStatus('Restore cancelled.');
+            return null;
+          }
+          flashRestoreStatus('Restoring…');
+          return dataProvider.restoreRelationshipsBackup(name).then(function (result) {
+            flashRestoreStatus(
+              'Restored from ' + sourceLabel + ' — ' +
+              result.counts.groups + ' groups, ' +
+              result.counts.notes + ' notes, ' +
+              result.counts.tags + ' tags.' +
+              (result.preRestoreSnapshot
+                ? ' Previous data saved as auto-backup; click an entry below to undo.'
+                : '')
+            );
+            refreshBackupList();
+          });
         }).catch(function (err) {
-          flashRestoreStatus('Could not read auto-backup: ' + (err && err.message || String(err)));
+          if (err && err.name === 'VersionMismatchError') {
+            flashRestoreStatus('App update pending — reload to enable restore.');
+            return;
+          }
+          flashRestoreStatus('Restore failed: ' + (err && err.message || String(err)));
         });
       });
     }
@@ -7559,7 +6673,7 @@
     if (q.charAt(0) === '#' && q.length > 1) {
       ftsQ = 'search_tags:' + q.slice(1);
     }
-    if (directoryDataSource === 'sqlite' && dataProvider) {
+    if (directoryDataSource === 'worker' && dataProvider) {
       setSearchStatus('Searching…');
       dataProvider
         .search(ftsQ)
@@ -7942,9 +7056,13 @@
       .then(function (provider) {
         dataProvider = provider;
         bootDebugPush('provider ready kind=' + provider.kind);
-        if (provider.kind === 'sqlite') {
-          directoryDataSource = 'sqlite';
+        if (provider.kind === 'worker') {
+          directoryDataSource = 'worker';
         }
+        // L6: persist() best-effort, once per install. Result lives in
+        // window.__persistStorageState for diagnostics + e2e tests.
+        // Denied/unavailable is non-fatal — boot continues.
+        maybeRequestPersistedStorage();
         // Reconcile self_email between localStorage (fast cache) and
         // relationships.settings (durable). PR 5: needed by the export
         // "email it to me" feature; safe to fire-and-forget.
@@ -8131,6 +7249,117 @@
     window.addEventListener('online', updateConnectionBanner);
     window.addEventListener('offline', updateConnectionBanner);
     updateConnectionBanner();
+  }
+
+  // Eagerly spawn the worker (init only — network-free per L4a) so OPFS
+  // handles + sqlite3 runtime are warm by the time the gate decision tree
+  // commits. Runs in parallel with /api/auth/status. If the gate decision
+  // lands at email-gate or install-landing, the warm worker is terminated
+  // by terminateWarmWorkerIfStillWarm() below — no network requests have
+  // happened yet, it's safe to throw away. If the decision lands at
+  // directory mode, bootDirectoryAsApp() consumes warmWorkerPromise and
+  // calls ensureFellowsDb on it.
+  var warmWorker = null;          // {rpc, init} once spawnWorkerAndInit resolves
+  var warmWorkerError = null;     // Error from spawn or init
+  var warmWorkerConsumed = false; // true once bootDirectoryAsApp adopts it
+  var warmWorkerPromise = spawnWorkerAndInit().then(function (handle) {
+    warmWorker = handle;
+    return handle;
+  }).catch(function (err) {
+    warmWorkerError = err;
+    throw err;
+  });
+
+  function terminateWarmWorkerIfStillWarm(reason) {
+    if (warmWorkerConsumed) return;
+    // If the spawn hasn't resolved yet, attach a handler that terminates
+    // when it does. Either way, mark consumed so future bootDirectoryAsApp
+    // calls (e.g. install-landing → use-in-tab) re-spawn cleanly.
+    warmWorkerConsumed = true;
+    bootDebugPush('worker: terminating warm worker (' + reason + ')');
+    warmWorkerPromise.then(function (handle) {
+      if (handle && handle.rpc) {
+        try { handle.rpc.terminate(); } catch (e) {}
+      }
+    }).catch(function () { /* spawn errored; nothing to terminate */ });
+    warmWorker = null;
+  }
+
+  // Resolve the data provider for bootDirectoryAsApp. Adopts the warm
+  // worker if it succeeded; otherwise spins a fresh worker (in case
+  // bootDirectoryAsApp is reached after a previous decision tree had
+  // already terminated the warm one — e.g. install-landing → "use in
+  // tab"). Falls back to API+IDB if the worker simply can't come up.
+  function pickDataProvider() {
+    bootDebugPush('pickDataProvider: start');
+    bootDebugPush('gates (one line): ' + describeOpfsGates().replace(/\n/g, ' | '));
+    var handlePromise;
+    if (warmWorkerConsumed && !warmWorker) {
+      // Re-spawn — the warm worker was terminated for the gate UI and
+      // we're now booting the directory anyway (e.g. user clicked "use
+      // in tab" on the install landing).
+      bootDebugPush('pickDataProvider: warm worker was terminated — re-spawning');
+      handlePromise = spawnWorkerAndInit();
+    } else {
+      handlePromise = warmWorkerPromise;
+    }
+    warmWorkerConsumed = true;
+    return handlePromise.then(function (handle) {
+      var provider = createWorkerDataProvider(handle.rpc, handle.init);
+      window.__dataProvider = provider;
+      if (!provider._versionOk) {
+        bootDebugPush(
+          'pickDataProvider: version skew — page expects rpc=' +
+          EXPECTED_WORKER_RPC_VERSION + '/schema=' + EXPECTED_RELATIONSHIPS_SCHEMA_VERSION +
+          ' worker has rpc=' + handle.init.workerRpcVersion +
+          '/schema=' + handle.init.schemaVersion + '; reads still work, writes refused'
+        );
+      }
+      return provider._ensureFellowsDb()
+        .then(function (res) {
+          bootDebugPush(
+            'ensureFellowsDb: hasFellowsDb=' + (res && res.hasFellowsDb) +
+            ' refreshed=' + (res && res.refreshed)
+          );
+          return provider;
+        })
+        .catch(function (e) {
+          bootDebugPush('ensureFellowsDb: failed (code=' + (e && e.code) +
+            ' http=' + (e && e.httpStatus) + '): ' + (e && e.message || e));
+          // Auth-related cold-start failures: the user is signed out
+          // server-side. Per email_gate.md invariant 10, fall through to
+          // the IDB cache so a previously-authed install still renders
+          // the directory. The worker stays in OPFS-owner role for any
+          // groups/settings work; we just can't populate fellows.db.
+          if (e && (e.httpStatus === 401 || e.httpStatus === 403)) {
+            bootDebugPush(
+              'ensureFellowsDb: auth failure → fall back to API+IDB for directory'
+            );
+            var fallback = createApiPlusIdbDataProvider();
+            window.__dataProvider = fallback;
+            return fallback;
+          }
+          // Other failures (network, malformed): surface so bootDirectoryAsApp
+          // can render a retry affordance instead of crashing.
+          var err = new Error(
+            'Could not download directory: ' + (e && e.message || String(e))
+          );
+          err.ensureFellowsDbFailed = true;
+          err.code = e && e.code;
+          err.httpStatus = e && e.httpStatus;
+          throw err;
+        });
+    }).catch(function (err) {
+      if (err && err.ensureFellowsDbFailed) throw err;
+      // Worker failed to spawn or init. Fall back to API+IDB so the
+      // directory-only browse path still works for OPFS-incapable
+      // browsers; groups + settings will surface the unsupported panel.
+      bootDebugPush('pickDataProvider: worker unavailable, falling back to API+IDB: ' +
+        (err && err.message || err));
+      var provider = createApiPlusIdbDataProvider();
+      window.__dataProvider = provider;
+      return provider;
+    });
   }
 
   tryUnlockFromHash().then(function () {

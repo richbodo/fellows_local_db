@@ -172,9 +172,15 @@ class TestEmailGate:
         page.add_init_script(
             "window.localStorage.setItem('fellows_authenticated_once', '1');"
         )
-        # Nuke both endpoints: the as-app boot path AND the gate/install
-        # fallback rely on different endpoints; both must fail for this test
-        # to exercise the "everything 5xx with marker" safety net.
+        # Nuke every endpoint the boot path could use: the worker-owned
+        # fellows.db (post-cutover directory data source), the api+idb
+        # fallback's /api/fellows, and the auth-status check. All must
+        # fail for this test to exercise the "everything 5xx with
+        # marker" safety net.
+        page.route(
+            "**/fellows.db",
+            lambda r: r.fulfill(status=503, body="service unavailable"),
+        )
         page.route(
             "**/api/fellows*",
             lambda r: r.fulfill(status=503, body="service unavailable"),
@@ -185,13 +191,18 @@ class TestEmailGate:
         )
         try:
             page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
-            page.wait_for_timeout(500)
+            # Wait up to 15s for the boot path to chain through:
+            #   worker spawn → ensureFellowsDb 503 →
+            #   bootDirectoryAsApp.catch → startBrowserUx →
+            #   /api/auth/status 503 → quiet email gate.
+            # The chain is longer than the pre-cutover one (the worker
+            # init + ensureFellowsDb fetch are extra steps); 15s is the
+            # comfortable upper bound observed across the test matrix.
+            page.locator("#install-gate-private").wait_for(state="visible", timeout=15000)
             # No scary error panel.
             assert page.locator("#auth-error-panel").is_hidden(), (
                 "Auth-error panel surfaced despite marker being set."
             )
-            # Email gate is the quiet fallback view.
-            expect(page.locator("#install-gate-private")).to_be_visible()
             server_line = page.locator("#build-badge-server")
             expect(server_line).to_contain_text("unreachable")
         finally:

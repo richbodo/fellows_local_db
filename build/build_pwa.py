@@ -71,9 +71,17 @@ def substitute_build_label(text: str, label: str) -> str:
 
 def stamp_static_assets(dist_dir: Path, label: str) -> None:
     """Substitute `__FELLOWS_UI_DIAG__` and `__CACHE_VERSION__` in the
-    two files that carry them. No-op if the placeholders aren't present
-    (e.g., a partial rebuild on already-stamped output)."""
-    for relpath in ("app.js", "sw.js"):
+    files that carry them. No-op if the placeholders aren't present
+    (e.g., a partial rebuild on already-stamped output).
+
+    vendor/sqlite-worker.js carries the same placeholder so the worker
+    handshake (init response → buildLabel) reports the running build —
+    used by the ?diag=1 panel and bug reports for triage. Stamping it
+    here keeps prod consistent with the dev server (app/server.py),
+    which performs the same substitution on the same file list at serve
+    time.
+    """
+    for relpath in ("app.js", "sw.js", "vendor/sqlite-worker.js"):
         target = dist_dir / relpath
         if not target.is_file():
             continue

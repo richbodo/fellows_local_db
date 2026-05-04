@@ -15,72 +15,21 @@ Pins:
   - Export only creates the file — it does not navigate to mailto: by
     itself; the post-export result row exposes a View link and an
     Email button (always — there's no upfront opt-in checkbox).
+
+Phase 1 (plans/local_first_worker_architecture.md): setup that previously
+went through dev /api/groups + /api/settings now drives the worker via
+the worker_data fixture.
 """
 from __future__ import annotations
 
-import json
 import re
-from http.client import HTTPConnection
-from urllib.parse import urlparse
 
 import pytest
 from playwright.sync_api import expect
 
 
-def _conn(base_url):
-    parsed = urlparse(base_url)
-    return HTTPConnection(parsed.hostname, parsed.port, timeout=10)
-
-
-def _wipe_groups(base_url):
-    c = _conn(base_url)
-    c.request("GET", "/api/groups")
-    r = c.getresponse()
-    body = r.read()
-    c.close()
-    if r.status != 200:
-        return
-    try:
-        groups = json.loads(body)
-    except ValueError:
-        return
-    for g in groups:
-        c2 = _conn(base_url)
-        c2.request("DELETE", f"/api/groups/{g['id']}")
-        c2.getresponse().read()
-        c2.close()
-
-
-def _wipe_settings(base_url):
-    c = _conn(base_url)
-    c.request("GET", "/api/settings")
-    r = c.getresponse()
-    body = r.read()
-    c.close()
-    if r.status != 200:
-        return
-    try:
-        bag = json.loads(body)
-    except ValueError:
-        return
-    for k in bag.keys():
-        c2 = _conn(base_url)
-        payload = json.dumps({"value": ""}).encode("utf-8")
-        c2.request(
-            "PUT", f"/api/settings/{k}", body=payload,
-            headers={"Content-Type": "application/json", "Content-Length": str(len(payload))},
-        )
-        c2.getresponse().read()
-        c2.close()
-
-
-def _real_fellows(base_url, with_email=True):
-    c = _conn(base_url)
-    c.request("GET", "/api/fellows?full=1")
-    r = c.getresponse()
-    body = r.read()
-    c.close()
-    rows = json.loads(body)
+def _real_fellows(worker_data, with_email=True):
+    rows = worker_data.get_full_fellows()
     out = []
     for row in rows:
         rid = row.get("record_id")
@@ -92,22 +41,6 @@ def _real_fellows(base_url, with_email=True):
     return out
 
 
-def _create_group(base_url, *, name, fellow_record_ids, note=""):
-    c = _conn(base_url)
-    payload = json.dumps({
-        "name": name, "note": note, "fellow_record_ids": fellow_record_ids,
-    }).encode("utf-8")
-    c.request(
-        "POST", "/api/groups", body=payload,
-        headers={"Content-Type": "application/json", "Content-Length": str(len(payload))},
-    )
-    r = c.getresponse()
-    body = r.read()
-    c.close()
-    assert r.status == 201, body
-    return json.loads(body)
-
-
 def _wait_for_directory(page):
     page.locator("#loading").wait_for(state="hidden", timeout=10000)
     # #app-wrap rather than #directory: the directory rail is now
@@ -116,25 +49,19 @@ def _wait_for_directory(page):
     page.locator("#app-wrap").wait_for(state="visible", timeout=5000)
 
 
-@pytest.fixture(autouse=True)
-def _reset(base_url_fixture):
-    _wipe_groups(base_url_fixture)
-    _wipe_settings(base_url_fixture)
-    yield
-
-
 class TestVisualDirectoryPage:
     def test_directory_route_renders_portrait_grid(
-        self, standalone_page, base_url_fixture
+        self, worker_data, base_url_fixture
     ):
-        page = standalone_page
-        fellows = _real_fellows(base_url_fixture)
+        page = worker_data.page
+        fellows = _real_fellows(worker_data)
         chosen = fellows[:3]
-        g = _create_group(
-            base_url_fixture, name="Visual",
+        g = worker_data.create_group(
+            "Visual",
             fellow_record_ids=[f[0] for f in chosen],
         )
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}/directory", wait_until="domcontentloaded")
+        worker_data.wait()
         _wait_for_directory(page)
         title = page.locator(".group-directory-title")
         expect(title).to_have_text("Visual")
@@ -145,31 +72,33 @@ class TestVisualDirectoryPage:
         expect(link).to_have_attribute("href", re.compile(r"^mailto:\?cc=.+&subject=Visual$"))
 
     def test_view_directory_row_action_navigates(
-        self, standalone_page, base_url_fixture
+        self, worker_data, base_url_fixture
     ):
-        page = standalone_page
-        fellows = _real_fellows(base_url_fixture)
-        g = _create_group(
-            base_url_fixture, name="Row nav",
+        page = worker_data.page
+        fellows = _real_fellows(worker_data)
+        g = worker_data.create_group(
+            "Row nav",
             fellow_record_ids=[f[0] for f in fellows[:1]],
         )
         page.goto(f"{base_url_fixture}/#/groups", wait_until="domcontentloaded")
+        worker_data.wait()
         _wait_for_directory(page)
         page.locator(".groups-action-view").click()
         page.wait_for_url(lambda u: f"#/groups/{g['id']}/directory" in u, timeout=3000)
         expect(page.locator(".group-directory-grid")).to_be_visible()
 
     def test_portrait_click_opens_contact_modal(
-        self, standalone_page, base_url_fixture
+        self, worker_data, base_url_fixture
     ):
-        page = standalone_page
-        fellows = _real_fellows(base_url_fixture)
+        page = worker_data.page
+        fellows = _real_fellows(worker_data)
         first = fellows[0]
-        g = _create_group(
-            base_url_fixture, name="Click test",
+        g = worker_data.create_group(
+            "Click test",
             fellow_record_ids=[first[0]],
         )
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}/directory", wait_until="domcontentloaded")
+        worker_data.wait()
         _wait_for_directory(page)
         page.locator(".group-directory-cell").first.click()
         # Modal appears with the fellow's name and a mailto: link to
@@ -188,16 +117,17 @@ class TestVisualDirectoryPage:
         expect(page.locator(".fellow-modal-overlay")).to_have_count(0)
 
     def test_portrait_modal_close_button_dismisses(
-        self, standalone_page, base_url_fixture
+        self, worker_data, base_url_fixture
     ):
-        page = standalone_page
-        fellows = _real_fellows(base_url_fixture)
+        page = worker_data.page
+        fellows = _real_fellows(worker_data)
         first = fellows[0]
-        g = _create_group(
-            base_url_fixture, name="Close test",
+        g = worker_data.create_group(
+            "Close test",
             fellow_record_ids=[first[0]],
         )
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}/directory", wait_until="domcontentloaded")
+        worker_data.wait()
         _wait_for_directory(page)
         page.locator(".group-directory-cell").first.click()
         expect(page.locator(".fellow-modal-card")).to_be_visible()
@@ -207,16 +137,17 @@ class TestVisualDirectoryPage:
 
 class TestExportDownloads:
     def test_html_export_downloads_single_self_contained_file(
-        self, standalone_page, base_url_fixture
+        self, worker_data, base_url_fixture
     ):
-        page = standalone_page
-        fellows = _real_fellows(base_url_fixture)
+        page = worker_data.page
+        fellows = _real_fellows(worker_data)
         chosen = fellows[:2]
-        g = _create_group(
-            base_url_fixture, name="HTML export test",
+        g = worker_data.create_group(
+            "HTML export test",
             fellow_record_ids=[f[0] for f in chosen],
         )
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
+        worker_data.wait()
         _wait_for_directory(page)
         page.locator("#group-action-export").click()
         page.locator("#export-format-html").check()
@@ -250,15 +181,16 @@ class TestExportDownloads:
         assert href.startswith("blob:"), f"expected blob: URL, got {href!r}"
 
     def test_pdf_export_downloads_with_pdf_magic_bytes(
-        self, standalone_page, base_url_fixture
+        self, worker_data, base_url_fixture
     ):
-        page = standalone_page
-        fellows = _real_fellows(base_url_fixture)
-        g = _create_group(
-            base_url_fixture, name="PDF export test",
+        page = worker_data.page
+        fellows = _real_fellows(worker_data)
+        g = worker_data.create_group(
+            "PDF export test",
             fellow_record_ids=[f[0] for f in fellows[:2]],
         )
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
+        worker_data.wait()
         _wait_for_directory(page)
         page.locator("#group-action-export").click()
         page.locator("#export-format-pdf").check()
@@ -272,15 +204,16 @@ class TestExportDownloads:
         assert head[:5] == b"%PDF-", f"expected %PDF- magic, got {head!r}"
 
     def test_pdf_and_html_radios_are_mutually_exclusive(
-        self, standalone_page, base_url_fixture
+        self, worker_data, base_url_fixture
     ):
-        page = standalone_page
-        fellows = _real_fellows(base_url_fixture)
-        g = _create_group(
-            base_url_fixture, name="Radio test",
+        page = worker_data.page
+        fellows = _real_fellows(worker_data)
+        g = worker_data.create_group(
+            "Radio test",
             fellow_record_ids=[f[0] for f in fellows[:1]],
         )
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
+        worker_data.wait()
         _wait_for_directory(page)
         page.locator("#group-action-export").click()
         # Default: PDF selected, HTML not.
@@ -292,24 +225,28 @@ class TestExportDownloads:
         expect(page.locator("#export-format-pdf")).not_to_be_checked()
 
     def test_email_input_prefilled_from_settings_when_set(
-        self, standalone_page, base_url_fixture
+        self, worker_data, base_url_fixture
     ):
-        page = standalone_page
-        # Seed a self_email in settings before opening the page.
-        c = _conn(base_url_fixture)
-        payload = json.dumps({"value": "user@example.com"}).encode("utf-8")
-        c.request(
-            "PUT", "/api/settings/self_email", body=payload,
-            headers={"Content-Type": "application/json", "Content-Length": str(len(payload))},
+        page = worker_data.page
+        # Seed self_email via the worker (the same code path the user
+        # exercises through the Settings UI). reconcileSelfEmailOnBoot
+        # mirrors settings → localStorage on next boot, but the export
+        # panel reads localStorage at render time, so prime localStorage
+        # too — that's exactly what reconcile does on a real user's
+        # first post-cutover boot, just synchronously here so the test
+        # doesn't race the boot's fire-and-forget reconcile.
+        worker_data.set_setting("self_email", "user@example.com")
+        page.evaluate(
+            "(v) => localStorage.setItem('fellows_self_email', v)",
+            "user@example.com",
         )
-        c.getresponse().read()
-        c.close()
-        fellows = _real_fellows(base_url_fixture)
-        g = _create_group(
-            base_url_fixture, name="Prefill test",
+        fellows = _real_fellows(worker_data)
+        g = worker_data.create_group(
+            "Prefill test",
             fellow_record_ids=[f[0] for f in fellows[:1]],
         )
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
+        worker_data.wait()
         _wait_for_directory(page)
         page.locator("#group-action-export").click()
         addr = page.locator("#export-self-email-addr")
@@ -318,15 +255,16 @@ class TestExportDownloads:
         expect(cue).to_contain_text("override")
 
     def test_email_input_empty_with_cue_when_no_settings(
-        self, standalone_page, base_url_fixture
+        self, worker_data, base_url_fixture
     ):
-        page = standalone_page
-        fellows = _real_fellows(base_url_fixture)
-        g = _create_group(
-            base_url_fixture, name="No-prefill test",
+        page = worker_data.page
+        fellows = _real_fellows(worker_data)
+        g = worker_data.create_group(
+            "No-prefill test",
             fellow_record_ids=[f[0] for f in fellows[:1]],
         )
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
+        worker_data.wait()
         _wait_for_directory(page)
         page.locator("#group-action-export").click()
         addr = page.locator("#export-self-email-addr")
@@ -335,15 +273,16 @@ class TestExportDownloads:
         expect(cue).to_contain_text("enter your email")
 
     def test_email_button_appears_after_export(
-        self, standalone_page, base_url_fixture
+        self, worker_data, base_url_fixture
     ):
-        page = standalone_page
-        fellows = _real_fellows(base_url_fixture)
-        g = _create_group(
-            base_url_fixture, name="Email button visible",
+        page = worker_data.page
+        fellows = _real_fellows(worker_data)
+        g = worker_data.create_group(
+            "Email button visible",
             fellow_record_ids=[f[0] for f in fellows[:1]],
         )
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
+        worker_data.wait()
         _wait_for_directory(page)
         page.locator("#group-action-export").click()
         # Email button lives inside the post-export result row, which
