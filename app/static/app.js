@@ -2,65 +2,6 @@
 // Detail layout matches reference: table-like rows, purple/grey section headers, two columns.
 
 (function () {
-  // TEMPORARY: Phase 0 COOP/COEP probe. `?diag=coi` short-circuits the rest
-  // of boot, spawns a fresh worker, and renders the worker-scope crossOriginIsolated
-  // + SharedArrayBuffer flags. Verifies the dedicated worker inherits the
-  // cross-origin-isolated environment SAH-pool needs. Remove once dev + prod
-  // return both flags true.
-  try {
-    if (new URLSearchParams(location.search).get('diag') === 'coi') {
-      var pageCoi =
-        typeof window.crossOriginIsolated !== 'undefined' ? window.crossOriginIsolated : null;
-      var pageSAB = typeof SharedArrayBuffer !== 'undefined';
-      var panel = document.createElement('pre');
-      panel.id = 'coi-probe-panel';
-      panel.style.cssText =
-        'position:fixed;top:8px;left:8px;right:8px;z-index:99999;' +
-        'background:#fff;border:2px solid #0066cc;padding:12px;' +
-        'font:13px/1.4 ui-monospace,monospace;white-space:pre-wrap;max-width:none;';
-      panel.textContent =
-        'COOP/COEP probe — page scope:\n' +
-        '  crossOriginIsolated: ' + pageCoi + '\n' +
-        '  hasSAB: ' + pageSAB + '\n\n' +
-        'Spawning worker…';
-      document.body.appendChild(panel);
-      try {
-        var probeWorker = new Worker('/vendor/sqlite-worker.js');
-        probeWorker.onmessage = function (ev) {
-          var d = (ev && ev.data) || {};
-          if (!d.ok) {
-            panel.textContent +=
-              '\n\nworker scope: ERROR ' + (d.error || 'unknown');
-          } else {
-            var r = d.result || {};
-            panel.textContent =
-              'COOP/COEP probe\n\n' +
-              'page scope:\n' +
-              '  crossOriginIsolated: ' + pageCoi + '\n' +
-              '  hasSAB: ' + pageSAB + '\n\n' +
-              'worker scope:\n' +
-              '  crossOriginIsolated: ' + r.crossOriginIsolated + '\n' +
-              '  hasSAB: ' + r.hasSAB + '\n\n' +
-              'all-true required for local-first worker plan to proceed.';
-          }
-          // Mirror to console for screenshots.
-          // eslint-disable-next-line no-console
-          console.log('coi-probe', { page: { crossOriginIsolated: pageCoi, hasSAB: pageSAB }, worker: d.result || d });
-          try { probeWorker.terminate(); } catch (e2) {}
-        };
-        probeWorker.onerror = function (ev) {
-          panel.textContent += '\n\nworker error: ' + (ev && ev.message || 'unknown');
-        };
-        probeWorker.postMessage({ id: 1, op: 'probeCoi' });
-      } catch (e3) {
-        panel.textContent += '\n\nworker spawn failed: ' + (e3 && e3.message || e3);
-      }
-      return;
-    }
-  } catch (e1) {
-    // Probe is best-effort; fall through to normal boot.
-  }
-
   var DETAIL_PAGE_TITLE = 'Confidential - Fellows Local-Only Directory Development Project';
   var fellowsBySlug = new Map();
   var list = [];
