@@ -75,6 +75,37 @@ self.addEventListener('activate', (event) => {
         (err) => ({ key: k, ok: false, error: String(err && err.message || err) })
       ))
     );
+    // One-time sweep of legacy /images/<slug>.<ext>?v=<build_label>
+    // entries. The cache-bust query was retired in this commit; until
+    // every installed user activates the new SW, fellows-images-v1
+    // continues holding stale duplicates from past deploys (725 / 508
+    // ratio observed in production before the fix). No-op once the
+    // sweep has run on a given install — new images land at bare URLs
+    // and the legacy entries will all have been removed. Safe to leave
+    // here permanently.
+    let imagesPurged = 0;
+    try {
+      if (keys.indexOf(IMAGES_CACHE) !== -1) {
+        const imageCache = await caches.open(IMAGES_CACHE);
+        const reqs = await imageCache.keys();
+        for (const req of reqs) {
+          // Match any /images/* entry carrying a query string. The only
+          // query that ever appeared on these URLs was ?v=<build_label>;
+          // matching on '?' keeps the predicate simple and resilient if
+          // the form ever varied.
+          if (req.url.indexOf('/images/') !== -1 && req.url.indexOf('?') !== -1) {
+            const ok = await imageCache.delete(req);
+            if (ok) imagesPurged += 1;
+          }
+        }
+      }
+    } catch (e) {
+      // Non-fatal — quota / private mode / corrupted cache. Activate
+      // must still complete so the new app shell takes over.
+      try {
+        console.warn('[sw] activate: image cache-bust sweep failed', e);
+      } catch (_) {}
+    }
     await self.clients.claim();
     // Tell the page what we did, regardless of whether anything was
     // deleted. Page logs this to bootDebugLines via the existing SW
@@ -84,13 +115,14 @@ self.addEventListener('activate', (event) => {
       type: 'sw-activate-pruned',
       activatedAt: new Date().toISOString(),
       currentCache: APP_SHELL_CACHE,
-      deletions: deletions
+      deletions: deletions,
+      imagesPurged: imagesPurged
     });
     // Also console-log so an operator with DevTools open sees it
     // even if the page-side log channel is disconnected.
     try {
       console.log('[sw] activate: current=', APP_SHELL_CACHE,
-        'deletions=', deletions);
+        'deletions=', deletions, 'imagesPurged=', imagesPurged);
     } catch (e) {}
     // Burn-down: only force-reload controlled windows when we're replacing a
     // prior shell cache. Rescues tabs stuck on stale in-memory app.js from a

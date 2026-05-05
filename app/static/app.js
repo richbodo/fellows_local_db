@@ -449,10 +449,18 @@
     function next() {
       var f = queue.shift();
       if (!f) return null;
-      // Same cache-busting suffix as <img src> in renderDetail — keeps the
-      // prewarm and the on-demand render aligned so we hit one cache entry.
-      var jpgUrl = '/images/' + encodeURIComponent(f.slug) + '.jpg?v=' + encodeURIComponent(FELLOWS_UI_DIAG);
-      var pngUrl = '/images/' + encodeURIComponent(f.slug) + '.png?v=' + encodeURIComponent(FELLOWS_UI_DIAG);
+      // No cache-bust query: profile photos for a given slug are
+      // immutable and the URL must stay stable across deploys. A `?v=`
+      // suffix tied to the build label produces a fresh cache key on
+      // every deploy and never evicts the old one — fellows-images-v1
+      // grew to 725 entries across 508 fellows in production before
+      // this fix. Recovery from a previously-404'd photo lags the
+      // deploy by up to a few minutes (browser HTTP cache TTL on the
+      // 404), which is acceptable for ~hundreds of mostly-static
+      // photos. The SW activate handler also sweeps any legacy `?v=`
+      // entries left over from before this change.
+      var jpgUrl = '/images/' + encodeURIComponent(f.slug) + '.jpg';
+      var pngUrl = '/images/' + encodeURIComponent(f.slug) + '.png';
       // Try .jpg first. If 404 / not-ok, fall back to .png — some fellows
       // have only a .png on disk (they uploaded a PNG on Knack), and
       // without this fallback the prewarm never caches them. Mirrors the
@@ -4053,12 +4061,13 @@
     if (demo) leftTop += '<p class="detail-demographics">' + escapeHtml(demo) + '</p>';
     var hasImage = fellow.has_image === 1 || fellow.has_image === true;
     if (hasImage && slug) {
-      // Cache-bust against stale 404s from before a fellow's photo existed.
-      // The HTTP cache has a long max-age for 200 images (good), but if a
-      // browser cached a 404 during a gap, it would persist for days. Adding
-      // ?v=<version> to the URL forces a fresh cache key on every release
-      // so a recovered image surfaces immediately after deploy.
-      var imgUrl = '/images/' + escapeHtml(slug) + '.jpg?v=' + escapeHtml(FELLOWS_UI_DIAG);
+      // Stable URL across deploys — see prewarmProfileImages for why we
+      // don't append ?v=<build_label>. A fellow whose photo was 404 on
+      // a prior visit will keep showing the placeholder until the
+      // browser's HTTP cache TTL on that 404 expires; for ~hundreds of
+      // mostly-static photos that lag is acceptable, and the alternative
+      // accumulates cache entries on every deploy without bound.
+      var imgUrl = '/images/' + escapeHtml(slug) + '.jpg';
       leftTop +=
         '<div class="profile-image-wrap profile-image-wrap--loading" data-slug="' + escapeHtml(slug) + '">' +
           '<img class="profile-image" data-slug="' + escapeHtml(slug) + '" src="' + imgUrl + '" alt="' + escapeHtml(name) + '">' +
@@ -4212,7 +4221,7 @@
           function () {
             var s = img.getAttribute('data-slug');
             if (s && img.src.indexOf('.png') === -1) {
-              img.src = '/images/' + s + '.png?v=' + FELLOWS_UI_DIAG;
+              img.src = '/images/' + s + '.png';
               img.addEventListener('load', markLoaded, { once: true });
               img.addEventListener('error', markPending, { once: true });
             } else {
@@ -5769,7 +5778,7 @@
         var slug = m.slug;
         var imgSrc;
         if (m.has_image && slug) {
-          imgSrc = '/images/' + encodeURIComponent(slug) + '.jpg?v=' + escapeHtml(FELLOWS_UI_DIAG);
+          imgSrc = '/images/' + encodeURIComponent(slug) + '.jpg';
         } else {
           imgSrc = PORTRAIT_SVG_PLACEHOLDER;
         }
@@ -5817,7 +5826,7 @@
     var slug = m.slug;
     var imgSrc;
     if (m.has_image && slug) {
-      imgSrc = '/images/' + encodeURIComponent(slug) + '.jpg?v=' + escapeHtml(FELLOWS_UI_DIAG);
+      imgSrc = '/images/' + encodeURIComponent(slug) + '.jpg';
     } else {
       imgSrc = PORTRAIT_SVG_PLACEHOLDER;
     }
