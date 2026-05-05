@@ -167,6 +167,20 @@ var bootTrace = [];
 
 function trace(msg) { bootTrace.push(new Date().toISOString() + ' ' + String(msg)); }
 
+// Recognize the SAH ownership-conflict failure that
+// installOpfsSAHPoolVfs() throws when another tab's worker already holds
+// the pool's capacity-file SAHs. Detection is name-first (Chrome surfaces
+// it as DOMException 'NoModificationAllowedError') with a message-substring
+// fallback for engines that haven't standardized the name yet. Conservative
+// — anything not matching falls through as a generic init failure.
+function isOwnershipConflictError(e) {
+  if (!e) return false;
+  if (e.name === 'NoModificationAllowedError') return true;
+  var msg = String((e && e.message) || e || '');
+  return /another open (?:Access Handle|Writable stream)/i.test(msg) ||
+         /Access Handles? cannot be created/i.test(msg);
+}
+
 // ===== SQL helpers ==========================================================
 
 function dbSelectAll(db, sql, bind) {
@@ -492,8 +506,37 @@ handlers.init = async function () {
   if (typeof sqlite3.installOpfsSAHPoolVfs !== 'function') {
     throw new Error('sqlite3.installOpfsSAHPoolVfs missing in worker build');
   }
-  poolUtil = await sqlite3.installOpfsSAHPoolVfs();
-  trace('installOpfsSAHPoolVfs: OK');
+  try {
+    poolUtil = await sqlite3.installOpfsSAHPoolVfs();
+    trace('installOpfsSAHPoolVfs: OK');
+  } catch (poolErr) {
+    // The SAH-pool VFS opens a fixed pool of OPFS capacity files via
+    // FileSystemFileHandle.createSyncAccessHandle(). If another tab or
+    // window of this app is already running, its worker holds those
+    // handles and ours can't acquire them — Chrome throws a
+    // NoModificationAllowedError DOMException with message "Access
+    // Handles cannot be created if there is another open Access Handle
+    // or Writable stream associated with the same file."
+    //
+    // Tag that case with code='OWNERSHIP_CONFLICT' so the page can
+    // render a specific "directory is open in another tab" panel
+    // instead of the misleading "your browser doesn't support this"
+    // copy. Other init failures stay generic. See
+    // plans/multi_tab_ownership_takeover.md for the full coordinated
+    // takeover this is the cheap-fix predecessor of.
+    if (isOwnershipConflictError(poolErr)) {
+      trace('installOpfsSAHPoolVfs: OWNERSHIP_CONFLICT (' + ((poolErr && poolErr.message) || String(poolErr)) + ')');
+      var conflictErr = new Error(
+        'Could not acquire OPFS lock — another tab or window of this app is already open. ' +
+        'Original: ' + ((poolErr && poolErr.message) || String(poolErr))
+      );
+      conflictErr.code = 'OWNERSHIP_CONFLICT';
+      conflictErr.name = (poolErr && poolErr.name) || 'NoModificationAllowedError';
+      throw conflictErr;
+    }
+    trace('installOpfsSAHPoolVfs: FAILED (' + ((poolErr && poolErr.message) || String(poolErr)) + ')');
+    throw poolErr;
+  }
 
   // One-time cleanup of the pre-P1 build-SHA sentinel (now retired).
   // No-op on profiles that never had it (clean installs, post-P1 boots).

@@ -2872,6 +2872,31 @@ a.group-action-btn--primary {
   color: #6a5800;
 }
 
+/* Reload button on the multi-tab ownership-conflict variant of the panel
+   (renderOwnershipConflictPanel in app.js). The base panel has no
+   actionable controls; this branch needs one because the remedy is a
+   page reload. */
+.local-data-unavailable-action {
+  display: inline-block;
+  margin-top: 0.25rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  background: var(--accent, #1f6fcf);
+  color: #fff;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.local-data-unavailable-action:hover {
+  filter: brightness(1.05);
+}
+
+.local-data-unavailable-action:active {
+  filter: brightness(0.95);
+}
+
 .local-data-unavailable-trace {
   margin: 0.75rem 0 0;
   font-size: 0.85rem;

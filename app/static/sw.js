@@ -62,8 +62,36 @@ self.addEventListener('activate', (event) => {
     const oldShellCaches = keys.filter(
       (k) => k.startsWith('fellows-app-shell-') && k !== APP_SHELL_CACHE
     );
-    await Promise.all(oldShellCaches.map((k) => caches.delete(k)));
+    // Capture per-key delete results so we can tell, post-hoc, whether
+    // the prune fired but didn't actually delete (returns false). The
+    // 2026-05-05 incident showed two shell caches coexisting after a
+    // build-label rebump even though this handler should have nuked the
+    // older one — instrumenting both sides (here + auditShellCaches in
+    // app.js) is the path to seeing whether the prune ran at all next
+    // time the symptom recurs.
+    const deletions = await Promise.all(
+      oldShellCaches.map((k) => caches.delete(k).then(
+        (ok) => ({ key: k, ok }),
+        (err) => ({ key: k, ok: false, error: String(err && err.message || err) })
+      ))
+    );
     await self.clients.claim();
+    // Tell the page what we did, regardless of whether anything was
+    // deleted. Page logs this to bootDebugLines via the existing SW
+    // message handler; future diagnostics dumps then carry a clear
+    // record of "activate ran at <ts>, current=<X>, deleted=<list>".
+    postCacheProgress({
+      type: 'sw-activate-pruned',
+      activatedAt: new Date().toISOString(),
+      currentCache: APP_SHELL_CACHE,
+      deletions: deletions
+    });
+    // Also console-log so an operator with DevTools open sees it
+    // even if the page-side log channel is disconnected.
+    try {
+      console.log('[sw] activate: current=', APP_SHELL_CACHE,
+        'deletions=', deletions);
+    } catch (e) {}
     // Burn-down: only force-reload controlled windows when we're replacing a
     // prior shell cache. Rescues tabs stuck on stale in-memory app.js from a
     // previous cacheFirst SW. First-time installs skip this.

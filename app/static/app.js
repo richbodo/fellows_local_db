@@ -131,6 +131,34 @@
   var directoryDataSource = 'api';
   var dataProvider = null;
   var bootDebugLines = [];
+  // Monotonic clock for boot-phase relative timing. performance.now() is
+  // wall-clock-independent (won't jump on NTP correction) and survives DST
+  // transitions cleanly. Falls back to Date.now() if performance is missing
+  // (very old browsers; harmless approximation).
+  var _bootPerfStart = (typeof performance !== 'undefined' && performance.now)
+    ? performance.now()
+    : Date.now();
+  function _bootMs() {
+    return (typeof performance !== 'undefined' && performance.now)
+      ? Math.round(performance.now() - _bootPerfStart)
+      : Date.now() - _bootPerfStart;
+  }
+  // Marks the time of every named milestone for later phase-duration math
+  // in emitBootSummary(). Filled by bootMark(); reading it directly is
+  // fine for diagnostics. Order is insertion order.
+  var bootMarks = {};
+  function bootMark(name) {
+    if (!Object.prototype.hasOwnProperty.call(bootMarks, name)) {
+      bootMarks[name] = _bootMs();
+    }
+  }
+  // Captures the very start of script execution; everything else is
+  // relative to this. Helpful when a boot stalls before pickDataProvider
+  // even runs (e.g., long script-parse, blocked dependency fetch).
+  bootMark('script_start');
+  // Single-shot guard so emitBootSummary doesn't fire twice if boot
+  // races finish out of order (image prewarm vs. getFull etc.).
+  var _bootSummaryEmitted = false;
   var authDebugLines = [];
   var swLifecycleLog = [];
   var imagePrewarmState = {
@@ -447,6 +475,10 @@
     return Promise.all(starters).then(function () {
       imagePrewarmState.status = 'done';
       imagePrewarmState.finishedAt = new Date().toISOString();
+      bootMark('image_prewarm_done');
+      // End-of-boot milestone — emit summary if not already emitted by
+      // an earlier path (e.g. getFull errored and we never reached here).
+      emitBootSummary();
     });
   }
 
@@ -575,6 +607,68 @@
     };
   }
 
+  // The cheap-fix copy for the multi-tab ownership-conflict case. Returns
+  // an HTML string with the same outer .local-data-unavailable shell as
+  // renderLocalDataUnavailablePanel so the existing CSS applies. Distinct
+  // from the version-floor copy because the user is on a perfectly
+  // capable browser — the only problem is another tab is holding OPFS.
+  // The remedy is mechanical: close the other tab and reload here. The
+  // coordinated takeover is the follow-up in
+  // plans/multi_tab_ownership_takeover.md.
+  function renderOwnershipConflictPanel(feature) {
+    var label = feature || 'this feature';
+    var headline = 'Directory is already open in another window';
+    var lede =
+      'Saved groups and per-device settings live in your browser\'s local storage (OPFS), and only ' +
+      'one tab or window can use it at a time. Another window of this app is already using it, ' +
+      'so ' + escapeHtml(label) + ' can\'t open here until you close that window.';
+    var detailHtml =
+      '<p>To use ' + escapeHtml(label) + ' here:</p>' +
+      '<ol>' +
+        '<li>Find the other open tab or window of this app (it may be the installed app on your dock or home screen).</li>' +
+        '<li>Close it, or quit the installed app entirely.</li>' +
+        '<li>Click <b>Reload this tab</b> below.</li>' +
+      '</ol>' +
+      '<p>If you\'d rather use the other window, switch to it instead — your work there is intact.</p>';
+    // Inline boot trace so the user (and the maintainer triaging) can
+    // see the captured DOMException without clicking elsewhere. Same
+    // pattern as the runtimeFailure branch in renderLocalDataUnavailablePanel.
+    var traceParts = [];
+    try {
+      if (warmWorkerError) {
+        traceParts.push('Worker init error: ' +
+          ((warmWorkerError && warmWorkerError.message) || String(warmWorkerError)));
+      }
+    } catch (e) {}
+    try {
+      if (bootDebugLines && bootDebugLines.length) {
+        traceParts.push('');
+        traceParts.push('Boot trace (chronological):');
+        traceParts.push(bootDebugLines.join('\n'));
+      }
+    } catch (e) {}
+    var traceHtml = traceParts.length
+      ? '<details class="local-data-unavailable-trace">' +
+          '<summary>Show what failed (boot trace)</summary>' +
+          '<pre>' + escapeHtml(traceParts.join('\n')) + '</pre>' +
+        '</details>'
+      : '';
+    return (
+      '<div class="local-data-unavailable">' +
+        '<h3>' + escapeHtml(headline) + '</h3>' +
+        '<p class="local-data-unavailable-lede">' + lede + '</p>' +
+        detailHtml +
+        '<p><button type="button" class="local-data-unavailable-action" ' +
+          'onclick="window.location.reload()">Reload this tab</button></p>' +
+        traceHtml +
+        '<p class="local-data-unavailable-foot">' +
+          'If reloading doesn\'t help after closing every other tab and the installed app, ' +
+          'please reach out — we\'re happy to help.' +
+        '</p>' +
+      '</div>'
+    );
+  }
+
   // Build the "your browser can't store groups locally" panel. Returns an
   // HTML string. Caller decides which container to drop it into.
   // `feature` is what the user was trying to do — "groups", "this group",
@@ -585,8 +679,20 @@
   // sqlite-wasm glitch). When set AND the detected version meets the
   // floor, we render a different copy that doesn't tell a Chrome-130
   // user to upgrade Chrome.
+  // `opts.ownershipConflict` (optional) means worker init failed because
+  // another tab/window already holds the OPFS SAH-pool. Defaults to the
+  // module-level bootOwnershipConflict flag if not passed, so callsites
+  // don't need to thread it through. Renders a specific "directory is
+  // open in another window" panel — see plans/multi_tab_ownership_takeover.md
+  // for the coordinated-takeover follow-up that supersedes this copy.
   function renderLocalDataUnavailablePanel(feature, opts) {
     opts = opts || {};
+    if (opts.ownershipConflict == null) {
+      opts.ownershipConflict = bootOwnershipConflict;
+    }
+    if (opts.ownershipConflict) {
+      return renderOwnershipConflictPanel(feature);
+    }
     var b = detectBrowserSupport();
     var label = feature || 'this feature';
     var browserHuman =
@@ -966,7 +1072,142 @@
   }
 
   function bootDebugPush(msg) {
-    bootDebugLines.push(new Date().toISOString() + ' ' + String(msg));
+    // Relative `t+Nms` makes phase durations readable at a glance without
+    // having to do math on the ISO timestamps. Cheap (one performance.now()
+    // call) and only ever appended — no parsing concerns. Unblocks the
+    // "tab spun for several minutes but boot trace looked fast" debug
+    // case where the wall-clock timestamps gave no signal about which
+    // phase actually stalled.
+    bootDebugLines.push(
+      new Date().toISOString() + ' (t+' + _bootMs() + 'ms) ' + String(msg)
+    );
+  }
+
+  // Persistence key for last-known-slow boot. Single record, overwritten
+  // each time a new slow boot is detected. Survives Clear App Cache
+  // intentionally — a regression that only repros once a week needs to
+  // outlive the session that captured it.
+  var SLOW_BOOT_KEY = 'fellows_last_slow_boot';
+  // Thresholds. Conservative — we want this to fire only when boot
+  // genuinely felt slow, not on every minor hiccup. Total covers
+  // end-to-end perceived latency; any-phase covers a single stuck step
+  // even when the rest were fast.
+  var SLOW_BOOT_TOTAL_MS = 3000;
+  var SLOW_BOOT_PHASE_MS = 2000;
+
+  // Persist a one-line slow-boot record to localStorage so the user can
+  // copy it from diagnostics on the next session even if the slow tab
+  // got closed. Safe under quota / private-mode by failing silently.
+  function persistSlowBoot(record) {
+    try {
+      localStorage.setItem(SLOW_BOOT_KEY, JSON.stringify(record));
+    } catch (e) {}
+  }
+
+  // Read the last persisted slow-boot record, if any. Returns null on
+  // missing / malformed / unreadable. Only called from diagnostics.
+  function readLastSlowBoot() {
+    try {
+      var raw = localStorage.getItem(SLOW_BOOT_KEY);
+      if (!raw) return null;
+      var rec = JSON.parse(raw);
+      if (rec && typeof rec === 'object') return rec;
+    } catch (e) {}
+    return null;
+  }
+
+  // Compute a phase-duration line from bootMarks and emit it once. Called
+  // from multiple boot completion sites (provider ready, getList done,
+  // getFull done, image prewarm done) — the _bootSummaryEmitted guard
+  // makes it idempotent. Persists a slow-boot record when warranted.
+  // The phase order here mirrors the sequence in bootDirectoryAsApp;
+  // missing marks are skipped, so this works on partial-boot exits too.
+  function emitBootSummary() {
+    if (_bootSummaryEmitted) return;
+    _bootSummaryEmitted = true;
+    bootMark('summary');
+    var phaseSeq = [
+      'script_start',
+      'pick_provider_start',
+      'worker_init_done',
+      'provider_ready',
+      'get_list_done',
+      'get_full_done',
+      'image_prewarm_done',
+      'summary'
+    ];
+    var parts = [];
+    var slowestPhase = null;
+    var slowestMs = 0;
+    for (var i = 1; i < phaseSeq.length; i++) {
+      var prev = phaseSeq[i - 1];
+      var curr = phaseSeq[i];
+      if (bootMarks[prev] == null || bootMarks[curr] == null) continue;
+      var dur = bootMarks[curr] - bootMarks[prev];
+      parts.push(curr.replace(/_/g, '-') + '=' + dur + 'ms');
+      if (dur > slowestMs) {
+        slowestMs = dur;
+        slowestPhase = curr;
+      }
+    }
+    var totalMs = bootMarks.summary != null ? bootMarks.summary : _bootMs();
+    bootDebugPush(
+      'boot summary: ' + parts.join(' ') + ' total=' + totalMs + 'ms'
+    );
+    if (totalMs > SLOW_BOOT_TOTAL_MS || slowestMs > SLOW_BOOT_PHASE_MS) {
+      var rec = {
+        ts: new Date().toISOString(),
+        totalMs: totalMs,
+        slowestPhase: slowestPhase,
+        slowestMs: slowestMs,
+        phases: parts.join(' '),
+        route: (location && location.hash) ? location.hash : '',
+        ua: (navigator && navigator.userAgent) ? navigator.userAgent.slice(0, 160) : ''
+      };
+      persistSlowBoot(rec);
+      bootDebugPush(
+        'boot SLOW (>'+ SLOW_BOOT_TOTAL_MS + 'ms total or >' + SLOW_BOOT_PHASE_MS +
+        'ms phase) — persisted to localStorage[' + SLOW_BOOT_KEY +
+        '] for inspection on next session'
+      );
+    }
+  }
+
+  // List shell caches and remove any that don't match the current build
+  // label. The SW activate handler already does this (sw.js), but in the
+  // 2026-05-05 incident the user's diagnostics showed two shell caches
+  // coexisting after a label rebump — the activate prune either didn't
+  // run or didn't catch the previous version. This is a defensive page-side
+  // safety net: cheap (one caches.keys() call) and silent on the happy
+  // path. Logs to bootDebugLines so any future incident shows whether
+  // this path actually fired and what it pruned.
+  function auditShellCaches() {
+    if (!self.caches || typeof self.caches.keys !== 'function') return;
+    self.caches.keys().then(function (keys) {
+      var shellKeys = keys.filter(function (k) {
+        return typeof k === 'string' && k.indexOf('fellows-app-shell-') === 0;
+      });
+      var current = 'fellows-app-shell-' + FELLOWS_UI_DIAG;
+      var stale = shellKeys.filter(function (k) { return k !== current; });
+      bootDebugPush(
+        'cache audit: shell caches=' + shellKeys.length +
+        ' (current=' + current + ', stale=' + stale.length + ')'
+      );
+      if (!stale.length) return;
+      Promise.all(stale.map(function (k) {
+        return self.caches.delete(k).then(function (ok) {
+          bootDebugPush(
+            'cache audit: deleted ' + k + ' (ok=' + ok + ')'
+          );
+        }).catch(function (e) {
+          bootDebugPush(
+            'cache audit: delete failed ' + k + ': ' + (e && e.message || e)
+          );
+        });
+      }));
+    }).catch(function (e) {
+      bootDebugPush('cache audit: caches.keys() failed: ' + (e && e.message || e));
+    });
   }
 
   function authDebugPush(msg) {
@@ -1426,6 +1667,25 @@
       'document.cookie length (HttpOnly cookies are NOT visible to JS): ' +
         String((document.cookie || '').length)
     );
+    // Surface the persisted slow-boot record (if any) right at the top.
+    // Lives in localStorage[fellows_last_slow_boot]; written by
+    // emitBootSummary when total boot >SLOW_BOOT_TOTAL_MS or any single
+    // phase >SLOW_BOOT_PHASE_MS. Survives Clear App Cache so a rare
+    // regression captured one session is still readable in the next.
+    try {
+      var slow = readLastSlowBoot();
+      if (slow) {
+        lines.push('');
+        lines.push('--- Last slow boot recorded ---');
+        lines.push('  at: ' + (slow.ts || '(unknown)'));
+        lines.push('  total: ' + (slow.totalMs != null ? slow.totalMs + 'ms' : '(?)'));
+        lines.push('  slowest phase: ' + (slow.slowestPhase || '(?)') +
+          ' (' + (slow.slowestMs != null ? slow.slowestMs + 'ms' : '?') + ')');
+        if (slow.phases) lines.push('  all phases: ' + slow.phases);
+        if (slow.route) lines.push('  route: ' + slow.route);
+        if (slow.ua) lines.push('  ua: ' + slow.ua);
+      }
+    } catch (e) {}
     lines.push('');
     // OPFS / sqlite-wasm boot state. The Settings page hides backup/restore
     // when this fell through to API mode; this section answers "and why?".
@@ -1632,7 +1892,10 @@
         }
       }
     } else if (warmWorkerError) {
-      lines.push('worker spawn: FAILED — ' +
+      var failTag = (warmWorkerError && warmWorkerError.code === 'OWNERSHIP_CONFLICT')
+        ? 'FAILED [OWNERSHIP_CONFLICT — another tab/window holds OPFS]'
+        : 'FAILED';
+      lines.push('worker spawn: ' + failTag + ' — ' +
         String((warmWorkerError && warmWorkerError.message) || warmWorkerError));
       lines.push('  (page expects rpc=' + EXPECTED_WORKER_RPC_VERSION +
         ' schema=' + EXPECTED_RELATIONSHIPS_SCHEMA_VERSION +
@@ -2667,6 +2930,7 @@
       }, WORKER_INIT_TIMEOUT_MS);
     });
     return Promise.race([initPromise, timeoutPromise]).then(function (initResult) {
+      bootMark('worker_init_done');
       bootDebugPush(
         'worker: init OK rpc=' + (initResult && initResult.workerRpcVersion) +
         ' schema=' + (initResult && initResult.schemaVersion) +
@@ -7171,6 +7435,20 @@
         ) {
           setSetupStatus('Getting app ready… ' + d.loaded + '/' + d.total);
         }
+        // SW activate handler logs each prune cycle so the page-side
+        // boot trace shows whether activate ran and what it deleted.
+        // Pairs with auditShellCaches() — this records what the SW did,
+        // the audit records what the page sees afterward.
+        if (d && d.type === 'sw-activate-pruned') {
+          var dels = Array.isArray(d.deletions) ? d.deletions : [];
+          var summary = dels.length
+            ? dels.map(function (x) { return x.key + '=' + x.ok; }).join(', ')
+            : '(none)';
+          bootDebugPush(
+            'sw activate prune: current=' + d.currentCache +
+            ' deleted=' + summary + ' at=' + d.activatedAt
+          );
+        }
       });
     }
 
@@ -7203,7 +7481,13 @@
     pickDataProvider()
       .then(function (provider) {
         dataProvider = provider;
+        bootMark('provider_ready');
         bootDebugPush('provider ready kind=' + provider.kind);
+        // Defensive shell-cache audit. Cheap (one caches.keys()) and
+        // silent on the happy path; logs + deletes any stale shell
+        // caches the SW activate prune missed. See the 2026-05-05
+        // incident note in auditShellCaches's docstring.
+        auditShellCaches();
         if (provider.kind === 'worker') {
           directoryDataSource = 'worker';
         }
@@ -7226,6 +7510,7 @@
         });
       })
       .then(function (data) {
+        bootMark('get_list_done');
         bootDebugPush(
           'getList: OK count=' + (Array.isArray(data) ? data.length : typeof data) +
           (offlineOnlyMode ? ' (from cache)' : '')
@@ -7262,8 +7547,14 @@
         });
       })
       .then(function (full) {
+        bootMark('get_full_done');
         bootDebugPush('getFull: OK rows=' + (Array.isArray(full) ? full.length : typeof full) +
           (offlineOnlyMode ? ' (from cache)' : ''));
+        // First moment the directory is fully data-backed. Image prewarm
+        // is the next phase but happens in the background; emitting now
+        // means a hung prewarm doesn't suppress the summary line.
+        // emitBootSummary is idempotent — prewarm's later call no-ops.
+        emitBootSummary();
         if (Array.isArray(full)) {
           fullFellowsCache = full;
           // Only persist a fresh API payload. A cache-served full is
@@ -7410,6 +7701,13 @@
   var warmWorker = null;          // {rpc, init} once spawnWorkerAndInit resolves
   var warmWorkerError = null;     // Error from spawn or init
   var warmWorkerConsumed = false; // true once bootDirectoryAsApp adopts it
+  // Set when the warm worker's init failed because another tab/window
+  // of this app already holds the OPFS SAH-pool. Distinct from generic
+  // OPFS-unsupported (older browser, missing SAH, etc.) — drives a
+  // specific "directory is open in another tab" panel via
+  // renderLocalDataUnavailablePanel(). See plans/multi_tab_ownership_takeover.md
+  // for the coordinated-takeover follow-up that supersedes this signal.
+  var bootOwnershipConflict = false;
   var warmWorkerPromise = spawnWorkerAndInit().then(function (handle) {
     warmWorker = handle;
     // Tee a success summary into the bug-report ring so a later bug
@@ -7428,14 +7726,18 @@
     return handle;
   }).catch(function (err) {
     warmWorkerError = err;
+    if (err && err.code === 'OWNERSHIP_CONFLICT') {
+      bootOwnershipConflict = true;
+    }
     // Spawn or init failed — user is about to drop to the API+IDB
     // fallback (or boot-failure panel). Tee + ship to journald so the
     // operator sees the failure rate without needing the user to send
     // diagnostics. Cardinality is bounded: warm spawn fires once per
     // page load, re-spawn fires at most once more.
     var msg = (err && err.message) || String(err);
-    pushBugReportError('worker', 'spawn_failed', msg.slice(0, 200));
-    reportWorkerEvent('spawn_failed', msg);
+    var tag = bootOwnershipConflict ? 'ownership_conflict' : 'spawn_failed';
+    pushBugReportError('worker', tag, msg.slice(0, 200));
+    reportWorkerEvent(tag, msg);
     throw err;
   });
 
@@ -7460,6 +7762,7 @@
   // already terminated the warm one — e.g. install-landing → "use in
   // tab"). Falls back to API+IDB if the worker simply can't come up.
   function pickDataProvider() {
+    bootMark('pick_provider_start');
     bootDebugPush('pickDataProvider: start');
     bootDebugPush('gates (one line): ' + describeOpfsGates().replace(/\n/g, ' | '));
     var handlePromise;
@@ -7527,6 +7830,12 @@
       // Worker failed to spawn or init. Fall back to API+IDB so the
       // directory-only browse path still works for OPFS-incapable
       // browsers; groups + settings will surface the unsupported panel.
+      // The re-spawn path (warm worker was terminated for the gate UI)
+      // can also hit OWNERSHIP_CONFLICT — propagate it so the panel
+      // renders the multi-tab copy here too, not just the warm-spawn case.
+      if (err && err.code === 'OWNERSHIP_CONFLICT') {
+        bootOwnershipConflict = true;
+      }
       bootDebugPush('pickDataProvider: worker unavailable, falling back to API+IDB: ' +
         (err && err.message || err));
       var provider = createApiPlusIdbDataProvider();
