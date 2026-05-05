@@ -1100,6 +1100,14 @@ handlers.getVersions = async function () {
   };
 };
 
+// Read-only view of fellows.db.meta.json for diagnostics + the About
+// page's "Last update check" line. Pure read — never triggers a fetch
+// or import; that's ensureFellowsDb's job. Returns null when the meta
+// file doesn't exist yet (cold-start before first ensureFellowsDb).
+handlers.getFellowsDbMeta = async function () {
+  return await readFellowsMeta();
+};
+
 // Reset Everything's nuclear path. Closes both DB handles, tears down the
 // SAH-pool VFS via removeVfs() (which releases every SAH and recursively
 // removes the pool's opaque storage dir), then sweeps sibling files we

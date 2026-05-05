@@ -13,7 +13,6 @@
   var authErrorPanelEl = document.getElementById('auth-error-panel');
   var authErrorPreEl = document.getElementById('auth-error-pre');
   var appWrapEl = document.getElementById('app-wrap');
-  var connectionBannerEl = document.getElementById('connection-banner');
   var directoryEl = document.getElementById('directory');
   var directoryListEl = document.getElementById('directory-list') || directoryEl;
   var searchInputEl = document.getElementById('search-input');
@@ -1911,6 +1910,34 @@
           lines.push('worker getOpfsInventory failed: ' + String(invErr && invErr.message || invErr));
         }
       }
+      // fellows.db.meta.json — the freshness sidecar that gates
+      // SHA-keyed re-import (Phase 3) and powers the About-page
+      // "Last update check" line (Phase 4). Same source-prefer pattern
+      // as the inventory call above.
+      var metaSource = null;
+      if (dataProvider && typeof dataProvider._getFellowsDbMeta === 'function') {
+        metaSource = dataProvider._getFellowsDbMeta();
+      } else if (warmWorker && warmWorker.rpc) {
+        metaSource = warmWorker.rpc.call('getFellowsDbMeta');
+      }
+      if (metaSource) {
+        try {
+          var meta = await metaSource;
+          if (meta && typeof meta === 'object') {
+            lines.push('fellows.db.meta.json (worker view):');
+            lines.push('  sha: ' + (meta.sha || '(unset)'));
+            lines.push('  fetched_at: ' + (meta.fetched_at || '(never)'));
+            lines.push('  last_failure_at: ' + (meta.last_failure_at || '(none)'));
+            if (meta.last_failure_reason) {
+              lines.push('  last_failure_reason: ' + meta.last_failure_reason);
+            }
+          } else {
+            lines.push('fellows.db.meta.json: (not yet written — cold start)');
+          }
+        } catch (metaErr) {
+          lines.push('worker getFellowsDbMeta failed: ' + String(metaErr && metaErr.message || metaErr));
+        }
+      }
     } else if (warmWorkerError) {
       var failTag = (warmWorkerError && warmWorkerError.code === 'OWNERSHIP_CONFLICT')
         ? 'FAILED [OWNERSHIP_CONFLICT — another tab/window holds OPFS]'
@@ -2651,7 +2678,6 @@
     if (installGatePrivateEl) installGatePrivateEl.classList.add('hidden');
     if (appWrapEl) appWrapEl.classList.add('hidden');
     setShellVisible(false);
-    if (connectionBannerEl) connectionBannerEl.classList.add('hidden');
     if (authErrorPanelEl) authErrorPanelEl.classList.remove('hidden');
     if (authErrorPreEl) authErrorPreEl.textContent = lines.join('\n');
   }
@@ -2881,7 +2907,11 @@
       // Diagnostics — pulls the worker's own boot trace + OPFS inventory.
       _getWorkerTrace: function () { return rpc.call('getTrace'); },
       _getOpfsInventory: function () { return rpc.call('getOpfsInventory'); },
-      _ensureFellowsDb: function (args) { return rpc.call('ensureFellowsDb', args || {}); }
+      _ensureFellowsDb: function (args) { return rpc.call('ensureFellowsDb', args || {}); },
+      // Read-only view of fellows.db.meta.json. Powers the About-page
+      // "Last update check" line and the diag panel's meta block. Pure
+      // read; does not trigger a fetch.
+      _getFellowsDbMeta: function () { return rpc.call('getFellowsDbMeta'); }
     };
   }
 
@@ -3424,7 +3454,6 @@
     setShellVisible(false);
     showLoading(false);
     showApp(false);
-    if (connectionBannerEl) connectionBannerEl.classList.add('hidden');
 
     if (authPayload) {
       showAuthDebugInstall(authPayload, httpStatus != null ? httpStatus : 200);
@@ -3569,7 +3598,6 @@
     setShellVisible(false);
     showLoading(false);
     showApp(false);
-    if (connectionBannerEl) connectionBannerEl.classList.add('hidden');
 
     setGateReasonBanner(reason);
 
@@ -4762,6 +4790,13 @@
     aboutHtml += '<button type="button" id="about-check-updates" class="about-check-updates-btn">Check for updates</button>';
     aboutHtml += '<span id="about-update-status" class="about-update-status" role="status" aria-live="polite"></span>';
     aboutHtml += '</p>';
+    // Persistent record of when the worker last reached the server for
+    // directory data. Populated async from fellows.db.meta.json. Useful
+    // when a user reports stale data — the line answers "is the
+    // distribution channel actually working for me?" without sending
+    // them into the diagnostics panel. Phase 4 of
+    // plans/local_first_worker_architecture.md.
+    aboutHtml += '<p class="about-last-update" id="about-last-update"></p>';
     var serverLabel = bootBuildMeta.git_sha
       ? bootBuildMeta.git_sha + (bootBuildMeta.built_at ? ' · ' + bootBuildMeta.built_at : '')
       : (bootBuildMeta.built_at || 'unknown');
@@ -4781,6 +4816,32 @@
     aboutHtml += '<div class="stats-grid" id="stats-grid"></div>';
     aboutHtml += '</div>';
     detailEl.innerHTML = aboutHtml;
+
+    // Populate the "Last update check" line from the worker's
+    // fellows.db.meta.json. Async + non-blocking: a missing/empty meta
+    // (cold-start) renders "No update checks recorded yet" and the page
+    // continues. If the dataProvider doesn't expose the meta RPC (api+idb
+    // fallback on no-OPFS browsers), leave the line empty — the meta
+    // doesn't exist in that path.
+    (function renderLastUpdateCheck() {
+      var el = document.getElementById('about-last-update');
+      if (!el) return;
+      if (!dataProvider || typeof dataProvider._getFellowsDbMeta !== 'function') return;
+      Promise.resolve(dataProvider._getFellowsDbMeta()).then(function (meta) {
+        if (!meta || (!meta.fetched_at && !meta.last_failure_at)) {
+          el.textContent = 'No update checks recorded yet.';
+          return;
+        }
+        var fetchedTs = meta.fetched_at ? new Date(meta.fetched_at).getTime() : 0;
+        var failedTs = meta.last_failure_at ? new Date(meta.last_failure_at).getTime() : 0;
+        if (failedTs > fetchedTs) {
+          var reason = meta.last_failure_reason || 'unknown reason';
+          el.textContent = 'Last update attempt: ' + meta.last_failure_at + ' — failed: ' + reason;
+        } else {
+          el.textContent = 'Last update check: ' + meta.fetched_at + ' — succeeded.';
+        }
+      }).catch(function () { /* non-fatal — leave line empty */ });
+    })();
 
     // Wire the "Check for updates" button. Shares the same checker used by
     // the hourly poll so the user-visible status stays consistent with what
@@ -7404,20 +7465,6 @@
     }
   }
 
-  function updateConnectionBanner() {
-    if (!connectionBannerEl) return;
-    if (navigator.onLine) {
-      connectionBannerEl.textContent = 'You are online.';
-      connectionBannerEl.classList.remove('hidden');
-      setTimeout(function () {
-        connectionBannerEl.classList.add('hidden');
-      }, 2000);
-    } else {
-      connectionBannerEl.textContent = 'You are offline. Showing cached data where available.';
-      connectionBannerEl.classList.remove('hidden');
-    }
-  }
-
   initSwReloadButton();
   initClearCacheButton();
   initResetEverythingButton();
@@ -7705,10 +7752,6 @@
     } else {
       initWindowAISearch();
     }
-
-    window.addEventListener('online', updateConnectionBanner);
-    window.addEventListener('offline', updateConnectionBanner);
-    updateConnectionBanner();
   }
 
   // Eagerly spawn the worker (init only — network-free per L4a) so OPFS
