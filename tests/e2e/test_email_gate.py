@@ -177,15 +177,21 @@ class TestEmailGate:
         # fallback's /api/fellows, and the auth-status check. All must
         # fail for this test to exercise the "everything 5xx with
         # marker" safety net.
-        page.route(
+        #
+        # /fellows.db is fetched by the dedicated worker (not the page),
+        # so context.route is required — page.route does not intercept
+        # Web Worker requests. The other two are page-fetched and would
+        # also work with page.route, but using context.route for all
+        # three keeps the mock setup uniform.
+        context.route(
             "**/fellows.db",
             lambda r: r.fulfill(status=503, body="service unavailable"),
         )
-        page.route(
+        context.route(
             "**/api/fellows*",
             lambda r: r.fulfill(status=503, body="service unavailable"),
         )
-        page.route(
+        context.route(
             AUTH_STATUS_PATH,
             lambda r: r.fulfill(status=503, body="service unavailable"),
         )

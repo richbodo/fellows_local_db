@@ -192,21 +192,27 @@ class TestBugReportHttpCapture:
     ):
         page = context.new_page()
         # Marker set: shouldActAsApp() returns true → bootDirectoryAsApp.
-        # Post-cutover the worker tries /fellows.db first; route both that
-        # and /api/fellows + /api/auth/status to push the boot through to
-        # the email-gate fallback where the bug-report button lives.
+        # Post-P1 cutover, /api/fellows is only fetched on the api+idb
+        # fallback path — which is triggered when the worker's
+        # ensureFellowsDb gets a 401/403. So:
+        #   /fellows.db → 401 (worker fetch; needs context.route since
+        #     page.route doesn't intercept Web Worker requests)
+        #   /api/fellows* → 404 (the error captured for the bug report)
+        #   /api/auth/status → 503 (so startBrowserUx falls through to
+        #     the quiet email-gate fallback where the bug-report button
+        #     on the gate is reachable)
         page.add_init_script(
             "window.localStorage.setItem('fellows_authenticated_once', '1');"
         )
-        page.route(
+        context.route(
             "**/fellows.db",
-            lambda r: r.fulfill(status=404, body="Not Found"),
+            lambda r: r.fulfill(status=401, body="unauthorized"),
         )
-        page.route(
+        context.route(
             "**/api/fellows*",
             lambda r: r.fulfill(status=404, body="Not Found"),
         )
-        page.route(
+        context.route(
             "**/api/auth/status",
             lambda r: r.fulfill(status=503, body="auth check unavailable"),
         )
