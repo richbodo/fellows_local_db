@@ -14,6 +14,14 @@
     mode: "0644"
   notify: Reload caddy
 
+- name: Ensure globaldonut site root exists (operator-owned for rsync deploys)
+  ansible.builtin.file:
+    path: "{{ globaldonut_root }}"
+    state: directory
+    owner: "{{ operator_user }}"
+    group: "{{ operator_user }}"
+    mode: "0755"
+
 - name: Ensure Caddy is enabled and running
   ansible.builtin.service:
     name: caddy

@@ -5,6 +5,10 @@
 fellows_domain: fellows.globaldonut.com
 app_root: /opt/fellows
 
+# Apex marketing site served from this same droplet (single machine, two IPs).
+globaldonut_domain: globaldonut.com
+globaldonut_root: /var/www/globaldonut
+
 # System user the fellows-pwa daemon runs as. Created by the common role as a
 # --system --no-create-home --shell /usr/sbin/nologin account. Never used for
 # SSH. Owns /opt/fellows tree; the operator ({{ operator_user }}) is added to

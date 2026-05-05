@@ -29,3 +29,7 @@ mail_from_name: EHF Fellows Directory
 
 # Secrets: define in ansible-vault (example keys)
 # postmark_server_api_token: "pm_..."
+
+# Apex marketing site served from this same droplet (single machine, two IPs).
+globaldonut_domain: globaldonut.com
+globaldonut_root: /var/www/globaldonut

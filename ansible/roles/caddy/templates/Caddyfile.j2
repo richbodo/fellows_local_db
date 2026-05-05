@@ -1,4 +1,8 @@
-# Managed by Ansible — fellows PWA behind Caddy (Let's Encrypt).
+# Managed by Ansible — Caddy on globaldonut1 droplet (Let's Encrypt).
+# Hosts (single droplet, two IPs):
+#   - {{ fellows_domain }}            → fellows-pwa.service on 127.0.0.1:8765
+#   - {{ globaldonut_domain }} (apex) → static site at {{ globaldonut_root }}
+#   - www.{{ globaldonut_domain }}    → 301 to apex
 {
 	email {{ caddy_admin_email }}
 }
@@ -19,4 +23,19 @@
 	}
 	# App binds 127.0.0.1:8765 only (see fellows-pwa.service).
 	reverse_proxy 127.0.0.1:8765
+}
+
+www.{{ globaldonut_domain }} {
+	redir https://{{ globaldonut_domain }}{uri} permanent
+}
+
+{{ globaldonut_domain }} {
+	encode gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+	root * {{ globaldonut_root }}
+	file_server
 }
