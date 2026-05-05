@@ -111,6 +111,14 @@ function shellPathNetworkFirst(pathname) {
   const base = pathname.split('/').pop() || '';
   if (base === 'app.js' || base === 'styles.css' || base === 'sw.js') return true;
   if (base === 'manifest.webmanifest' || base === 'build-meta.json') return true;
+  // sqlite-worker.js carries WORKER_RPC_VERSION, which the page checks
+  // against EXPECTED_WORKER_RPC_VERSION on init. Cache-first lets a
+  // freshly-network-fetched app.js spawn a stale cached worker during a
+  // build-version bump, producing the "Worker version skew" panel even
+  // though the disk and server already agree. Other vendor/ assets
+  // (sqlite3.js, sqlite3.wasm, jspdf) carry no protocol contract with
+  // app.js and stay cache-first.
+  if (pathname === '/vendor/sqlite-worker.js') return true;
   return false;
 }
 
