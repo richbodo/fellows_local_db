@@ -400,16 +400,6 @@ body {
   background: #f4f4f4;
 }
 
-.connection-banner {
-  margin-top: 0.5rem;
-  padding: 0.4rem 0.6rem;
-  font-size: 0.85rem;
-  border-radius: 3px;
-  background: #fff3cd;
-  color: #664d03;
-  border: 1px solid #ffe69c;
-}
-
 .hidden {
   display: none;
 }
@@ -1390,6 +1380,16 @@ h1 {
 .about-update-status {
   font-size: 0.9rem;
   color: #5a5a5a;
+}
+
+.about-last-update {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+  color: #5a5a5a;
+}
+
+.about-last-update:empty {
+  display: none;
 }
 
 /* =========================================================================

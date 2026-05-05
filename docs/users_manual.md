@@ -243,6 +243,13 @@ file or a recent auto-backup.](images/users_manual/11_settings.png)
 cohort / fellow type) and the build line — handy when reporting a bug.
 **Check for updates** forces a service-worker refresh.
 
+A line under the **Check for updates** button shows when the app last
+successfully refreshed fellow data from the server, e.g.
+*"Last update check: 2026-05-04T18:22:07Z — succeeded."* If the most
+recent attempt failed, it reads *"Last update attempt: … — failed: …"*.
+Useful when a fellow asks "am I seeing the latest data?" — the answer
+is right there.
+
 ![About page.](images/users_manual/12_about_page.png)
 
 ---
@@ -302,13 +309,17 @@ submit), the gate has its own diagnostics block:
 
 ## Offline
 
-Works fully offline once installed. Photos that finished caching are
-available; the rest show a placeholder until you're back online.
+The app is local-first by design. Once installed, it runs entirely on
+your device — fellow data, your saved groups, your notes, your
+settings. No login, no server round-trip on each click. Photos that
+finished caching are available; the rest show a placeholder until you
+get a chance to fetch them.
 
-If the server is unreachable or your session has expired, the app
-keeps running off the last cached load. The build badge at the top
-reads *"server: unreachable"* or *"server: offline · using cache."*
-For fresh data, visit `/?gate=1` for a new magic link.
+If you ever wonder whether the app has reached the server recently —
+to pick up new fellows, fixes, or a refreshed profile — the **About**
+page shows the timestamp of the last successful refresh under
+**Check for updates**. If your session has expired, visit `/?gate=1`
+for a new magic link.
 
 ---
 

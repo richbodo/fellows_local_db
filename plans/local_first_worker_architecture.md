@@ -171,18 +171,37 @@ Acceptance:
 
 Out of scope: cross-version schema migration. The schema is single-version today; if it ever isn't, a separate plan covers it.
 
-### Phase 4 — Diagnostics
+### Phase 4 — Diagnostics + UI vocabulary cleanup
 
-Cheap wins; ship anytime after Phase 3.
+After Phases 1–3, the app has only one user-facing mode: local. The server is contacted opportunistically for build-meta and SHA-keyed `fellows.db` refresh, never for primary reads. This phase brings the UI vocabulary in line with that, and surfaces the persistent server-contact signal (`fellows.db.meta.json`) in the two places it's actually useful: the developer's diagnostics panel, and the user's About-page update check.
+
+The framing matters. To users, this is a desktop-app delivered by magic link — they install it, it runs, that's the model. Telling them "you're online" or "local-only mode" presumes a SaaS mental model the app was deliberately built to avoid. To developers, "is the server reachable right now?" is a less useful question than "when did the worker last successfully sync?" — the latter is persistent across sessions and is exactly what `fellows.db.meta.json` already records.
 
 Scope:
-- Diagnostics panel (`?diag=1`) shows: worker status (running / errored / version), worker `WORKER_RPC_VERSION` + `RELATIONSHIPS_SCHEMA_VERSION` vs page expected values, OPFS file inventory (per worker query), `persisted()` result with reason if false, contents of `fellows.db.meta.json` (last sha, last fetched_at, last_failure_*), build label of worker bundle (informational).
-- Build badge (already there) gains a tiny indicator when local-only mode is in effect.
+
+- **Drop the main-UI connection banner.** `#connection-banner` ("You are online." / "You are offline. Showing cached data where available.") is leftover from the api+idb era. Post-cutover it tells the user something they don't need to know and contradicts the desktop-app mental model. Delete the element from `index.html`, the `updateConnectionBanner` function + `connectionBannerEl` reference in `app.js`, the `online`/`offline` window listeners, the per-route hide calls, and the `.connection-banner` CSS rule.
+
+- **Surface "last server contact" on the About page.** That's the one place a user would ask the question — they're already there to check for updates. Add a passive line near the existing "Check for updates" control:
+  - `Last update check: <ISO timestamp> — succeeded` when `fetched_at` is the most recent event.
+  - `Last update attempt: <ISO timestamp> — failed: <reason>` when `last_failure_at` is more recent than `fetched_at`.
+  - `No update checks recorded yet` when the meta is empty.
+  - Source: `fellows.db.meta.json:fetched_at` / `last_failure_at` / `last_failure_reason`, read via a new worker RPC `getFellowsDbMeta` (thin wrapper over existing `readFellowsMeta()`).
+
+- **Render `fellows.db.meta.json` contents in the Diagnostics panel.** Same `getFellowsDbMeta` RPC; show the full blob (sha, fetched_at, last_failure_at, last_failure_reason). Developer-grade detail belongs here, not on About.
+
+- **Drop the build-badge "local-only mode" indicator from earlier drafts of this phase.** In a single-mode app there is no mode-change to indicate. The build badge keeps its build-label role; no new trigger is added. `setBuildBadgeOfflineOnly` is left untouched — it still fires harmlessly in the api+idb fallback path (browsers without OPFS) and is unrelated to the post-cutover happy path.
+
+- **The rest of the Phase 4 panel content shipped in Phase 1** (worker version handshake, OPFS inventory, `persisted()` state). Verify they still render correctly post-Phase-3; no new code needed there.
 
 Acceptance:
-- Diagnostics panel renders all of the above without main-thread OPFS access (everything is RPC-derived, except `persisted()` which is a `navigator.storage` call on the page).
 
-Out of scope: telemetry beyond the existing client-error sink.
+- Main-route DOM has no `connection-banner` element on any route. No `online`/`offline` window listeners remain.
+- About page shows the last-update-check line, populated from the worker meta.
+- Diagnostics panel shows the full `fellows.db.meta.json` contents — RPC-derived, no main-thread OPFS access.
+- `tests/e2e/test_diagnostics_panel.py` (new) opens `?diag=1`, captures the panel text, and asserts each Phase 4 section renders. Same file asserts the connection banner is absent from the directory route.
+- `docs/users_manual.md` reflects the About-page change (per CLAUDE.md: UI/UX changes ship with the doc update).
+
+Out of scope: telemetry beyond the existing client-error sink. Renaming or restyling the build badge. A real-time "server reachable now?" indicator — the persistent meta is sufficient.
 
 ### Phase 5 — Test infrastructure (paired with each phase)
 
@@ -350,9 +369,10 @@ Files touched by more than one phase. Use this to decide which phases can run in
 | File | P0 | P1 | P2 | P3 | P4 | P6 |
 |---|---|---|---|---|---|---|
 | `app/static/app.js` | | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `app/static/vendor/sqlite-worker.js` | (probe op, reverted) | ✓ canonical | | ✓ meta + SHA refresh | | |
+| `app/static/vendor/sqlite-worker.js` | (probe op, reverted) | ✓ canonical | | ✓ meta + SHA refresh | ✓ `getFellowsDbMeta` RPC | |
 | `app/static/sw.js` | | | | ✓ runtime-cache exclusion | | |
-| `app/static/index.html` | | ✓ (preload, Q-B) | | | | |
+| `app/static/index.html` | | ✓ (preload, Q-B) | | | ✓ delete `connection-banner` element | |
+| `app/static/styles.css` | | | | | ✓ delete `.connection-banner` rule | |
 | `build/build_pwa.py` | | ✓ worker label sub | | ✓ `fellows_db_sha` | | |
 | `app/server.py` | | ✓ delete routes + worker label sub | | ✓ `fellows_db_sha` compute | | |
 | `deploy/server.py` | | | | ✓ `build-meta.json` field | | |
@@ -361,10 +381,11 @@ Files touched by more than one phase. Use this to decide which phases can run in
 | `docs/browser_support.md` | ✓ | ✓ small revision | | | | |
 | `docs/email_gate.md` | | | | | | ✓ invariant 10 |
 | `docs/debugging.md` | | ✓ "worker stuck on init" playbook | | | | |
+| `docs/users_manual.md` | | | | | ✓ About-page "Last update check" line | |
 | `CLAUDE.md` | ✓ | | | | | |
 | `tests/test_api.py` | | ✓ delete classes | | | | |
 | `tests/e2e/conftest.py` | | ✓ OPFS-state helper | | | | |
-| `tests/e2e/test_*.py` | | ✓ migrate 7 fixtures | ✓ new test file | ✓ new test file | | |
+| `tests/e2e/test_*.py` | | ✓ migrate 7 fixtures | ✓ new test file | ✓ new test file | ✓ new test file | |
 
 The hottest seams are `app/static/app.js` (every phase except P0) and `vendor/sqlite-worker.js` (P1 + P3). **Worktree branches off P1 will conflict heavily with branches off P2/P3/P4 if P1 isn't merged first.** Do not parallelize P1 with anything downstream.
 

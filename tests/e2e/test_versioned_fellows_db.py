@@ -6,7 +6,7 @@ from /build-meta.json and passes it to the worker's `ensureFellowsDb`;
 the worker compares against the SHA recorded in OPFS-side
 `fellows.db.meta.json` and fetches only on mismatch.
 
-This file covers the three runtime-falsifiable acceptance criteria:
+This file covers the four runtime-falsifiable acceptance criteria:
 
   1. Two consecutive returning boots with the same fellows_db_sha
      produce zero GET /fellows.db requests on the second boot.
@@ -15,6 +15,10 @@ This file covers the three runtime-falsifiable acceptance criteria:
   3. A failed refresh (network error or non-2xx) leaves the previously
      live fellows.db intact and writes meta.last_failure_* — the
      directory keeps rendering against the cached bytes.
+  4. Restoring a relationships.db backup does not trigger a fellows.db
+     re-fetch on next boot — proves the freshness sidecar
+     (`fellows.db.meta.json`) lives outside the SAH-pool dir and is not
+     touched by the relationships.db swap (invariant L8).
 
 These run against the dev server (no auth gate) using the standalone-mode
 fixture so the directory boot path is exercised end-to-end. The SW's
@@ -224,4 +228,97 @@ def test_failed_refresh_preserves_previous_db_and_records_failure(
     rows = page.evaluate("() => window.__dataProvider.getList()")
     assert isinstance(rows, list) and len(rows) > 0, (
         f"directory must still render after a failed refresh; got {len(rows) if isinstance(rows, list) else rows}"
+    )
+
+
+def test_relationships_restore_does_not_refetch_fellows_db(
+    standalone_page, base_url_fixture
+):
+    """Restoring a relationships.db backup must not desync fellows.db
+    freshness — invariant L8 in the local-first worker plan.
+
+    The whole reason `fellows.db.meta.json` lives at the OPFS root
+    (sibling of the SAH-pool dir, not inside relationships.settings) is
+    so a relationships.db swap can't accidentally wipe or invalidate
+    the fellows.db freshness signal. This pins that decoupling: after
+    a real importRelationshipsBytes round-trip, a reload must produce
+    zero GET /fellows.db requests because meta.sha still matches.
+    """
+    page = standalone_page
+
+    # Cold-start boot to populate fellows.db + record its sha in meta.
+    page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+    meta_before = _wait_for_first_ensure(page)
+    assert meta_before and meta_before.get("sha"), (
+        f"first boot should populate meta.sha; got {meta_before}"
+    )
+    sha_before = meta_before["sha"]
+
+    # Capture pristine relationships.db bytes, mutate, then restore — all
+    # inside one page.evaluate so the Uint8Array stays in the same JS
+    # context. Mutation is what proves the import actually swapped the
+    # DB; if importRelationshipsBytes silently no-op'd, the test would
+    # still see groupsAfter > 0 and fail loudly.
+    restore_outcome = page.evaluate(
+        """
+        async () => {
+          const dp = window.__dataProvider;
+          // Drain reconcileHasEmailFilterOnBoot before exporting so the
+          // captured bytes reflect a settled relationships.db. Same
+          // reasoning as conftest.py's wipe_relationships helper.
+          for (let i = 0; i < 20; i++) {
+            const probe = await dp.getSetting('has_email_only');
+            if (probe === '0' || probe === '1') break;
+            await new Promise((r) => setTimeout(r, 50));
+          }
+          const originalBytes = await dp.exportRelationshipsBytes();
+          await dp.createGroup({
+            name: 'phase3-decouple-canary',
+            note: '',
+            fellow_record_ids: []
+          });
+          const groupsBefore = await dp.listGroups();
+          const importResult = await dp.importRelationshipsBytes(originalBytes);
+          const groupsAfter = await dp.listGroups();
+          return {
+            groupsBefore: (groupsBefore || []).length,
+            groupsAfter: (groupsAfter || []).length,
+            preRestoreSnapshot: importResult && importResult.preRestoreSnapshot
+              ? true
+              : false
+          };
+        }
+        """
+    )
+    assert restore_outcome["groupsBefore"] >= 1, (
+        f"createGroup mutation should be visible before the restore; "
+        f"got {restore_outcome}"
+    )
+    assert restore_outcome["groupsAfter"] == 0, (
+        f"importRelationshipsBytes must replace the live DB with the "
+        f"pristine bytes (canary group should be gone); got {restore_outcome}"
+    )
+    assert restore_outcome["preRestoreSnapshot"], (
+        f"import path should snapshot the pre-restore DB; got {restore_outcome}"
+    )
+
+    # Now reload. The relationships.db restore is committed to OPFS; on
+    # next boot the worker re-reads fellows.db.meta.json untouched and
+    # the SHA-keyed gate must skip the fetch.
+    requests: list[str] = []
+    page.on(
+        "request",
+        lambda req: requests.append(req.url) if req.url.endswith("/fellows.db") else None,
+    )
+    page.reload(wait_until="domcontentloaded")
+    meta_after = _wait_for_first_ensure(page)
+
+    assert meta_after and meta_after.get("sha") == sha_before, (
+        f"meta.sha must survive a relationships.db restore unchanged: "
+        f"before={sha_before} after_restore_reload={meta_after and meta_after.get('sha')}"
+    )
+    fetched = [r for r in requests if r.endswith("/fellows.db")]
+    assert len(fetched) == 0, (
+        f"a relationships.db restore must not trigger /fellows.db re-fetch "
+        f"on next boot; got {fetched}"
     )
