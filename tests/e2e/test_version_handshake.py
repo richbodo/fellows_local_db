@@ -34,12 +34,13 @@ def _rewrite_worker_version(route, base_url):
     ).read().decode("utf-8")
     # Bump the constant. Match the exact line so a copy-paste regression
     # (renaming the constant) trips the test instead of silently passing.
-    target = "var WORKER_RPC_VERSION = 1;"
+    # The current value is checked dynamically so a future RPC-version
+    # bump doesn't require a fixture edit; we only assert the substring.
+    import re as _re
+    m = _re.search(r"var WORKER_RPC_VERSION = (\d+);", raw)
+    assert m, "could not find WORKER_RPC_VERSION assignment in worker bundle"
+    target = m.group(0)
     replacement = "var WORKER_RPC_VERSION = 99;"
-    assert target in raw, (
-        f"could not find {target!r} in worker bundle — did the constant "
-        f"name or its initial value change?"
-    )
     rewritten = raw.replace(target, replacement, 1)
     route.fulfill(
         status=200,

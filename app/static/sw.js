@@ -122,6 +122,16 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // /fellows.db is owned by the sqlite worker's OPFS cache. Double-caching
+  // megabytes of DB bytes here would waste quota and create a third place
+  // a stale copy can hide; the worker's `fellows.db.meta.json` is the
+  // single source of freshness. Pass through to the network unchanged so
+  // the worker's `cache: 'no-store'` fetch reaches the server cleanly.
+  // Plan: plans/local_first_worker_architecture.md § Phase 3.
+  if (url.pathname === '/fellows.db') {
+    return;
+  }
+
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(networkFirst(request));
     return;

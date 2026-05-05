@@ -436,8 +436,17 @@ class Handler(BaseHTTPRequestHandler):
         # build badge, drift check, and diagnostics panel all work
         # locally. Without this the SW + diag panel both 404 and the
         # browser console logs `Unexpected token 'N'` parse errors.
+        #
+        # `fellows_db_sha` is computed on the fly so that `just db-rebuild`
+        # without a server restart still produces a coherent SHA. SHA-256
+        # over a few-MB file is sub-50 ms in practice; if that changes,
+        # mtime caching is the trivial follow-up.
         if path == "/build-meta.json":
-            self.send_json(BUILD_META)
+            meta = dict(BUILD_META)
+            sha = _build_pwa.compute_fellows_db_sha(DB_PATH)
+            if sha is not None:
+                meta["fellows_db_sha"] = sha
+            self.send_json(meta)
             return
 
         # Diagnostics stub for the in-app `?diag=1` panel and the SW

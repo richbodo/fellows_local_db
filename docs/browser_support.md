@@ -1,7 +1,5 @@
 # Browser Support
 
-> **Doc-state note:** the "How a user without OPFS reaches the panel" section below describes the architecture as of Phase 1 of [`plans/local_first_worker_architecture.md`](../plans/local_first_worker_architecture.md) — capability detection moves from the main-thread `pickDataProvider()` to the worker's `init` handshake. The runtime catches up when the cutover ships. Remove this banner when P1 lands.
-
 How we triage long-tail browser-compatibility issues for this app. The
 audience is small (~hundreds of fellows) and the distribution model is
 "by emailed magic link, install once" — but each one of those users

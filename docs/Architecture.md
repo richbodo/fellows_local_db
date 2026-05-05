@@ -1,7 +1,5 @@
 # Architecture
 
-> **Doc-state note:** the "Worker-owned OPFS" subsection and the "Non-goals (worker-owned OPFS)" section below describe the architecture as of Phase 1 of [`plans/local_first_worker_architecture.md`](../plans/local_first_worker_architecture.md) — runtime catches up when the cutover ships. Remove this banner when P1 lands.
-
 ## Design constraint: local-only, not SaaS
 
 **This app is single-user and local-only by design. It must never become a SaaS.** The PWA + magic-link distribution exists so a fellow can pull down the bundle and contact DB once, then run the app indefinitely against that local copy. Production is a delivery channel, not a service.
@@ -9,7 +7,7 @@
 Operationally that means server contact is restricted to two responsibilities:
 
 1. **Authorize a download** (magic-link gate, allowlist check, session cookie) so the bundle and `fellows.db` only reach EHF fellows.
-2. **Serve fresh bytes on update** (new bundle when the SHA changes; re-imported `fellows.db` on every successful boot).
+2. **Serve fresh bytes on update** (new bundle when the SHA changes; re-imported `fellows.db` only when its content SHA changes, gated by `fellows_db_sha` in `/build-meta.json`).
 
 Everything else runs on the device:
 
@@ -60,41 +58,34 @@ The server opens a new SQLite connection per request (no connection pool — unn
 | GET | `/api/fellows/<slug>` | One fellow by `slug` or `record_id`. |
 | GET | `/api/search?q=…` | FTS5 search across name / bio / cohort / fellow_type / search_tags / key_links. |
 | GET | `/api/stats` | Aggregates for the About page: total, breakdowns by fellow_type / cohort / region, field completeness. |
-| GET | `/api/groups` | List of saved groups with member counts (newest-touched first). |
-| POST | `/api/groups` | Create a group (`{name, note?, fellow_record_ids?}`). Returns 201 with the new group. |
-| GET | `/api/groups/<id>` | One group with members joined to fellows. 404 if missing. |
-| PATCH | `/api/groups/<id>` | Partial update — any subset of `name`, `note`, `fellow_record_ids` (replaces members in full when given). |
-| DELETE | `/api/groups/<id>` | Delete a group; FK cascade removes its `group_members`. Returns 204. |
-| GET | `/api/settings` | Full settings key/value bag. |
-| GET | `/api/settings/<key>` | One setting; 404 if unset. |
-| PUT | `/api/settings/<key>` | Upsert (`{value: "…"}`). Empty value clears the key. |
 | GET | `/api/auth/status` | Stub in dev (auth disabled). Real shape comes from `deploy/server.py`. |
 | POST | `/api/client-errors` | Unauthenticated client-error sink. Always 204. Sanitized + rate-limited; logs `event=client_error` to journald. Schema + privacy boundary: [`email_gate.md` § Client error reporting](email_gate.md#client-error-reporting). Dev stub mirrors prod for round-trip. |
 | GET | `/fellows.db` | Raw SQLite snapshot for the PWA's OPFS bootstrap. |
 | GET | `/images/<slug>.{jpg,png}` | Profile image; alphanumeric-fallback filename match. |
 | GET | `/` and other static paths | App shell from `app/static/`. |
 
-`/api/stats` is heavier than a simple row fetch (region split + field-completeness pass over `extra_json` via `json_extract`); still fine at local scale. `/api/groups` and `/api/settings` open `relationships.db` per request and ATTACH `fellows.db` read-only — see [Persistence and upgrades](#persistence-and-upgrades).
+`/api/stats` is heavier than a simple row fetch (region split + field-completeness pass over `extra_json` via `json_extract`); still fine at local scale. Per-user state (groups, settings, tags, notes) does not appear above — `/api/groups` and `/api/settings` were retired in Phase 1 of the local-first worker plan; see [Persistence and upgrades](#persistence-and-upgrades) and [Worker-owned OPFS](#worker-owned-opfs).
 
 ### Persistence and upgrades
 
 User-authored data (groups, tags, notes, settings) lives in
 `app/relationships.db`, a separate SQLite file from `fellows.db`.
-Cross-DB joins use SQLite `ATTACH DATABASE ... ?mode=ro`, which keeps
-contact data read-only at the SQLite level. `relationships.db` is
-durable across both app updates and Clear App Cache; `fellows.db` is
-re-imported on every boot.
+Cross-DB joins (worker-internal) use SQLite `ATTACH DATABASE ... ?mode=ro`,
+which keeps contact data read-only at the SQLite level. `relationships.db`
+is durable across both app updates and Clear App Cache; `fellows.db`
+is re-imported only when its server-reported content SHA differs from
+the SHA recorded in OPFS-side `fellows.db.meta.json` — equal SHA means
+no fetch and no re-import (Phase 3 of the local-first worker plan).
 
-In the browser this lives in OPFS (`sqlite3.wasm` + `relationships.db`)
-in **both** standalone PWA mode and browser-tab mode. Production's
-`deploy/server.py` does not serve `/api/groups` or `/api/settings`;
-OPFS is the canonical store there. The dev server's HTTP routes for
-groups and settings exist only to support the dev round-trip — they
-are not part of the production API surface. When a visitor's browser
-can't run OPFS (older Safari, missing `FileSystemSyncAccessHandle`,
-insecure context), the API provider tags those endpoints unreachable
-and the UI surfaces an unsupported-browser panel via
-`renderLocalDataUnavailablePanel()` — see
+In the browser this lives in OPFS (`sqlite3.wasm` + `relationships.db`
++ `fellows.db` + `fellows.db.meta.json`) in **both** standalone PWA mode
+and browser-tab mode. Neither the production server nor the dev server
+exposes per-user state HTTP routes — `/api/groups` and `/api/settings`
+were retired in Phase 1 and OPFS is the only canonical store. When a
+visitor's browser can't run OPFS (older Safari, missing
+`FileSystemSyncAccessHandle`, insecure context), the worker reports
+`opfsCapable: false` during init and the page surfaces an
+unsupported-browser panel via `renderLocalDataUnavailablePanel()` — see
 [`docs/browser_support.md`](browser_support.md).
 
 The full state-survival matrix (which storage layers survive which
@@ -111,7 +102,9 @@ every `sqlite3.wasm` instance. The main thread is an RPC client: it
 posts `{id, op, args}` messages and awaits `{id, ok, result|error}`
 responses. The same worker handles both `relationships.db`
 (read-write user-authored data) and `fellows.db` (read-only contact
-data, re-imported on update). No other context — not the main
+data, re-imported only when its server-reported content SHA in
+`/build-meta.json:fellows_db_sha` differs from the SHA recorded in
+worker-owned `fellows.db.meta.json`). No other context — not the main
 thread, not the service worker, not a future render worker — is
 permitted to call `navigator.storage.getDirectory` or open a
 `FileSystemSyncAccessHandle`.

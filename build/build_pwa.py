@@ -91,12 +91,35 @@ def stamp_static_assets(dist_dir: Path, label: str) -> None:
             target.write_text(stamped, encoding="utf-8")
 
 
-def write_build_meta(dest: Path, label: str) -> None:
+def compute_fellows_db_sha(db_path: Path) -> str | None:
+    """SHA-256 hex of the `fellows.db` bytes, or None if the file is missing.
+
+    The PWA worker's `ensureFellowsDb` compares this to the SHA recorded
+    in OPFS-side `fellows.db.meta.json` to decide whether to re-fetch
+    `/fellows.db`. Computed over the raw file bytes so the dev server
+    and the build pipeline produce identical values for identical DBs.
+    """
+    if not db_path.is_file():
+        return None
+    h = hashlib.sha256()
+    with db_path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def write_build_meta(dest: Path, label: str, db_path: Path | None = None) -> None:
     """Fingerprint for deploy debugging (client vs server bundle drift).
 
     The git_sha here matches the SHA-half of the build label so a single
     server response can be cross-referenced against a single source
     revision. built_at is UTC, ISO-8601, second-resolution.
+
+    `fellows_db_sha` (Phase 3 of the local-first worker plan) gates the
+    PWA worker's per-boot re-import of `/fellows.db`: equal SHA → no
+    fetch, different SHA → atomic re-import. Omitted when `db_path` is
+    None or missing — the worker treats that as "no comparison
+    available" and falls back to its Phase 1 cold-start-only behavior.
     """
     sha = label.rsplit("-", 1)[-1] if label else None
     meta = {
@@ -105,6 +128,10 @@ def write_build_meta(dest: Path, label: str) -> None:
         "build_label": label,
         "generator": "build/build_pwa.py",
     }
+    if db_path is not None:
+        fellows_sha = compute_fellows_db_sha(db_path)
+        if fellows_sha is not None:
+            meta["fellows_db_sha"] = fellows_sha
     dest.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
 
 
@@ -143,7 +170,7 @@ def main() -> int:
     shutil.copytree(STATIC_DIR, DIST_DIR)
     label = compute_build_label()
     stamp_static_assets(DIST_DIR, label)
-    write_build_meta(DIST_DIR / "build-meta.json", label)
+    write_build_meta(DIST_DIR / "build-meta.json", label, db_path=DB_SRC)
     if DB_SRC.is_file():
         shutil.copy2(DB_SRC, DIST_DIR / "fellows.db")
         write_allowed_email_hashes(DB_SRC, DIST_DIR / "allowed_emails.json")
