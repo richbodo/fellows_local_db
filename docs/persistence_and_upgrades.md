@@ -1,7 +1,5 @@
 # Persistence and Upgrades
 
-> **Doc-state note:** the storage table's "Owner" column, the `fellows.db.meta.json` row, the new auto-backup trigger semantics (per-boot debounced, 5-slot rotation), and the removal of the `last_seen_sha.txt` row reflect the target architecture as of Phase 1 of [`plans/local_first_worker_architecture.md`](../plans/local_first_worker_architecture.md). The runtime catches up when the cutover ships. Until then, `app/static/app.js` still drives auto-backup from the main thread on a build-SHA-change trigger and writes `last_seen_sha.txt`. Remove this banner when P1 lands.
-
 The PWA stores user state across several layers, each with different
 survival semantics. This doc captures what survives what — so future
 features can land without surprising existing users, and so we have a

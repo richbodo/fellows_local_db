@@ -35,7 +35,7 @@
   // app/static/vendor/sqlite-worker.js (`WORKER_RPC_VERSION`,
   // `RELATIONSHIPS_SCHEMA_VERSION`). See plans/local_first_worker_architecture.md
   // §"Why build label is not the gate".
-  var EXPECTED_WORKER_RPC_VERSION = 1;
+  var EXPECTED_WORKER_RPC_VERSION = 2;
   var EXPECTED_RELATIONSHIPS_SCHEMA_VERSION = 1;
 
   // Thrown by mutating dataProvider methods when the worker reports a
@@ -298,18 +298,33 @@
   // About-page "Check for updates" button both compare against this snapshot
   // to decide whether the server has shipped a newer build since this page
   // was loaded. Populated asynchronously; consumers guard on .git_sha.
-  var bootBuildMeta = { git_sha: null, built_at: null, capturedAt: null };
+  //
+  // `fellows_db_sha` (Phase 3 of the local-first worker plan) is the
+  // input to the worker's SHA-keyed `ensureFellowsDb` refresh. We capture
+  // it here so `pickDataProvider` can pass it into the worker without
+  // doing its own /build-meta.json fetch.
+  var bootBuildMeta = {
+    git_sha: null,
+    built_at: null,
+    fellows_db_sha: null,
+    capturedAt: null
+  };
   var updateCheckState = {
     lastAttemptAt: null,
     lastResult: null,
     lastLatestMeta: null
   };
 
+  // Promise of the boot-time /build-meta.json fetch. Resolved when the
+  // first response comes back (regardless of ok/fail). Consumers `.then`
+  // on it to read fields after population without racing the IIFE.
+  var bootBuildMetaPromise = null;
+
   // Populate the server-side label independently of the auth flow so a dev
   // reading the badge still gets a signal when /api/auth/status is failing.
   function primeServerBadgeFromBuildMeta() {
     try {
-      fetch('/build-meta.json', { cache: 'no-cache', credentials: 'same-origin' })
+      bootBuildMetaPromise = fetch('/build-meta.json', { cache: 'no-cache', credentials: 'same-origin' })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (meta) {
           if (meta) {
@@ -318,13 +333,18 @@
               bootBuildMeta = {
                 git_sha: meta.git_sha || null,
                 built_at: meta.built_at || null,
+                fellows_db_sha: (typeof meta.fellows_db_sha === 'string' && meta.fellows_db_sha)
+                  ? meta.fellows_db_sha : null,
                 capturedAt: new Date().toISOString()
               };
             }
           }
+          return bootBuildMeta;
         })
-        .catch(function () {});
-    } catch (e) {}
+        .catch(function () { return bootBuildMeta; });
+    } catch (e) {
+      bootBuildMetaPromise = Promise.resolve(bootBuildMeta);
+    }
   }
   primeServerBadgeFromBuildMeta();
 
@@ -2708,6 +2728,7 @@
         if (msg.errorName) err.name = msg.errorName;
         if (msg.errorCode) err.code = msg.errorCode;
         if (msg.httpStatus) err.httpStatus = msg.httpStatus;
+        if (msg.meta) err.meta = msg.meta;
         if (msg.stack) err.workerStack = msg.stack;
         slot.reject(err);
       }
@@ -2860,7 +2881,7 @@
       // Diagnostics — pulls the worker's own boot trace + OPFS inventory.
       _getWorkerTrace: function () { return rpc.call('getTrace'); },
       _getOpfsInventory: function () { return rpc.call('getOpfsInventory'); },
-      _ensureFellowsDb: function () { return rpc.call('ensureFellowsDb'); }
+      _ensureFellowsDb: function (args) { return rpc.call('ensureFellowsDb', args || {}); }
     };
   }
 
@@ -7787,12 +7808,29 @@
           '/schema=' + handle.init.schemaVersion + '; reads still work, writes refused'
         );
       }
-      return provider._ensureFellowsDb()
+      var hadFellowsDbBefore = !!(handle.init && handle.init.hasFellowsDb);
+      // Wait for the boot /build-meta.json fetch so the worker can
+      // SHA-compare. If it never resolved (offline at boot, server 5xx),
+      // we fall through with serverSha=null and the worker preserves its
+      // P1-era no-op-on-returning-visit contract.
+      var metaPromise = bootBuildMetaPromise || Promise.resolve(bootBuildMeta);
+      return metaPromise.then(function (meta) {
+        var serverSha = (meta && typeof meta.fellows_db_sha === 'string' && meta.fellows_db_sha)
+          ? meta.fellows_db_sha : null;
+        return provider._ensureFellowsDb({ serverSha: serverSha });
+      })
         .then(function (res) {
           bootDebugPush(
             'ensureFellowsDb: hasFellowsDb=' + (res && res.hasFellowsDb) +
             ' refreshed=' + (res && res.refreshed)
           );
+          // Silent SHA-keyed refresh of an already-installed DB → small
+          // toast so the user knows they're seeing newer data. Cold-start
+          // imports skip the toast: the page renders the directory for
+          // the first time, no "updated" claim makes sense.
+          if (res && res.refreshed && hadFellowsDbBefore) {
+            try { showToast('Directory updated'); } catch (e) {}
+          }
           return provider;
         })
         .catch(function (e) {

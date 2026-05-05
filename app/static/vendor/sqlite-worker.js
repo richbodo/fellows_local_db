@@ -38,7 +38,12 @@ importScripts('./sqlite3.js');
 // return shape, error semantics). A pure code refactor that preserves the
 // wire shape leaves it alone. Page reads this in the init handshake and
 // refuses mutating RPCs on mismatch.
-var WORKER_RPC_VERSION = 1;
+//
+// v2 (Phase 3): ensureFellowsDb({serverSha}) gained an optional serverSha
+// arg and SHA-keyed refresh semantics. Page bumps its expected value in
+// lockstep; a stale page paired with this worker (or vice versa) refuses
+// mutations and waits for the SW's "New version available" reload banner.
+var WORKER_RPC_VERSION = 2;
 
 // Same value as relationships.db's PRAGMA user_version. Bumped only on
 // schema migrations. Mirrored from app/relationships.py:SCHEMA_VERSION.
@@ -405,9 +410,10 @@ async function snapshotRelationshipsDbToBackup() {
 
 // ===== fellows.db.meta.json (freshness sidecar) =============================
 // Sibling of fellows.db at the OPFS root, outside the SAH-pool dir, so a
-// relationships.db restore can't desync fellows.db freshness. Phase 1 just
-// records {sha, fetched_at} on initial cold-start fetch; Phase 3 layers the
-// SHA-keyed refresh on top.
+// relationships.db restore can't desync fellows.db freshness. The page
+// passes the server-reported `fellows_db_sha` (read from /build-meta.json)
+// into ensureFellowsDb; the worker compares it to `meta.sha` to decide
+// whether to re-fetch.
 
 async function readFellowsMeta() {
   var raw = await _opfsReadText(FELLOWS_META_FILE);
@@ -421,6 +427,22 @@ async function readFellowsMeta() {
 
 async function writeFellowsMeta(meta) {
   await _opfsWriteText(FELLOWS_META_FILE, JSON.stringify(meta));
+}
+
+// SubtleCrypto digest of `bytes` as lowercase hex. Identical output to the
+// build pipeline's `hashlib.sha256(...).hexdigest()` — the comparison hinges
+// on byte-for-byte agreement between the dist DB and what the worker
+// fetches over the wire, so the digest function on both sides has to round
+// to the same string.
+async function _sha256Hex(bytes) {
+  var buf = await crypto.subtle.digest('SHA-256', bytes);
+  var view = new Uint8Array(buf);
+  var hex = '';
+  for (var i = 0; i < view.length; i++) {
+    var b = view[i];
+    hex += (b < 16 ? '0' : '') + b.toString(16);
+  }
+  return hex;
 }
 
 // ===== Inspect bytes (used by import + listRelationshipsBackups) =============
@@ -933,42 +955,93 @@ handlers.getStats = async function () {
   };
 };
 
-// ----- ensureFellowsDb (page-driven cold-start fetch) -----------------------
-// Per Phase 1 plan: page calls this exactly once per session, only after
-// the gate decision tree resolves to directory mode. P1 behavior:
-//   - hasFellowsDb=true → no-op (Phase 3 layers SHA-keyed refresh on top)
-//   - hasFellowsDb=false → fetch /fellows.db, validate, atomic staging
-//     swap, write fellows.db.meta.json, open fellowsDb
+// ----- ensureFellowsDb (page-driven cold-start fetch + SHA-keyed refresh) ---
+// Page calls this exactly once per session, only after the gate decision
+// tree resolves to directory mode. Phase 3 semantics:
+//
+//   - args.serverSha is the `fellows_db_sha` from /build-meta.json. Optional
+//     — pages that can't reach build-meta or older callers omit it.
+//   - hasFellowsDb=true AND serverSha matches local meta.sha → no-op.
+//     The directory keeps using whatever bytes are already on disk.
+//   - hasFellowsDb=true AND serverSha differs (or serverSha provided but
+//     local meta.sha is null — covers visitors upgrading from P1) →
+//     fetch, validate, atomically replace.
+//   - hasFellowsDb=true AND serverSha not provided → no-op (matches the
+//     P1-era contract for any caller that doesn't know about SHAs yet).
+//   - hasFellowsDb=false → fetch unconditionally; the comparison is moot
+//     because we have nothing local to keep.
+//
+// On fetch / validation failure, `meta.last_failure_at` and
+// `last_failure_reason` are recorded; the previously-live fellows.db
+// stays open. The error is also thrown so the page can surface a soft
+// warning, but `relationships.db` operations remain unaffected (G3 / L5).
 
-handlers.ensureFellowsDb = async function () {
-  if (fellowsDb) {
-    var meta = await readFellowsMeta();
-    return { hasFellowsDb: true, refreshed: false, meta: meta || null };
+async function _writeMetaFailure(reason) {
+  var existing = (await readFellowsMeta()) || {
+    sha: null,
+    fetched_at: null,
+    last_failure_at: null,
+    last_failure_reason: null
+  };
+  existing.last_failure_at = new Date().toISOString();
+  existing.last_failure_reason = String(reason || '');
+  try { await writeFellowsMeta(existing); }
+  catch (we) { trace('ensureFellowsDb: meta-failure write failed: ' + (we && we.message || we)); }
+  return existing;
+}
+
+handlers.ensureFellowsDb = async function (args) {
+  args = args || {};
+  var serverSha = (typeof args.serverSha === 'string' && args.serverSha) ? args.serverSha : null;
+  var localMeta = await readFellowsMeta();
+  var localSha = (localMeta && typeof localMeta.sha === 'string') ? localMeta.sha : null;
+
+  // Returning visitor with up-to-date bytes: no fetch, no re-import.
+  if (fellowsDb && serverSha && localSha && serverSha === localSha) {
+    return { hasFellowsDb: true, refreshed: false, meta: localMeta };
   }
-  trace('ensureFellowsDb: cold-start fetch /fellows.db');
+  // Returning visitor with no SHA-comparison input: preserve P1-era contract.
+  if (fellowsDb && !serverSha) {
+    return { hasFellowsDb: true, refreshed: false, meta: localMeta || null };
+  }
+
+  var refreshKind = fellowsDb ? 'refresh' : 'cold-start';
+  trace('ensureFellowsDb: ' + refreshKind + ' fetch /fellows.db'
+    + (serverSha ? ' (serverSha=' + serverSha.slice(0, 12) + '…)' : ''));
+
   var resp;
   try {
     resp = await fetch('/fellows.db', { credentials: 'include', cache: 'no-store' });
   } catch (e) {
+    var netReason = 'network: ' + (e && e.message || e);
+    var failedMeta = await _writeMetaFailure(netReason);
     var nerr = new Error('Network fetch /fellows.db failed: ' + (e && e.message || e));
     nerr.code = 'fellows_db_fetch_network';
+    nerr.meta = failedMeta;
     throw nerr;
   }
   if (!resp.ok) {
+    var httpReason = 'HTTP ' + resp.status;
+    var failedMetaH = await _writeMetaFailure(httpReason);
     var herr = new Error('GET /fellows.db returned HTTP ' + resp.status);
     herr.code = 'fellows_db_fetch_http';
     herr.httpStatus = resp.status;
+    herr.meta = failedMetaH;
     throw herr;
   }
   var buf = await resp.arrayBuffer();
   var bytes = new Uint8Array(buf);
   if (!bytes.byteLength) {
+    var emptyMeta = await _writeMetaFailure('empty response');
     var eerr = new Error('Empty /fellows.db response');
     eerr.code = 'fellows_db_fetch_empty';
+    eerr.meta = emptyMeta;
     throw eerr;
   }
-  // Atomic staging-slot import: if anything fails mid-flight, the previous
-  // (absent here, since hasFellowsDb=false) DB is unaffected.
+
+  // Validate the fetched bytes in a staging slot before touching the live
+  // slot. If validation fails, the previous fellowsDb is still open and
+  // the error path leaves it untouched.
   var verifyDb = null;
   try {
     poolUtil.importDb(FELLOWS_STAGING_SLOT, bytes);
@@ -980,19 +1053,32 @@ handlers.ensureFellowsDb = async function () {
     }
   } catch (verr) {
     if (verifyDb) { try { verifyDb.close(); } catch (e2) {} }
+    var invalidReason = 'invalid bytes: ' + (verr && verr.message || verr);
+    var invalidMeta = await _writeMetaFailure(invalidReason);
     var ierr = new Error('Validation of fetched fellows.db failed: ' + (verr && verr.message || verr));
     ierr.code = 'fellows_db_invalid';
+    ierr.meta = invalidMeta;
     throw ierr;
   }
   if (verifyDb) { try { verifyDb.close(); } catch (e3) {} }
-  // Promote staging → live slot.
+
+  // Compute the digest of what we actually got. This is the value that
+  // ends up in meta.sha — not args.serverSha — so a server that lies
+  // about its SHA can't desync the local copy.
+  var fetchedSha = await _sha256Hex(bytes);
+
+  // Promote staging → live slot. importDb requires the live slot's SAH
+  // to be released first, so close the current handle (if any).
+  if (fellowsDb) {
+    try { fellowsDb.close(); } catch (e4) {}
+    fellowsDb = null;
+  }
   poolUtil.importDb(FELLOWS_DB_SLOT, bytes);
   fellowsDb = new poolUtil.OpfsSAHPoolDb(FELLOWS_DB_SLOT);
-  trace('ensureFellowsDb: imported ' + bytes.byteLength + ' bytes, opened fellows.db');
-  // P1 records sha=null (Phase 3 emits a real SHA on the server side and
-  // wires the comparison). The shape stays stable so P3 just fills sha.
+  trace('ensureFellowsDb: imported ' + bytes.byteLength + ' bytes, sha=' + fetchedSha.slice(0, 12) + '…');
+
   var newMeta = {
-    sha: null,
+    sha: fetchedSha,
     fetched_at: new Date().toISOString(),
     last_failure_at: null,
     last_failure_reason: null
@@ -1113,6 +1199,10 @@ self.onmessage = async function (ev) {
       errorName: e && e.name,
       errorCode: e && e.code,
       httpStatus: e && e.httpStatus,
+      // ensureFellowsDb attaches the post-failure meta blob (with
+      // last_failure_at / last_failure_reason populated) so the page
+      // can surface a soft warning without a second RPC roundtrip.
+      meta: e && e.meta,
       stack: e && e.stack
     });
   }
