@@ -12,7 +12,7 @@ After install, the app must keep working without further server contact. Concret
 
 - **All user-authored state** (groups, notes, tags, settings) lives in the user's browser (`relationships.db` in OPFS). Production's `deploy/server.py` does not expose `/api/groups` or `/api/settings` — there are no per-user resources on the server, no per-user storage to back up, no multi-tenant model to defend.
 - **Reads of contact data** run against the locally-cached `fellows.db` (OPFS) and the IndexedDB fallback cache. A stale session or an offline server must not lock the user out of data they've already downloaded — see [`docs/email_gate.md`](docs/email_gate.md) invariant 10.
-- **Server contact is bounded to two purposes only:** (1) the magic-link gate that authorizes a download, and (2) fetching new bundle / DB bytes on update. Anything else added server-side needs a strong justification against this constraint.
+- **Server contact is bounded to two purposes only:** (1) the magic-link gate that authorizes a download, and (2) fetching new bundle / DB bytes when the user opts in to an update (app-shell updates auto-prompt via the *New version available — Reload* banner; directory-data updates are user-initiated from the About page — see [`docs/users_manual.md` § Updates](docs/users_manual.md#updates)). Anything else added server-side needs a strong justification against this constraint.
 
 What this rules out, even if individually convenient: cross-device sync, server-side backups of `relationships.db`, an "edit once, see it everywhere" share feature, real-time collaboration, an admin console showing other users' groups, telemetry beyond the unauthenticated client-error sink. If a feature requires per-user state on the server, it doesn't belong in this app.
 

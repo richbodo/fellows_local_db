@@ -73,9 +73,15 @@ User-authored data (groups, tags, notes, settings) lives in
 Cross-DB joins (worker-internal) use SQLite `ATTACH DATABASE ... ?mode=ro`,
 which keeps contact data read-only at the SQLite level. `relationships.db`
 is durable across both app updates and Clear App Cache; `fellows.db`
-is re-imported only when its server-reported content SHA differs from
-the SHA recorded in OPFS-side `fellows.db.meta.json` — equal SHA means
-no fetch and no re-import (Phase 3 of the local-first worker plan).
+is re-imported **on user request** when its server-reported content SHA
+differs from the SHA recorded in OPFS-side `fellows.db.meta.json` —
+the boot path is install-only and never auto-refreshes a returning
+visitor. The user-driven swap path lives on the About page (*Update
+directory data*) and is gated by a pre-swap impact preview that lists
+any group members who would no longer have a profile after the
+update. See `plans/opt_in_directory_data_updates.md` for the policy
+and `plans/local_first_worker_architecture.md` for the underlying
+SHA-keyed-refresh mechanism (now wrapped behind the opt-in UI).
 
 In the browser this lives in OPFS (`sqlite3.wasm` + `relationships.db`
 + `fellows.db` + `fellows.db.meta.json`) in **both** standalone PWA mode

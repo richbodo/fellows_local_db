@@ -16,8 +16,8 @@ layer (per [Architecture.md § Worker-owned OPFS](Architecture.md#worker-owned-o
 | Cache API `fellows-app-shell-vN` | service worker | HTML, JS, CSS, SW, manifest, icons, sqlite3.wasm, `vendor/sqlite-worker.js` | Yes — every CACHE_VERSION bump | Yes |
 | Cache API `fellows-images-v1` | service worker | Profile photos | No (separate cache name) — re-fetched as needed | Yes |
 | IndexedDB `fellows-local-db` | main (retired in Phase 6) | Offline-fallback full fellow rows | Regenerated on every successful boot | Yes |
-| OPFS `fellows.db` | worker | Imported Knack contact data | **Re-imported** when `fellows.db.meta.json:sha` differs from `build-meta.json:fellows_db_sha` (Phase 3); otherwise reused | **No** (gap; see "Open questions") |
-| OPFS `fellows.db.meta.json` | worker | `{sha, fetched_at, last_failure_at, last_failure_reason}` — the freshness sidecar that gates re-import of `fellows.db`. Sibling of `fellows.db` at the OPFS root, outside the SAH-pool dir, so a `relationships.db` restore can't desync it. | Updated after each successful re-import; otherwise untouched | **No** |
+| OPFS `fellows.db` | worker | Imported Knack contact data | **Re-imported on user request** via the About-page *Update directory data* button when `fellows.db.meta.json:sha` differs from `build-meta.json:fellows_db_sha`. Boot path is install-only and never auto-refreshes a returning visitor (`plans/opt_in_directory_data_updates.md`). | **No** (gap; see "Open questions") |
+| OPFS `fellows.db.meta.json` | worker | `{sha, fetched_at, last_failure_at, last_failure_reason}` — the freshness sidecar that records what's locally installed. Sibling of `fellows.db` at the OPFS root, outside the SAH-pool dir, so a `relationships.db` restore can't desync it. | Updated after each successful user-driven re-import; otherwise untouched | **No** |
 | OPFS `relationships.db` | worker | Groups, group members, fellow_tags, fellow_notes, settings — all user-authored | **Never** — that's the whole point of this file | **No** |
 | OPFS `relationships.db.bak.<ISO>` | worker | Snapshots of `relationships.db`, rotated to keep newest 5 | Auto-created on every boot when the most recent backup is more than 1 hour old (debounced); pruned to 5 newest | **No** (preserved alongside `relationships.db` for recovery) |
 | localStorage `fellows_authenticated_once` | main | "this origin has authenticated at least once" marker | Untouched | **Preserved by name** in `clearAllAppData` |
@@ -70,25 +70,67 @@ floors and triage policy.
 5. `app.js` shows the "New version available — Reload" banner.
 6. User clicks Reload. New SW activates. Old shell cache deleted.
    Controlled tabs auto-navigate (see `sw.js`'s activate handler).
-7. Fresh `app.js` runs against fresh shell against fresh `fellows.db`.
+7. Fresh `app.js` runs against fresh shell against the **same**
+   `fellows.db` already on disk. App-shell updates do not refresh
+   directory data — see *Directory data update flow* below.
 
 What survives the reload, end-to-end:
 - The session cookie (still valid until its 7-day TTL).
 - `fellows_authenticated_once` (the URL-just-works marker).
 - `relationships.db` (the user's groups, tags, notes, and settings).
+- `fellows.db` (the on-device fellow-data snapshot — unchanged unless
+  the user opts in to a directory data update).
 - The image cache.
 - All localStorage keys (drafts, filter prefs, etc.).
 
 What gets replaced (intentionally):
 - App shell HTML, JS, CSS, SW, manifest, and `vendor/sqlite-worker.js`
   (precached together; CACHE_VERSION-busted as one unit).
-- `fellows.db` in OPFS, **only when** `build-meta.json:fellows_db_sha`
-  differs from the locally-recorded `fellows.db.meta.json:sha` — the
-  worker's `ensureFellowsDb` op runs an atomic staging-slot import on
-  mismatch and updates the sidecar. Two consecutive boots against an
-  unchanged server produce zero `/fellows.db` requests.
 - IndexedDB cache (regenerated on next successful `getList`; retired
   in Phase 6 per [`plans/local_first_worker_architecture.md`](../plans/local_first_worker_architecture.md#phase-6--retire-indexeddb)).
+
+## Directory data update flow
+
+Independent of app-shell updates. The data on the device is treated as
+an installed snapshot — see [`plans/opt_in_directory_data_updates.md`](../plans/opt_in_directory_data_updates.md)
+for the full rationale.
+
+1. About page → **Check for updates** fetches `/build-meta.json` and
+   asks the worker to compare its `fellows_db_sha` to the local
+   `fellows.db.meta.json:sha`.
+2. If they match → row reads *up to date*; nothing to do.
+3. If they differ → row reads *Directory Data update available* with
+   an **Update directory data** button.
+4. Clicking the button calls `previewFellowsDbSwap` — the worker
+   fetches the new bytes, validates them in `/fellows.db.swap-staging`,
+   and computes which `group_members.fellow_record_id`s would no
+   longer have a profile after the swap.
+5. If any members would be affected, a confirm dialog lists them by
+   name and group. **Cancel** discards the staged bytes. **Update
+   anyway** commits the swap.
+6. If no members are affected, the swap commits silently and the
+   directory re-renders against the new bytes.
+7. After commit, `applyFellowsDbSwap` writes the new `meta.sha` and
+   refreshes the in-memory orphan set so group detail flags any new
+   orphans.
+
+The boot path never auto-fetches or auto-imports a returning
+visitor's `fellows.db` — that was the pre-2026-05 policy and is
+explicitly retired. Only cold-start (no local fellows.db) or the
+About-page button trigger a fetch.
+
+### Orphan members (post-swap)
+
+A `group_members` row whose `record_id` is no longer in
+`fellows.db` renders in group detail as **Profile no longer
+available (record_id: …)** with a per-row **Remove** button. Data
+isn't auto-removed — the user decides.
+
+A one-shot **soft scan** runs on first boot of the opt-in build to
+catch members orphaned by past auto-refreshes (PR #113 era). It
+fires a single toast pointing the user at group detail; the
+`relationships.settings.orphan_scan_done = "1"` marker prevents
+re-toasting.
 
 ## Auto-backup of `relationships.db`
 

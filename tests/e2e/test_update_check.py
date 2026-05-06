@@ -1,9 +1,12 @@
 """E2E tests: About-page "Check for updates" button + server-drift banner.
 
-Exercises the Phase-2 update check: a boot snapshot of ``/build-meta.json``
-is compared against the latest value each time the user clicks the button
-(and, in production, once an hour). When the server git_sha has changed,
-the shared ``#sw-update-banner`` is surfaced so the user can reload.
+Exercises the two-row update status block on About. A single button
+drives both the app-shell check (existing checkForServerUpdate, which
+raises the SW reload banner on `git_sha` drift) and the directory-data
+check (compareFellowsDbSha). Each row populates its own status text and
+optional action button independently.
+
+plans/opt_in_directory_data_updates.md.
 """
 import json
 
@@ -16,11 +19,14 @@ from conftest import _STANDALONE_DISPLAY_INIT
 BUILD_META_PATH = "**/build-meta.json"
 
 
-def _route_build_meta(context, git_sha, built_at="2026-04-20T00:00:00Z"):
+def _route_build_meta(context, git_sha, fellows_db_sha=None, built_at="2026-04-20T00:00:00Z"):
     # NB: use context.route (not page.route) — page.route only fires for the
     # first matching request in our Playwright version; the boot fetch and the
     # button-click fetch both need to be mocked.
-    body = json.dumps({"git_sha": git_sha, "built_at": built_at})
+    payload = {"git_sha": git_sha, "built_at": built_at}
+    if fellows_db_sha is not None:
+        payload["fellows_db_sha"] = fellows_db_sha
+    body = json.dumps(payload)
 
     def _fulfill(route):
         route.fulfill(
@@ -53,8 +59,9 @@ class TestAboutUpdateCheck:
             btn = page.locator("#about-check-updates")
             expect(btn).to_be_visible()
             btn.click()
-            status = page.locator("#about-update-status")
-            expect(status).to_contain_text("latest version", timeout=5000)
+            # App row shows "up to date" when git_sha matches.
+            app_status = page.locator("#about-app-status")
+            expect(app_status).to_contain_text("up to date", timeout=5000)
             expect(page.locator("#sw-update-banner")).to_be_hidden()
         finally:
             context.unroute(BUILD_META_PATH)
@@ -72,8 +79,10 @@ class TestAboutUpdateCheck:
             _route_build_meta(context, git_sha="xyz999")
 
             page.locator("#about-check-updates").click()
-            status = page.locator("#about-update-status")
-            expect(status).to_contain_text("New version available", timeout=5000)
+            app_status = page.locator("#about-app-status")
+            expect(app_status).to_contain_text("App update available", timeout=5000)
+            # The Reload affordance lives in the action cell.
+            expect(page.locator("#about-app-update-btn")).to_be_visible()
             expect(page.locator("#sw-update-banner")).to_be_visible()
         finally:
             context.unroute(BUILD_META_PATH)
@@ -94,8 +103,8 @@ class TestAboutUpdateCheck:
             )
 
             page.locator("#about-check-updates").click()
-            status = page.locator("#about-update-status")
-            expect(status).to_contain_text("Unable to reach", timeout=5000)
+            app_status = page.locator("#about-app-status")
+            expect(app_status).to_contain_text("Couldn", timeout=5000)
             expect(page.locator("#sw-update-banner")).to_be_hidden()
         finally:
             context.unroute(BUILD_META_PATH)

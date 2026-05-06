@@ -154,6 +154,17 @@ Out of scope: versioned `fellows.db` (next phase); IDB retirement (Phase 6).
 
 ### Phase 3 — Versioned, atomic `fellows.db` updates
 
+> **Policy supersession (2026-05).** Phase 3's silent-on-boot refresh
+> shipped in PR #113 and was superseded by an opt-in policy a few weeks
+> later — see [`plans/opt_in_directory_data_updates.md`](opt_in_directory_data_updates.md).
+> The fetch / validate / atomic-swap mechanism described below is
+> unchanged; only the **trigger** moved from boot-time SHA mismatch to
+> a user click on the About page's *Update directory data* button.
+> The boot path is now install-only. The "Directory updated" toast
+> described in this section was removed in the same change. Read this
+> phase as the underlying machinery; read the opt-in plan for the
+> current user-facing policy.
+
 Stop re-importing `fellows.db` on every boot. Metadata is **worker-owned**, stored as a sibling OPFS file — explicitly not in `relationships.settings`, so a `relationships.db` restore can't desync `fellows.db` freshness.
 
 Scope:

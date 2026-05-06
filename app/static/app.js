@@ -151,6 +151,11 @@
       bootMarks[name] = _bootMs();
     }
   }
+  // Expose for e2e tests that need to wait for a specific boot phase
+  // (notably `get_full_done` — knowing that the boot path's second
+  // route() call has fired prevents test assertions from racing with
+  // an About-page re-render). Read-only by convention.
+  window.__bootMarks = bootMarks;
   // Captures the very start of script execution; everything else is
   // relative to this. Helpful when a boot stalls before pickDataProvider
   // even runs (e.g., long script-parse, blocked dependency fetch).
@@ -404,6 +409,281 @@
       if (document.hidden) return;
       checkForServerUpdate();
     }, UPDATE_CHECK_INTERVAL_MS);
+  }
+
+  // Companion to checkForServerUpdate — checks whether the bundled
+  // fellows.db has changed since the local sidecar was last written.
+  // Always uses /build-meta.json:fellows_db_sha as the truth value;
+  // the worker handles the local read. Independent of app-shell SHA
+  // so the two flows can succeed/fail individually.
+  // plans/opt_in_directory_data_updates.md.
+  //
+  // Returns a Promise resolving to { status, serverSha?, localSha?, fetchedAt?, error? }.
+  // `status`:
+  //   'update-available' — local fellows.db differs from server
+  //   'up-to-date'       — SHAs match
+  //   'no-local-data'    — worker has no fellows.db (cold-start case)
+  //   'unsupported'      — running on a provider that can't compare
+  //                        (api+idb fallback, no-OPFS browser)
+  //   'worker-stale'     — page is on a newer build than the worker
+  //                        (transient SW upgrade race; worker doesn't
+  //                        know the new RPC). Resolves on reload.
+  //   'error'            — server unreachable or worker errored
+  function checkForDirectoryDataUpdate() {
+    if (!dataProvider || typeof dataProvider._compareFellowsDbSha !== 'function') {
+      return Promise.resolve({ status: 'unsupported' });
+    }
+    return fetch('/build-meta.json', { cache: 'no-store', credentials: 'same-origin' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (meta) {
+        var serverSha = (meta && typeof meta.fellows_db_sha === 'string' && meta.fellows_db_sha)
+          ? meta.fellows_db_sha : null;
+        return dataProvider._compareFellowsDbSha({ serverSha: serverSha }).then(function (cmp) {
+          if (!cmp.hasFellowsDb) {
+            return {
+              status: 'no-local-data',
+              serverSha: serverSha,
+              localSha: cmp.localSha,
+              fetchedAt: cmp.fetchedAt
+            };
+          }
+          if (cmp.dataUpdateAvailable === true) {
+            return {
+              status: 'update-available',
+              serverSha: serverSha,
+              localSha: cmp.localSha,
+              fetchedAt: cmp.fetchedAt
+            };
+          }
+          if (cmp.dataUpdateAvailable === false) {
+            return {
+              status: 'up-to-date',
+              serverSha: serverSha,
+              localSha: cmp.localSha,
+              fetchedAt: cmp.fetchedAt
+            };
+          }
+          // dataUpdateAvailable === null (server didn't expose a SHA).
+          return {
+            status: 'error',
+            error: 'server did not report fellows_db_sha',
+            serverSha: serverSha,
+            localSha: cmp.localSha,
+            fetchedAt: cmp.fetchedAt
+          };
+        });
+      })
+      .catch(function (err) {
+        // Worker doesn't know the new RPC → page is newer than the
+        // worker bundle. Common during the SW upgrade race: page
+        // loaded the new shell, worker was spawned with the old shell
+        // still in cache. Reload spawns a fresh worker from the new
+        // cache and the check works.
+        var msg = (err && err.message) || String(err);
+        if (/unknown op:\s*compareFellowsDbSha/i.test(msg)) {
+          return { status: 'worker-stale', error: msg };
+        }
+        return { status: 'error', error: msg };
+      });
+  }
+
+  // Handler for the "Update directory data" button on the About page.
+  // Three-step flow per plans/opt_in_directory_data_updates.md:
+  //   1. previewFellowsDbSwap → fetch + validate, compute affected
+  //      members.
+  //   2. If affected.length > 0, render the confirm dialog;
+  //      Cancel → cancelFellowsDbSwap; Update anyway → step 3.
+  //      If affected.length === 0, apply silently (step 3).
+  //   3. applyFellowsDbSwap → atomic replace + meta update.
+  //   4. Refresh in-page directory state and the orphan set.
+  function handleUpdateDirectoryDataClick(checkResult, refreshBtn) {
+    var dataStatusEl = document.getElementById('about-data-status');
+    var dataActionEl = document.getElementById('about-data-action');
+    var lastCheckEl = document.getElementById('about-last-check');
+    function setBusy(msg) {
+      if (dataStatusEl) dataStatusEl.textContent = msg;
+      if (dataActionEl) dataActionEl.innerHTML = '';
+    }
+    function setDone(msg) {
+      if (dataStatusEl) dataStatusEl.textContent = msg;
+      if (dataActionEl) dataActionEl.innerHTML = '';
+      if (lastCheckEl) lastCheckEl.textContent = 'Last check: ' + new Date().toISOString();
+    }
+
+    if (!dataProvider || typeof dataProvider._previewFellowsDbSwap !== 'function') {
+      setDone('Directory data updates aren’t available in this browser.');
+      return;
+    }
+    var serverSha = checkResult && checkResult.serverSha;
+    setBusy('Checking impact…');
+
+    dataProvider._previewFellowsDbSwap({ serverSha: serverSha })
+      .then(function (preview) {
+        var affected = (preview && preview.affectedGroups) || [];
+        if (!affected.length) {
+          // No group impact — apply silently.
+          return applyDirectoryUpdate(preview.stagingId);
+        }
+        return new Promise(function (resolve) {
+          openDirectoryUpdateDialog(affected, {
+            onCancel: function () {
+              dataProvider._cancelFellowsDbSwap({ stagingId: preview.stagingId })
+                .catch(function () {});
+              setDone('Update cancelled. Your directory data is unchanged.');
+              resolve();
+            },
+            onConfirm: function () {
+              applyDirectoryUpdate(preview.stagingId).then(resolve, resolve);
+            }
+          });
+        });
+      })
+      .catch(function (err) {
+        if (err && err.versionMismatch) {
+          setDone('Reload the app first (a newer version is available), then try again.');
+          return;
+        }
+        var reason = (err && err.message) || String(err);
+        setDone('Could not stage update: ' + reason);
+      });
+
+    function applyDirectoryUpdate(stagingId) {
+      setBusy('Applying update…');
+      return dataProvider._applyFellowsDbSwap({ stagingId: stagingId })
+        .then(function () {
+          // Re-render the directory in place — getList + getFull rebuild
+          // the in-memory cache. Cheap; ~hundreds of rows.
+          return reloadDirectoryAfterDataSwap()
+            .catch(function () { /* surfaced via toast below if it matters */ });
+        })
+        .then(function () {
+          // Refresh orphan set against the freshly-imported fellows.db
+          // so group detail views flag any rows that became orphaned by
+          // the swap.
+          if (typeof dataProvider._findOrphanedGroupMembers === 'function') {
+            return dataProvider._findOrphanedGroupMembers().then(function (res) {
+              setOrphanedRecordIdsFromList(res && res.orphans);
+            }).catch(function () {});
+          }
+        })
+        .then(function () {
+          setDone('Directory data updated.');
+        })
+        .catch(function (err) {
+          var reason = (err && err.message) || String(err);
+          setDone('Update failed: ' + reason + '. Try again.');
+        });
+    }
+  }
+
+  // Reload directory data after a swap. Re-uses the existing getList +
+  // getFull pipeline so the rail / search / detail views all see the
+  // new rows. Resolves once renderDirectory has run with the new data.
+  // Skips re-routing the current view if the user is on About — About
+  // doesn't render fellow data, and a re-render would wipe the status
+  // text the apply handler is about to set.
+  function reloadDirectoryAfterDataSwap() {
+    if (!dataProvider || typeof dataProvider.getList !== 'function') return Promise.resolve();
+    return dataProvider.getList().then(function (data) {
+      list = Array.isArray(data) ? data : [];
+      renderDirectory();
+      return dataProvider.getFull();
+    }).then(function (full) {
+      if (Array.isArray(full)) {
+        fullFellowsCache = full;
+        fellowsBySlug = new Map();
+        full.forEach(function (f) {
+          if (f.slug) fellowsBySlug.set(f.slug, f);
+          if (f.record_id) fellowsBySlug.set(f.record_id, f);
+        });
+      }
+      // Re-route data-rendering views (group detail, fellow detail,
+      // visual directory) so the new bytes show through. Skip when
+      // the user is on a non-data view (About, Settings) — re-rendering
+      // those would clobber the just-applied status text and add
+      // nothing useful.
+      var hash = String(window.location.hash || '');
+      var skipReroute = hash.indexOf('#/about') === 0 || hash.indexOf('#/settings') === 0;
+      if (!skipReroute) {
+        try { route(); } catch (e) {}
+      }
+    });
+  }
+
+  // Build a one-shot modal listing the affected members. Cleans itself
+  // up on close. No bespoke markup in index.html — this dialog is
+  // unique to the update flow and is created on demand.
+  function openDirectoryUpdateDialog(affected, callbacks) {
+    var existing = document.getElementById('directory-update-dialog');
+    if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+
+    var dialog = document.createElement('div');
+    dialog.id = 'directory-update-dialog';
+    dialog.className = 'directory-update-dialog';
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-labelledby', 'directory-update-dialog-title');
+
+    var listHtml = '';
+    for (var i = 0; i < affected.length; i++) {
+      var item = affected[i];
+      var name = item.name || ('record_id ' + item.recordId);
+      var groupNames = (item.groups || []).map(function (g) { return '‘' + g.name + '’'; });
+      listHtml += '<li><strong>' + escapeHtml(name) + '</strong> — in ' +
+        escapeHtml(groupNames.join(', ')) + '</li>';
+    }
+
+    dialog.innerHTML =
+      '<div class="directory-update-dialog-inner" role="document">' +
+        '<h2 id="directory-update-dialog-title" class="directory-update-dialog-title">Update directory data?</h2>' +
+        '<p>This update removes <strong>' + affected.length + ' fellow' +
+          (affected.length === 1 ? '' : 's') + '</strong> from your saved groups:</p>' +
+        '<ul class="directory-update-dialog-list">' + listHtml + '</ul>' +
+        '<p>After the update they will no longer appear in those groups. ' +
+        'Their entries will be flagged as &lsquo;Profile no longer available&rsquo; ' +
+        'so you can review and remove them.</p>' +
+        '<div class="directory-update-dialog-actions">' +
+          '<button type="button" class="directory-update-dialog-cancel" id="directory-update-dialog-cancel">Cancel</button>' +
+          '<button type="button" class="directory-update-dialog-confirm" id="directory-update-dialog-confirm">Update anyway</button>' +
+        '</div>' +
+      '</div>';
+
+    document.body.appendChild(dialog);
+
+    function close() {
+      if (dialog.parentNode) dialog.parentNode.removeChild(dialog);
+      document.removeEventListener('keydown', onKey);
+    }
+    function onKey(e) {
+      if (e.key === 'Escape') {
+        close();
+        if (callbacks && callbacks.onCancel) callbacks.onCancel();
+      }
+    }
+    document.addEventListener('keydown', onKey);
+
+    document.getElementById('directory-update-dialog-cancel').addEventListener('click', function () {
+      close();
+      if (callbacks && callbacks.onCancel) callbacks.onCancel();
+    });
+    document.getElementById('directory-update-dialog-confirm').addEventListener('click', function () {
+      close();
+      if (callbacks && callbacks.onConfirm) callbacks.onConfirm();
+    });
+    // Click outside the inner panel closes (cancel-equivalent).
+    dialog.addEventListener('click', function (e) {
+      if (e.target === dialog) {
+        close();
+        if (callbacks && callbacks.onCancel) callbacks.onCancel();
+      }
+    });
+    // Focus the cancel button by default — destructive action requires
+    // explicit confirm.
+    var cancelBtn = document.getElementById('directory-update-dialog-cancel');
+    if (cancelBtn) try { cancelBtn.focus(); } catch (e) {}
   }
 
   function logSwLifecycle(event, detail) {
@@ -2919,7 +3199,31 @@
       // Read-only view of fellows.db.meta.json. Powers the About-page
       // "Last update check" line and the diag panel's meta block. Pure
       // read; does not trigger a fetch.
-      _getFellowsDbMeta: function () { return rpc.call('getFellowsDbMeta'); }
+      _getFellowsDbMeta: function () { return rpc.call('getFellowsDbMeta'); },
+      // Opt-in directory-data update RPCs
+      // (plans/opt_in_directory_data_updates.md). Compare is a cheap
+      // sidecar read; preview fetches + validates + stages; apply
+      // promotes; cancel discards. None of them are version-gated —
+      // reads are always safe, and apply requires a stagingId minted in
+      // the same worker session so a stale page can't accidentally
+      // commit a swap.
+      _compareFellowsDbSha: function (args) {
+        return rpc.call('compareFellowsDbSha', args || {});
+      },
+      _previewFellowsDbSwap: function (args) {
+        return refuseIfVersionSkew('previewFellowsDbSwap') ||
+          rpc.call('previewFellowsDbSwap', args || {});
+      },
+      _applyFellowsDbSwap: function (args) {
+        return refuseIfVersionSkew('applyFellowsDbSwap') ||
+          rpc.call('applyFellowsDbSwap', args || {});
+      },
+      _cancelFellowsDbSwap: function (args) {
+        return rpc.call('cancelFellowsDbSwap', args || {});
+      },
+      _findOrphanedGroupMembers: function () {
+        return rpc.call('findOrphanedGroupMembers');
+      }
     };
   }
 
@@ -3907,6 +4211,63 @@
     }).catch(function () { /* ignore */ });
   }
 
+  // Set of record_ids known to be missing from the live fellows.db. Populated
+  // by the boot soft-scan and refreshed after applyFellowsDbSwap, so group
+  // detail rendering can flag rows whose underlying fellow is no longer in
+  // the directory. Empty when no scan has run, when there are no orphans,
+  // or when the api+idb fallback is in use (worker required to query).
+  var orphanedRecordIds = Object.create(null);
+
+  function setOrphanedRecordIdsFromList(orphans) {
+    orphanedRecordIds = Object.create(null);
+    if (!Array.isArray(orphans)) return;
+    for (var i = 0; i < orphans.length; i++) {
+      var rid = orphans[i] && orphans[i].recordId;
+      if (rid) orphanedRecordIds[rid] = true;
+    }
+  }
+
+  function isOrphanedRecordId(rid) {
+    return !!(rid && orphanedRecordIds[rid]);
+  }
+
+  // One-shot post-PR-#113 orphan scan. Catches group_members whose
+  // record_id is no longer in fellows.db — possible if the user got an
+  // auto-refresh under the old policy. Toast fires once; the
+  // orphan_scan_done setting prevents repeats. Group detail surfaces the
+  // orphan rows via isOrphanedRecordId regardless.
+  // plans/opt_in_directory_data_updates.md.
+  function maybeRunOrphanSoftScan() {
+    if (!dataProvider) return;
+    if (typeof dataProvider._findOrphanedGroupMembers !== 'function') return;
+    if (typeof dataProvider.getSetting !== 'function') return;
+    Promise.resolve(dataProvider.getSetting('orphan_scan_done')).then(function (done) {
+      if (done === '1') {
+        // Already scanned in a previous boot. Still refresh the in-memory
+        // set so group detail flags any orphans that are present, but no
+        // toast.
+        return dataProvider._findOrphanedGroupMembers().then(function (res) {
+          setOrphanedRecordIdsFromList(res && res.orphans);
+        });
+      }
+      return dataProvider._findOrphanedGroupMembers().then(function (res) {
+        var orphans = (res && res.orphans) || [];
+        setOrphanedRecordIdsFromList(orphans);
+        if (orphans.length) {
+          try {
+            showToast('Some group members are no longer in the directory. ' +
+              'See group details for review.', 8000);
+          } catch (e) {}
+        }
+        if (typeof dataProvider.setSetting === 'function') {
+          return dataProvider.setSetting('orphan_scan_done', '1').catch(function () {});
+        }
+      });
+    }).catch(function (e) {
+      bootDebugPush('orphan soft scan failed: ' + (e && e.message || e));
+    });
+  }
+
   function fellowHasEmail(f) {
     if (f.has_contact_email === true || f.has_contact_email === 1) return true;
     return !!(f.contact_email && String(f.contact_email).trim());
@@ -4795,25 +5156,38 @@
     aboutHtml += 'For support, request to join the github repository or just ask on one of the fellows channels.</p>';
     aboutHtml += '<p class="about-support">Having trouble with the app? Contact the EHF Communications Working Group.</p>';
     aboutHtml += '<p class="about-users-manual"><a href="https://github.com/richbodo/fellows_local_db/blob/main/docs/users_manual.md" target="_blank" rel="noopener">User Guide</a> \u2014 how to install, browse, save groups, export, and manage settings.</p>';
-    aboutHtml += '<p class="about-update-check">';
-    aboutHtml += '<button type="button" id="about-check-updates" class="about-check-updates-btn">Check for updates</button>';
-    aboutHtml += '<span id="about-update-status" class="about-update-status" role="status" aria-live="polite"></span>';
-    aboutHtml += '</p>';
-    // Persistent record of when the worker last reached the server for
-    // directory data. Populated async from fellows.db.meta.json. Useful
-    // when a user reports stale data — the line answers "is the
-    // distribution channel actually working for me?" without sending
-    // them into the diagnostics panel. Phase 4 of
-    // plans/local_first_worker_architecture.md.
-    aboutHtml += '<p class="about-last-update" id="about-last-update"></p>';
+    // Two-row update status block. App and Directory data are
+    // independently versioned (build/build_pwa.py emits both `git_sha`
+    // and `fellows_db_sha` into /build-meta.json); the user can act on
+    // either without affecting the other.
+    // plans/opt_in_directory_data_updates.md.
     var serverLabel = bootBuildMeta.git_sha
       ? bootBuildMeta.git_sha + (bootBuildMeta.built_at ? ' · ' + bootBuildMeta.built_at : '')
       : (bootBuildMeta.built_at || 'unknown');
-    aboutHtml += '<p class="about-build">';
-    aboutHtml += '<span class="about-build-label">Build</span> ';
+    aboutHtml += '<div class="about-update-block">';
+    aboutHtml += '<div class="about-update-row" id="about-app-row">';
+    aboutHtml += '<div class="about-update-row-label">App</div>';
+    aboutHtml += '<div class="about-update-row-status" id="about-app-status" role="status" aria-live="polite">';
     aboutHtml += '<code class="about-build-value">app: ' + escapeHtml(FELLOWS_UI_DIAG) + '</code> ';
     aboutHtml += '<code class="about-build-value">server: ' + escapeHtml(serverLabel) + '</code>';
+    aboutHtml += '</div>';
+    aboutHtml += '<div class="about-update-row-action" id="about-app-action"></div>';
+    aboutHtml += '</div>';
+    aboutHtml += '<div class="about-update-row" id="about-data-row">';
+    aboutHtml += '<div class="about-update-row-label">Directory data</div>';
+    aboutHtml += '<div class="about-update-row-status" id="about-data-status" role="status" aria-live="polite">Click "Check for updates" to compare with the server.</div>';
+    aboutHtml += '<div class="about-update-row-action" id="about-data-action"></div>';
+    aboutHtml += '</div>';
+    aboutHtml += '<p class="about-update-check">';
+    aboutHtml += '<button type="button" id="about-check-updates" class="about-check-updates-btn">Check for updates</button>';
+    aboutHtml += '<span id="about-last-check" class="about-update-status"></span>';
     aboutHtml += '</p>';
+    // Persistent record of when fellows.db was last fetched (or last
+    // failed). Populated async from fellows.db.meta.json. Useful when a
+    // user reports stale data — answers "is the distribution channel
+    // actually working for me?" without sending them into the
+    // diagnostics panel.
+    aboutHtml += '<p class="about-last-update" id="about-last-update"></p>';
     aboutHtml += '<p class="about-repo"><a href="https://github.com/richbodo/fellows_local_db" target="_blank" rel="noopener">';
     aboutHtml += '<svg class="github-icon" viewBox="0 0 16 16" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>';
     aboutHtml += ' richbodo/fellows_local_db</a></p>';
@@ -4852,27 +5226,95 @@
       }).catch(function () { /* non-fatal — leave line empty */ });
     })();
 
-    // Wire the "Check for updates" button. Shares the same checker used by
-    // the hourly poll so the user-visible status stays consistent with what
-    // triggers the sw-update-banner.
+    // Wire the "Check for updates" button. Drives the app-shell check
+    // (existing checkForServerUpdate, which raises the SW reload banner
+    // on drift) AND the directory-data check in parallel; each result
+    // populates its own status row independently.
+    // plans/opt_in_directory_data_updates.md.
     (function wireUpdateCheckButton() {
       var btn = document.getElementById('about-check-updates');
-      var statusEl = document.getElementById('about-update-status');
-      if (!btn || !statusEl) return;
+      var lastCheckEl = document.getElementById('about-last-check');
+      var appStatusEl = document.getElementById('about-app-status');
+      var appActionEl = document.getElementById('about-app-action');
+      var dataStatusEl = document.getElementById('about-data-status');
+      var dataActionEl = document.getElementById('about-data-action');
+      if (!btn) return;
+
+      function paintAppRow(res) {
+        if (!appStatusEl) return;
+        var serverLabel = bootBuildMeta.git_sha
+          ? bootBuildMeta.git_sha + (bootBuildMeta.built_at ? ' \u00b7 ' + bootBuildMeta.built_at : '')
+          : (bootBuildMeta.built_at || 'unknown');
+        var build = '<code class="about-build-value">app: ' + escapeHtml(FELLOWS_UI_DIAG) + '</code> ' +
+          '<code class="about-build-value">server: ' + escapeHtml(serverLabel) + '</code>';
+        var statusText, actionHtml = '';
+        if (res.status === 'update-available') {
+          statusText = ' \u2014 App update available';
+          actionHtml = '<button type="button" class="about-update-action-btn" id="about-app-update-btn">Reload to apply</button>';
+        } else if (res.status === 'up-to-date') {
+          statusText = ' \u2014 up to date';
+        } else if (res.status === 'no-boot-snapshot') {
+          statusText = ' \u2014 version recorded; future checks will compare against this build.';
+        } else {
+          statusText = ' \u2014 Couldn\u2019t check (offline?)';
+        }
+        appStatusEl.innerHTML = build + statusText;
+        if (appActionEl) appActionEl.innerHTML = actionHtml;
+        var appBtn = document.getElementById('about-app-update-btn');
+        if (appBtn) {
+          appBtn.addEventListener('click', function () { window.location.reload(); });
+        }
+      }
+
+      function paintDataRow(res) {
+        if (!dataStatusEl) return;
+        var statusText = '', actionHtml = '';
+        if (res.status === 'unsupported') {
+          statusText = 'Directory data updates aren\u2019t available in this browser.';
+        } else if (res.status === 'no-local-data') {
+          statusText = 'No local directory data \u2014 reload to download.';
+        } else if (res.status === 'worker-stale') {
+          // Transient SW-upgrade race: the page is on a newer build
+          // than the worker, so the new compareFellowsDbSha RPC isn't
+          // recognized. Reloading spawns a fresh worker from the now-
+          // current shell cache and the check works.
+          statusText = 'Reload the app to enable update checks.';
+          actionHtml = '<button type="button" class="about-update-action-btn" id="about-data-reload-btn">Reload</button>';
+        } else if (res.status === 'update-available') {
+          statusText = 'Directory Data update available';
+          actionHtml = '<button type="button" class="about-update-action-btn" id="about-data-update-btn">Update directory data</button>';
+        } else if (res.status === 'up-to-date') {
+          var snap = res.fetchedAt ? ' (snapshot from ' + escapeHtml(String(res.fetchedAt)) + ')' : '';
+          statusText = 'up to date' + snap;
+        } else {
+          statusText = 'Couldn\u2019t check (offline?)';
+        }
+        dataStatusEl.textContent = statusText;
+        if (dataActionEl) dataActionEl.innerHTML = actionHtml;
+        var dataBtn = document.getElementById('about-data-update-btn');
+        if (dataBtn) {
+          dataBtn.addEventListener('click', function () {
+            handleUpdateDirectoryDataClick(res, btn);
+          });
+        }
+        var reloadBtn = document.getElementById('about-data-reload-btn');
+        if (reloadBtn) {
+          reloadBtn.addEventListener('click', function () { window.location.reload(); });
+        }
+      }
+
       btn.addEventListener('click', function () {
         btn.disabled = true;
-        statusEl.textContent = 'Checking\u2026';
-        checkForServerUpdate().then(function (res) {
+        if (lastCheckEl) lastCheckEl.textContent = 'Checking\u2026';
+        if (appStatusEl) appStatusEl.textContent = 'Checking\u2026';
+        if (appActionEl) appActionEl.innerHTML = '';
+        if (dataStatusEl) dataStatusEl.textContent = 'Checking\u2026';
+        if (dataActionEl) dataActionEl.innerHTML = '';
+        Promise.all([checkForServerUpdate(), checkForDirectoryDataUpdate()]).then(function (results) {
           btn.disabled = false;
-          if (res.status === 'update-available') {
-            statusEl.textContent = 'New version available \u2014 reload to apply.';
-          } else if (res.status === 'up-to-date') {
-            statusEl.textContent = 'You\u2019re on the latest version.';
-          } else if (res.status === 'no-boot-snapshot') {
-            statusEl.textContent = 'Version recorded \u2014 future checks will compare against this build.';
-          } else {
-            statusEl.textContent = 'Unable to reach the server right now. Try again later.';
-          }
+          paintAppRow(results[0] || { status: 'error' });
+          paintDataRow(results[1] || { status: 'error' });
+          if (lastCheckEl) lastCheckEl.textContent = 'Last check: ' + new Date().toISOString();
         });
       });
     })();
@@ -5624,6 +6066,25 @@
         members.forEach(function (m) {
           var rid = m.record_id || '';
           var fellow = fellowsBySlug.get(rid);
+          // Orphan = explicitly flagged by the orphan scan, OR not found
+          // in the in-memory cache (defensive — the scan may not have run
+          // yet on this boot, e.g. on the api+idb fallback). The latter
+          // never produces false positives in worker mode because
+          // fellowsBySlug is populated from the same fellows.db the
+          // worker uses to validate group_members.
+          var orphaned = isOrphanedRecordId(rid) || (rid && !fellow);
+          if (orphaned) {
+            html += '<tr class="group-detail-member-orphan" data-record-id="' +
+              escapeHtml(rid) + '"><td>' +
+              '<span class="group-detail-orphan-icon" aria-hidden="true">?</span>' +
+              '<span class="group-detail-orphan-text">Profile no longer available' +
+              ' <code class="group-detail-orphan-rid">(record_id: ' +
+              escapeHtml(rid) + ')</code></span>' +
+              '<button type="button" class="group-detail-orphan-remove" data-record-id="' +
+              escapeHtml(rid) + '">Remove</button>' +
+              '</td></tr>';
+            return;
+          }
           var slug = fellow && fellow.slug ? fellow.slug : '';
           var href = slug ? '#/fellow/' + encodeURIComponent(slug) : '#';
           html += '<tr><td><a href="' + escapeHtml(href) + '">' +
@@ -6814,6 +7275,42 @@
         startInlineGroupRename(group);
       });
     }
+
+    // Wire per-row "Remove" buttons on orphan rows (members whose
+    // record_id is no longer in the live fellows.db). Calls updateGroup
+    // with the rid removed, then re-renders the page so the row drops
+    // out and counts refresh.
+    // plans/opt_in_directory_data_updates.md.
+    var orphanRemoveBtns = detailEl.querySelectorAll('.group-detail-orphan-remove');
+    if (orphanRemoveBtns && orphanRemoveBtns.length) {
+      Array.prototype.forEach.call(orphanRemoveBtns, function (btn) {
+        btn.addEventListener('click', function () {
+          var rid = btn.getAttribute('data-record-id');
+          if (!rid) return;
+          var remaining = (group.members || [])
+            .map(function (m) { return m.record_id; })
+            .filter(function (id) { return id && id !== rid; });
+          btn.disabled = true;
+          btn.textContent = 'Removing…';
+          dataProvider.updateGroup(group.id, { fellow_record_ids: remaining })
+            .then(function () {
+              // Drop from in-memory orphan set so subsequent renders
+              // don't re-flag (the rid is gone from group_members now,
+              // but the worker scan still considers it orphaned —
+              // remove it locally to keep state coherent until the next
+              // boot scan).
+              if (orphanedRecordIds[rid]) delete orphanedRecordIds[rid];
+              renderGroupDetailPage(group.id);
+            })
+            .catch(function (err) {
+              btn.disabled = false;
+              btn.textContent = 'Remove';
+              showToast('Could not remove: ' +
+                ((err && err.message) || 'unknown error'));
+            });
+        });
+      });
+    }
   }
 
   /** Inline rename for the group name (pencil ✎ next to the title on the
@@ -7656,6 +8153,11 @@
         // Start the hourly server-build-drift check. Idempotent; only
         // arms the interval when running as an installed PWA.
         startUpdateCheckPoll();
+        // One-shot soft scan for group members orphaned by past
+        // auto-refreshes (PR #113 era). Surfaces a toast once if any
+        // exist; sets relationships.settings.orphan_scan_done so it
+        // never repeats. plans/opt_in_directory_data_updates.md.
+        maybeRunOrphanSoftScan();
       })
       .catch(function (err) {
         // Only reached when the API refused us AND no local cache could
@@ -7860,29 +8362,25 @@
           '/schema=' + handle.init.schemaVersion + '; reads still work, writes refused'
         );
       }
-      var hadFellowsDbBefore = !!(handle.init && handle.init.hasFellowsDb);
-      // Wait for the boot /build-meta.json fetch so the worker can
-      // SHA-compare. If it never resolved (offline at boot, server 5xx),
-      // we fall through with serverSha=null and the worker preserves its
-      // P1-era no-op-on-returning-visit contract.
+      // Boot path is install-only by policy
+      // (plans/opt_in_directory_data_updates.md). The worker only fetches
+      // /fellows.db when there's nothing on disk yet (cold start /
+      // post–Reset Everything). Returning visitors keep whatever bytes
+      // they have, regardless of SHA — refresh is a user-driven action
+      // surfaced through the About-page "Update directory data" button.
+      // Pass serverSha purely for the worker's trace; it isn't consulted
+      // for the install-only branch.
       var metaPromise = bootBuildMetaPromise || Promise.resolve(bootBuildMeta);
       return metaPromise.then(function (meta) {
         var serverSha = (meta && typeof meta.fellows_db_sha === 'string' && meta.fellows_db_sha)
           ? meta.fellows_db_sha : null;
-        return provider._ensureFellowsDb({ serverSha: serverSha });
+        return provider._ensureFellowsDb({ serverSha: serverSha, mode: 'install-only' });
       })
         .then(function (res) {
           bootDebugPush(
             'ensureFellowsDb: hasFellowsDb=' + (res && res.hasFellowsDb) +
             ' refreshed=' + (res && res.refreshed)
           );
-          // Silent SHA-keyed refresh of an already-installed DB → small
-          // toast so the user knows they're seeing newer data. Cold-start
-          // imports skip the toast: the page renders the directory for
-          // the first time, no "updated" claim makes sense.
-          if (res && res.refreshed && hadFellowsDbBefore) {
-            try { showToast('Directory updated'); } catch (e) {}
-          }
           return provider;
         })
         .catch(function (e) {

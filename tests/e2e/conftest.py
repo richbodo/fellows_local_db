@@ -186,14 +186,16 @@ class WorkerDataHelper:
         async () => {
           var dp = window.__dataProvider;
           if (!dp) return { groups_deleted: 0, settings_cleared: 0 };
-          // Drain any in-flight boot writes (reconcileHasEmailFilterOnBoot,
-          // reconcileSelfEmailOnBoot). Both fire on bootDirectoryAsApp and
-          // are fire-and-forget; we poll up to 1s for has_email_only to
-          // appear (it's the marker that reconcile has executed at least
-          // once on this page load).
+          // Drain any in-flight boot writes that are fire-and-forget
+          // (reconcileHasEmailFilterOnBoot, reconcileSelfEmailOnBoot,
+          // maybeRunOrphanSoftScan). Each writes a setting after boot.
+          // We poll up to 1s for has_email_only AND orphan_scan_done
+          // to land; if either is still missing after 1s the wipe
+          // proceeds anyway — the test just inherits the leaked key.
           for (var attempt = 0; attempt < 20; attempt++) {
             var probe = await dp.getSetting('has_email_only');
-            if (probe === '0' || probe === '1') break;
+            var orphan = await dp.getSetting('orphan_scan_done');
+            if ((probe === '0' || probe === '1') && orphan === '1') break;
             await new Promise(function (r) { setTimeout(r, 50); });
           }
           var groups = await dp.listGroups();
