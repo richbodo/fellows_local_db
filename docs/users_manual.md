@@ -348,6 +348,22 @@ A confirm dialog spells out what's lost before it runs. In-progress
 group drafts are lost in either reset (drafts are unsaved by
 definition).
 
+**Reset Everything offers a backup first.** Because Reset Everything
+wipes your saved groups, notes, and settings — including the
+auto-backups stored alongside them — clicking it pops up a *Save a
+backup first?* dialog with three options:
+
+- **⬇ Download backup & continue** — downloads the same `.db` file
+  Settings → *Download my user data* produces, then proceeds to the
+  destructive confirm. Safe choice if you might want to restore later.
+- **Skip — no data to save** — for clean installs or when you don't
+  care about losing the data. Goes straight to the destructive confirm.
+- **Cancel** — backs out without resetting anything.
+
+After a reset, install the app again from a fresh magic link, then
+Settings → *Restore from backup → Restore from a file* → pick the
+`.db` you downloaded.
+
 ### When the directory hangs at "Loading…"
 
 Rare, but it can happen — usually a stuck service worker or an

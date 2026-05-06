@@ -76,3 +76,109 @@ class TestResetEverything:
             ).count() == 1
         finally:
             page.close()
+
+
+class TestResetEverythingBackupPrompt:
+    """Issue #123: Reset Everything's destructive flow now opens a
+    backup-first prompt before the existing window.confirm. Three paths
+    out of the prompt — Download, Skip, Cancel — each pinned here so a
+    future regression that flips back to "single confirm, no backup
+    offer" or that breaks one branch is caught loudly.
+    """
+
+    def _open_app(self, context, base_url_fixture):
+        page = context.new_page()
+        page.add_init_script(
+            "window.localStorage.setItem('fellows_authenticated_once', '1');"
+        )
+        page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+        page.locator("#loading").wait_for(state="hidden", timeout=10000)
+        return page
+
+    def test_cancel_aborts_without_resetting(self, context, base_url_fixture):
+        """Cancel must close the prompt and NOT trigger the destructive
+        flow. Pre-fix the button went straight to a single confirm; this
+        test pins the new "you can back out cleanly" affordance.
+
+        We assert by side-effects (no /api/logout, no navigation to
+        ?cache_reset=full) rather than by stubbing window.confirm —
+        Playwright's UtilityScript evaluation context shows up in
+        confirm-stub stacks regardless of user-side calls, making the
+        stub-counter approach unreliable.
+        """
+        page = self._open_app(context, base_url_fixture)
+        try:
+            logout_calls = {"n": 0}
+            def _count_logout(r):
+                if r.url.endswith("/api/logout"):
+                    logout_calls["n"] += 1
+            page.on("request", _count_logout)
+
+            url_before = page.url
+
+            page.click("#reset-everything-button")
+            page.locator("#reset-backup-prompt").wait_for(state="visible", timeout=2000)
+            page.click("#reset-backup-cancel")
+            page.locator("#reset-backup-prompt").wait_for(state="hidden", timeout=2000)
+
+            # Wait a beat to give any leaked async work a chance to fire.
+            page.wait_for_timeout(200)
+
+            assert logout_calls["n"] == 0, "no /api/logout should fire on Cancel"
+            assert page.url == url_before, (
+                f"page should not have navigated on Cancel; was {url_before!r} → {page.url!r}"
+            )
+        finally:
+            page.close()
+
+    def test_skip_proceeds_to_destructive_confirm_and_resets(self, context, base_url_fixture):
+        """Skip closes the prompt, surfaces the existing destructive
+        confirm, and on accept fires the same clearEverything path the
+        original button did. Mirrors test_reset_everything_posts_logout
+        for the no-backup-needed user.
+        """
+        page = self._open_app(context, base_url_fixture)
+        # Auto-accept the destructive confirm.
+        page.evaluate("window.confirm = function () { return true; };")
+        page.route(
+            "**/api/logout",
+            lambda r: r.fulfill(status=200, content_type="application/json", body='{"ok": true}'),
+        )
+        try:
+            page.click("#reset-everything-button")
+            page.locator("#reset-backup-prompt").wait_for(state="visible", timeout=2000)
+            with page.expect_request("**/api/logout") as req_info:
+                page.click("#reset-backup-skip")
+            assert req_info.value.method == "POST"
+            page.wait_for_url("**/?cache_reset=full*", timeout=5000)
+        finally:
+            page.close()
+
+    def test_download_triggers_export_then_proceeds_to_reset(self, context, base_url_fixture):
+        """Download fires the same export pipeline as Settings → "Download
+        my user data", then the prompt closes and the destructive
+        confirm runs. The fresh-context relationships.db is small but
+        non-empty (the worker bootstraps the schema at init), so the
+        download fires a real Blob.
+        """
+        page = self._open_app(context, base_url_fixture)
+        page.evaluate("window.confirm = function () { return true; };")
+        page.route(
+            "**/api/logout",
+            lambda r: r.fulfill(status=200, content_type="application/json", body='{"ok": true}'),
+        )
+        try:
+            page.click("#reset-everything-button")
+            page.locator("#reset-backup-prompt").wait_for(state="visible", timeout=2000)
+
+            with page.expect_download(timeout=5000) as dl_info:
+                page.click("#reset-backup-download")
+            download = dl_info.value
+            assert download.suggested_filename.startswith("relationships-")
+            assert download.suggested_filename.endswith(".db")
+
+            # After the download fires, the prompt closes and the
+            # destructive flow proceeds to /api/logout.
+            page.wait_for_url("**/?cache_reset=full*", timeout=5000)
+        finally:
+            page.close()

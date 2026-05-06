@@ -2061,22 +2061,120 @@
     });
   }
 
+  // Triggers a Settings-equivalent download of the user's relationships
+  // data. Returns a promise that resolves to {filename, byteLength} on
+  // a successful save, resolves to null when there's nothing to save
+  // (export returned empty), or rejects on a real error. Reused by the
+  // Reset Everything backup-first prompt so the user can grab a copy
+  // before the destructive flow runs (issue #123). Settings page calls
+  // its own inlined version with extra UI feedback; this is the
+  // headless equivalent for callers that drive their own UI.
+  function downloadRelationshipsBackup() {
+    if (!dataProvider || typeof dataProvider.exportRelationshipsBytes !== 'function') {
+      return Promise.reject(new Error('export not available in this mode'));
+    }
+    return dataProvider.exportRelationshipsBytes().then(function (bytes) {
+      if (!bytes || !bytes.byteLength) return null;
+      var ts = new Date().toISOString().replace(/[:.]/g, '-');
+      var filename = 'relationships-' + ts + '.db';
+      var blob = new Blob([bytes], { type: 'application/octet-stream' });
+      return downloadBlob(blob, filename).then(function () {
+        return { filename: filename, byteLength: bytes.byteLength };
+      });
+    });
+  }
+
   function initResetEverythingButton() {
     var btn = document.getElementById('reset-everything-button');
     if (!btn) return;
-    btn.addEventListener('click', function () {
+    var prompt = document.getElementById('reset-backup-prompt');
+    var promptStatus = document.getElementById('reset-backup-prompt-status');
+    var downloadBtn = document.getElementById('reset-backup-download');
+    var skipBtn = document.getElementById('reset-backup-skip');
+    var cancelBtn = document.getElementById('reset-backup-cancel');
+
+    function openPrompt() {
+      if (!prompt) return;
+      if (promptStatus) promptStatus.textContent = '';
+      [downloadBtn, skipBtn, cancelBtn].forEach(function (b) {
+        if (b) b.disabled = false;
+      });
+      if (downloadBtn) downloadBtn.textContent = '⬇ Download backup & continue';
+      prompt.classList.remove('hidden');
+      prompt.setAttribute('aria-hidden', 'false');
+    }
+    function closePrompt() {
+      if (!prompt) return;
+      prompt.classList.add('hidden');
+      prompt.setAttribute('aria-hidden', 'true');
+    }
+
+    // Existing destructive confirm preserved as the second step. Spelling
+    // out *that data is gone* in plain English at this point — the
+    // backup prompt is gentle, this one is the safety latch.
+    function destructiveConfirmAndReset() {
       var ok = window.confirm(
         'Reset everything?\n\n' +
-        'This deletes your saved groups, group notes, fellow tags, and settings, ' +
-        'AND signs you out. It is meant for the case where Clear App Cache hasn\'t ' +
-        'fixed the problem.\n\n' +
+        'This permanently deletes your saved groups, group notes, fellow tags, ' +
+        'and settings, AND signs you out. The on-device fellow data is wiped ' +
+        'too. Use this only when Clear App Cache hasn\'t fixed the problem.\n\n' +
         'Continue?'
       );
       if (!ok) return;
       Promise.resolve(clearEverything()).catch(function (e) {
         console.error('[Fellows] clearEverything rejected:', e);
       });
-    });
+    }
+
+    btn.addEventListener('click', openPrompt);
+
+    if (downloadBtn) {
+      downloadBtn.addEventListener('click', function () {
+        downloadBtn.disabled = true;
+        downloadBtn.textContent = 'Preparing backup…';
+        if (promptStatus) promptStatus.textContent = '';
+        downloadRelationshipsBackup()
+          .then(function (result) {
+            if (!result) {
+              // No user data exists yet — nothing was downloaded.
+              // Surface that and continue without a "broken" feeling:
+              // the user's about to wipe nothing, so the destructive
+              // confirm is still appropriate.
+              if (promptStatus) {
+                promptStatus.textContent =
+                  'No saved data on this device — nothing to back up. Continuing.';
+              }
+            } else if (promptStatus) {
+              promptStatus.textContent =
+                'Saved ' + result.filename + ' (' + result.byteLength + ' bytes). Continuing.';
+            }
+            closePrompt();
+            destructiveConfirmAndReset();
+          })
+          .catch(function (err) {
+            // Export failed (e.g., dataProvider didn't surface the
+            // method, or the worker rejected). Don't proceed to reset
+            // — surface the error so the user can decide whether to
+            // skip-and-reset anyway.
+            downloadBtn.disabled = false;
+            downloadBtn.textContent = '⬇ Download backup & continue';
+            if (promptStatus) {
+              promptStatus.textContent =
+                'Could not export: ' + (err && err.message || String(err)) +
+                '. Pick "Skip — no data to save" if you want to reset anyway.';
+            }
+          });
+      });
+    }
+    if (skipBtn) {
+      skipBtn.addEventListener('click', function () {
+        closePrompt();
+        destructiveConfirmAndReset();
+      });
+    }
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', closePrompt);
+    }
   }
 
   async function collectDiagnosticsText() {

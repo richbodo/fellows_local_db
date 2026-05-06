@@ -42,6 +42,31 @@
   </button>
 
   <div
+    id="reset-backup-prompt"
+    class="bug-report-dialog hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="reset-backup-prompt-title"
+    aria-hidden="true"
+  >
+    <div class="bug-report-dialog-inner" role="document">
+      <h2 id="reset-backup-prompt-title" class="bug-report-title">Save a backup first?</h2>
+      <p class="bug-report-lead">
+        Reset Everything will permanently delete your saved groups, notes, tags, settings, and
+        the on-device fellow data. Auto-backups are stored alongside your data and will be
+        wiped too. <strong>Download a backup first</strong> if you have user data you want
+        to keep — you can restore from it after reinstalling.
+      </p>
+      <p id="reset-backup-prompt-status" class="bug-report-status" aria-live="polite"></p>
+      <div class="bug-report-actions">
+        <button type="button" id="reset-backup-download" class="bug-report-send">⬇ Download backup &amp; continue</button>
+        <button type="button" id="reset-backup-skip" class="bug-report-copy">Skip — no data to save</button>
+        <button type="button" id="reset-backup-cancel" class="bug-report-close">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div
     id="bug-report-dialog"
     class="bug-report-dialog hidden"
     role="dialog"
