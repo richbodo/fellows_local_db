@@ -129,6 +129,28 @@ class TestInstallLandingEscape:
         marker = page.evaluate("localStorage.getItem('fellows_authenticated_once')")
         assert marker == "1", "fellows_authenticated_once must be set so future visits skip the landing"
 
+        # Regression: the warm worker eagerly spawned at boot must survive
+        # the install-landing transition. Pre-emptively terminating it
+        # (the historic behavior) forced pickDataProvider to re-spawn,
+        # racing OPFS SAH-pool handle-release from the just-killed worker
+        # and surfacing as an indefinite 'Loading…' on use-in-tab.
+        #
+        # bootDirectoryAsApp clears bootDebugLines at entry, so the warm
+        # spawn's own trace lines are gone by the time we read here. The
+        # load-bearing signal is the *absence* of the re-spawn breadcrumb
+        # that pickDataProvider would log if warmWorkerConsumed had been
+        # set by initBrowserInstallMode. See initBrowserInstallMode and
+        # pickDataProvider in app/static/app.js.
+        boot_trace = page.evaluate("(window.__bootDebugLines || []).slice()")
+        assert isinstance(boot_trace, list)
+        respawn_events = [line for line in boot_trace if "warm worker was terminated" in line]
+        assert not respawn_events, (
+            "pickDataProvider hit the re-spawn path; install-landing must "
+            f"keep the warm worker alive. Re-spawn lines: {respawn_events}\n"
+            f"Full post-boot trace ({len(boot_trace)} lines):\n  "
+            + "\n  ".join(boot_trace)
+        )
+
 
 class TestRedeemDoubleFireGuard:
     """M2: a second tryUnlockFromHash invocation with the same token in the

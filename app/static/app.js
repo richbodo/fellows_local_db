@@ -156,6 +156,11 @@
   // route() call has fired prevents test assertions from racing with
   // an About-page re-render). Read-only by convention.
   window.__bootMarks = bootMarks;
+  // Same rationale: e2e tests assert that specific boot trace lines
+  // appear or don't appear. Notably, the install-landing → use-in-tab
+  // regression test checks that 'worker: spawn + init starting' fires
+  // exactly once (no warm-worker re-spawn). Read-only by convention.
+  window.__bootDebugLines = bootDebugLines;
   // Captures the very start of script execution; everything else is
   // relative to this. Helpful when a boot stalls before pickDataProvider
   // even runs (e.g., long script-parse, blocked dependency fetch).
@@ -3760,7 +3765,18 @@
   }
 
   function initBrowserInstallMode(authPayload, httpStatus) {
-    terminateWarmWorkerIfStillWarm('initBrowserInstallMode');
+    // The install landing is a transition state, not a leaving-directory-mode
+    // state. Both forward paths the user can take from here — clicking
+    // Install (which spawns a separate standalone PWA process anyway) and
+    // clicking "Use the directory in this tab" (which calls
+    // bootDirectoryAsApp and immediately needs a worker) — benefit from the
+    // warm worker remaining alive. Pre-emptively terminating it here forced
+    // pickDataProvider to re-spawn, racing OPFS SAH-pool handle-release from
+    // the just-killed worker; in practice that race could deadlock the new
+    // worker on installOpfsSAHPoolVfs and surface as an indefinite "Loading…"
+    // after use-in-tab. Leave the warm worker alive; terminate is handled
+    // by initEmailGate (genuine leave) and showAuthFailure (broken state),
+    // and back-to-gate navigates via location.replace which reloads anyway.
     if (installGatePrivateEl) installGatePrivateEl.classList.add('hidden');
     if (installLandingEl) installLandingEl.classList.remove('hidden');
     setShellVisible(false);
@@ -8268,11 +8284,16 @@
   // Eagerly spawn the worker (init only — network-free per L4a) so OPFS
   // handles + sqlite3 runtime are warm by the time the gate decision tree
   // commits. Runs in parallel with /api/auth/status. If the gate decision
-  // lands at email-gate or install-landing, the warm worker is terminated
-  // by terminateWarmWorkerIfStillWarm() below — no network requests have
-  // happened yet, it's safe to throw away. If the decision lands at
-  // directory mode, bootDirectoryAsApp() consumes warmWorkerPromise and
-  // calls ensureFellowsDb on it.
+  // lands at email-gate (or showAuthFailure), the warm worker is
+  // terminated by terminateWarmWorkerIfStillWarm() below — no network
+  // requests have happened yet, it's safe to throw away. If the decision
+  // lands at install-landing, the warm worker is *kept alive*: the
+  // install landing is a transition state and both forward paths (Install
+  // app, Use the directory in this tab) need a worker shortly after.
+  // See initBrowserInstallMode for why pre-emptive termination there
+  // raced with re-spawn against unreleased OPFS SAH-pool handles. If the
+  // decision lands directly at directory mode, bootDirectoryAsApp()
+  // consumes warmWorkerPromise and calls ensureFellowsDb on it.
   var warmWorker = null;          // {rpc, init} once spawnWorkerAndInit resolves
   var warmWorkerError = null;     // Error from spawn or init
   var warmWorkerConsumed = false; // true once bootDirectoryAsApp adopts it
