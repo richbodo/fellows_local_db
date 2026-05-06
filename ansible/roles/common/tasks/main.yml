@@ -12,6 +12,24 @@
     state: present
     update_cache: true
 
+# unattended-upgrades is enabled by default on Ubuntu 24.04 and applies the
+# -security pocket nightly, but never reboots — so kernel/libc updates land
+# and then strand the box on the old kernel until someone reboots manually.
+# Drop-in lives alongside (not inside) the distro-managed 50unattended-upgrades
+# so package upgrades won't clobber it. Server is in UTC; 04:00 is the
+# quietest window for the EHF audience (NZ 16:00, US PT 21:00 prior day).
+- name: Configure unattended-upgrades auto-reboot
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/52unattended-upgrades-local
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      // Managed by Ansible (roles/common). Do not edit by hand.
+      Unattended-Upgrade::Automatic-Reboot "true";
+      Unattended-Upgrade::Automatic-Reboot-WithUsers "true";
+      Unattended-Upgrade::Automatic-Reboot-Time "04:00";
+
 # Service identity: a system account with no login shell and no home, per
 # Ubuntu convention for daemons (www-data, postgres, etc.). The account
 # exists only to run fellows-pwa and own /opt/fellows.
