@@ -175,13 +175,15 @@ def test_gated_paths():
     assert ml.is_protected_data_path("/images/foo.jpg")
 
 
-def test_build_postmark_body_default_sender_is_ehf_directory(monkeypatch):
-    """Default From carries the ``EHF Directory`` display name so the inbox
-    shows a recognizable sender rather than bare ``admin@``."""
+def test_build_postmark_body_default_sender_is_ehf_directory_app(monkeypatch):
+    """Default From carries the ``EHF Directory App`` display name so the
+    inbox shows a recognizable sender rather than bare ``admin@`` (which
+    most mail clients render as just ``admin``, reading as spam-adjacent —
+    see the 2026-05-06 incident)."""
     monkeypatch.delenv("FELLOWS_MAIL_FROM", raising=False)
     monkeypatch.delenv("FELLOWS_REPLY_TO", raising=False)
     body = ml.build_postmark_body("user@example.com", "https://fellows.globaldonut.com/#/unlock/tok")
-    assert body["From"] == "EHF Directory <admin@fellows.globaldonut.com>"
+    assert body["From"] == "EHF Directory App <admin@fellows.globaldonut.com>"
     assert body["To"] == "user@example.com"
     assert body["MessageStream"] == "outbound"
     assert "expires in 30 minutes" in body["Subject"]
@@ -193,10 +195,10 @@ def test_build_postmark_body_default_sender_is_ehf_directory(monkeypatch):
 
 def test_build_postmark_body_reply_to_env_wins(monkeypatch):
     """FELLOWS_REPLY_TO becomes the ReplyTo header when set."""
-    monkeypatch.setenv("FELLOWS_MAIL_FROM", "EHF Directory <admin@fellows.globaldonut.com>")
+    monkeypatch.setenv("FELLOWS_MAIL_FROM", "EHF Directory App <admin@fellows.globaldonut.com>")
     monkeypatch.setenv("FELLOWS_REPLY_TO", "richbodo+fellows@gmail.com")
     body = ml.build_postmark_body("u@x.com", "https://example/#/unlock/tok")
-    assert body["From"] == "EHF Directory <admin@fellows.globaldonut.com>"
+    assert body["From"] == "EHF Directory App <admin@fellows.globaldonut.com>"
     assert body["ReplyTo"] == "richbodo+fellows@gmail.com"
 
 

@@ -66,13 +66,18 @@ cp ansible/group_vars/fellows.yml.example ansible/group_vars/fellows.yml
 # edit ansible_host, ansible_port, ansible_user, key path, caddy_admin_email
 just ansible-collections
 just bootstrap
+just prod-configure-env       # required: writes /etc/fellows/fellows-pwa.env
+just smoke                    # verify
 ```
+
+`just bootstrap` brings up the unix accounts, systemd unit, Caddy, and starts the service — but the service can't authenticate users until `just prod-configure-env` lands `FELLOWS_SESSION_SECRET`, `FELLOWS_POSTMARK_TOKEN`, and `FELLOWS_PUBLIC_ORIGIN`. See [`docs/DevOps.md` § Required environment variables](../docs/DevOps.md#required-environment-variables) for what each var does and what breaks if it's missing or wrong.
 
 Lower-level equivalents (same commands `just` invokes):
 
 ```bash
 ansible-galaxy collection install -r ansible/collections/requirements.yml -p ansible/collections
 ansible-playbook ansible/site.yml --tags bootstrap --ask-become-pass
+./scripts/configure_email_auth_env.sh
 ```
 
 On first run, the `common` role adds the operator (e.g. `rsb`) to the `fellows` group and then runs `meta: reset_connection` so subsequent tasks in the same playbook see the new group membership. If you ever see rsync errors about permission on `/opt/fellows/deploy/dist/`, the most likely cause is that the operator is not yet in the `fellows` group — run `just bootstrap` once.
@@ -138,6 +143,6 @@ ssh -p 52221 rsb@170.64.243.67 'systemctl status fellows-pwa caddy --no-pager'
 
 ## Magic-link env
 
-The deploy bundle includes `allowed_emails.json` (from `build/build_pwa.py`). To turn on the browser gate, the `fellows-pwa` service needs env vars `FELLOWS_SESSION_SECRET` and `FELLOWS_POSTMARK_TOKEN`. Run `just prod-configure-env` (wraps `./scripts/configure_email_auth_env.sh`) from the repo root to install `/etc/fellows/fellows-pwa.env` (`root:fellows 0640`) and the systemd `EnvironmentFile=` drop-in. Without these, `deploy/server.py` serves without the email gate. Use `just prod-env` to read back what's currently installed, and `just prod-repair-env` for the documented env-file repair playbook.
+The deploy bundle includes `allowed_emails.json` (from `build/build_pwa.py`), but the `fellows-pwa` service can't authenticate users without env vars in `/etc/fellows/fellows-pwa.env`. The full list, with what-breaks-if-missing notes, lives in [`docs/DevOps.md` § Required environment variables](../docs/DevOps.md#required-environment-variables); the operator runbook (Postmark sender setup, debugging, journald event schema) lives in [`docs/email_system_management.md`](../docs/email_system_management.md).
 
-See [`docs/email_system_management.md`](../docs/email_system_management.md) for full operator runbook, Postmark debugging, and journald event schema.
+Run `just prod-configure-env` (wraps `./scripts/configure_email_auth_env.sh`) once after bootstrap to install the env file and the systemd `EnvironmentFile=` drop-in. `just prod-env` reads back current values; `just prod-repair-env` is the playbook for a malformed file.
