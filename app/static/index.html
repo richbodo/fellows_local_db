@@ -287,22 +287,26 @@
   <div id="loading-panel" class="loading-panel hidden">
     <p id="loading">Loading…</p>
     <div id="boot-error-panel" class="boot-error-panel hidden" role="alert">
-      <p class="boot-error-lead"><strong>Could not load the directory.</strong></p>
+      <p class="boot-error-lead"><strong>We couldn't load the directory.</strong></p>
       <p class="boot-error-hint">
-        If you are debugging: use the report below and the browser console. Common causes include a stale service worker
-        (use <strong>Reload</strong> on the update banner), missing <code>fellows.db</code> or API routes on the server,
-        or OPFS / SQLite blocked in this context.
+        Something went wrong starting up — usually a transient network hiccup or a stuck local cache.
+        Your saved groups, notes, and settings are preserved on this device.
       </p>
-      <pre id="boot-error-pre" class="boot-error-pre"></pre>
       <p class="boot-error-actions">
+        <button type="button" id="boot-error-reload-button" class="bug-report-inline-button">Reload</button>
+        <button type="button" id="boot-error-clear-cache-button" class="bug-report-inline-button">Clear App Cache &amp; Reload</button>
         <button
           type="button"
           id="bug-report-button-boot-error"
           class="bug-report-inline-button"
           data-bug-report-context="boot-error"
           data-sync-only="1"
-        >Send this report to the maintainer</button>
+        >Send report to the maintainer</button>
       </p>
+      <details class="boot-error-details">
+        <summary class="boot-error-summary">Show technical details</summary>
+        <pre id="boot-error-pre" class="boot-error-pre"></pre>
+      </details>
     </div>
     <div id="boot-stuck-panel" class="boot-error-panel hidden" role="alert">
       <p class="boot-error-lead"><strong>This is taking longer than expected.</strong></p>
