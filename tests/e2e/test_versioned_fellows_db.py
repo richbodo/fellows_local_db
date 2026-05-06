@@ -1,17 +1,23 @@
-"""E2E for Phase 3 versioned, atomic fellows.db updates.
+"""E2E for the fellows.db install + opt-in refresh primitives.
 
-Phase 3 of plans/local_first_worker_architecture.md: the worker stops
-re-importing fellows.db on every boot. The page reads `fellows_db_sha`
-from /build-meta.json and passes it to the worker's `ensureFellowsDb`;
-the worker compares against the SHA recorded in OPFS-side
-`fellows.db.meta.json` and fetches only on mismatch.
+Originally Phase 3 of plans/local_first_worker_architecture.md ("SHA-keyed
+refresh"). plans/opt_in_directory_data_updates.md narrowed the policy:
+the boot path is install-only (never auto-refreshes a returning
+visitor), and the user-driven "Update directory data" button on the
+About page is the only way an installed fellows.db ever gets replaced.
+The worker primitive (`ensureFellowsDb({mode: 'refresh'})`) still exists
+and is what `applyFellowsDbSwap` builds on; this file pins that
+primitive's behavior. The boot-path policy is covered by
+`test_directory_data_update_flow.py`.
 
-This file covers the four runtime-falsifiable acceptance criteria:
+This file covers four runtime-falsifiable acceptance criteria:
 
-  1. Two consecutive returning boots with the same fellows_db_sha
-     produce zero GET /fellows.db requests on the second boot.
-  2. Bumping fellows_db_sha (via /build-meta.json mock) triggers exactly
-     one GET /fellows.db; meta.sha rotates to the freshly-computed digest.
+  1. Two consecutive returning boots produce zero GET /fellows.db
+     requests on the second boot — install-only is the default.
+  2. ensureFellowsDb({mode: 'refresh'}) triggers exactly one GET
+     /fellows.db; meta.sha rotates to the freshly-computed digest.
+     This is the primitive applyFellowsDbSwap leans on — preserving
+     it keeps the user-driven swap path testable.
   3. A failed refresh (network error or non-2xx) leaves the previously
      live fellows.db intact and writes meta.last_failure_* — the
      directory keeps rendering against the cached bytes.
@@ -117,9 +123,14 @@ def test_matching_sha_makes_no_second_fetch(standalone_page, base_url_fixture):
     )
 
 
-def test_changed_sha_triggers_one_refetch(standalone_page, base_url_fixture):
-    """Bumping fellows_db_sha rotates meta.sha to the actual fetched digest
-    and produces exactly one GET /fellows.db on the next ensureFellowsDb."""
+def test_explicit_refresh_triggers_one_refetch(standalone_page, base_url_fixture):
+    """ensureFellowsDb({mode: 'refresh'}) rotates meta.sha to the actual
+    fetched digest and produces exactly one GET /fellows.db.
+
+    This is the worker primitive applyFellowsDbSwap builds on — it must
+    keep working under direct invocation even though boot-path callers
+    now always use mode='install-only'. plans/opt_in_directory_data_updates.md.
+    """
     page = standalone_page
 
     # Boot once normally so OPFS has a fellows.db + meta installed.
@@ -130,8 +141,8 @@ def test_changed_sha_triggers_one_refetch(standalone_page, base_url_fixture):
     )
     real_sha = meta_before["sha"]
 
-    # Now drive a refresh by passing a different serverSha to the worker.
-    # The worker treats this as "server has new bytes" and re-fetches.
+    # Drive an explicit refresh — install-only would no-op even with a
+    # different serverSha, so we have to opt in via mode='refresh'.
     requests: list[str] = []
     page.on(
         "request",
@@ -139,16 +150,16 @@ def test_changed_sha_triggers_one_refetch(standalone_page, base_url_fixture):
     )
     fake_server_sha = "f" * 64  # syntactically a SHA-256 hex but not a real digest
     result = page.evaluate(
-        "(sha) => window.__dataProvider._ensureFellowsDb({ serverSha: sha })",
+        "(sha) => window.__dataProvider._ensureFellowsDb({ serverSha: sha, mode: 'refresh' })",
         fake_server_sha,
     )
 
     assert result.get("refreshed") is True, (
-        f"SHA mismatch should trigger a refresh; got result={result}"
+        f"explicit refresh should re-import; got result={result}"
     )
     fetched = [r for r in requests if r.endswith("/fellows.db")]
     assert len(fetched) == 1, (
-        f"changed SHA must produce exactly one GET /fellows.db; got {fetched}"
+        f"explicit refresh must produce exactly one GET /fellows.db; got {fetched}"
     )
     # meta.sha is the digest the worker computed over the fetched bytes —
     # not the serverSha the page passed in. The dev server returns the
@@ -157,6 +168,56 @@ def test_changed_sha_triggers_one_refetch(standalone_page, base_url_fixture):
         f"meta.sha must reflect the digest of fetched bytes (server-returned sha "
         f"{real_sha}), not the serverSha the page passed in ({fake_server_sha}); "
         f"got {result['meta']['sha']}"
+    )
+
+
+def test_install_only_does_not_refetch_on_sha_mismatch(standalone_page, base_url_fixture):
+    """Install-only is a hard policy: even if the page hands the worker a
+    different serverSha, no fetch happens when fellowsDb is already open.
+
+    This is the boot-path contract — without it, every reload after a
+    deploy would silently re-import fellows.db and the user could see
+    profile data change underneath them. plans/opt_in_directory_data_updates.md.
+    """
+    page = standalone_page
+
+    # Cold-start boot.
+    page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+    meta_before = _wait_for_first_ensure(page)
+    assert meta_before and meta_before.get("sha")
+    sha_before = meta_before["sha"]
+
+    requests: list[str] = []
+    page.on(
+        "request",
+        lambda req: requests.append(req.url) if req.url.endswith("/fellows.db") else None,
+    )
+    fake_server_sha = "f" * 64
+    # Default mode (no `mode` arg) coerces to 'install-only'; explicit
+    # mode='install-only' is the same. Either way: no fetch, no refresh.
+    for mode_arg in (None, "install-only"):
+        if mode_arg is None:
+            result = page.evaluate(
+                "(sha) => window.__dataProvider._ensureFellowsDb({ serverSha: sha })",
+                fake_server_sha,
+            )
+        else:
+            result = page.evaluate(
+                "(args) => window.__dataProvider._ensureFellowsDb(args)",
+                {"serverSha": fake_server_sha, "mode": mode_arg},
+            )
+        assert result.get("refreshed") is False, (
+            f"install-only with SHA mismatch must NOT refresh "
+            f"(mode={mode_arg!r}); got result={result}"
+        )
+        assert result["meta"]["sha"] == sha_before, (
+            f"install-only no-op must leave meta.sha unchanged; "
+            f"before={sha_before} after={result['meta']['sha']}"
+        )
+    fetched = [r for r in requests if r.endswith("/fellows.db")]
+    assert len(fetched) == 0, (
+        f"install-only must produce zero GET /fellows.db requests "
+        f"regardless of SHA; got {fetched}"
     )
 
 
@@ -190,7 +251,8 @@ def test_failed_refresh_preserves_previous_db_and_records_failure(
             async () => {
               try {
                 const res = await window.__dataProvider._ensureFellowsDb({
-                  serverSha: 'f'.repeat(64)
+                  serverSha: 'f'.repeat(64),
+                  mode: 'refresh'
                 });
                 return { ok: true, res };
               } catch (e) {

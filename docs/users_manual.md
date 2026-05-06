@@ -240,15 +240,33 @@ file or a recent auto-backup.](images/users_manual/11_settings.png)
 ## About
 
 `#/about` shows fellowship statistics (totals, breakdowns by region /
-cohort / fellow type) and the build line — handy when reporting a bug.
-**Check for updates** forces a service-worker refresh.
+cohort / fellow type) plus a two-line update status block:
 
-A line under the **Check for updates** button shows when the app last
-successfully refreshed fellow data from the server, e.g.
-*"Last update check: 2026-05-04T18:22:07Z — succeeded."* If the most
-recent attempt failed, it reads *"Last update attempt: … — failed: …"*.
-Useful when a fellow asks "am I seeing the latest data?" — the answer
-is right there.
+- **App** — the build label running in this tab.
+- **Directory data** — when fellows.db was last fetched.
+
+Click **Check for updates** to ask the server about both. Each row
+updates independently:
+
+- *up to date* — nothing to do.
+- *App update available* — a newer app version is on the server. A
+  **Reload to apply** button appears next to the row; clicking it is
+  the same as clicking the *New version available* banner.
+- *Directory Data update available* — the bundled fellow data on the
+  server differs from the snapshot on this device. An **Update
+  directory data** button appears. See *Updating directory data*
+  below.
+- *Couldn't check (offline?)* — the server didn't respond. Try again
+  when you're online.
+- *Reload the app to enable update checks* — appears briefly right
+  after an app update if the previous service worker was still running
+  when the page loaded. A single reload spawns a fresh background
+  worker and the check works.
+
+A line below the block shows when fellow data was last fetched (or
+the most recent failure), e.g. *"Last update check: 2026-05-04T18:22:07Z
+— succeeded."* — useful when a fellow asks "am I seeing the latest
+data?".
 
 ![About page.](images/users_manual/12_about_page.png)
 
@@ -256,9 +274,55 @@ is right there.
 
 ## Updates
 
-The app checks for new versions automatically — at every launch, and
-once an hour while open. When one's available a banner reads
-*"New version available — Reload."* Click Reload.
+The app handles two kinds of updates separately. Both are surfaced on
+the **About** page; you can click **Check for updates** at any time to
+re-check.
+
+### App updates
+
+The app shell (UI, layout, fixes) auto-checks for new versions — at
+every launch, and once an hour while open. When one's available a
+banner reads *"New version available — Reload."* Click Reload. The
+About page shows the same state alongside an inline **Reload to
+apply** button.
+
+Reloading replaces only the app. Your saved groups, notes, settings,
+and the fellow data on this device are untouched.
+
+### Directory data updates
+
+The fellow data on this device — names, profiles, contact info — is a
+snapshot. **By design it does not change automatically.** Once
+installed, the directory you see is yours: a fellow's profile won't
+shift mid-session, and your saved groups will keep referring to the
+same people.
+
+When the server's snapshot differs from yours, the About page's
+*Directory data* row shows **Directory Data update available** and an
+**Update directory data** button.
+
+Before applying the update, the app checks whether any of your saved
+group members would disappear from the new snapshot. If so, a confirm
+dialog lists them by name and group, e.g.:
+
+> *This update removes 2 fellows from your saved groups:*
+> *• Alice Smith — in 'NZ Mentors', 'Investors'*
+> *• Bob Jones   — in 'NZ Mentors'*
+>
+> *After the update they will no longer appear in those groups.
+> Their entries will be flagged as 'Profile no longer available' so
+> you can review and remove them.*
+>
+> *[Cancel] [Update anyway]*
+
+If no members would disappear, the update applies silently and the
+status flips to *Directory data updated.*
+
+After an update, members whose profile is no longer in the directory
+render in group detail as **Profile no longer available (record_id:
+…)** with a per-row **Remove** button. The data isn't lost — it's just
+no longer in the active snapshot. You can leave the row in place
+(harmless) or click **Remove** to drop it from the group.
 
 ---
 
@@ -270,7 +334,7 @@ Two reset paths if the app gets weird. Try the gentle one first.
 |---|---|---|
 | Wipes the cache, signs you out | ✓ | ✓ |
 | Wipes saved groups, notes, tags, settings | — | ✓ |
-| Re-downloads fellow data on next launch | ✓ | ✓ |
+| Wipes the on-device fellow data snapshot | — | ✓ |
 | Lands you at | the install landing | the email gate |
 
 - **Phone / tablet** — top-right **⋮** kebab → either option.
@@ -315,11 +379,12 @@ settings. No login, no server round-trip on each click. Photos that
 finished caching are available; the rest show a placeholder until you
 get a chance to fetch them.
 
-If you ever wonder whether the app has reached the server recently —
-to pick up new fellows, fixes, or a refreshed profile — the **About**
-page shows the timestamp of the last successful refresh under
-**Check for updates**. If your session has expired, visit `/?gate=1`
-for a new magic link.
+If you ever wonder whether the app has reached the server recently,
+the **About** page shows the timestamp of the last successful fetch
+under **Check for updates**. Picking up new fellows, fixes, or a
+refreshed profile is opt-in — see *Updates → Directory data updates*
+above. If your session has expired, visit `/?gate=1` for a new magic
+link.
 
 ---
 
