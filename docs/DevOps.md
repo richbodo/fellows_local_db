@@ -164,32 +164,45 @@ ssh -p 52221 rsb@fellows.globaldonut.com 'systemctl status fellows-pwa caddy --n
 
 ## Bootstrapping a fresh droplet
 
+If you're forking this repo for your own org, this is the section you want. Bootstrap is **two phases**: provision/playbook, then secrets. Both are required before the email gate works — the service starts after step 4 below but won't be able to send magic links or verify sessions until step 5 lands the secrets.
+
 ```bash
 # 1. Provision Droplet, assign Reserved IP (170.64.243.67), create DNS A record.
-# 2. Ensure your SSH key is in /home/rsb/.ssh/authorized_keys on the droplet.
-# 3. From the repo root:
+# 2. Ensure your SSH key is in /home/<operator>/.ssh/authorized_keys on the droplet.
+# 3. Edit ansible/inventory/hosts.ini and ansible/group_vars/fellows.yml from the
+#    .example templates (host, port, user, key path, caddy_admin_email).
+# 4. From the repo root:
 just ansible-collections    # one-time per workstation
 just bootstrap              # ansible site.yml --tags bootstrap --ask-become-pass
+# 5. Install required env vars (Postmark token, session secret, public origin):
+just prod-configure-env     # interactive; writes /etc/fellows/fellows-pwa.env
+# 6. Verify:
+just smoke                  # /healthz, /manifest.webmanifest, /api/debug/diagnostics
 ```
 
-Under the hood:
+Under the hood for step 4:
 
 ```bash
 ansible-galaxy collection install -r ansible/collections/requirements.yml -p ansible/collections
 ansible-playbook ansible/site.yml --tags bootstrap --ask-become-pass
 ```
 
-The first run creates the `fellows` system user, adds `rsb` to the `fellows` group, writes the hardened systemd unit, and starts the service. If a legacy `deploy` account is present from a pre-migration droplet, the second play in `site.yml` removes it.
+That run creates the `fellows` system user, adds the operator to the `fellows` group, writes the hardened systemd unit, and starts the service. If a legacy `deploy` account is present from a pre-migration droplet, the second play in `site.yml` removes it. The service starts but **does not yet have its env vars** — auth status reports `authEnabled: false`, no magic links can be issued — until step 5 runs.
 
-## Magic-link env file
+## Required environment variables
 
-After bootstrap, install Postmark + session secrets once:
+The `fellows-pwa.service` reads these from `/etc/fellows/fellows-pwa.env` (mode `0640`, owned `root:fellows`). Without all four set, the production server runs without the email gate. The interactive setup script `scripts/configure_email_auth_env.sh` (wrapped by `just prod-configure-env`) prompts for each value; re-run only when a secret rotates.
 
-```bash
-just prod-configure-env
-```
+| Variable | Required | Purpose | What breaks if missing or wrong |
+|---|---|---|---|
+| `FELLOWS_SESSION_SECRET` | yes | Long random key (≥48 chars) used to HMAC-sign the session cookie. Generate with `python -c "import secrets; print(secrets.token_urlsafe(48))"`. | Without it, the auth gate refuses to issue or verify cookies; users land on a generic "auth check failed" panel. Rotation invalidates every outstanding session. |
+| `FELLOWS_POSTMARK_TOKEN` | yes | Postmark Server API token (one per project, found on the server's settings page in Postmark). | Without it, `POST /api/send-unlock` fails — fellows submit their email and see the silent "we'll send a link if it's allowed" anti-enumeration response, but no email goes out. Operator-side: `event=send_unlock_email` in journald logs `result=error`. |
+| `FELLOWS_PUBLIC_ORIGIN` | yes (recommended) | The HTTPS origin used to build magic-link URLs in email bodies (e.g., `https://fellows.globaldonut.com`). | If unset, the server falls back to inferring origin from `X-Forwarded-Proto`/`Host`. That fallback works when Caddy is correctly forwarding headers, but a bare `Host` with no `X-Forwarded-Proto` produces malformed `https://` links. Set it explicitly to take that risk off the table. |
+| `FELLOWS_MAIL_FROM` | optional | Override of the default From: header. The in-code default is `EHF Directory App <admin@fellows.globaldonut.com>` (`deploy/magic_link_auth.py:DEFAULT_MAIL_FROM`). **Forks running a different domain or display name must override.** | If set to a *bare address* (no display name brackets), most mail clients show only the local-part (`admin`) as the sender — reads as spam in users' inboxes. Always pass `Display Name <addr@domain>`. |
+| `FELLOWS_REPLY_TO` | optional | When set, becomes the email's `Reply-To` header. Use when `admin@` isn't a human mailbox and you want replies to land with the operator (e.g., `you+fellows@gmail.com`). | If unset, replies go to `FELLOWS_MAIL_FROM`. |
+| `FELLOWS_COOKIE_INSECURE` | optional, dev only | When `1`, drops the `Secure` flag from the session cookie so it works over plain HTTP (used by the in-process test fixture). **Never set on prod.** | Sets the cookie without `Secure`, allowing it over HTTP — a session-hijack risk if used outside localhost. |
 
-That wraps `./scripts/configure_email_auth_env.sh`, which prompts for `FELLOWS_MAIL_FROM`, `FELLOWS_PUBLIC_ORIGIN`, `FELLOWS_POSTMARK_TOKEN`, `FELLOWS_SESSION_SECRET`, then SSHes to the droplet and creates `/etc/fellows/fellows-pwa.env` (`root:fellows 0640`) and the systemd drop-in. Re-run only when a secret rotates.
+Operators rotating any of the above values: edit `/etc/fellows/fellows-pwa.env` (`sudo nano …`), then `sudo systemctl restart fellows-pwa`. `just prod-env` reads the current values back (raw, paste-ready). `just prod-repair-env` is the documented playbook for a malformed env file. Full operator runbook (Postmark sender setup, debugging, journald event schema): [`docs/email_system_management.md`](email_system_management.md).
 
 ## Debugging
 
