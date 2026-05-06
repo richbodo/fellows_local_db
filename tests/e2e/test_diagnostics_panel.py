@@ -169,6 +169,58 @@ def test_no_main_thread_opfs_during_diag_render(standalone_page, base_url_fixtur
     )
 
 
+def test_force_email_gate_button_signs_out_and_navigates_to_gate(
+    standalone_page, base_url_fixture
+):
+    """The Force-email-gate diag button is the power-user escape hatch
+    from a stuck PWA boot (issue #125). On confirm it: (a) POSTs
+    /api/logout, (b) clears localStorage + sessionStorage, (c) replaces
+    location to /?gate=1. We assert the URL flip + the gate render —
+    the localStorage wipe is verified by re-reading the marker after
+    navigation (it must NOT survive, unlike Clear App Cache which
+    preserves fellows_authenticated_once by name).
+    """
+    page = standalone_page
+
+    # Boot normally with the panel open via ?diag=1 so the button is
+    # rendered + wired before we click it. Standalone display-mode is
+    # set by the fixture; the localhost dev passthrough boots the
+    # directory directly.
+    page.goto(base_url_fixture + "/?diag=1", wait_until="domcontentloaded")
+    page.locator("#loading").wait_for(state="hidden", timeout=10000)
+
+    # Pre-condition: the auth-once marker is set by a successful
+    # getList during normal boot. Confirms we have *something* in
+    # localStorage to verify the wipe behavior against.
+    assert page.evaluate("localStorage.getItem('fellows_authenticated_once')") == "1"
+
+    # Auto-accept the confirm dialog. The diag button uses window.confirm()
+    # so the user can't trigger this destructively by accident; the test
+    # bypasses the prompt by stubbing it.
+    page.evaluate("window.confirm = function () { return true; };")
+
+    # Click the button and wait for the navigation. location.replace
+    # fires a navigation event Playwright can hook.
+    with page.expect_navigation(timeout=8000):
+        page.click("#diag-force-gate")
+
+    # The new URL must end with /?gate=1 — the gate-override the email_gate.md
+    # decision tree treats as "force email gate UI regardless of cookie".
+    assert page.url.endswith("/?gate=1"), f"unexpected URL after force-gate: {page.url}"
+
+    # And the gate panel itself must render (the user has somewhere to go,
+    # not just a URL change).
+    page.locator("#install-gate-private").wait_for(state="visible", timeout=5000)
+
+    # localStorage must be wiped — otherwise a returning visit to a
+    # browser-tab decision tree could route back into the same trapped
+    # state via the auth-once marker.
+    marker = page.evaluate("localStorage.getItem('fellows_authenticated_once')")
+    assert marker is None, (
+        f"force-gate must clear fellows_authenticated_once; got: {marker!r}"
+    )
+
+
 def test_connection_banner_is_gone(standalone_page, base_url_fixture):
     """The legacy `#connection-banner` element ("You are online.") was
     leftover vocabulary from before the worker cutover. Phase 4 deletes

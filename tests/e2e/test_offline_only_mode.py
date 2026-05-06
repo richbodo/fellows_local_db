@@ -142,6 +142,58 @@ class TestOfflineOnlyMode:
             context.unroute(API_FELLOWS)
             page.close()
 
+    def test_401_without_cached_data_in_standalone_pwa_falls_back_to_gate(self, context, base_url_fixture):
+        """Standalone PWA + 401 + no cache → must reach the email gate, not
+        the boot-error panel (issue #125). Pre-fix, the catch handler at
+        bootDirectoryAsApp's tail only handed off to startBrowserUx when
+        ``!isStandaloneDisplayMode() && hasAuthenticatedOnce()`` — which
+        was false in standalone mode, trapping users in a boot-error loop
+        with no in-app way back to the gate (PWA windows have no URL bar).
+        The fix extends the handoff to fire on any HTTP 401/403, regardless
+        of display mode.
+        """
+        page = _make_standalone_page(context)
+        # Mock /fellows.db and /api/fellows as 401 (expired session).
+        context.route(
+            FELLOWS_DB,
+            lambda r: r.fulfill(status=401, body="session expired"),
+        )
+        context.route(
+            API_FELLOWS,
+            lambda r: r.fulfill(status=401, body="session expired"),
+        )
+        # Mock /api/auth/status so startBrowserUx renders the gate (rather
+        # than the local-dev passthrough) once handoff fires.
+        context.route(
+            "**/api/auth/status",
+            lambda r: r.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "authEnabled": True,
+                    "authenticated": False,
+                    "hasSessionCookie": False,
+                    "installRecentlyAllowed": False,
+                }),
+            ),
+        )
+        try:
+            page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+            # The fix routes the catch handler to startBrowserUx → email
+            # gate. The gate's load-bearing element is the private container.
+            page.locator("#install-gate-private").wait_for(state="visible", timeout=10000)
+            # Pre-fix, the boot-error panel would have rendered. Asserting
+            # both "gate visible" AND "boot-error panel hidden" pins the
+            # fix-branch decision against any future regression that flips
+            # back to the trap behavior.
+            expect(page.locator("#boot-error-panel")).to_be_hidden()
+            expect(page.locator("#auth-error-panel")).to_be_hidden()
+        finally:
+            context.unroute(FELLOWS_DB)
+            context.unroute(API_FELLOWS)
+            context.unroute("**/api/auth/status")
+            page.close()
+
     def test_401_without_cached_data_in_browser_tab_falls_back_to_gate(self, context, base_url_fixture):
         """Browser tab + marker + 401 + no cache → the PR #49 safety net
         kicks in (quiet email gate). We never leave the user staring at a

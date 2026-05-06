@@ -2431,6 +2431,54 @@
         );
       });
     }
+    // Power-user escape hatch from any boot state — including the
+    // standalone-PWA auth-trap that motivated this button (issue #125).
+    // Standalone PWA windows have no URL bar, so a user whose session
+    // expired and whose IDB cache is empty can be stuck in a loop where
+    // every Clear App Cache reload returns to the same boot-error panel.
+    // Diagnostics is reachable from that state (it sits on top of the
+    // boot-error panel), and from here the user can sign out + force the
+    // gate UI in one click. Fires the same teardown as `clearCookiesBestEffort`
+    // + `POST /api/logout` does for the auth cookie, then navigates to
+    // `/?gate=1` which forces the email-gate render path regardless of
+    // localStorage markers (per email_gate.md invariant 7).
+    var forceGateBtn = document.getElementById('diag-force-gate');
+    if (forceGateBtn) {
+      forceGateBtn.addEventListener('click', function () {
+        var ok = window.confirm(
+          'Sign out of this device and reload to the email gate?\n\n' +
+          'Your saved groups, notes, and settings stay safe in local storage. ' +
+          'You will need to re-request a magic link to sign back in.'
+        );
+        if (!ok) return;
+        // Server clears the HttpOnly session cookie. Best-effort —
+        // a network failure here shouldn't block the recovery flow,
+        // because the gate UI itself doesn't require a cleared cookie
+        // (?gate=1 forces the gate render).
+        var logoutPromise;
+        try {
+          logoutPromise = fetch('/api/logout', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}'
+          }).catch(function () { /* swallowed */ });
+        } catch (e) {
+          logoutPromise = Promise.resolve();
+        }
+        // Best-effort JS-visible cookie sweep for any non-HttpOnly
+        // residue. Then nuke localStorage so the gate boots clean — the
+        // `fellows_authenticated_once` marker would otherwise route a
+        // returning visitor straight back into the same trap on the
+        // browser-tab decision tree.
+        Promise.resolve(logoutPromise).then(function () {
+          try { clearCookiesBestEffort(); } catch (e) {}
+          try { localStorage.clear(); } catch (e) {}
+          try { sessionStorage.clear(); } catch (e) {}
+          window.location.replace('/?gate=1');
+        });
+      });
+    }
 
     try {
       if (new URLSearchParams(location.search).get('diag') === '1' && panel) {
@@ -3508,8 +3556,15 @@
   // `?gate=1` still bypasses both branches so a dev can always reach the
   // email gate explicitly.
   function shouldActAsApp() {
-    if (isStandaloneDisplayMode()) return true;
+    // `?gate=1` is the always-reachable dev escape hatch (email_gate.md
+    // invariant 7). Checked FIRST so it wins over standalone-mode short-
+    // circuit — without that ordering, a standalone PWA whose session has
+    // expired had no in-app path back to the gate (issue #125): every
+    // reload entered shouldActAsApp() → standalone short-circuit → true →
+    // bootDirectoryAsApp → 403 → boot-error panel, even when navigating
+    // to /?gate=1 from the diag panel's Force-email-gate button.
     if (parseGateOverride().force) return false;
+    if (isStandaloneDisplayMode()) return true;
     return hasAuthenticatedOnce();
   }
 
@@ -8340,12 +8395,40 @@
         // the watchdog after we've already shown the gate or boot-error
         // panel, double-rendering recovery affordances.
         clearBootWatchdog('boot_failure');
-        // Only reached when the API refused us AND no local cache could
-        // answer. In browser-tab-acting-as-app mode, hand off to the
-        // email gate quietly. Otherwise show the boot-failure panel.
-        if (!isStandaloneDisplayMode() && hasAuthenticatedOnce()) {
+        // Two routes hand off to startBrowserUx (which renders the email
+        // gate when /api/auth/status reports authenticated=false):
+        //
+        // 1. Browser-tab-acting-as-app + we've authenticated here before
+        //    (the original path; quiet handoff for returning visitors).
+        // 2. *Any* boot whose proximate cause is HTTP 401/403 — including
+        //    standalone PWAs whose 7-day session cookie expired. Without
+        //    this branch, standalone users were trapped: standalone mode
+        //    short-circuits shouldActAsApp() to true regardless of auth,
+        //    so every reload re-entered bootDirectoryAsApp, hit the same
+        //    403 from /fellows.db, and showed showBootFailure with no
+        //    in-app way to reach the gate (PWA windows have no URL bar).
+        //    Clear App Cache and Reset Everything both looped back into
+        //    the same trap. See issue #125.
+        var authFailure = err && (
+          err.httpStatus === 401 || err.httpStatus === 403 ||
+          err.status === 401 || err.status === 403
+        );
+        if ((!isStandaloneDisplayMode() && hasAuthenticatedOnce()) || authFailure) {
           bootDebugPush('as-app boot failed; handing off to startBrowserUx: ' +
             (err && err.message ? err.message : String(err)));
+          // Telemetry: distinguish the auth-failure handoff (the dominant
+          // cause in production once a fellow's session ages out) from
+          // generic boot failures so the operator can read incidence
+          // straight out of journald (`kind=worker, msg=boot_failed_auth`).
+          // Cardinality bounded to one event per page load.
+          if (authFailure) {
+            try {
+              reportWorkerEvent(
+                'boot_failed_auth',
+                'last_mark=' + String(lastCompletedBootMark() || 'unknown')
+              );
+            } catch (e) {}
+          }
           setShellVisible(false);
           if (loadingPanelEl) loadingPanelEl.classList.add('hidden');
           if (loadingEl) loadingEl.classList.add('hidden');
