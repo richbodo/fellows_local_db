@@ -158,7 +158,7 @@ What the maintainer can read in journald:
 - **Route** — the URL hash route the user was on, with these substitutions: query string dropped (`?…`), `#/fellow/<slug>` redacted to `#/fellow/<redacted>`, `#/unlock/<token>` redacted to `#/unlock/<token>` placeholder (token leak would grant a session).
 - **Display mode** — `"standalone"` (installed PWA) or `"browser-tab"`. Other values dropped.
 - **Online flag** — `Boolean(navigator.onLine)`.
-- **Events** (up to 20) — each has a `kind` from a fixed allow-list (`http`, `sw`, `window.error`, `unhandledrejection`, `console.error`), an optional ISO `ts` (length-capped, not parsed), a `msg` (up to 500 chars, with email + slug + token redaction applied), and an optional `extra` (up to 200 chars, same redaction). Unknown kinds are silently dropped.
+- **Events** (up to 20) — each has a `kind` from a fixed allow-list (`http`, `sw`, `window.error`, `unhandledrejection`, `console.error`, `install`, `worker`), an optional ISO `ts` (length-capped, not parsed), a `msg` (up to 500 chars, with email + slug + token redaction applied), and an optional `extra` (up to 200 chars, same redaction). Unknown kinds are silently dropped.
 - **`lastSubmitHashPrefix`** — only if it matches `^[0-9a-f]{12}$`. This is `sha256(email).slice(0,12)` from a prior gate submit; it's the same join key the server already logs as `email_hash_prefix` in `event=send_unlock_email`. Not reversible to an email at this length, but stable enough to grep journald and find the matching send attempt.
 - **`client_ip_prefix`** — first 12 hex of `sha256(client_ip)`. The raw IP is *never* logged. The hash is stable enough that two reports from the same client cluster together; opaque enough that a journald audit doesn't expose a per-fellow source map.
 
@@ -223,6 +223,19 @@ just prod-stats '7 days ago'   # weekly view
 ```
 
 `just prod-stats` parses these events out of journald and renders an `Install funnel:` section under `Client error reports`. Each row counts events by `msg`; `outcome_*` rows include a per-platform breakdown from `extra` (typically `web` for Chrome/Edge/Android Chrome). The section is hidden when there's no install activity in the window. See `scripts/prod_stats.py:_print_install_funnel` for the renderer.
+
+#### `kind=worker` events
+
+Spawn / init outcomes for the dedicated SQLite worker (`vendor/sqlite-worker.js`), used to triage cold-start failures and stuck-boot reports. One event per worker spawn outcome plus, after the boot watchdog ships, one event per stuck boot. Cardinality is bounded — the worker spawns at most twice per page load (warm + at most one re-spawn), and `boot_stuck` fires at most once.
+
+| `msg` | Fired when |
+|---|---|
+| `spawn_ok` | Warm worker `init` RPC succeeded. `extra` carries `rpc=<n> schema=<n> opfsCapable=<bool> hasFellowsDb=<bool> hasRelDb=<bool>`. |
+| `spawn_failed` | Worker construction or `init` RPC failed (timeout, OPFS init error, etc.). `extra` carries the truncated error message. |
+| `ownership_conflict` | Worker init refused because another tab already holds the OPFS SAH-pool. Signals that "this app is already open in another tab" panel was shown. |
+| `boot_stuck` | `bootDirectoryAsApp` did not reach `get_list_done` within `BOOT_WATCHDOG_MS` (20 s default). `extra` carries the last completed `bootMark` name (`script_start`, `pick_provider_start`, `worker_init_done`, `provider_ready`, …) — this is the load-bearing diagnostic. The recovery panel surfaces the same name to the user. |
+
+Operator query: `journalctl -u fellows-pwa | grep '"kind": "worker"'`. Pair `boot_stuck` events with the user's `ua` and `lastSubmitHashPrefix` (if any) to find the matching session and reproduce.
 
 ### Anti-abuse posture
 

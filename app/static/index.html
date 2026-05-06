@@ -273,6 +273,25 @@
         >Send this report to the maintainer</button>
       </p>
     </div>
+    <div id="boot-stuck-panel" class="boot-error-panel hidden" role="alert">
+      <p class="boot-error-lead"><strong>This is taking longer than expected.</strong></p>
+      <p class="boot-error-hint">
+        The directory hasn't finished loading after <span id="boot-stuck-elapsed-secs">20</span> seconds.
+        The last step that completed was <code id="boot-stuck-last-mark">starting up</code>.
+        That usually means a stuck service worker, a slow or unresponsive database, or a transient network issue.
+      </p>
+      <p class="boot-error-actions">
+        <button type="button" id="boot-stuck-reload-button" class="bug-report-inline-button">Reload</button>
+        <button type="button" id="boot-stuck-clear-cache-button" class="bug-report-inline-button">Clear App Cache &amp; Reload</button>
+        <button
+          type="button"
+          id="bug-report-button-boot-stuck"
+          class="bug-report-inline-button"
+          data-bug-report-context="boot-stuck"
+          data-sync-only="1"
+        >Send report to the maintainer</button>
+      </p>
+    </div>
   </div>
   <div id="auth-error-panel" class="auth-error-panel hidden" role="alert">
     <p class="boot-error-lead"><strong>Authentication check failed.</strong></p>

@@ -348,6 +348,24 @@ A confirm dialog spells out what's lost before it runs. In-progress
 group drafts are lost in either reset (drafts are unsaved by
 definition).
 
+### When the directory hangs at "Loading…"
+
+Rare, but it can happen — usually a stuck service worker or an
+unresponsive local database after a deploy. After about 20 seconds of
+no progress the app replaces the loading message with a recovery
+panel that names the last completed phase and gives you three options:
+
+- **Reload** — try again with a fresh page load. Fixes most stuck
+  service-worker cases on its own.
+- **Clear App Cache & Reload** — same as the red button at the
+  bottom of the page. Wipes the shell cache and signs you out, but
+  keeps your saved groups and the on-device fellow data.
+- **Send report to the maintainer** — opens the bug-report dialog
+  pre-filled with the boot trace so we can see where it stalled.
+
+Try Reload first; if that doesn't help, Clear App Cache. Send the
+report if both fail — that's the case where we want to hear about it.
+
 ---
 
 ## Reporting a bug
