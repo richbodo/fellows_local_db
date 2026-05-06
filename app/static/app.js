@@ -10,6 +10,9 @@
   var loadingPanelEl = document.getElementById('loading-panel');
   var bootErrorPanelEl = document.getElementById('boot-error-panel');
   var bootErrorPreEl = document.getElementById('boot-error-pre');
+  var bootStuckPanelEl = document.getElementById('boot-stuck-panel');
+  var bootStuckLastMarkEl = document.getElementById('boot-stuck-last-mark');
+  var bootStuckElapsedEl = document.getElementById('boot-stuck-elapsed-secs');
   var authErrorPanelEl = document.getElementById('auth-error-panel');
   var authErrorPreEl = document.getElementById('auth-error-pre');
   var appWrapEl = document.getElementById('app-wrap');
@@ -1656,6 +1659,112 @@
     }
   }
 
+  // Boot watchdog. The bootDirectoryAsApp Promise chain has no built-in
+  // timeout: if the worker init resolves (we've already got an 8 s timeout
+  // there) but a subsequent RPC like _ensureFellowsDb or getList hangs —
+  // an OPFS contention edge case, an unresponsive cached fellows.db, an
+  // SW that won't deliver a network response — the user just sees
+  // "Loading…" forever. The watchdog fires after BOOT_WATCHDOG_MS to
+  // surface that state with actionable recovery affordances rather than
+  // letting the user guess.
+  //
+  // Cleared on bootMark('get_list_done') (the first moment the directory
+  // is known-renderable) and on .catch in bootDirectoryAsApp (different
+  // failure path; showBootFailure already has the user covered).
+  //
+  // The ?wd=<ms> URL parameter overrides the timer for e2e tests; bounded
+  // to a sane range so it can't be abused into an infinite loop or a
+  // pathological 0-delay.
+  var BOOT_WATCHDOG_MS = (function () {
+    try {
+      var raw = new URLSearchParams(location.search).get('wd');
+      var n = raw == null ? null : parseInt(raw, 10);
+      if (n != null && isFinite(n) && n >= 100 && n <= 60000) return n;
+    } catch (e) {}
+    return 20000;
+  })();
+  var bootWatchdog = {
+    state: 'idle',     // idle → pending → cleared|fired
+    startedAt: null,
+    lastMark: null,
+    timerId: null,
+    elapsedMs: null
+  };
+  // Exposed for e2e tests that need to assert the watchdog has fired or
+  // not without re-implementing the timer logic. Read-only by convention.
+  window.__bootWatchdog = bootWatchdog;
+
+  // Returns the most recent bootMark name (insertion order in bootMarks).
+  // bootMark is idempotent so insertion order is the order phases first
+  // completed; the last-inserted key is therefore "the latest phase that
+  // finished" — the load-bearing context for the recovery panel.
+  function lastCompletedBootMark() {
+    var keys = Object.keys(bootMarks);
+    return keys.length ? keys[keys.length - 1] : null;
+  }
+
+  function startBootWatchdog() {
+    if (bootWatchdog.state !== 'idle') return;
+    bootWatchdog.state = 'pending';
+    bootWatchdog.startedAt = _bootMs();
+    bootWatchdog.timerId = setTimeout(function () {
+      if (bootWatchdog.state !== 'pending') return;
+      bootWatchdog.state = 'fired';
+      bootWatchdog.lastMark = lastCompletedBootMark();
+      bootWatchdog.elapsedMs = _bootMs() - bootWatchdog.startedAt;
+      bootDebugPush(
+        'boot watchdog: stuck after ' + BOOT_WATCHDOG_MS +
+        'ms; last mark=' + (bootWatchdog.lastMark || '(none)')
+      );
+      // Telemetry so the operator sees stuck-boot rates in journald
+      // without depending on the user clicking Send report. Cardinality
+      // bounded to one event per page load by the state machine.
+      try {
+        reportWorkerEvent('boot_stuck', String(bootWatchdog.lastMark || 'unknown'));
+      } catch (e) {}
+      showBootStuck(bootWatchdog.lastMark);
+    }, BOOT_WATCHDOG_MS);
+  }
+
+  function clearBootWatchdog(reason) {
+    if (bootWatchdog.state !== 'pending') return;
+    bootWatchdog.state = 'cleared';
+    bootWatchdog.lastMark = lastCompletedBootMark();
+    bootWatchdog.elapsedMs = bootWatchdog.startedAt != null
+      ? _bootMs() - bootWatchdog.startedAt
+      : null;
+    if (bootWatchdog.timerId != null) {
+      clearTimeout(bootWatchdog.timerId);
+      bootWatchdog.timerId = null;
+    }
+    bootDebugPush(
+      'boot watchdog: cleared (' + (reason || 'unspecified') +
+      ') at last mark=' + (bootWatchdog.lastMark || '(none)') +
+      ' elapsed=' + (bootWatchdog.elapsedMs != null ? bootWatchdog.elapsedMs + 'ms' : '?')
+    );
+  }
+
+  function showBootStuck(lastMark) {
+    if (loadingEl) loadingEl.classList.add('hidden');
+    if (bootStuckLastMarkEl) {
+      bootStuckLastMarkEl.textContent = lastMark || 'starting up';
+    }
+    if (bootStuckElapsedEl) {
+      bootStuckElapsedEl.textContent = String(Math.round(BOOT_WATCHDOG_MS / 1000));
+    }
+    if (bootStuckPanelEl) bootStuckPanelEl.classList.remove('hidden');
+    // Capture a snapshot of the boot trace into the bug-report ring so
+    // the Send-report button (sync-only path) carries enough context
+    // without an awaitable diagnostics probe — the reason we ended up
+    // here is precisely that async probes can hang.
+    pushBugReportError(
+      'boot',
+      'boot_stuck',
+      'last_mark=' + String(lastMark || 'unknown') +
+      ' elapsed=' + BOOT_WATCHDOG_MS + 'ms'
+    );
+  }
+
   function clearCookiesBestEffort() {
     var cookiePairs = (document.cookie || '').split(';');
     cookiePairs.forEach(function (cookie) {
@@ -2641,6 +2750,7 @@
       'bug-report-button-install',
       'bug-report-button-gate',
       'bug-report-button-boot-error',
+      'bug-report-button-boot-stuck',
       'bug-report-button-auth-error'
     ];
     ids.forEach(function (id) {
@@ -2652,6 +2762,31 @@
         openBugReportDialog({ syncOnly: syncOnly });
       });
     });
+  }
+
+  // Wires the Reload and Clear-App-Cache buttons inside the boot-stuck
+  // recovery panel. Both delegate to existing global affordances rather
+  // than duplicating logic — Reload is a plain location.reload(), and
+  // Clear App Cache routes through the global #clear-app-cache-button
+  // so the click is indistinguishable from the user pressing the same
+  // button at the bottom of the page (single source of truth for the
+  // confirm dialog + clearAllAppData re-entrancy guards).
+  function initBootStuckPanelButtons() {
+    var reloadBtn = document.getElementById('boot-stuck-reload-button');
+    if (reloadBtn) {
+      reloadBtn.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        window.location.reload();
+      });
+    }
+    var clearBtn = document.getElementById('boot-stuck-clear-cache-button');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        var globalBtn = document.getElementById('clear-app-cache-button');
+        if (globalBtn) globalBtn.click();
+      });
+    }
   }
 
   // ===== Mobile shell: appbar + tabs + kebab sheet =======================
@@ -7992,6 +8127,7 @@
   initResetEverythingButton();
   initDiagnosticsPanel();
   initBugReportButtons();
+  initBootStuckPanelButtons();
   initKebabSheet();
   initComposerFab();
   initGroupCardSheet();
@@ -8007,6 +8143,19 @@
     if (loadingEl) {
       loadingEl.classList.remove('hidden');
     }
+    // Replace the static "Loading…" with a phase that conveys "we've
+    // started." The next two checkpoints (Setting up local database… /
+    // Loading directory…) update as the boot chain progresses, so a
+    // user looking at a stuck tab can at least tell which phase
+    // stalled. The watchdog uses bootMarks (not these strings) for
+    // its lastMark report; the user-facing strings can drift without
+    // affecting telemetry.
+    setSetupStatus('Starting up…');
+    // Start the boot watchdog. Cleared on get_list_done (success) or in
+    // the .catch (failure path that already has its own panel). Only
+    // armed in directory boot; the email-gate / install-landing paths
+    // settle synchronously and don't need a hang surface.
+    startBootWatchdog();
     // Restore the in-progress group draft (members + auto-title state)
     // before any rendering so the rail and markers come up consistent.
     loadGroupDraft();
@@ -8068,6 +8217,14 @@
       });
     }
 
+    // pickDataProvider is the slow part of cold-start boot: worker spawn,
+    // OPFS attach, optional fellows.db fetch + import. Surface the phase
+    // to the user so a tab that takes 10+ s on a fresh install isn't
+    // indistinguishable from a hung one. The SW cache-progress handler
+    // above will overwrite this transiently with byte counts when the
+    // shell precache is populating; that's intentional — bytes are
+    // more concrete than a label.
+    setSetupStatus('Setting up local database…');
     pickDataProvider()
       .then(function (provider) {
         dataProvider = provider;
@@ -8093,7 +8250,7 @@
         // ehf_has_email_only from localStorage-only into the durable
         // relationships.settings store on first post-PR-D boot.
         reconcileHasEmailFilterOnBoot();
-        setSetupStatus('Loading…');
+        setSetupStatus('Loading directory…');
         return provider.getList().catch(function (err) {
           if (isAuthFailure(err)) return tryListFromCache(err);
           throw err;
@@ -8101,6 +8258,7 @@
       })
       .then(function (data) {
         bootMark('get_list_done');
+        clearBootWatchdog('get_list_done');
         bootDebugPush(
           'getList: OK count=' + (Array.isArray(data) ? data.length : typeof data) +
           (offlineOnlyMode ? ' (from cache)' : '')
@@ -8176,6 +8334,12 @@
         maybeRunOrphanSoftScan();
       })
       .catch(function (err) {
+        // Either branch below settles the boot one way or another, so the
+        // watchdog is no longer load-bearing — clear it before we route
+        // the user. Without this clear, a slow .catch path could trip
+        // the watchdog after we've already shown the gate or boot-error
+        // panel, double-rendering recovery affordances.
+        clearBootWatchdog('boot_failure');
         // Only reached when the API refused us AND no local cache could
         // answer. In browser-tab-acting-as-app mode, hand off to the
         // email gate quietly. Otherwise show the boot-failure panel.
