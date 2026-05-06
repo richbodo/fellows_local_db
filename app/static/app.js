@@ -2935,6 +2935,32 @@
     }
   }
 
+  // Same pattern for the boot-error panel (issue #124). The panel
+  // surfaces when bootDirectoryAsApp's catch handler can't recover
+  // — post-#126 that's no longer the auth-failure case (which now
+  // hands off to startBrowserUx → email gate), so the panel only
+  // shows for genuinely unknown failures (network, 5xx, unexpected
+  // exceptions). Inline Reload / Clear App Cache & Reload buttons
+  // give the user a productive next step without forcing them to
+  // hunt for the floating chrome at the bottom of the page.
+  function initBootErrorPanelButtons() {
+    var reloadBtn = document.getElementById('boot-error-reload-button');
+    if (reloadBtn) {
+      reloadBtn.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        window.location.reload();
+      });
+    }
+    var clearBtn = document.getElementById('boot-error-clear-cache-button');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        var globalBtn = document.getElementById('clear-app-cache-button');
+        if (globalBtn) globalBtn.click();
+      });
+    }
+  }
+
   // ===== Mobile shell: appbar + tabs + kebab sheet =======================
   // Phase 3 of the mobile redesign (plans/mobile_redesign/). The appbar
   // and tab strip are mobile-only persistent chrome (CSS hides them at
@@ -8281,6 +8307,7 @@
   initDiagnosticsPanel();
   initBugReportButtons();
   initBootStuckPanelButtons();
+  initBootErrorPanelButtons();
   initKebabSheet();
   initComposerFab();
   initGroupCardSheet();

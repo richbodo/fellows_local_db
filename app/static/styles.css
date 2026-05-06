@@ -454,6 +454,29 @@ body {
   font-family: ui-monospace, "Cascadia Code", Menlo, Monaco, Consolas, monospace;
 }
 
+/* Collapsible diagnostics block on the boot-error panel (issue #124).
+   Default-collapsed so the user-facing copy isn't dominated by a wall
+   of green text; power users + bug-report flows expand it manually. */
+.boot-error-details {
+  margin-top: 0.75rem;
+}
+
+.boot-error-summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: var(--muted, #666);
+  user-select: none;
+  padding: 0.25rem 0;
+}
+
+.boot-error-summary:hover {
+  color: var(--ink-deep, #222);
+}
+
+.boot-error-details[open] .boot-error-summary {
+  margin-bottom: 0.5rem;
+}
+
 /* Side-by-side: directory (left) + detail (right) so detail is always visible */
 #app-wrap {
   display: flex;
