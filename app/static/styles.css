@@ -3423,6 +3423,19 @@ a.group-action-btn--primary {
   }
 }
 
+/* Focus mode (desktop subset): About and Settings are pure reading
+   surfaces with no list-scanning workflow — at desktop widths the
+   directory list and composer rail squeezed the central column into
+   an unreadable strip on common laptop widths (1025px–1500px).
+   Hide them on these two routes at every width. Other non-directory
+   routes (fellow detail, group detail, groups list) intentionally
+   keep the rails visible at desktop because their workflow includes
+   scanning the directory while reading. Issue #121. */
+body:is(.route-about, .route-settings) #directory,
+body:is(.route-about, .route-settings) #group-rail {
+  display: none;
+}
+
 /* =========================================================================
  * Mobile redesign — Phase 3 step 3: interaction surfaces (PR 2).
  *
