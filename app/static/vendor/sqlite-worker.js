@@ -158,6 +158,13 @@ var RELATIONSHIPS_DB_SLOT = '/relationships.db';
 var FELLOWS_DB_SLOT = '/fellows.db';
 var RESTORE_STAGING_SLOT = '/relationships.db.restore-staging';
 var FELLOWS_STAGING_SLOT = '/fellows.db.staging';
+// Distinct from FELLOWS_STAGING_SLOT — the boot-path ensureFellowsDb
+// staging slot is short-lived (open, validate, swap, close in one tick)
+// while the user-driven swap can sit pending across the confirm dialog.
+// Using separate slots avoids any chance of one path stomping the other,
+// even though under the opt-in policy ensureFellowsDb only fires at cold
+// start.
+var FELLOWS_SWAP_STAGING_SLOT = '/fellows.db.swap-staging';
 var FELLOWS_META_FILE = 'fellows.db.meta.json';
 
 var REQUIRED_RESTORE_TABLES = ['groups', 'group_members', 'fellow_tags', 'fellow_notes', 'settings'];
@@ -169,6 +176,12 @@ var poolUtil = null;
 var relDb = null;
 var fellowsDb = null;
 var bootTrace = [];
+
+// User-driven directory-data update, between previewFellowsDbSwap and
+// applyFellowsDbSwap / cancelFellowsDbSwap. Holds the SHA + an opaque
+// stagingId that the page must echo back. Bytes live in the staging
+// slot, not in JS memory.
+var pendingFellowsDbSwap = null;
 
 function trace(msg) { bootTrace.push(new Date().toISOString() + ' ' + String(msg)); }
 
@@ -955,21 +968,24 @@ handlers.getStats = async function () {
   };
 };
 
-// ----- ensureFellowsDb (page-driven cold-start fetch + SHA-keyed refresh) ---
-// Page calls this exactly once per session, only after the gate decision
-// tree resolves to directory mode. Phase 3 semantics:
+// ----- ensureFellowsDb (page-driven cold-start fetch — opt-in policy) ------
+// Page calls this on every boot, only after the gate decision tree
+// resolves to directory mode. The boot path is install-only by design
+// (plans/opt_in_directory_data_updates.md): on a returning visitor with
+// fellows.db already on disk, the worker never auto-fetches, regardless
+// of SHA. The user has to explicitly request a refresh via the About
+// page → previewFellowsDbSwap → applyFellowsDbSwap RPCs.
 //
-//   - args.serverSha is the `fellows_db_sha` from /build-meta.json. Optional
-//     — pages that can't reach build-meta or older callers omit it.
-//   - hasFellowsDb=true AND serverSha matches local meta.sha → no-op.
-//     The directory keeps using whatever bytes are already on disk.
-//   - hasFellowsDb=true AND serverSha differs (or serverSha provided but
-//     local meta.sha is null — covers visitors upgrading from P1) →
-//     fetch, validate, atomically replace.
-//   - hasFellowsDb=true AND serverSha not provided → no-op (matches the
-//     P1-era contract for any caller that doesn't know about SHAs yet).
-//   - hasFellowsDb=false → fetch unconditionally; the comparison is moot
-//     because we have nothing local to keep.
+//   - args.mode: 'install-only' (default) — fetch only when fellowsDb
+//     is not open (cold start, post-Reset Everything). Returns the
+//     existing handle untouched otherwise. SHA is ignored in this mode
+//     beyond an informational trace.
+//   - args.mode: 'refresh' — pre-PR-#113 behavior, kept for the
+//     applyFellowsDbSwap RPC's internal use only. Fetch + validate +
+//     atomic replace + meta update. `args.serverSha`, if provided, is
+//     stamped into the trace; the actual SHA written to meta is the
+//     digest of the bytes we received.
+//   - Unknown / missing mode coerces to 'install-only'.
 //
 // On fetch / validation failure, `meta.last_failure_at` and
 // `last_failure_reason` are recorded; the previously-live fellows.db
@@ -990,24 +1006,14 @@ async function _writeMetaFailure(reason) {
   return existing;
 }
 
-handlers.ensureFellowsDb = async function (args) {
-  args = args || {};
-  var serverSha = (typeof args.serverSha === 'string' && args.serverSha) ? args.serverSha : null;
-  var localMeta = await readFellowsMeta();
-  var localSha = (localMeta && typeof localMeta.sha === 'string') ? localMeta.sha : null;
-
-  // Returning visitor with up-to-date bytes: no fetch, no re-import.
-  if (fellowsDb && serverSha && localSha && serverSha === localSha) {
-    return { hasFellowsDb: true, refreshed: false, meta: localMeta };
-  }
-  // Returning visitor with no SHA-comparison input: preserve P1-era contract.
-  if (fellowsDb && !serverSha) {
-    return { hasFellowsDb: true, refreshed: false, meta: localMeta || null };
-  }
-
-  var refreshKind = fellowsDb ? 'refresh' : 'cold-start';
-  trace('ensureFellowsDb: ' + refreshKind + ' fetch /fellows.db'
-    + (serverSha ? ' (serverSha=' + serverSha.slice(0, 12) + '…)' : ''));
+// Fetch /fellows.db, validate, atomically replace the live slot, write
+// meta. Throws on any failure with a code-tagged Error; on throw the
+// previously-live fellowsDb stays open and meta records the failure.
+// Used by both ensureFellowsDb's cold-start branch and (via raw bytes
+// already on disk) applyFellowsDbSwap.
+async function _fetchValidateAndImportFellowsDb(serverShaHint, kind) {
+  trace('fellows.db ' + kind + ': fetch /fellows.db'
+    + (serverShaHint ? ' (serverSha=' + serverShaHint.slice(0, 12) + '…)' : ''));
 
   var resp;
   try {
@@ -1063,8 +1069,8 @@ handlers.ensureFellowsDb = async function (args) {
   if (verifyDb) { try { verifyDb.close(); } catch (e3) {} }
 
   // Compute the digest of what we actually got. This is the value that
-  // ends up in meta.sha — not args.serverSha — so a server that lies
-  // about its SHA can't desync the local copy.
+  // ends up in meta.sha — not the hint — so a server that lies about
+  // its SHA can't desync the local copy.
   var fetchedSha = await _sha256Hex(bytes);
 
   // Promote staging → live slot. importDb requires the live slot's SAH
@@ -1075,7 +1081,7 @@ handlers.ensureFellowsDb = async function (args) {
   }
   poolUtil.importDb(FELLOWS_DB_SLOT, bytes);
   fellowsDb = new poolUtil.OpfsSAHPoolDb(FELLOWS_DB_SLOT);
-  trace('ensureFellowsDb: imported ' + bytes.byteLength + ' bytes, sha=' + fetchedSha.slice(0, 12) + '…');
+  trace('fellows.db ' + kind + ': imported ' + bytes.byteLength + ' bytes, sha=' + fetchedSha.slice(0, 12) + '…');
 
   var newMeta = {
     sha: fetchedSha,
@@ -1084,8 +1090,318 @@ handlers.ensureFellowsDb = async function (args) {
     last_failure_reason: null
   };
   try { await writeFellowsMeta(newMeta); }
-  catch (we) { trace('ensureFellowsDb: meta write failed: ' + (we && we.message || we)); }
-  return { hasFellowsDb: true, refreshed: true, meta: newMeta };
+  catch (we) { trace('fellows.db ' + kind + ': meta write failed: ' + (we && we.message || we)); }
+  return { bytes: bytes, sha: fetchedSha, meta: newMeta };
+}
+
+handlers.ensureFellowsDb = async function (args) {
+  args = args || {};
+  var mode = args.mode === 'refresh' ? 'refresh' : 'install-only';
+  var serverSha = (typeof args.serverSha === 'string' && args.serverSha) ? args.serverSha : null;
+  var localMeta = await readFellowsMeta();
+
+  // Install-only is the boot-path policy under
+  // plans/opt_in_directory_data_updates.md: never auto-refresh a
+  // returning visitor's fellows.db, regardless of SHA. The user opts
+  // in via previewFellowsDbSwap → applyFellowsDbSwap.
+  if (mode === 'install-only' && fellowsDb) {
+    return { hasFellowsDb: true, refreshed: false, meta: localMeta || null };
+  }
+
+  // Cold-start (no local fellows.db) under either mode: fetch.
+  // Refresh under either condition: fetch.
+  var kind = fellowsDb ? 'refresh' : 'cold-start';
+  var imported = await _fetchValidateAndImportFellowsDb(serverSha, kind);
+  return { hasFellowsDb: true, refreshed: true, meta: imported.meta };
+};
+
+// ----- Opt-in directory-data update flow ------------------------------------
+// plans/opt_in_directory_data_updates.md. Flow:
+//   1. compareFellowsDbSha({serverSha}) → quick read of meta.sha vs server.
+//   2. previewFellowsDbSwap({serverSha}) → fetch + validate + write to
+//      swap-staging slot. Compute affected group members. Return.
+//   3. applyFellowsDbSwap({stagingId}) → promote staging → live slot.
+//      OR cancelFellowsDbSwap({stagingId}) → discard.
+//
+// The staging slot persists between (2) and (3) so the dialog can sit
+// open without holding bytes in JS memory. `pendingFellowsDbSwap` holds
+// the metadata + an opaque id the page must echo back; a stale id
+// (page reloaded, worker restarted) makes apply 400.
+
+function _newStagingId() {
+  // 16 hex chars from crypto.getRandomValues — opaque, unguessable enough
+  // for a same-process correlation handle.
+  var arr = new Uint8Array(8);
+  crypto.getRandomValues(arr);
+  var hex = '';
+  for (var i = 0; i < arr.length; i++) {
+    var b = arr[i];
+    hex += (b < 16 ? '0' : '') + b.toString(16);
+  }
+  return hex;
+}
+
+function _clearSwapStagingSlot() {
+  if (!poolUtil) return;
+  try {
+    if (typeof poolUtil.unlink === 'function') {
+      poolUtil.unlink(FELLOWS_SWAP_STAGING_SLOT);
+    }
+  } catch (e) { /* slot may not exist; non-fatal */ }
+}
+
+handlers.compareFellowsDbSha = async function (args) {
+  args = args || {};
+  var serverSha = (typeof args.serverSha === 'string' && args.serverSha) ? args.serverSha : null;
+  var meta = await readFellowsMeta();
+  var localSha = (meta && typeof meta.sha === 'string') ? meta.sha : null;
+  // dataUpdateAvailable is only true when we have a local DB AND a
+  // local SHA AND a server SHA AND they differ. Cold-start (no local
+  // DB) is not an "update" — that's the install path. Server unreachable
+  // (serverSha null) returns null so the UI can show "couldn't check"
+  // distinctly from "up to date".
+  var dataUpdateAvailable = false;
+  if (!serverSha) {
+    dataUpdateAvailable = null;
+  } else if (fellowsDb && localSha) {
+    dataUpdateAvailable = (localSha !== serverSha);
+  }
+  return {
+    hasFellowsDb: !!fellowsDb,
+    localSha: localSha,
+    serverSha: serverSha,
+    fetchedAt: (meta && meta.fetched_at) || null,
+    dataUpdateAvailable: dataUpdateAvailable
+  };
+};
+
+handlers.previewFellowsDbSwap = async function (args) {
+  args = args || {};
+  var serverSha = (typeof args.serverSha === 'string' && args.serverSha) ? args.serverSha : null;
+  if (!fellowsDb) {
+    var nerr = new Error('No local fellows.db to swap from');
+    nerr.code = 'no_local_fellows_db';
+    throw nerr;
+  }
+  // A previous pending swap is implicitly discarded: we only support one
+  // outstanding swap at a time. Later attempts re-fetch.
+  if (pendingFellowsDbSwap) {
+    _clearSwapStagingSlot();
+    pendingFellowsDbSwap = null;
+  }
+
+  // Fetch into the swap-staging slot. Reuse the validation path by writing
+  // to the existing staging slot first, but copy into the swap-staging
+  // slot afterwards so the boot-path slot stays free for any future
+  // ensureFellowsDb call.
+  trace('previewFellowsDbSwap: fetch /fellows.db'
+    + (serverSha ? ' (serverSha=' + serverSha.slice(0, 12) + '…)' : ''));
+  var resp;
+  try {
+    resp = await fetch('/fellows.db', { credentials: 'include', cache: 'no-store' });
+  } catch (e) {
+    var nferr = new Error('Network fetch /fellows.db failed: ' + (e && e.message || e));
+    nferr.code = 'fellows_db_fetch_network';
+    throw nferr;
+  }
+  if (!resp.ok) {
+    var herr = new Error('GET /fellows.db returned HTTP ' + resp.status);
+    herr.code = 'fellows_db_fetch_http';
+    herr.httpStatus = resp.status;
+    throw herr;
+  }
+  var buf = await resp.arrayBuffer();
+  var bytes = new Uint8Array(buf);
+  if (!bytes.byteLength) {
+    var eerr = new Error('Empty /fellows.db response');
+    eerr.code = 'fellows_db_fetch_empty';
+    throw eerr;
+  }
+
+  // Validate by importing into the swap-staging slot directly and running
+  // PRAGMA quick_check + a fellows-table sanity probe.
+  var stagingDb = null;
+  var fetchedSha;
+  var stagedIdSet; // map: record_ids present in the staged fellows.db
+  try {
+    poolUtil.importDb(FELLOWS_SWAP_STAGING_SLOT, bytes);
+    stagingDb = new poolUtil.OpfsSAHPoolDb(FELLOWS_SWAP_STAGING_SLOT);
+    var qc = dbSelectOne(stagingDb, 'PRAGMA quick_check', null);
+    var qcResult = qc && (qc.quick_check || qc['quick_check']);
+    if (qcResult !== 'ok') {
+      throw new Error('quick_check failed: ' + (qcResult || 'unknown'));
+    }
+    // Smoke-check the schema. A zero-row DB is technically valid SQLite
+    // but would silently orphan every existing group member; reject it.
+    var totalRow = dbSelectOne(stagingDb, 'SELECT COUNT(*) AS n FROM fellows', null);
+    if (!totalRow || !totalRow.n) {
+      throw new Error('staged fellows.db has zero rows');
+    }
+    fetchedSha = await _sha256Hex(bytes);
+
+    // Compute affected group members: every record_id in group_members
+    // that has no matching record in the staged fellows.db. We need
+    // (a) the set of record_ids in the staged DB (b) every (member,
+    // group) pair from relationships.db (c) human-readable names from
+    // the *live* fellows.db so the dialog can show "Alice Smith" not
+    // a record_id.
+    var stagedIdsRows = dbSelectAll(stagingDb, 'SELECT record_id FROM fellows', null);
+    stagedIdSet = {};
+    for (var i = 0; i < stagedIdsRows.length; i++) stagedIdSet[stagedIdsRows[i].record_id] = true;
+  } catch (verr) {
+    if (stagingDb) { try { stagingDb.close(); } catch (e2) {} }
+    _clearSwapStagingSlot();
+    var ierr = new Error('Validation of staged fellows.db failed: ' + (verr && verr.message || verr));
+    ierr.code = 'fellows_db_invalid';
+    throw ierr;
+  }
+  try { stagingDb.close(); } catch (e3) {}
+
+  // Resolve affected members from the page's perspective. Read
+  // group_members + group names from relationships.db, drop any whose
+  // record_id is in the staged set, then look up display names in the
+  // *live* fellows.db.
+  var affected = []; // [{ recordId, name, groups: [{id, name}] }]
+  if (relDb) {
+    var memberRows = dbSelectAll(
+      relDb,
+      'SELECT gm.fellow_record_id AS rid, gm.group_id AS gid, g.name AS gname ' +
+        'FROM group_members gm JOIN groups g ON g.id = gm.group_id',
+      null
+    );
+    var byRid = {};
+    for (var m = 0; m < memberRows.length; m++) {
+      var row = memberRows[m];
+      if (stagedIdSet[row.rid]) continue; // still present after swap
+      if (!byRid[row.rid]) byRid[row.rid] = { recordId: row.rid, name: null, groups: [] };
+      byRid[row.rid].groups.push({ id: row.gid, name: row.gname });
+    }
+    var ridKeys = Object.keys(byRid);
+    if (ridKeys.length && fellowsDb) {
+      // Resolve names from the live DB. Bind one at a time — the count is
+      // expected to be small (members lost between consecutive deploys).
+      for (var rk = 0; rk < ridKeys.length; rk++) {
+        var rid = ridKeys[rk];
+        var nrow = dbSelectOne(fellowsDb, 'SELECT name FROM fellows WHERE record_id = ?', [rid]);
+        byRid[rid].name = (nrow && nrow.name) || null;
+        affected.push(byRid[rid]);
+      }
+      affected.sort(function (a, b) {
+        var an = (a.name || '').toLowerCase();
+        var bn = (b.name || '').toLowerCase();
+        return an < bn ? -1 : an > bn ? 1 : 0;
+      });
+    }
+  }
+
+  var stagingId = _newStagingId();
+  pendingFellowsDbSwap = {
+    stagingId: stagingId,
+    sha: fetchedSha,
+    fetchedAt: new Date().toISOString(),
+    serverShaHint: serverSha
+  };
+  trace('previewFellowsDbSwap: staged sha=' + fetchedSha.slice(0, 12) +
+    '… affectedMembers=' + affected.length + ' stagingId=' + stagingId);
+
+  return {
+    stagingId: stagingId,
+    newSha: fetchedSha,
+    affectedGroups: affected
+  };
+};
+
+handlers.applyFellowsDbSwap = async function (args) {
+  args = args || {};
+  var stagingId = args.stagingId;
+  if (!pendingFellowsDbSwap || !stagingId || pendingFellowsDbSwap.stagingId !== stagingId) {
+    var serr = new Error('No matching pending swap (stagingId mismatch or expired)');
+    serr.code = 'staging_id_mismatch';
+    throw serr;
+  }
+  var pending = pendingFellowsDbSwap;
+  // Read bytes back from the staging slot. exportFile returns a fresh
+  // Uint8Array; importDb-into-live releases the SAH after we close the
+  // current live handle.
+  var bytes;
+  try {
+    bytes = poolUtil.exportFile(FELLOWS_SWAP_STAGING_SLOT);
+  } catch (e) {
+    pendingFellowsDbSwap = null;
+    _clearSwapStagingSlot();
+    var rerr = new Error('Could not read staged bytes: ' + (e && e.message || e));
+    rerr.code = 'staging_export_failed';
+    throw rerr;
+  }
+  if (!bytes || !bytes.byteLength) {
+    pendingFellowsDbSwap = null;
+    _clearSwapStagingSlot();
+    var berr = new Error('Staged bytes are empty');
+    berr.code = 'staging_empty';
+    throw berr;
+  }
+  if (fellowsDb) {
+    try { fellowsDb.close(); } catch (e2) {}
+    fellowsDb = null;
+  }
+  poolUtil.importDb(FELLOWS_DB_SLOT, bytes);
+  fellowsDb = new poolUtil.OpfsSAHPoolDb(FELLOWS_DB_SLOT);
+  var newMeta = {
+    sha: pending.sha,
+    fetched_at: pending.fetchedAt,
+    last_failure_at: null,
+    last_failure_reason: null
+  };
+  try { await writeFellowsMeta(newMeta); }
+  catch (we) { trace('applyFellowsDbSwap: meta write failed: ' + (we && we.message || we)); }
+  pendingFellowsDbSwap = null;
+  _clearSwapStagingSlot();
+  trace('applyFellowsDbSwap: live slot promoted to sha=' + pending.sha.slice(0, 12) + '…');
+  return { ok: true, newSha: pending.sha, meta: newMeta };
+};
+
+handlers.cancelFellowsDbSwap = async function (args) {
+  args = args || {};
+  var stagingId = args.stagingId;
+  // Be lenient on cancel — if the page sends a stale id, just clear
+  // anyway. The intent ("don't apply the staged update") is unambiguous.
+  if (pendingFellowsDbSwap && stagingId && pendingFellowsDbSwap.stagingId !== stagingId) {
+    trace('cancelFellowsDbSwap: stagingId mismatch — clearing pending anyway');
+  }
+  pendingFellowsDbSwap = null;
+  _clearSwapStagingSlot();
+  return { ok: true };
+};
+
+// Soft scan invoked once on first boot of the new code (gated by the
+// `orphan_scan_done` setting on the page side). Returns the same shape
+// as previewFellowsDbSwap.affectedGroups so the same UI patterns apply.
+handlers.findOrphanedGroupMembers = async function () {
+  if (!relDb || !fellowsDb) return { orphans: [] };
+  var memberRows = dbSelectAll(
+    relDb,
+    'SELECT gm.fellow_record_id AS rid, gm.group_id AS gid, g.name AS gname ' +
+      'FROM group_members gm JOIN groups g ON g.id = gm.group_id',
+    null
+  );
+  if (!memberRows.length) return { orphans: [] };
+  var fellowRows = dbSelectAll(fellowsDb, 'SELECT record_id FROM fellows', null);
+  var existing = {};
+  for (var i = 0; i < fellowRows.length; i++) existing[fellowRows[i].record_id] = true;
+  var byRid = {};
+  for (var j = 0; j < memberRows.length; j++) {
+    var r = memberRows[j];
+    if (existing[r.rid]) continue;
+    if (!byRid[r.rid]) byRid[r.rid] = { recordId: r.rid, name: null, groups: [] };
+    byRid[r.rid].groups.push({ id: r.gid, name: r.gname });
+  }
+  var orphans = [];
+  var keys = Object.keys(byRid);
+  for (var k = 0; k < keys.length; k++) orphans.push(byRid[keys[k]]);
+  orphans.sort(function (a, b) {
+    return a.recordId < b.recordId ? -1 : a.recordId > b.recordId ? 1 : 0;
+  });
+  return { orphans: orphans };
 };
 
 // ----- Diagnostics ----------------------------------------------------------
