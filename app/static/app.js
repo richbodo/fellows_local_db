@@ -97,6 +97,7 @@
   var installButtonEl = document.getElementById('install-pwa-button');
   var installStatusEl = document.getElementById('install-status');
   var iosHintEl = document.getElementById('install-ios-hint');
+  var macSafariHintEl = document.getElementById('install-mac-safari-hint');
   var authDebugPrivateEl = document.getElementById('auth-debug-private');
   var authDebugPrivatePreEl = document.getElementById('auth-debug-private-pre');
   var authDebugPrivateCopyEl = document.getElementById('auth-debug-private-copy');
@@ -3924,6 +3925,22 @@
     return iOS && webkit && noChrome;
   }
 
+  // macOS Safari is its own thing: same WebKit lineage as iOS Safari but
+  // a different install path (File → Add to Dock, macOS Sonoma 14+),
+  // and it never fires beforeinstallprompt — that's Chromium-only. So
+  // the install button is unconditionally non-functional on macOS Safari
+  // and the UI must surface the correct path instead. The iPad-pretending-
+  // to-be-Mac case (MacIntel platform + touchPoints > 1) is excluded so
+  // those devices still get the iOS Safari hint.
+  function isMacOsSafari() {
+    var ua = navigator.userAgent || '';
+    var isMac = /Macintosh/.test(ua);
+    var isSafari = /Safari/.test(ua);
+    var isChromium = /Chrome|Chromium|Edg\/|CriOS|FxiOS|EdgiOS/.test(ua);
+    var isTouchMac = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+    return isMac && isSafari && !isChromium && !isTouchMac;
+  }
+
   function formatAuthDebugLine(data, httpStatus) {
     var st = httpStatus != null ? String(httpStatus) : '?';
     var ae = data && typeof data.authEnabled === 'boolean' ? data.authEnabled : '?';
@@ -4277,6 +4294,15 @@
       iosHintEl.classList.remove('hidden');
       if (installButtonEl) installButtonEl.classList.add('hidden');
       reportInstallEvent('ios_safari_advised');
+    } else if (isMacOsSafari() && macSafariHintEl) {
+      // macOS Safari never fires beforeinstallprompt, but does support
+      // PWA install via File → Add to Dock on macOS Sonoma 14+. Surface
+      // that path eagerly (same shape as iOS Safari) and hide the
+      // install button — clicking it would just trigger the click-no-
+      // prompt fallback, which is the wrong message for this case.
+      macSafariHintEl.classList.remove('hidden');
+      if (installButtonEl) installButtonEl.classList.add('hidden');
+      reportInstallEvent('macos_safari_advised');
     }
 
     // Track whether beforeinstallprompt arrived. The 5s timer reports
@@ -4298,7 +4324,7 @@
       if (installUnsupportedHintEl) installUnsupportedHintEl.classList.add('hidden');
       if (installButtonEl) installButtonEl.classList.remove('hidden');
     });
-    if (!isIosSafari()) {
+    if (!isIosSafari() && !isMacOsSafari()) {
       setTimeout(function () {
         if (!beforeInstallPromptSeen) {
           reportInstallEvent('before_prompt_never_arrived');

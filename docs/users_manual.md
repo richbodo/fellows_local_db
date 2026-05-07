@@ -18,11 +18,14 @@ You'll get a magic link in email. Click it.
 
 1. On the install landing, click **Install app**.
 2. Confirm your browser's prompt:
-   - **Desktop Chrome / Edge** — small prompt near the address bar; the
+   - **Desktop Chrome / Edge / Brave** — small prompt near the address bar; the
      app opens in its own window.
    - **Android Chrome** — *Add to Home screen*; appears in your launcher.
    - **iOS Safari** — *Share → Add to Home Screen*. (iOS has no one-click
      prompt.)
+   - **macOS Safari** — *File → Add to Dock…* (macOS Sonoma 14 or newer).
+     Safari doesn't show an in-page install button; the install path is in
+     the menu bar.
 3. Open the app from its icon. First launch downloads fellow data in the
    background.
 
