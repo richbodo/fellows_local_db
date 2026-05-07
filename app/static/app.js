@@ -4092,6 +4092,47 @@
   }
 
   function initBrowserInstallMode(authPayload, httpStatus) {
+    // Defensive re-check for the standalone race. matchMedia(
+    // '(display-mode: standalone)').matches has been observed to return
+    // false in startBrowserUx's auth-status .then() callback even when
+    // the window IS standalone — Chrome's matchMedia in a freshly-
+    // launched PWA window can resolve after initial script execution,
+    // so the pre-branch in startBrowserUx misses the route. By the
+    // time we reach initBrowserInstallMode (one tick later), it may
+    // have flipped to true. If so, redirect to directory per the
+    // PWA-mode tree in docs/email_gate.md.
+    if (!directoryBootAttempted && isStandaloneDisplayMode()) {
+      authDebugPush(
+        'initBrowserInstallMode: standalone detected on entry — redirecting to directory'
+      );
+      if (installLandingEl) installLandingEl.classList.add('hidden');
+      markAuthenticatedOnce();
+      bootDirectoryAsApp();
+      return;
+    }
+    // Even later: listen for display-mode flipping to standalone after
+    // the install landing renders. Catches the case where matchMedia
+    // hasn't resolved by initBrowserInstallMode entry but flips during
+    // the user's interaction with the install landing.
+    if (window.matchMedia && typeof window.matchMedia === 'function') {
+      try {
+        var standaloneMq = window.matchMedia('(display-mode: standalone)');
+        var standaloneFlipHandler = function (ev) {
+          if (ev.matches && !directoryBootAttempted) {
+            authDebugPush(
+              'display-mode flipped to standalone — redirecting from install landing'
+            );
+            try { standaloneMq.removeEventListener('change', standaloneFlipHandler); } catch (e) {}
+            if (installLandingEl) installLandingEl.classList.add('hidden');
+            markAuthenticatedOnce();
+            bootDirectoryAsApp();
+          }
+        };
+        if (typeof standaloneMq.addEventListener === 'function') {
+          standaloneMq.addEventListener('change', standaloneFlipHandler);
+        }
+      } catch (e) {}
+    }
     // The install landing is a transition state, not a leaving-directory-mode
     // state. Both forward paths the user can take from here — clicking
     // Install (which spawns a separate standalone PWA process anyway) and
@@ -4453,7 +4494,14 @@
         // The directoryBootAttempted guard prevents (2) from re-entering
         // bootDirectoryAsApp and looping; in that case we fall through to
         // the email gate so the user can request a fresh magic link.
-        if (isStandaloneDisplayMode() && data.authEnabled) {
+        var standaloneAtCheck = isStandaloneDisplayMode();
+        authDebugPush(
+          'pre-branch check: standalone=' + standaloneAtCheck +
+          ' authEnabled=' + data.authEnabled +
+          ' authenticated=' + data.authenticated +
+          ' directoryBootAttempted=' + directoryBootAttempted
+        );
+        if (standaloneAtCheck && data.authEnabled) {
           if (data.authenticated && !directoryBootAttempted) {
             authDebugPush('standalone + authenticated: routing to directory (PWA-mode tree)');
             markAuthenticatedOnce();
