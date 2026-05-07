@@ -191,18 +191,48 @@ That run creates the `fellows` system user, adds the operator to the `fellows` g
 
 ## Required environment variables
 
-The `fellows-pwa.service` reads these from `/etc/fellows/fellows-pwa.env` (mode `0640`, owned `root:fellows`). Without all four set, the production server runs without the email gate. The interactive setup script `scripts/configure_email_auth_env.sh` (wrapped by `just prod-configure-env`) prompts for each value; re-run only when a secret rotates.
+`fellows-pwa.service` reads its env from `/etc/fellows/fellows-pwa.env` (mode `0640`, owned `root:fellows`). The interactive script (`just prod-configure-env` → `scripts/configure_email_auth_env.sh`) prompts for the four every operator sets; re-run it only when a secret rotates.
 
-| Variable | Required | Purpose | What breaks if missing or wrong |
+Canonical shape:
+
+```env
+# Hard-required. The auth gate disables itself if either is unset.
+FELLOWS_SESSION_SECRET=...
+FELLOWS_POSTMARK_TOKEN=...
+
+# Required in practice. Code has fallbacks but they're fragile.
+FELLOWS_MAIL_FROM=EHF Directory App <admin@fellows.globaldonut.com>
+FELLOWS_PUBLIC_ORIGIN=https://fellows.globaldonut.com
+
+# Optional.
+FELLOWS_REPLY_TO=you+fellows@example.com
+```
+
+Generate a session secret:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+| Variable | Tier | Purpose | What breaks if unset or wrong |
 |---|---|---|---|
-| `FELLOWS_SESSION_SECRET` | yes | Long random key (≥48 chars) used to HMAC-sign the session cookie. Generate with `python -c "import secrets; print(secrets.token_urlsafe(48))"`. | Without it, the auth gate refuses to issue or verify cookies; users land on a generic "auth check failed" panel. Rotation invalidates every outstanding session. |
-| `FELLOWS_POSTMARK_TOKEN` | yes | Postmark Server API token (one per project, found on the server's settings page in Postmark). | Without it, `POST /api/send-unlock` fails — fellows submit their email and see the silent "we'll send a link if it's allowed" anti-enumeration response, but no email goes out. Operator-side: `event=send_unlock_email` in journald logs `result=error`. |
-| `FELLOWS_PUBLIC_ORIGIN` | yes (recommended) | The HTTPS origin used to build magic-link URLs in email bodies (e.g., `https://fellows.globaldonut.com`). | If unset, the server falls back to inferring origin from `X-Forwarded-Proto`/`Host`. That fallback works when Caddy is correctly forwarding headers, but a bare `Host` with no `X-Forwarded-Proto` produces malformed `https://` links. Set it explicitly to take that risk off the table. |
-| `FELLOWS_MAIL_FROM` | optional | Override of the default From: header. The in-code default is `EHF Directory App <admin@fellows.globaldonut.com>` (`deploy/magic_link_auth.py:DEFAULT_MAIL_FROM`). **Forks running a different domain or display name must override.** | If set to a *bare address* (no display name brackets), most mail clients show only the local-part (`admin`) as the sender — reads as spam in users' inboxes. Always pass `Display Name <addr@domain>`. |
-| `FELLOWS_REPLY_TO` | optional | When set, becomes the email's `Reply-To` header. Use when `admin@` isn't a human mailbox and you want replies to land with the operator (e.g., `you+fellows@gmail.com`). | If unset, replies go to `FELLOWS_MAIL_FROM`. |
-| `FELLOWS_COOKIE_INSECURE` | optional, dev only | When `1`, drops the `Secure` flag from the session cookie so it works over plain HTTP (used by the in-process test fixture). **Never set on prod.** | Sets the cookie without `Secure`, allowing it over HTTP — a session-hijack risk if used outside localhost. |
+| `FELLOWS_SESSION_SECRET` | hard-required | HMAC key (≥48 chars) for the session cookie. | `deploy/server.py` logs "auth disabled" at startup; `/api/auth/status` returns `authEnabled: false` for every request; nobody can sign in. Rotation invalidates every outstanding session. |
+| `FELLOWS_POSTMARK_TOKEN` | hard-required | Postmark Server API token. | `POST /api/send-unlock` raises; users see the anti-enumeration "we'll send a link if it's allowed" reply but no email goes out. journald logs `event=send_unlock_email result=error`. |
+| `FELLOWS_MAIL_FROM` | required for non-canonical deploys | Sender on outgoing magic-link emails. In-code default `EHF Directory App <admin@fellows.globaldonut.com>` works for the canonical deploy; **forks must override**. | If set as a bare address (no `Display Name <addr>`), most clients render the local-part as the sender — reads as spam. If unset on a fork, sends as the canonical domain and fails Postmark sender verification. |
+| `FELLOWS_PUBLIC_ORIGIN` | required in practice | Base origin for magic-link URLs in email bodies. | Server falls back to inferring from `X-Forwarded-Proto`/`Host`. Works when Caddy forwards both headers; produces malformed links when either is missing. Set it to take the risk off the table. |
+| `FELLOWS_REPLY_TO` | optional | Sets the email's `Reply-To` header. Use when the From address isn't a human inbox. | Replies fall through to `FELLOWS_MAIL_FROM`. |
 
-Operators rotating any of the above values: edit `/etc/fellows/fellows-pwa.env` (`sudo nano …`), then `sudo systemctl restart fellows-pwa`. `just prod-env` reads the current values back (raw, paste-ready). `just prod-repair-env` is the documented playbook for a malformed env file. Full operator runbook (Postmark sender setup, debugging, journald event schema): [`docs/email_system_management.md`](email_system_management.md).
+**Dev-only.** `FELLOWS_COOKIE_INSECURE=1` drops the `Secure` flag from the session cookie so it works over plain HTTP. Used by the in-process test fixture; never set on prod. `FELLOWS_DIST_ROOT` overrides the static-root path the prod server reads from (default `<deploy>/dist`) — useful for staging deploys, not in the bootstrap script.
+
+**Rotating a value:**
+
+```bash
+ssh -p 52221 rsb@fellows.globaldonut.com 'sudo nano /etc/fellows/fellows-pwa.env'
+ssh -p 52221 rsb@fellows.globaldonut.com 'sudo systemctl restart fellows-pwa'
+just prod-env             # confirm new value (paste-ready)
+```
+
+`just prod-repair-env` is the documented playbook for a malformed env file. Full operator runbook (Postmark sender setup, debugging, journald event schema): [`docs/email_system_management.md`](email_system_management.md).
 
 ## Debugging
 

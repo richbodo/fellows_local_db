@@ -16,7 +16,7 @@ Environment:
   FELLOWS_DIST_ROOT     Absolute path to the static root (default: <this_dir>/dist).
   FELLOWS_SESSION_SECRET   HMAC secret for session cookie (required for auth).
   FELLOWS_POSTMARK_TOKEN   Send magic links via Postmark (required to actually email).
-  FELLOWS_MAIL_FROM        From address (default noreply@fellows.globaldonut.com).
+  FELLOWS_MAIL_FROM        From address (default: EHF Directory App <admin@fellows.globaldonut.com>).
   FELLOWS_PUBLIC_ORIGIN    Base URL for magic links (default: infer from Host / X-Forwarded-Proto).
   FELLOWS_COOKIE_INSECURE  Set to 1 to omit Secure on session cookie (local HTTP testing).
 
