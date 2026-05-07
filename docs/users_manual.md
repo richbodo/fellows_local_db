@@ -53,7 +53,9 @@ also drag the icon from `~/Applications/Chrome Apps/` onto your Dock to
 keep it one click away.
 
 If Spotlight / Start menu / launcher all come up empty, it probably didn't
-install — try *Can't install at all?* below.
+install — try *Can't install at all?* below. If that doesn't help either,
+file a [GitHub issue](https://github.com/richbodo/fellows_local_db/issues)
+(ask Rich for repo access if you don't have it).
 
 And remember: `https://fellows.globaldonut.com` always works in a browser
 tab. Once you've installed, the URL skips the install landing and opens
@@ -74,7 +76,9 @@ ask for help:
   — green/red checklist of what's missing.
 
 Both are free and don't require sign-in. Send the report to the EHF
-Communications Working Group along with what you tried.
+Communications Working Group along with what you tried, or file a
+[GitHub issue](https://github.com/richbodo/fellows_local_db/issues)
+(ask Rich for repo access first if you don't have it).
 
 ---
 
@@ -442,6 +446,12 @@ submit), the gate has its own diagnostics block:
   in
   [`deploy/client_error_sanitizer.py`](https://github.com/richbodo/fellows_local_db/blob/main/deploy/client_error_sanitizer.py).
 
+Prefer GitHub? File an issue at
+[github.com/richbodo/fellows_local_db/issues](https://github.com/richbodo/fellows_local_db/issues)
+— useful when you want a thread to track the fix in, or when the in-app
+report can't reach the server. Ask Rich to add you to the repo if you
+don't have access yet.
+
 ---
 
 ## Offline
@@ -480,8 +490,10 @@ update iOS itself (iPhone 8 and newer support 16.4+).
 
 - **General questions** — fellows channels, or EHF Communications
   Working Group.
-- **Bug reports / feature requests** — GitHub issue (link on About
-  page; you'll need to be added — ask Rich).
+- **Bug reports / feature requests** — file a
+  [GitHub issue](https://github.com/richbodo/fellows_local_db/issues)
+  (you'll need to be added to the repo first — ask Rich). The same
+  GitHub link is on the About page.
 - **Lost or expired install link** — request a fresh one from the
   operator.
 
