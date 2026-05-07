@@ -38,6 +38,31 @@ If **Install app** does nothing, the landing page shows a hint:
 
 ---
 
+## Can't find the app after installing?
+
+Almost always: it installed fine, your OS just put it somewhere unexpected.
+**Spotlight** on macOS, **Start menu** on Windows, or your **app launcher**
+on Linux is the most reliable way to find it — search for "EHF" and it'll
+surface.
+
+The specific gotcha worth knowing: on **macOS with Chrome or Edge**, the app
+installs to `~/Applications/Chrome Apps/` — *not* the main Applications
+folder. That's a Chromium quirk, not a bug; installing into `/Applications`
+would need admin rights. Spotlight (`⌘-Space → "EHF"`) finds it; you can
+also drag the icon from `~/Applications/Chrome Apps/` onto your Dock to
+keep it one click away.
+
+If Spotlight / Start menu / launcher all come up empty, it probably didn't
+install — try *Can't install at all?* below.
+
+And remember: `https://fellows.globaldonut.com` always works in a browser
+tab. Once you've installed, the URL skips the install landing and opens
+the directory directly — no icon-hunting required.
+
+See *Where the installed app lives* for the full per-platform breakdown.
+
+---
+
 ## Can't install at all?
 
 Likely a device-side quirk. Two third-party tools that triage before you
