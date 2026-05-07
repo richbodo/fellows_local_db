@@ -324,6 +324,11 @@ render in group detail as **Profile no longer available (record_id:
 no longer in the active snapshot. You can leave the row in place
 (harmless) or click **Remove** to drop it from the group.
 
+The same row also appears with a small *(fellow data unavailable)*
+note anywhere else the group surfaces — composer rail when editing,
+visual directory grid, and PDF / HTML exports — so you can spot the
+gap without opening group detail.
+
 ---
 
 ## Clearing app data

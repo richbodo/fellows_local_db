@@ -5056,16 +5056,33 @@
     groupDraft.members.forEach(function (rid) {
       var li = document.createElement('li');
       li.className = 'group-rail-member';
+      var resolvedName = groupDraft.memberNames[rid];
+      // Unresolved when no name was stored, OR when the stored name
+      // equals the record_id itself (attachMemberNamesFromCache /
+      // edit-mode loader both fall back to `rid` as the "name" when
+      // the fellow row is missing from fellows.db).
+      var unresolved = !resolvedName || resolvedName === rid;
       var name = document.createElement('span');
       name.className = 'group-rail-member-name';
-      name.textContent = groupDraft.memberNames[rid] || rid;
+      name.textContent = resolvedName || rid;
+      if (unresolved) {
+        // Edit-mode rail can include an orphan whose fellow row is
+        // gone from fellows.db; chip would otherwise show a raw
+        // record_id with no context. See issue #111.
+        li.classList.add('group-rail-member--unresolved');
+        var hint = document.createElement('span');
+        hint.className = 'fellow-data-unavailable-hint';
+        hint.textContent = '(fellow data unavailable)';
+        name.appendChild(document.createTextNode(' '));
+        name.appendChild(hint);
+      }
       var rm = document.createElement('button');
       rm.type = 'button';
       rm.className = 'group-rail-member-remove';
       rm.title = 'remove';
       rm.textContent = '×';
       rm.addEventListener('click', function () {
-        toggleDraftMember(rid, name.textContent);
+        toggleDraftMember(rid, resolvedName || rid);
       });
       li.appendChild(name);
       li.appendChild(rm);
@@ -6573,12 +6590,21 @@
         } else {
           imgSrc = PORTRAIT_SVG_PLACEHOLDER;
         }
-        html += '<button type="button" class="group-directory-cell" data-member-idx="' + escapeHtml(String(idx)) + '">' +
+        // Unresolved member: resolveMembersForView fell back to rid as
+        // the display name. See issue #111.
+        var unresolved = m.record_id && m.name === m.record_id;
+        var hintHtml = unresolved
+          ? '<div class="fellow-data-unavailable-hint">(fellow data unavailable)</div>'
+          : '';
+        html += '<button type="button" class="group-directory-cell' +
+          (unresolved ? ' group-directory-cell--unresolved' : '') +
+          '" data-member-idx="' + escapeHtml(String(idx)) + '">' +
           '<div class="group-directory-portrait">' +
             '<img src="' + escapeHtml(imgSrc) + '" alt="' + escapeHtml(m.name) +
             '" loading="lazy" onerror="this.onerror=null;this.src=\'' + PORTRAIT_SVG_PLACEHOLDER + '\';">' +
           '</div>' +
           '<div class="group-directory-name">' + escapeHtml(m.name) + '</div>' +
+          hintHtml +
         '</button>';
       });
       html += '</div></div>';
@@ -6675,6 +6701,15 @@
       ? '<a class="fellow-modal-profile-link" href="' + escapeHtml(profileHref) + '">View full profile →</a>'
       : '';
 
+    // See issue #111: portrait was clicked from a group whose member's
+    // fellow row is gone from fellows.db; modal would otherwise show the
+    // raw record_id as the heading with no context.
+    var unresolved = m.record_id && m.name === m.record_id;
+    var unresolvedHintHtml = unresolved
+      ? '<div class="fellow-data-unavailable-hint fellow-modal-unresolved-hint">' +
+          '(fellow data unavailable)' +
+        '</div>'
+      : '';
     var overlay = document.createElement('div');
     overlay.className = 'fellow-modal-overlay';
     overlay.setAttribute('role', 'presentation');
@@ -6686,6 +6721,7 @@
           '" onerror="this.onerror=null;this.src=\'' + PORTRAIT_SVG_PLACEHOLDER + '\';">' +
         '</div>' +
         '<h3 class="fellow-modal-name" id="fellow-modal-name">' + escapeHtml(m.name || '') + '</h3>' +
+        unresolvedHintHtml +
         '<ul class="fellow-modal-rows">' + rowsHtml + '</ul>' +
         profileHtml +
       '</div>';
@@ -6743,6 +6779,9 @@
     'overflow:hidden;background:#eee;}' +
     '.portrait img{width:100%;height:100%;object-fit:cover;display:block;}' +
     '.cell-name{font-size:0.78rem;margin-top:4px;line-height:1.2;}' +
+    '.fellow-data-unavailable-hint{font-size:0.72rem;color:#888;font-style:italic;' +
+    'margin:2px 0 0;line-height:1.2;}' +
+    '.fellow-card .fellow-data-unavailable-hint{margin:-0.2rem 0 0.6rem;font-size:0.85rem;}' +
     '.back-link{display:inline-block;margin:1.2rem 0 0.4rem;color:#0066cc;font-size:0.85rem;}' +
     '.fellow-card{max-width:420px;margin:0 auto 1rem;background:#fff;border:1px solid #ccc;' +
     'border-radius:4px;padding:1.2rem 1.4rem;}' +
@@ -6771,10 +6810,17 @@
     members.forEach(function (m) {
       var slug = m.slug || slugifyForFilename(m.name);
       var imgSrc = imgMap[m.slug] || PORTRAIT_SVG_PLACEHOLDER;
+      // See issue #111: orphan members in an exported group otherwise
+      // print as a portrait placeholder under a raw record_id.
+      var unresolved = m.record_id && m.name === m.record_id;
+      var hintHtml = unresolved
+        ? '<div class="fellow-data-unavailable-hint">(fellow data unavailable)</div>'
+        : '';
       html += '<a class="cell" href="#fellow-' + escapeHtml(slug) + '">' +
         '<div class="portrait"><img src="' + escapeHtml(imgSrc) +
         '" alt="' + escapeHtml(m.name) + '"></div>' +
         '<div class="cell-name">' + escapeHtml(m.name) + '</div>' +
+        hintHtml +
       '</a>';
     });
     return html + '</div>';
@@ -6783,6 +6829,10 @@
   function buildExportFellowSection(group, m, imgMap) {
     var slug = m.slug || slugifyForFilename(m.name);
     var imgSrc = imgMap[m.slug] || PORTRAIT_SVG_PLACEHOLDER;
+    var unresolved = m.record_id && m.name === m.record_id;
+    var unresolvedHintHtml = unresolved
+      ? '<p class="fellow-data-unavailable-hint">(fellow data unavailable)</p>'
+      : '';
     var rows = [];
     if (m.contact_email) {
       rows.push('<tr><td class="label">email</td><td><a href="mailto:' +
@@ -6808,6 +6858,7 @@
         '<div class="fellow-portrait"><img src="' + escapeHtml(imgSrc) +
           '" alt="' + escapeHtml(m.name) + '"></div>' +
         '<h2>' + escapeHtml(m.name) + '</h2>' +
+        unresolvedHintHtml +
         (rows.length
           ? '<table class="field-table"><tbody>' + rows.join('') + '</tbody></table>'
           : '<p>(No public contact info on file.)</p>') +
@@ -6960,8 +7011,20 @@
         var nameY = y + portraitSize + nameLineH;
         var nameTextW = doc.getStringUnitWidth(m.name) * 9;
         doc.text(m.name, x + (cellW - nameTextW) / 2, nameY);
-        // Email (clickable mailto annotation)
-        if (m.contact_email) {
+        // Unresolved member: render a muted italic hint where the email
+        // line would go. See issue #111.
+        var unresolved = m.record_id && m.name === m.record_id;
+        if (unresolved) {
+          doc.setFont('helvetica', 'italic');
+          doc.setFontSize(8);
+          doc.setTextColor(136);
+          var hintText = '(fellow data unavailable)';
+          var hintY = nameY + emailLineH;
+          var hintW = doc.getStringUnitWidth(hintText) * 8;
+          doc.text(hintText, x + (cellW - hintW) / 2, hintY);
+          doc.setTextColor(34);
+        } else if (m.contact_email) {
+          // Email (clickable mailto annotation)
           doc.setFont('helvetica', 'normal');
           doc.setFontSize(8);
           doc.setTextColor(0, 102, 204);

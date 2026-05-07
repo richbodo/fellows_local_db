@@ -123,6 +123,68 @@ def test_soft_scan_fires_toast_once_and_marks_done(context, base_url_fixture):
         page.close()
 
 
+def test_unresolved_member_shows_hint_in_rail_and_visual_directory(
+    context, base_url_fixture
+):
+    """Issue #111 second half: when a group_member's record_id can't be
+    resolved against fellows.db, the composer rail (edit mode) and the
+    visual-directory portrait grid both render a muted '(fellow data
+    unavailable)' hint instead of just the raw record_id.
+
+    Group detail itself uses the richer 'Profile no longer available'
+    orphan row (PR #117); this test covers the other surfaces.
+    """
+    page = _make_standalone_page(context)
+    try:
+        page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+        _wait_for_worker_ready(page)
+
+        _seed_orphan_group(
+            page,
+            group_name="orphan-hint-canary",
+            orphan_rid="rec_orphan_for_hint_render",
+        )
+        group_id = page.evaluate(
+            """
+            async () => {
+              const groups = await window.__dataProvider.listGroups();
+              const g = groups.find((x) => x.name === 'orphan-hint-canary');
+              return g ? g.id : null;
+            }
+            """
+        )
+        assert group_id is not None
+
+        # Visual directory: hint shows under the portrait.
+        page.goto(
+            base_url_fixture + "/#/groups/" + str(group_id) + "/directory",
+            wait_until="domcontentloaded",
+        )
+        unresolved_cell = page.locator(".group-directory-cell--unresolved")
+        expect(unresolved_cell).to_be_visible(timeout=5000)
+        expect(unresolved_cell).to_contain_text("(fellow data unavailable)")
+        expect(unresolved_cell).to_contain_text("rec_orphan_for_hint_render")
+
+        # Modal opened from that cell carries the same hint.
+        unresolved_cell.click()
+        modal_hint = page.locator(".fellow-modal-unresolved-hint")
+        expect(modal_hint).to_be_visible(timeout=3000)
+        expect(modal_hint).to_contain_text("(fellow data unavailable)")
+        page.locator(".fellow-modal-close").click()
+
+        # Edit mode: rail chip carries the hint instead of just the rid.
+        page.goto(
+            base_url_fixture + "/#/edit/" + str(group_id),
+            wait_until="domcontentloaded",
+        )
+        rail_chip = page.locator(".group-rail-member--unresolved")
+        expect(rail_chip).to_be_visible(timeout=5000)
+        expect(rail_chip).to_contain_text("(fellow data unavailable)")
+        expect(rail_chip).to_contain_text("rec_orphan_for_hint_render")
+    finally:
+        page.close()
+
+
 def test_orphan_row_renders_with_remove_affordance(context, base_url_fixture):
     """Group detail flags orphan members and offers a Remove button.
     Clicking Remove drops the row from group_members and re-renders."""
