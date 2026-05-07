@@ -80,6 +80,15 @@ fellows match.](images/users_manual/01_directory_search.png)
   type.
 - **Has email** filter (top) is on by default; turn it off to see fellows
   without an email.
+- **Filters** button (next to the search input) opens a panel where you
+  can narrow the directory by **cohort**, **fellow type**, **region**,
+  and **citizenship**. Selections apply immediately; the button shows
+  how many filters are active. **Reset** clears them in one tap. Active
+  filters are written into the page URL — copy the URL to share a
+  filtered view, or reload to come back to the same filtered list.
+  (The Filters button is disabled until the directory has finished
+  loading the full fellow data; **Search** and **Has email** keep
+  working before then.)
 - The visible-count line ("142 of 515 fellows visible") tracks the
   current search + filter.
 - **📋** beside any email or phone number copies just that value to your

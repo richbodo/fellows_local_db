@@ -249,13 +249,28 @@
   <header id="site-header" class="site-header hidden">
     <h1><a href="#/" class="site-title-link">EHF Fellows Directory</a></h1>
     <div id="search-container" class="header-search">
-      <input
-        id="search-input"
-        class="search-input"
-        type="search"
-        placeholder="Search by name, tags, cohort…"
-        autocomplete="off"
-      />
+      <div class="search-row">
+        <input
+          id="search-input"
+          class="search-input"
+          type="search"
+          placeholder="Search by name, tags, cohort…"
+          autocomplete="off"
+        />
+        <button
+          id="filter-trigger"
+          type="button"
+          class="filter-trigger"
+          aria-haspopup="dialog"
+          aria-controls="filter-sheet"
+          aria-expanded="false"
+          disabled
+          title="Filters available once full data loads"
+        >
+          <span class="filter-trigger__label">Filters</span>
+          <span id="filter-trigger-count" class="filter-trigger__count" hidden></span>
+        </button>
+      </div>
       <div class="filter-row">
         <label class="filter-checkbox">
           <input type="checkbox" id="has-email-filter" checked />
@@ -471,6 +486,48 @@
     <button type="button" class="sheet-action" data-kebab-action="report-bug">Report a bug…</button>
     <button type="button" class="sheet-action sheet-action--danger" data-kebab-action="clear-cache">Clear app cache &amp; reload</button>
     <button type="button" class="sheet-action sheet-action--danger" data-kebab-action="reset-everything">Reset everything (lose groups &amp; settings)</button>
+  </aside>
+  <div id="filter-scrim" class="sheet-scrim hidden" hidden></div>
+  <aside
+    id="filter-sheet"
+    class="sheet sheet--filter hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="filter-sheet-title"
+    hidden
+  >
+    <div class="sheet__handle" aria-hidden="true"></div>
+    <div class="sheet__head">
+      <div class="sheet__title" id="filter-sheet-title">Filters</div>
+      <button type="button" id="filter-sheet-reset" class="filter-sheet__reset" hidden>Reset</button>
+      <button type="button" id="filter-sheet-close" class="sheet__close" aria-label="Close">×</button>
+    </div>
+    <div class="filter-sheet__body">
+      <label class="filter-field">
+        <span class="filter-field__label">Cohort</span>
+        <select id="filter-cohort" class="filter-field__control">
+          <option value="">Any</option>
+        </select>
+      </label>
+      <label class="filter-field">
+        <span class="filter-field__label">Fellow type</span>
+        <select id="filter-fellow-type" class="filter-field__control">
+          <option value="">Any</option>
+        </select>
+      </label>
+      <fieldset class="filter-field filter-field--checks">
+        <legend class="filter-field__label">Region</legend>
+        <div id="filter-region-options" class="filter-checks"></div>
+      </fieldset>
+      <label class="filter-field">
+        <span class="filter-field__label">Citizenship</span>
+        <select id="filter-citizenship" class="filter-field__control">
+          <option value="">Any</option>
+        </select>
+      </label>
+    </div>
+    <div class="sheet__divider" aria-hidden="true"></div>
+    <button type="button" id="filter-sheet-done" class="filter-sheet__done">Done</button>
   </aside>
   <script src="/vendor/jspdf-2.5.1.umd.min.js"></script>
   <script src="/app.js"></script>
