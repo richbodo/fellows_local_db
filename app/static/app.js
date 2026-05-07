@@ -5468,28 +5468,35 @@
 
   // ===== End groups feature ============================================
 
-  function statsSection(title, items, color) {
+  /** Render a stats section as semantic HTML bars instead of SVG.
+   *  Each row is a CSS grid: label · bar-track (with proportional fill) ·
+   *  count. Bar heights are fixed in CSS so they stay legible at any
+   *  viewport — issue #132. The SVG predecessor coupled bar height to
+   *  width via aspect-ratio scaling, which made bars shrink in both
+   *  dimensions on narrow columns. `multicol` opts the section into a
+   *  two-column wrap above the desktop breakpoint — appropriate for the
+   *  long Field Completeness list. */
+  function statsSection(title, items, color, multicol) {
     if (!items || !items.length) return '';
     var maxCount = items[0].count;
-    var barHeight = 28;
-    var labelWidth = 220;
-    var gap = 4;
-    var chartWidth = 500;
-    var svgHeight = items.length * (barHeight + gap);
-    var totalWidth = labelWidth + chartWidth + 60;
-
-    var svg = '<svg class="stats-chart" width="100%" viewBox="0 0 ' + totalWidth + ' ' + svgHeight + '" role="img" aria-label="' + escapeHtml(title) + '">';
+    var rows = '';
     for (var i = 0; i < items.length; i++) {
       var item = items[i];
-      var y = i * (barHeight + gap);
-      var barWidth = maxCount > 0 ? (item.count / maxCount) * chartWidth : 0;
-      svg += '<text x="' + (labelWidth - 8) + '" y="' + (y + barHeight / 2 + 5) + '" text-anchor="end" font-size="13" fill="#333">' + escapeHtml(item.label) + '</text>';
-      svg += '<rect x="' + labelWidth + '" y="' + y + '" width="' + barWidth + '" height="' + barHeight + '" rx="3" fill="' + color + '" opacity="0.85"/>';
-      svg += '<text x="' + (labelWidth + barWidth + 6) + '" y="' + (y + barHeight / 2 + 5) + '" font-size="13" fill="#333">' + item.count + '</text>';
+      var pct = maxCount > 0 ? (item.count / maxCount) * 100 : 0;
+      var ariaLabel = title + ': ' + item.label + ' — ' + item.count;
+      rows += '<li class="stats-bar-row" aria-label="' + escapeHtml(ariaLabel) + '">' +
+        '<span class="stats-bar-label">' + escapeHtml(item.label) + '</span>' +
+        '<span class="stats-bar-track">' +
+          '<span class="stats-bar-fill" style="width: ' + pct.toFixed(1) + '%"></span>' +
+        '</span>' +
+        '<span class="stats-bar-count">' + escapeHtml(String(item.count)) + '</span>' +
+      '</li>';
     }
-    svg += '</svg>';
-
-    return '<div class="detail-section"><h3 class="detail-section-title">' + escapeHtml(title) + '</h3><div class="detail-section-body">' + svg + '</div></div>';
+    var sectionClass = 'stats-section' + (multicol ? ' stats-section--multicol' : '');
+    return '<section class="' + sectionClass + '" style="--stats-bar-color: ' + color + '">' +
+      '<h3 class="stats-section-title">' + escapeHtml(title) + '</h3>' +
+      '<ol class="stats-bars">' + rows + '</ol>' +
+    '</section>';
   }
 
   function renderAboutPage() {
@@ -5702,14 +5709,16 @@
         var gridEl = document.getElementById('stats-grid');
         if (totalEl) totalEl.innerHTML = 'Total Fellows: <strong>' + escapeHtml(String(data.total)) + '</strong>';
         if (gridEl) {
-          var gh = '<div class="stats-col stats-col--left">';
+          // Issue #132: stack sections single-column at full pane width
+          // so bars use the available horizontal space; Field
+          // Completeness opts into a 2-column wrap (CSS-only) above the
+          // desktop breakpoint to keep its ~30 entries scannable
+          // without dwarfing the others.
+          var gh = '';
           gh += statsSection('Fellows by Type', data.by_fellow_type, '#0066cc');
           gh += statsSection('Fellows by Cohort', data.by_cohort, '#2c6a4a');
           gh += statsSection('Fellows by Region', data.by_region, '#2c4a6a');
-          gh += '</div>';
-          gh += '<div class="stats-col stats-col--right">';
-          gh += statsSection('Field Completeness', data.field_completeness, '#5a5a5a');
-          gh += '</div>';
+          gh += statsSection('Field Completeness', data.field_completeness, '#5a5a5a', true);
           gridEl.innerHTML = gh;
         }
       })

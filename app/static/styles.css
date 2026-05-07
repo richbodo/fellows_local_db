@@ -973,14 +973,10 @@ h1 {
 }
 
 .stats-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 1.5rem;
-  align-items: start;
-}
-
-.stats-col {
-  min-width: 0;
+  align-items: stretch;
 }
 
 .stats-title {
@@ -991,6 +987,90 @@ h1 {
 .stats-total {
   font-size: 1.1rem;
   margin-bottom: 1.5rem;
+}
+
+/* Stats sections (issue #132): semantic HTML bars at full pane width.
+   Replaces the prior SVG renderer whose viewBox-based scaling shrank
+   bars in both dimensions on narrow columns. */
+.stats-section {
+  --stats-bar-color: #0066cc;
+  margin: 0;
+  padding: 0;
+}
+
+.stats-section-title {
+  margin: 0 0 0.6rem 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #222;
+}
+
+.stats-bars {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.stats-bar-row {
+  display: grid;
+  grid-template-columns: minmax(80px, max-content) 1fr 3em;
+  align-items: center;
+  gap: 0.6rem;
+  height: 28px;
+  margin-bottom: 4px;
+  break-inside: avoid;
+}
+
+.stats-bar-label {
+  font-size: 0.85rem;
+  color: #333;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stats-bar-track {
+  display: block;
+  height: 100%;
+  background: #f0f3f7;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.stats-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--stats-bar-color);
+  opacity: 0.85;
+  border-radius: 3px;
+  min-width: 2px;
+}
+
+.stats-bar-count {
+  font-size: 0.85rem;
+  color: #333;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+}
+
+/* Field Completeness opts into a 2-column wrap above the desktop
+   breakpoint so its ~30 entries don't push the rest of the page into
+   a long scroll. Single column below 1100px. */
+@media (min-width: 1100px) {
+  .stats-section--multicol .stats-bars {
+    column-count: 2;
+    column-gap: 2rem;
+  }
+}
+
+@media (max-width: 700px) {
+  /* Fellow-detail tables can overflow narrow viewports; allow a local
+     horizontal scroll rather than breaking the layout. (Was paired
+     with stats-chart rules in the SVG era; those are gone.) */
+  .detail-section-body {
+    overflow-x: auto;
+  }
 }
 
 .about-body {
@@ -1044,24 +1124,6 @@ h1 {
   vertical-align: middle;
 }
 
-.stats-chart {
-  display: block;
-  margin: 0.5rem 0 1rem 0;
-  max-width: 100%;
-  height: auto;
-}
-
-@media (max-width: 700px) {
-  .stats-grid {
-    grid-template-columns: 1fr;
-  }
-  .stats-chart {
-    min-width: 600px;
-  }
-  .detail-section-body {
-    overflow-x: auto;
-  }
-}
 
 /* PWA install landing (browser tab only) */
 .install-landing {
