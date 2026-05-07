@@ -5921,12 +5921,18 @@
       var item = items[i];
       var pct = maxCount > 0 ? (item.count / maxCount) * 100 : 0;
       var ariaLabel = title + ': ' + item.label + ' — ' + item.count;
+      // Label + count travel together inside .stats-bar-text so the
+      // count is readable on mobile even when the bar overflows the
+      // viewport. Bars all start at the same x across sections via a
+      // fixed-width label column on desktop (CSS).
       rows += '<li class="stats-bar-row" aria-label="' + escapeHtml(ariaLabel) + '">' +
-        '<span class="stats-bar-label">' + escapeHtml(item.label) + '</span>' +
+        '<span class="stats-bar-text">' +
+          '<span class="stats-bar-label">' + escapeHtml(item.label) + '</span>' +
+          '<span class="stats-bar-count">' + escapeHtml(String(item.count)) + '</span>' +
+        '</span>' +
         '<span class="stats-bar-track">' +
           '<span class="stats-bar-fill" style="width: ' + pct.toFixed(1) + '%"></span>' +
         '</span>' +
-        '<span class="stats-bar-count">' + escapeHtml(String(item.count)) + '</span>' +
       '</li>';
     }
     var sectionClass = 'stats-section' + (multicol ? ' stats-section--multicol' : '');

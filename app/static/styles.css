@@ -1077,24 +1077,52 @@ h1 {
   padding: 0;
 }
 
+/* Bar row layout (revised after #132 user feedback):
+   - Desktop: fixed-width left column for label+count, 1fr for the
+     bar track. Bars start at the same x across every section.
+   - Mobile: label+count column auto-sizes to its content, bar gets
+     whatever's left. Bars don't align across rows on mobile, but the
+     count is in text so the data stays readable when bars overflow
+     the viewport. */
 .stats-bar-row {
   display: grid;
-  grid-template-columns: minmax(80px, max-content) 1fr 3em;
+  grid-template-columns: var(--stats-label-col, 13rem) 1fr;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.75rem;
   height: 28px;
   margin-bottom: 4px;
   break-inside: avoid;
 }
 
-.stats-bar-label {
+.stats-bar-text {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4em;
+  min-width: 0;
+  overflow: hidden;
   font-size: 0.85rem;
   color: #333;
-  text-align: right;
+}
+
+.stats-bar-label {
+  flex: 0 1 auto;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.stats-bar-count {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  color: #555;
+}
+
+/* Parens wrap the count visually so it reads as "Label (288)".
+   Drawn via ::before/::after so the accessible name (set on
+   .stats-bar-row's aria-label) stays clean. */
+.stats-bar-count::before { content: '('; }
+.stats-bar-count::after { content: ')'; }
 
 .stats-bar-track {
   display: block;
@@ -1102,6 +1130,7 @@ h1 {
   background: #f0f3f7;
   border-radius: 3px;
   overflow: hidden;
+  min-width: 0;
 }
 
 .stats-bar-fill {
@@ -1113,20 +1142,37 @@ h1 {
   min-width: 2px;
 }
 
-.stats-bar-count {
-  font-size: 0.85rem;
-  color: #333;
-  font-variant-numeric: tabular-nums;
-  text-align: left;
-}
-
 /* Field Completeness opts into a 2-column wrap above the desktop
    breakpoint so its ~30 entries don't push the rest of the page into
-   a long scroll. Single column below 1100px. */
+   a long scroll. Single column below 1100px. The fixed label column
+   inside each multicol-column keeps bars aligned within that column. */
 @media (min-width: 1100px) {
   .stats-section--multicol .stats-bars {
     column-count: 2;
     column-gap: 2rem;
+  }
+  .stats-section--multicol .stats-bar-row {
+    /* Narrower label column inside multicol so the bar still gets
+       meaningful width in the half-pane. */
+    --stats-label-col: 11rem;
+  }
+}
+
+@media (max-width: 700px) {
+  /* Mobile: drop the fixed label column. The full label + count is
+     always readable; the bar takes whatever's left, even if cramped.
+     Magnitude is decorative on mobile — the count is the data.
+     User feedback: prefer label visibility over bar alignment here. */
+  .stats-bar-row {
+    grid-template-columns: max-content minmax(2rem, 1fr);
+    gap: 0.5rem;
+  }
+  .stats-bar-text {
+    overflow: visible;
+  }
+  .stats-bar-label {
+    overflow: visible;
+    text-overflow: clip;
   }
 }
 
