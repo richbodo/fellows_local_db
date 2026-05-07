@@ -401,7 +401,15 @@ body {
 }
 
 .hidden {
-  display: none;
+  /* `!important` because component rules later in this stylesheet
+     specify display values (e.g. `.install-pwa-button { display:
+     inline-block }`) at equal specificity but later in source order,
+     which would otherwise win the cascade and silently un-hide
+     elements we tried to hide via `el.classList.add('hidden')`.
+     This caused the macOS Safari install button to remain clickable
+     after isMacOsSafari() detection — see the install-loop /
+     install-prompt debug session of 2026-05-08. */
+  display: none !important;
 }
 
 .loading-panel {
