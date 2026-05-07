@@ -5921,12 +5921,18 @@
       var item = items[i];
       var pct = maxCount > 0 ? (item.count / maxCount) * 100 : 0;
       var ariaLabel = title + ': ' + item.label + ' — ' + item.count;
+      // Label + count travel together inside .stats-bar-text so the
+      // count is readable on mobile even when the bar overflows the
+      // viewport. Bars all start at the same x across sections via a
+      // fixed-width label column on desktop (CSS).
       rows += '<li class="stats-bar-row" aria-label="' + escapeHtml(ariaLabel) + '">' +
-        '<span class="stats-bar-label">' + escapeHtml(item.label) + '</span>' +
+        '<span class="stats-bar-text">' +
+          '<span class="stats-bar-label">' + escapeHtml(item.label) + '</span>' +
+          '<span class="stats-bar-count">' + escapeHtml(String(item.count)) + '</span>' +
+        '</span>' +
         '<span class="stats-bar-track">' +
           '<span class="stats-bar-fill" style="width: ' + pct.toFixed(1) + '%"></span>' +
         '</span>' +
-        '<span class="stats-bar-count">' + escapeHtml(String(item.count)) + '</span>' +
       '</li>';
     }
     var sectionClass = 'stats-section' + (multicol ? ' stats-section--multicol' : '');
@@ -6946,14 +6952,18 @@
       "</svg>"
     );
 
-  /** Trigger a Blob download. On platforms that support
-   *  navigator.share with files (iOS 16.4+, modern Android), prefer the
-   *  share sheet — gives the user Save to Files / AirDrop / Mail
-   *  options. Fall back to <a download> for desktop and older mobile.
-   *  Per the PR 1 mitigation plan in docs/persistence_and_upgrades.md. */
+  /** Trigger a Blob download. On mobile (iOS 16.4+, modern Android),
+   *  prefer the share sheet — gives the user Save to Files / AirDrop /
+   *  Mail. Desktop always falls through to <a download>: on macOS Chrome
+   *  PWA, navigator.canShare({files}) returns true but the resulting
+   *  sheet has no Save-to-Downloads entry, only AirDrop/Messages/Notes —
+   *  a dead end for "I just want the file in Downloads". */
   function downloadBlob(blob, filename) {
     try {
-      if (navigator.canShare && typeof File === 'function') {
+      var ua = navigator.userAgent || '';
+      var isMobile = /iPad|iPhone|iPod|Android/.test(ua) ||
+                     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      if (isMobile && navigator.canShare && typeof File === 'function') {
         var file = new File([blob], filename, { type: blob.type || 'application/octet-stream' });
         if (navigator.canShare({ files: [file] })) {
           return navigator.share({ files: [file], title: filename });
