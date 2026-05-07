@@ -4554,6 +4554,27 @@
     return { force: false, reason: '' };
   }
 
+  // ?app=1 — debug counterpart to ?gate=1. Forces directory boot in a
+  // browser tab even when the routing tree would normally show the
+  // install landing (authenticated + installRecentlyAllowed). Use cases:
+  //   - Verify the directory works without dealing with Chrome's install
+  //     heuristic (which can refuse to fire beforeinstallprompt after
+  //     repeated install/uninstall cycles).
+  //   - Confirm relationships.db data survives across sessions.
+  //   - Test a code change against existing groups without the install dance.
+  // Like ?gate=1, this is a UI-layer override only — protected endpoints
+  // still require a valid session cookie. Honored only when authenticated;
+  // unauthenticated visits with ?app=1 still go through the gate.
+  function parseAppOverride() {
+    try {
+      var u = new URL(window.location.href);
+      if (u.searchParams.get('app') === '1') {
+        return { force: true };
+      }
+    } catch (e) {}
+    return { force: false };
+  }
+
   function startBrowserUx() {
     authDebugLines.length = 0;
     authDebugPush('startBrowserUx: begin auth status check');
@@ -4595,6 +4616,17 @@
         if (override.force) {
           authDebugPush('?gate=1 override: using email gate (reason=' + (override.reason || 'none') + ')');
           initEmailGate(data, httpStatus, override.reason);
+          return;
+        }
+        // ?app=1 — debug escape hatch. When authenticated, force directory
+        // boot in browser-tab mode, bypassing the install landing. See
+        // parseAppOverride doc for use cases. Only honored when
+        // authenticated and not already attempted (the standard guard
+        // against bootDirectoryAsApp re-entry from its catch handler).
+        if (parseAppOverride().force && data.authEnabled && data.authenticated && !directoryBootAttempted) {
+          authDebugPush('?app=1 override: forcing directory boot in browser tab');
+          markAuthenticatedOnce();
+          bootDirectoryAsApp();
           return;
         }
         // PWA-mode decision tree per docs/email_gate.md: installed PWAs
