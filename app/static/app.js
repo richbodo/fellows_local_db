@@ -129,6 +129,14 @@
   var groupCardScrimEl = document.getElementById('group-card-scrim');
   var groupActionbarSheetEl = document.getElementById('group-actionbar-sheet');
   var groupActionbarScrimEl = document.getElementById('group-actionbar-scrim');
+  // Directory filter UI (issue #86). Trigger sits beside the search input;
+  // the sheet is the single point of entry on every viewport. Controls
+  // are populated lazily once phase 2 (?full=1) lands. See
+  // filterState / filterOptions / buildFilterOptions below.
+  var filterTriggerEl = document.getElementById('filter-trigger');
+  var filterTriggerCountEl = document.getElementById('filter-trigger-count');
+  var filterSheetEl = document.getElementById('filter-sheet');
+  var filterScrimEl = document.getElementById('filter-scrim');
   var deferredInstallPrompt = null;
   var directoryDataSource = 'api';
   var dataProvider = null;
@@ -607,6 +615,11 @@
           if (f.slug) fellowsBySlug.set(f.slug, f);
           if (f.record_id) fellowsBySlug.set(f.record_id, f);
         });
+        // Re-derive filter options after a directory-data swap; the new
+        // bytes may have introduced or removed cohort/region/citizenship
+        // values. Existing filterState is preserved — values that no
+        // longer exist in the data simply match nothing.
+        activateFiltersFromFullData(full);
       }
       // Re-route data-rendering views (group detail, fellow detail,
       // visual directory) so the new bytes show through. Skip when
@@ -4603,9 +4616,432 @@
     return !!(f.contact_email && String(f.contact_email).trim());
   }
 
-  function applyHasEmailFilter(items) {
-    if (!hasEmailOnly) return items;
-    return items.filter(fellowHasEmail);
+  // Directory filter UI (issue #86). filterState is the source of truth
+  // for what's active; filterOptions caches the distinct values scanned
+  // out of the loaded fellow set after phase 2 (?full=1). The trigger
+  // button stays disabled until filterOptions is populated, which is
+  // why has-email + keyword search remain valid during phase 1 (their
+  // codepaths don't depend on filterOptions).
+  var filterState = {
+    cohort: null,           // string | null  (single-select)
+    fellowType: null,       // string | null  (single-select)
+    regions: [],            // string[]       (any-of multi-select)
+    citizenship: null       // string | null  (single-select)
+  };
+  var filterOptions = null;
+  var filterSheetWired = false;
+  // Re-entry guard: applyFiltersToHash() writes the URL via
+  // history.replaceState which doesn't fire 'hashchange', but defensive
+  // code paths may also call route() directly. The flag lets the
+  // hash-read pass bail when we initiated the change ourselves.
+  var filtersWritingHash = false;
+
+  function activeFilterCount() {
+    var n = 0;
+    if (filterState.cohort) n++;
+    if (filterState.fellowType) n++;
+    if (filterState.regions && filterState.regions.length) n++;
+    if (filterState.citizenship) n++;
+    return n;
+  }
+
+  function filterStateSignature() {
+    // Stable serialization for change detection. Region order is
+    // normalized so reordering checkboxes doesn't look like a change.
+    var rs = (filterState.regions || []).slice().sort().join(',');
+    return [
+      filterState.cohort || '',
+      filterState.fellowType || '',
+      rs,
+      filterState.citizenship || ''
+    ].join('|');
+  }
+
+  function uniqueSorted(values, opts) {
+    var seen = Object.create(null);
+    var out = [];
+    for (var i = 0; i < values.length; i++) {
+      var v = values[i];
+      if (v == null) continue;
+      v = String(v).trim();
+      if (!v) continue;
+      if (seen[v]) continue;
+      seen[v] = true;
+      out.push(v);
+    }
+    if (opts && opts.cohort) {
+      // Cohort labels often start with a year ("2020", "2020 Cohort").
+      // Sort by leading numeric prefix when present, falling back to a
+      // string compare so "Inaugural" / "Founder" stay deterministic.
+      out.sort(function (a, b) {
+        var na = parseInt(a, 10);
+        var nb = parseInt(b, 10);
+        var aIsNum = !isNaN(na);
+        var bIsNum = !isNaN(nb);
+        if (aIsNum && bIsNum && na !== nb) return na - nb;
+        if (aIsNum && !bIsNum) return -1;
+        if (!aIsNum && bIsNum) return 1;
+        return a.localeCompare(b);
+      });
+    } else {
+      out.sort(function (a, b) { return a.localeCompare(b); });
+    }
+    return out;
+  }
+
+  function buildFilterOptions(items) {
+    if (!Array.isArray(items) || !items.length) {
+      filterOptions = null;
+      return;
+    }
+    var cohorts = [];
+    var fellowTypes = [];
+    var regions = [];
+    var citizenships = [];
+    for (var i = 0; i < items.length; i++) {
+      var f = items[i];
+      if (!f) continue;
+      cohorts.push(f.cohort);
+      fellowTypes.push(f.fellow_type);
+      citizenships.push(f.primary_citizenship);
+      var raw = f.global_regions_currently_based_in;
+      if (raw) {
+        var parts = String(raw).split(',');
+        for (var j = 0; j < parts.length; j++) regions.push(parts[j]);
+      }
+    }
+    filterOptions = {
+      cohorts: uniqueSorted(cohorts, { cohort: true }),
+      fellowTypes: uniqueSorted(fellowTypes),
+      regions: uniqueSorted(regions),
+      citizenships: uniqueSorted(citizenships)
+    };
+  }
+
+  function fellowMatchesRegions(f, picked) {
+    if (!picked || !picked.length) return true;
+    var raw = f.global_regions_currently_based_in;
+    if (!raw) return false;
+    var parts = String(raw).split(',');
+    for (var i = 0; i < parts.length; i++) {
+      var r = parts[i].trim();
+      if (!r) continue;
+      for (var j = 0; j < picked.length; j++) {
+        if (picked[j] === r) return true;
+      }
+    }
+    return false;
+  }
+
+  // Resolve a possibly-minimal directory row to the full row that has
+  // structured fields (cohort, fellow_type, etc.). The directory's
+  // `list` carries the minimal projection from /api/fellows; full rows
+  // arrive after phase 2 and are indexed in fellowsBySlug. Search
+  // results already come back as full rows, so this is a no-op in that
+  // path.
+  function resolveFullRow(f) {
+    if (!f) return null;
+    if (f.cohort !== undefined || f.fellow_type !== undefined) return f;
+    if (f.slug && fellowsBySlug.has(f.slug)) return fellowsBySlug.get(f.slug);
+    if (f.record_id && fellowsBySlug.has(f.record_id)) return fellowsBySlug.get(f.record_id);
+    return null;
+  }
+
+  function applyFilters(items) {
+    if (!Array.isArray(items)) return items;
+    var out = items;
+    if (hasEmailOnly) out = out.filter(fellowHasEmail);
+    var needsFull =
+      !!filterState.cohort ||
+      !!filterState.fellowType ||
+      (filterState.regions && filterState.regions.length > 0) ||
+      !!filterState.citizenship;
+    if (!needsFull) return out;
+    out = out.filter(function (f) {
+      var full = resolveFullRow(f);
+      if (!full) return false; // can't evaluate without full data; treat as miss
+      if (filterState.cohort && full.cohort !== filterState.cohort) return false;
+      if (filterState.fellowType && full.fellow_type !== filterState.fellowType) return false;
+      if (filterState.regions && filterState.regions.length &&
+          !fellowMatchesRegions(full, filterState.regions)) return false;
+      if (filterState.citizenship && full.primary_citizenship !== filterState.citizenship) return false;
+      return true;
+    });
+    return out;
+  }
+
+  // ----- Filter hash <-> state ------------------------------------------
+  // Filter state lives in the directory hash as a query-style suffix:
+  // #/?cohort=2020&type=Fellow&region=Africa,Asia&citizenship=United%20States.
+  // Read on directory route entry; write via history.replaceState on
+  // every filter change so reload + share-as-link round-trip cleanly
+  // without thrashing the back stack.
+
+  function readFiltersFromHash() {
+    var hash = window.location.hash || '';
+    var qIdx = hash.indexOf('?');
+    if (qIdx === -1) {
+      filterState.cohort = null;
+      filterState.fellowType = null;
+      filterState.regions = [];
+      filterState.citizenship = null;
+      return;
+    }
+    var qs = hash.slice(qIdx + 1);
+    var params;
+    try {
+      params = new URLSearchParams(qs);
+    } catch (_) {
+      return;
+    }
+    filterState.cohort = params.get('cohort') || null;
+    filterState.fellowType = params.get('type') || null;
+    var regionParam = params.get('region') || '';
+    filterState.regions = regionParam
+      ? regionParam.split(',').map(function (s) { return s.trim(); }).filter(Boolean)
+      : [];
+    filterState.citizenship = params.get('citizenship') || null;
+  }
+
+  function writeFiltersToHash() {
+    var hash = window.location.hash || '';
+    var qIdx = hash.indexOf('?');
+    var pathPart = qIdx === -1 ? hash : hash.slice(0, qIdx);
+    if (!pathPart) pathPart = '#/';
+    var qs = new URLSearchParams();
+    if (filterState.cohort) qs.set('cohort', filterState.cohort);
+    if (filterState.fellowType) qs.set('type', filterState.fellowType);
+    if (filterState.regions && filterState.regions.length) {
+      qs.set('region', filterState.regions.join(','));
+    }
+    if (filterState.citizenship) qs.set('citizenship', filterState.citizenship);
+    var qsStr = qs.toString();
+    var newHash = qsStr ? (pathPart + '?' + qsStr) : pathPart;
+    if (newHash === hash) return;
+    filtersWritingHash = true;
+    try {
+      if (window.history && window.history.replaceState) {
+        var url = window.location.pathname + window.location.search + newHash;
+        window.history.replaceState(null, '', url);
+      } else {
+        window.location.hash = newHash;
+      }
+    } finally {
+      filtersWritingHash = false;
+    }
+  }
+
+  // ----- Filter sheet UI ------------------------------------------------
+
+  function setSelectOptions(selectEl, values, currentValue, anyLabel) {
+    if (!selectEl) return;
+    var html = '<option value="">' + escapeHtml(anyLabel || 'Any') + '</option>';
+    for (var i = 0; i < values.length; i++) {
+      var v = values[i];
+      var sel = (v === currentValue) ? ' selected' : '';
+      html += '<option value="' + escapeHtml(v) + '"' + sel + '>' + escapeHtml(v) + '</option>';
+    }
+    selectEl.innerHTML = html;
+  }
+
+  function populateFilterSheetControls() {
+    if (!filterOptions) return;
+    var cohortEl = document.getElementById('filter-cohort');
+    var typeEl = document.getElementById('filter-fellow-type');
+    var citEl = document.getElementById('filter-citizenship');
+    var regionWrap = document.getElementById('filter-region-options');
+    setSelectOptions(cohortEl, filterOptions.cohorts, filterState.cohort);
+    setSelectOptions(typeEl, filterOptions.fellowTypes, filterState.fellowType);
+    setSelectOptions(citEl, filterOptions.citizenships, filterState.citizenship);
+    if (regionWrap) {
+      var html = '';
+      var picked = {};
+      for (var p = 0; p < filterState.regions.length; p++) picked[filterState.regions[p]] = true;
+      for (var i = 0; i < filterOptions.regions.length; i++) {
+        var r = filterOptions.regions[i];
+        var checked = picked[r] ? ' checked' : '';
+        html +=
+          '<label><input type="checkbox" data-filter-region value="' +
+          escapeHtml(r) + '"' + checked + ' /><span>' + escapeHtml(r) + '</span></label>';
+      }
+      regionWrap.innerHTML = html || '<p class="placeholder">No regions in data.</p>';
+    }
+  }
+
+  function syncFilterSheetControls() {
+    // Lighter than re-rendering: just reflect filterState into existing
+    // controls. Used after Reset and after readFiltersFromHash().
+    if (!filterOptions) return;
+    var cohortEl = document.getElementById('filter-cohort');
+    var typeEl = document.getElementById('filter-fellow-type');
+    var citEl = document.getElementById('filter-citizenship');
+    if (cohortEl) cohortEl.value = filterState.cohort || '';
+    if (typeEl) typeEl.value = filterState.fellowType || '';
+    if (citEl) citEl.value = filterState.citizenship || '';
+    var regionWrap = document.getElementById('filter-region-options');
+    if (regionWrap) {
+      var picked = {};
+      for (var p = 0; p < filterState.regions.length; p++) picked[filterState.regions[p]] = true;
+      var inputs = regionWrap.querySelectorAll('input[data-filter-region]');
+      for (var i = 0; i < inputs.length; i++) {
+        inputs[i].checked = !!picked[inputs[i].value];
+      }
+    }
+  }
+
+  function updateFilterTriggerUI() {
+    if (!filterTriggerEl) return;
+    var n = activeFilterCount();
+    var ready = !!filterOptions;
+    filterTriggerEl.disabled = !ready;
+    filterTriggerEl.classList.toggle('filter-trigger--active', n > 0);
+    if (filterTriggerCountEl) {
+      if (n > 0) {
+        filterTriggerCountEl.textContent = String(n);
+        filterTriggerCountEl.removeAttribute('hidden');
+      } else {
+        filterTriggerCountEl.textContent = '';
+        filterTriggerCountEl.setAttribute('hidden', '');
+      }
+    }
+    if (ready) {
+      filterTriggerEl.title = n > 0
+        ? n + ' filter' + (n === 1 ? '' : 's') + ' active'
+        : 'Filters';
+    } else {
+      filterTriggerEl.title = 'Filters available once full data loads';
+    }
+    var resetBtn = document.getElementById('filter-sheet-reset');
+    if (resetBtn) {
+      if (n > 0) resetBtn.removeAttribute('hidden');
+      else resetBtn.setAttribute('hidden', '');
+    }
+  }
+
+  function rerenderForFilterChange() {
+    var query = (searchInputEl && searchInputEl.value || '').trim();
+    if (query) {
+      runSearch(query);
+    } else if (Array.isArray(list) && list.length) {
+      renderDirectory();
+    }
+  }
+
+  function isFilterSheetOpen() {
+    return !!(filterSheetEl && !filterSheetEl.classList.contains('hidden'));
+  }
+
+  function openFilterSheet() {
+    if (!filterSheetEl) return;
+    if (!filterOptions) return; // defense in depth; trigger is also disabled
+    populateFilterSheetControls();
+    filterSheetEl.classList.remove('hidden');
+    filterSheetEl.removeAttribute('hidden');
+    if (filterScrimEl) {
+      filterScrimEl.classList.remove('hidden');
+      filterScrimEl.removeAttribute('hidden');
+    }
+    if (filterTriggerEl) filterTriggerEl.setAttribute('aria-expanded', 'true');
+  }
+
+  function closeFilterSheet() {
+    if (!filterSheetEl) return;
+    filterSheetEl.classList.add('hidden');
+    filterSheetEl.setAttribute('hidden', '');
+    if (filterScrimEl) {
+      filterScrimEl.classList.add('hidden');
+      filterScrimEl.setAttribute('hidden', '');
+    }
+    if (filterTriggerEl) filterTriggerEl.setAttribute('aria-expanded', 'false');
+  }
+
+  function resetFilters() {
+    var changed = activeFilterCount() > 0;
+    filterState.cohort = null;
+    filterState.fellowType = null;
+    filterState.regions = [];
+    filterState.citizenship = null;
+    syncFilterSheetControls();
+    updateFilterTriggerUI();
+    writeFiltersToHash();
+    if (changed) rerenderForFilterChange();
+  }
+
+  function initFilterSheet() {
+    if (filterSheetWired) return;
+    if (!filterTriggerEl || !filterSheetEl) return;
+    filterSheetWired = true;
+    filterTriggerEl.addEventListener('click', function () {
+      if (isFilterSheetOpen()) closeFilterSheet();
+      else openFilterSheet();
+    });
+    if (filterScrimEl) {
+      filterScrimEl.addEventListener('click', closeFilterSheet);
+    }
+    var closeBtn = document.getElementById('filter-sheet-close');
+    if (closeBtn) closeBtn.addEventListener('click', closeFilterSheet);
+    var doneBtn = document.getElementById('filter-sheet-done');
+    if (doneBtn) doneBtn.addEventListener('click', closeFilterSheet);
+    var resetBtn = document.getElementById('filter-sheet-reset');
+    if (resetBtn) resetBtn.addEventListener('click', resetFilters);
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && isFilterSheetOpen()) closeFilterSheet();
+    });
+
+    var cohortEl = document.getElementById('filter-cohort');
+    if (cohortEl) {
+      cohortEl.addEventListener('change', function () {
+        filterState.cohort = cohortEl.value || null;
+        writeFiltersToHash();
+        updateFilterTriggerUI();
+        rerenderForFilterChange();
+      });
+    }
+    var typeEl = document.getElementById('filter-fellow-type');
+    if (typeEl) {
+      typeEl.addEventListener('change', function () {
+        filterState.fellowType = typeEl.value || null;
+        writeFiltersToHash();
+        updateFilterTriggerUI();
+        rerenderForFilterChange();
+      });
+    }
+    var citEl = document.getElementById('filter-citizenship');
+    if (citEl) {
+      citEl.addEventListener('change', function () {
+        filterState.citizenship = citEl.value || null;
+        writeFiltersToHash();
+        updateFilterTriggerUI();
+        rerenderForFilterChange();
+      });
+    }
+    // Region checkboxes are added dynamically; delegate at the wrap.
+    var regionWrap = document.getElementById('filter-region-options');
+    if (regionWrap) {
+      regionWrap.addEventListener('change', function (ev) {
+        var t = ev.target;
+        if (!t || !t.matches || !t.matches('input[data-filter-region]')) return;
+        var val = t.value;
+        var picked = filterState.regions.slice();
+        var idx = picked.indexOf(val);
+        if (t.checked && idx === -1) picked.push(val);
+        else if (!t.checked && idx !== -1) picked.splice(idx, 1);
+        filterState.regions = picked;
+        writeFiltersToHash();
+        updateFilterTriggerUI();
+        rerenderForFilterChange();
+      });
+    }
+  }
+
+  // Called after phase 2 (?full=1) settles. Builds option lists, enables
+  // the trigger, and re-renders if hash-derived filters were already in
+  // play during phase 1 (they applied via applyFilters but the trigger
+  // count UI couldn't update until we knew the option set was real).
+  function activateFiltersFromFullData(items) {
+    buildFilterOptions(items);
+    populateFilterSheetControls();
+    updateFilterTriggerUI();
   }
 
   function setFilterCount(msg) {
@@ -4653,7 +5089,7 @@
       updateBulkBar();
       return;
     }
-    var filtered = applyHasEmailFilter(list);
+    var filtered = applyFilters(list);
     if (!filtered.length) {
       directoryListEl.innerHTML = '<p class="placeholder">No fellows match the current filter.</p>';
       displayedList = [];
@@ -4662,8 +5098,9 @@
       displayedList = filtered;
     }
     // This UI element is defined as "count of fellows visible in the current
-    // view." In directory mode it reflects the `has email` filter; in search
-    // mode it reflects the search + filter together (see renderSearchResults).
+    // view." In directory mode it reflects all active filters (has email +
+    // structured filters from #86); in search mode it reflects search +
+    // filters together (see renderSearchResults).
     setFilterCount(
       filtered.length === list.length
         ? list.length + ' fellows visible'
@@ -5769,6 +6206,31 @@
     if (typeof closeGroupActionbarSheet === 'function' && groupActionbarSheetEl &&
         !groupActionbarSheetEl.classList.contains('hidden')) {
       closeGroupActionbarSheet();
+    }
+    if (typeof closeFilterSheet === 'function' && isFilterSheetOpen()) {
+      closeFilterSheet();
+    }
+    // Filter state lives in the directory hash. Re-read on every route()
+    // call so back/forward and externally-set hashes (shared links,
+    // diagnostics tools) hydrate correctly. Off-directory routes ignore
+    // the params; switching back to '#/' re-hydrates from whatever the
+    // hash carried at the time. Skip when we initiated the hash write
+    // ourselves (replaceState doesn't fire hashchange but defensive
+    // route() callers might reach here anyway).
+    //
+    // Also re-render the directory if filterState actually changed —
+    // the list is already in the DOM (focus mode hides it via body
+    // class, doesn't unmount it), so without an explicit re-render
+    // the user would see stale, pre-filter rows when arriving from
+    // a shared link or from another route.
+    if (!filtersWritingHash) {
+      var prevSig = filterStateSignature();
+      readFiltersFromHash();
+      syncFilterSheetControls();
+      updateFilterTriggerUI();
+      if (filterStateSignature() !== prevSig) {
+        rerenderForFilterChange();
+      }
     }
 
     // Mobile shell chrome — appbar title + active tab. Renderers that
@@ -8132,7 +8594,7 @@
 
   function renderSearchResults(results, label) {
     var total = results.length;
-    var filtered = applyHasEmailFilter(results);
+    var filtered = applyFilters(results);
     displayedList = filtered;
     // Keep the visible-count indicator in sync with what's actually shown,
     // including during search. The denominator stays at list.length (total
@@ -8384,6 +8846,12 @@
   initComposerFab();
   initGroupCardSheet();
   initGroupActionbarSheet();
+  initFilterSheet();
+  // Hydrate filterState from any query suffix on the initial hash so a
+  // shared link like #/?cohort=2020 applies before the first render.
+  // Trigger stays disabled until phase 2 builds filterOptions.
+  readFiltersFromHash();
+  updateFilterTriggerUI();
   wireCopyButtons();
 
   function bootDirectoryAsApp() {
@@ -8566,6 +9034,10 @@
             if (f.slug) fellowsBySlug.set(f.slug, f);
             if (f.record_id) fellowsBySlug.set(f.record_id, f);
           });
+          // Issue #86: derive distinct filter values now that we have the
+          // full row set. Enables the trigger button and populates sheet
+          // controls. Hash-derived filters from phase 1 still apply.
+          activateFiltersFromFullData(full);
         }
         route();
         // Kick off image prewarm in the background — does not block UI.

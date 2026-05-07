@@ -527,6 +527,72 @@ h1 {
   outline-offset: 1px;
 }
 
+.search-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.4rem;
+}
+
+.search-row .search-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.filter-trigger {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0 0.6rem;
+  min-height: 32px;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--ink-deep, #0f172a);
+  background: #fff;
+  border: 1px solid #bbb;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.filter-trigger:hover:not(:disabled) {
+  background: var(--accent-soft, #eef3fb);
+}
+
+.filter-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.filter-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.filter-trigger--active {
+  background: var(--accent-soft, #dbeafe);
+  border-color: var(--accent);
+  color: var(--accent-deeper, #003366);
+}
+
+.filter-trigger__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.4rem;
+  height: 1.1rem;
+  padding: 0 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 999px;
+}
+
+.filter-trigger__count[hidden] {
+  display: none;
+}
+
 .search-status {
   margin: 0.25rem 0 0;
   font-size: 0.8rem;
@@ -3440,6 +3506,137 @@ a.group-action-btn--primary {
 
 .sheet-scrim.hidden {
   display: none;
+}
+
+/* ----- Filter sheet (issue #86) -------------------------------------- */
+/* Reuses the .sheet shell. On mobile: bottom-anchored as the rest. On
+ * desktop: re-positioned as a centered modal so the bottom-sheet idiom
+ * doesn't feel out of place on a wide viewport. The trigger button is
+ * always visible (search-row); the sheet is the only point of entry. */
+
+.filter-sheet__reset {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 8px;
+  margin-left: auto;
+  margin-right: 4px;
+  border-radius: 4px;
+}
+
+.filter-sheet__reset:hover {
+  background: var(--accent-soft);
+}
+
+.filter-sheet__reset[hidden] {
+  display: none;
+}
+
+.filter-sheet__body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 0 12px;
+}
+
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.filter-field__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-deep, #0f172a);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.filter-field__control {
+  font: inherit;
+  font-size: 16px; /* avoid iOS auto-zoom on focus */
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong, #a8b8cc);
+  border-radius: 6px;
+  background: #fff;
+  min-height: 44px;
+}
+
+.filter-field__control:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.filter-field--checks {
+  /* fieldset reset already done above */
+}
+
+.filter-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  max-height: 12rem;
+  overflow-y: auto;
+}
+
+.filter-checks label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  font-size: 14px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.filter-sheet__done {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 12px 16px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.filter-sheet__done:hover {
+  background: var(--accent-hover, #004499);
+}
+
+.filter-sheet__done:focus-visible {
+  outline: 2px solid var(--accent-deeper, #003366);
+  outline-offset: 2px;
+}
+
+/* Desktop: turn the bottom sheet into a centered modal. Mobile keeps
+ * the inherited .sheet positioning. */
+@media (min-width: 1025px) {
+  .sheet--filter {
+    inset: 50% auto auto 50%;
+    transform: translate(-50%, -50%);
+    width: min(28rem, calc(100vw - 32px));
+    max-height: min(80vh, 640px);
+    border-radius: 12px;
+    border: 1px solid var(--border-strong, #a8b8cc);
+    padding: 14px 18px calc(16px + env(safe-area-inset-bottom, 0));
+  }
+
+  .sheet--filter .sheet__handle {
+    display: none;
+  }
 }
 
 .diag-list {
