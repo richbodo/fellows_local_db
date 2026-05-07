@@ -200,3 +200,133 @@ class TestAboutStatsLayout:
             )
         finally:
             page.close()
+
+    def test_bars_aligned_across_sections_at_desktop(
+        self, context, base_url_fixture
+    ):
+        """User feedback (post-#132): the conventional bar-chart shape
+        wants every bar to start at the same x. Pre-fix the label
+        column auto-sized per-section, so the Region section's bars
+        started further right than Type's. The fixed-label-column rule
+        should pin every single-column section to the same starting x.
+
+        We exclude the multicol section (Field Completeness) because
+        its rows live inside CSS columns whose offset depends on which
+        column they're in — alignment within each multicol-column is
+        what matters there, and is covered by visual review."""
+        page = _make_standalone_page(context)
+        try:
+            page.set_viewport_size({"width": 1400, "height": 900})
+            _boot_then_open_about(page, base_url_fixture)
+
+            # Sample the leftmost x of the bar track in the first row of
+            # each non-multicol section. They must all match to within
+            # 1px (subpixel rounding).
+            xs = page.evaluate(
+                """
+                () => {
+                  const out = [];
+                  const sections = document.querySelectorAll(
+                    '.stats-grid .stats-section:not(.stats-section--multicol)'
+                  );
+                  for (const s of sections) {
+                    const track = s.querySelector(
+                      '.stats-bar-row:first-child .stats-bar-track'
+                    );
+                    if (track) {
+                      out.push({
+                        title: s.querySelector('.stats-section-title').textContent,
+                        x: track.getBoundingClientRect().left,
+                      });
+                    }
+                  }
+                  return out;
+                }
+                """
+            )
+            assert len(xs) >= 3, f"expected ≥3 single-col sections; got {xs}"
+            base_x = xs[0]["x"]
+            for entry in xs[1:]:
+                assert abs(entry["x"] - base_x) < 1.5, (
+                    f"bars should align across sections; "
+                    f"{entry['title']!r} starts at {entry['x']:.1f}, "
+                    f"baseline {xs[0]['title']!r} at {base_x:.1f}"
+                )
+        finally:
+            page.close()
+
+    def test_count_renders_inside_label_text_block(
+        self, context, base_url_fixture
+    ):
+        """User feedback: count moves to sit next to the label so it's
+        readable on mobile when the bar overflows the viewport. The
+        count must live inside .stats-bar-text (alongside the label),
+        NOT after the bar track."""
+        page = _make_standalone_page(context)
+        try:
+            _boot_then_open_about(page, base_url_fixture)
+
+            row = page.locator(".stats-grid .stats-bar-row").first
+            # Count is inside the text block.
+            count_in_text = row.locator(".stats-bar-text > .stats-bar-count")
+            expect(count_in_text).to_have_count(1)
+            # No stray count outside the text block (e.g. after the track).
+            stray = row.locator(":scope > .stats-bar-count")
+            assert stray.count() == 0, (
+                "count should not be a direct child of .stats-bar-row; "
+                "it must nest inside .stats-bar-text"
+            )
+
+            # Count text matches the resolved value (without parens —
+            # those come from CSS ::before/::after).
+            count_text = count_in_text.inner_text()
+            assert count_text.strip().isdigit(), (
+                f"count should be a bare number (parens come from CSS); "
+                f"got {count_text!r}"
+            )
+        finally:
+            page.close()
+
+    def test_mobile_keeps_full_label_visible(self, context, base_url_fixture):
+        """User feedback: on mobile we drop bar alignment in favor of
+        full label readability. At ≤700px viewport, labels must NOT be
+        ellipsized — the user wants 'International Entrepreneur (288)'
+        in full even if the bar overflows the viewport.
+
+        We assert by computing the rendered label width and comparing
+        against scrollWidth: if scrollWidth > clientWidth, the label is
+        being clipped."""
+        page = _make_standalone_page(context)
+        try:
+            page.set_viewport_size({"width": 360, "height": 800})
+            _boot_then_open_about(page, base_url_fixture)
+
+            # Pick the longest label across all sections — likely
+            # "East & Central Asia (includes China)" in Region — and
+            # assert it's not clipped at 360px viewport.
+            clipped = page.evaluate(
+                """
+                () => {
+                  const labels = document.querySelectorAll(
+                    '.stats-grid .stats-bar-label'
+                  );
+                  const out = [];
+                  for (const el of labels) {
+                    if (el.scrollWidth > el.clientWidth + 1) {
+                      out.push({
+                        text: el.textContent,
+                        scroll: el.scrollWidth,
+                        client: el.clientWidth,
+                      });
+                    }
+                  }
+                  return out;
+                }
+                """
+            )
+            assert clipped == [], (
+                f"labels should not be ellipsized at 360px mobile viewport; "
+                f"got {len(clipped)} clipped: {clipped[:3]}"
+            )
+        finally:
+            page.close()
