@@ -181,6 +181,44 @@
   var _bootSummaryEmitted = false;
   var authDebugLines = [];
   var swLifecycleLog = [];
+  // Local mirror of every reportInstallEvent() call, plus shape of
+  // beforeinstallprompt/appinstalled events. The server-side counterpart
+  // (kind=install events to /api/client-errors) is great for aggregate
+  // funnel telemetry but useless when triaging a single user's session
+  // from a pasted Diagnostics blob — that user's events are mixed in
+  // with everyone else's on the server side. This array goes into the
+  // Diagnostics dialog so the install lifecycle is visible per-session.
+  // Capped at 50 entries (more than enough; install flow has ~10 events).
+  var installLifecycleLog = [];
+  // Snapshots of (display-mode: standalone) at multiple boot checkpoints.
+  // Chrome desktop has been observed to return false for matchMedia(
+  // '(display-mode: standalone)').matches at the very first script tick
+  // in a freshly-launched PWA window, even when the window IS standalone —
+  // that's the race the install-loop fix is defending against. Without
+  // multiple samples we can't tell "always browser-tab" from "standalone
+  // but matchMedia hadn't resolved." Samples carry both isStandaloneDisplay
+  // Mode() (which OR's iOS navigator.standalone) and the raw matchMedia
+  // result, plus a label for the call site.
+  var displayModeSamples = [];
+  function sampleDisplayMode(label) {
+    try {
+      var rawMatches = null;
+      try {
+        rawMatches = (window.matchMedia &&
+          window.matchMedia('(display-mode: standalone)').matches) || false;
+      } catch (eMm) { rawMatches = '(matchMedia threw)'; }
+      var navStandalone = null;
+      try { navStandalone = window.navigator && window.navigator.standalone; } catch (eNs) {}
+      displayModeSamples.push({
+        ts: new Date().toISOString(),
+        label: String(label || ''),
+        standalone: isStandaloneDisplayMode(),
+        matchMedia: rawMatches,
+        navStandalone: navStandalone === undefined ? '(unset)' : navStandalone
+      });
+      if (displayModeSamples.length > 30) displayModeSamples.shift();
+    } catch (e) { /* best-effort */ }
+  }
   var imagePrewarmState = {
     status: 'idle',
     total: 0,
@@ -2475,6 +2513,71 @@
       );
     }
     lines.push('');
+    // Auth trace: which routing branches fired during this page load.
+    // Mirrors the "Auth trace" surfaced in the bug-report dialog —
+    // duplicated here because the Diagnostics dialog is what users
+    // typically paste, and without this it's impossible to tell from a
+    // diag whether bootDirectoryAsApp / startBrowserUx / initEmailGate /
+    // initBrowserInstallMode was reached or why.
+    try {
+      lines.push('Auth trace (' + authDebugLines.length + ' events):');
+      if (authDebugLines.length === 0) {
+        lines.push('  (no auth trace lines recorded)');
+      } else {
+        for (var ai = 0; ai < authDebugLines.length; ai++) {
+          lines.push('  ' + authDebugLines[ai]);
+        }
+      }
+    } catch (e) {
+      lines.push('Auth trace: (error — ' + String(e && e.message || e) + ')');
+    }
+    lines.push('');
+    // Install lifecycle: every reportInstallEvent() in this page load.
+    // Distinguishes "Chrome never fired beforeinstallprompt" (suppressed
+    // because PWA is already installed elsewhere on this profile) from
+    // "user dismissed" or "Chrome offered install but click failed".
+    try {
+      lines.push('Install lifecycle (' + installLifecycleLog.length + ' events):');
+      if (installLifecycleLog.length === 0) {
+        lines.push('  (no install events recorded — install landing not reached or before_prompt timer not yet fired)');
+      } else {
+        for (var ii = 0; ii < installLifecycleLog.length; ii++) {
+          var iev = installLifecycleLog[ii];
+          lines.push(
+            '  ' + iev.ts + ' ' + iev.name +
+            (iev.extra ? ' [' + iev.extra + ']' : '') +
+            ' (standalone=' + iev.standalone + ')'
+          );
+        }
+      }
+    } catch (e) {
+      lines.push('Install lifecycle: (error — ' + String(e && e.message || e) + ')');
+    }
+    lines.push('');
+    // Display-mode samples — the matchMedia race at the heart of the
+    // install-loop bug. If the first samples show standalone=false and
+    // a later sample shows standalone=true, the matchMedia race fired:
+    // the dispatcher saw browser-tab and routed to startBrowserUx, but
+    // by the time of a later check the window was actually standalone.
+    try {
+      lines.push('Display-mode samples (' + displayModeSamples.length + '):');
+      if (displayModeSamples.length === 0) {
+        lines.push('  (no samples — module init may not have completed)');
+      } else {
+        for (var si = 0; si < displayModeSamples.length; si++) {
+          var s = displayModeSamples[si];
+          lines.push(
+            '  ' + s.ts + ' ' + s.label +
+            ': standalone=' + s.standalone +
+            ' matchMedia=' + s.matchMedia +
+            ' navStandalone=' + s.navStandalone
+          );
+        }
+      }
+    } catch (e) {
+      lines.push('Display-mode samples: (error — ' + String(e && e.message || e) + ')');
+    }
+    lines.push('');
     lines.push(
       'Tip: In Chrome DevTools → Application → Cookies → https://your-host — HttpOnly session cookie may list there while document.cookie stays empty.'
     );
@@ -4024,6 +4127,18 @@
   // that often follows (e.g. user_in_tab_clicked → bootDirectoryAsApp).
   function reportInstallEvent(name, extra) {
     if (!name) return;
+    // Local mirror first — independent of network. The server-side fetch
+    // below can fail silently; the local log goes into the Diagnostics
+    // blob the user pastes, so this is what unsticks debugging.
+    try {
+      installLifecycleLog.push({
+        ts: new Date().toISOString(),
+        name: String(name),
+        extra: extra ? String(extra) : '',
+        standalone: isStandaloneDisplayMode()
+      });
+      if (installLifecycleLog.length > 50) installLifecycleLog.shift();
+    } catch (eLi) { /* best-effort */ }
     var build = '';
     if (bootBuildMeta && (bootBuildMeta.git_sha || bootBuildMeta.built_at)) {
       build = (bootBuildMeta.git_sha || '') +
@@ -4092,6 +4207,7 @@
   }
 
   function initBrowserInstallMode(authPayload, httpStatus) {
+    sampleDisplayMode('initBrowserInstallMode_entry');
     // Defensive re-check for the standalone race. matchMedia(
     // '(display-mode: standalone)').matches has been observed to return
     // false in startBrowserUx's auth-status .then() callback even when
@@ -4494,6 +4610,7 @@
         // The directoryBootAttempted guard prevents (2) from re-entering
         // bootDirectoryAsApp and looping; in that case we fall through to
         // the email gate so the user can request a fresh magic link.
+        sampleDisplayMode('startBrowserUx_then');
         var standaloneAtCheck = isStandaloneDisplayMode();
         authDebugPush(
           'pre-branch check: standalone=' + standaloneAtCheck +
@@ -9468,8 +9585,26 @@
     });
   }
 
+  // Display-mode samples around the boot dispatcher — the matchMedia
+  // race lives here. See displayModeSamples docs at module top.
+  sampleDisplayMode('module_init');
+  setTimeout(function () { sampleDisplayMode('after_setTimeout_0'); }, 0);
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(function () { sampleDisplayMode('after_raf'); });
+  }
+  setTimeout(function () { sampleDisplayMode('after_500ms'); }, 500);
+
   tryUnlockFromHash().then(function () {
-    if (shouldActAsApp()) {
+    sampleDisplayMode('dispatcher');
+    var actAsApp = shouldActAsApp();
+    var override = parseGateOverride();
+    bootDebugPush(
+      'dispatcher: shouldActAsApp=' + actAsApp +
+      ' (standalone=' + isStandaloneDisplayMode() +
+      ', authOnce=' + hasAuthenticatedOnce() +
+      ', forceGate=' + (override && override.force) + ')'
+    );
+    if (actAsApp) {
       bootDirectoryAsApp();
     } else {
       startBrowserUx();
