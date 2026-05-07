@@ -6946,34 +6946,47 @@
       "</svg>"
     );
 
-  /** Trigger a Blob download. On platforms that support
-   *  navigator.share with files (iOS 16.4+, modern Android), prefer the
-   *  share sheet — gives the user Save to Files / AirDrop / Mail
-   *  options. Fall back to <a download> for desktop and older mobile.
-   *  Per the PR 1 mitigation plan in docs/persistence_and_upgrades.md. */
+  /** Trigger a Blob download. On mobile (iOS 16.4+, modern Android),
+   *  prefer the share sheet — gives the user Save to Files / AirDrop /
+   *  Mail. Desktop always uses <a download>: on macOS Chrome PWA the
+   *  share sheet has no Save-to-Downloads entry, just AirDrop/Messages.
+   *  If share() rejects (Chromium's file-share allowlist excludes
+   *  text/html, which surfaced as "permission denied" on Android too),
+   *  fall back to <a download> — but skip the fallback on AbortError,
+   *  which is the user dismissing the sheet. */
   function downloadBlob(blob, filename) {
+    function triggerAnchorDownload() {
+      return new Promise(function (resolve) {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function () {
+          try { document.body.removeChild(a); } catch (e) {}
+          try { URL.revokeObjectURL(url); } catch (e) {}
+          resolve();
+        }, 100);
+      });
+    }
     try {
-      if (navigator.canShare && typeof File === 'function') {
+      var ua = navigator.userAgent || '';
+      var isMobile = /iPad|iPhone|iPod|Android/.test(ua) ||
+                     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      if (isMobile && navigator.canShare && typeof File === 'function') {
         var file = new File([blob], filename, { type: blob.type || 'application/octet-stream' });
         if (navigator.canShare({ files: [file] })) {
-          return navigator.share({ files: [file], title: filename });
+          return navigator.share({ files: [file], title: filename })
+            .catch(function (err) {
+              if (err && err.name === 'AbortError') return;
+              return triggerAnchorDownload();
+            });
         }
       }
     } catch (e) { /* fall through to <a download> */ }
-    return new Promise(function (resolve) {
-      var url = URL.createObjectURL(blob);
-      var a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      a.style.display = 'none';
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(function () {
-        try { document.body.removeChild(a); } catch (e) {}
-        try { URL.revokeObjectURL(url); } catch (e) {}
-        resolve();
-      }, 100);
-    });
+    return triggerAnchorDownload();
   }
 
   /** For each member, look up the full fellow record from fellowsBySlug.
