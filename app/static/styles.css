@@ -1658,6 +1658,32 @@ h1 {
   white-space: nowrap;
 }
 
+/* Inline hint shown next to a member chip when fellow data is missing —
+   composer rail (edit-mode orphan), visual-directory portrait + modal,
+   and group exports. See issue #111 for context. */
+.fellow-data-unavailable-hint {
+  font-size: 0.72rem;
+  color: var(--muted-soft, #888);
+  font-style: italic;
+  font-weight: 400;
+}
+
+.group-rail-member--unresolved .group-rail-member-name {
+  color: var(--muted, #555);
+}
+
+.group-directory-name + .fellow-data-unavailable-hint {
+  display: block;
+  margin-top: 2px;
+  line-height: 1.2;
+}
+
+.fellow-modal-unresolved-hint {
+  text-align: center;
+  margin: -0.4rem 0 0.6rem;
+  font-size: 0.85rem;
+}
+
 .group-rail-member-remove {
   background: transparent;
   border: 0;
