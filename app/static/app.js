@@ -4440,6 +4440,35 @@
           initEmailGate(data, httpStatus, override.reason);
           return;
         }
+        // PWA-mode decision tree per docs/email_gate.md: installed PWAs
+        // route to directory or email gate, never the install landing.
+        // Two ways we can reach this code path while standalone:
+        //   1. shouldActAsApp() returned false at boot — possible on a
+        //      freshly-installed PWA where the display-mode media query
+        //      hadn't resolved standalone by the time the dispatcher
+        //      ran. Reproduces as an "install loop" inside the standalone
+        //      window for 30 minutes after token issue.
+        //   2. bootDirectoryAsApp's catch handler routed an authFailure
+        //      (401/403) here.
+        // The directoryBootAttempted guard prevents (2) from re-entering
+        // bootDirectoryAsApp and looping; in that case we fall through to
+        // the email gate so the user can request a fresh magic link.
+        if (isStandaloneDisplayMode() && data.authEnabled) {
+          if (data.authenticated && !directoryBootAttempted) {
+            authDebugPush('standalone + authenticated: routing to directory (PWA-mode tree)');
+            markAuthenticatedOnce();
+            bootDirectoryAsApp();
+            return;
+          }
+          authDebugPush(
+            'standalone + (unauth or directory already attempted): using email gate'
+          );
+          if (data.authenticated) {
+            markAuthenticatedOnce();
+          }
+          initEmailGate(data, httpStatus, '');
+          return;
+        }
         if (!data.authEnabled) {
           // Dev passthrough. On localhost we boot the directory directly —
           // the install landing every time a maintainer hits Clear App
@@ -8873,7 +8902,10 @@
   updateFilterTriggerUI();
   wireCopyButtons();
 
+  var directoryBootAttempted = false;
+
   function bootDirectoryAsApp() {
+    directoryBootAttempted = true;
     bootDebugLines.length = 0;
     setShellVisible(true);
     if (loadingPanelEl) {
