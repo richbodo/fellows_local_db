@@ -393,6 +393,11 @@ drift:
     echo "origin/main:"
     git log -1 --format='  %h %cI  %s' origin/main 2>/dev/null || echo "  (no origin/main)"
 
+# Interactive SSH into the prod droplet (uses FELLOWS_HOST / FELLOWS_SSH_PORT / FELLOWS_SSH_USER).
+[group('prod')]
+prod-ssh:
+    ssh -p {{ssh_port}} {{ssh_user}}@{{host}}
+
 # Tail journald for UNIT (default fellows-pwa).
 [group('prod')]
 prod-logs unit="fellows-pwa":

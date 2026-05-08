@@ -161,6 +161,12 @@ Export them or inline: `FELLOWS_BASE_URL=https://staging.example.com just smoke`
   a refresh cheat-sheet (Cmd-Shift-R bypasses the SW shell cache;
   Clear App Cache preserves OPFS; incognito is the nuclear baseline).
   Use when "is this the version I think it is?" comes up.
+- **`prod-ssh`** — interactive SSH into the prod droplet using
+  `FELLOWS_HOST` / `FELLOWS_SSH_PORT` / `FELLOWS_SSH_USER`. No IP, port,
+  or operator account to remember. Use this when you need a real shell
+  on the box (e.g. `sudo nano /etc/fellows/fellows-pwa.env`); for
+  one-off non-interactive commands the targeted recipes below are
+  shorter (`prod-logs`, `prod-status`, `prod-env`).
 - **`prod-logs [UNIT]`** — SSH + `journalctl -u UNIT -f`. Default unit
   `fellows-pwa`; try `just prod-logs caddy` for the reverse proxy.
 - **`prod-stats [SINCE]`** — summary of page views, magic-link send/verify
