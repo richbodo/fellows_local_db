@@ -22,6 +22,7 @@ The architectural decisions below — separate `relationships.db` file, `ATTACH 
 ## Tech Stack
 
 - **Server**: Python stdlib `http.server` — single file, no framework
+- **Cross-origin isolation**: Both servers send `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`. **Required** — the OPFS-SAH-Pool VFS that backs `relationships.db` and `fellows.db` in the browser gates `SharedArrayBuffer` / `Atomics` on `crossOriginIsolated=true`. A reverse proxy that strips these headers makes the worker silently fall back to the `api+idb` provider; the symptom is "Settings has no backup/restore section," diagnosable via `?diag=1` showing `dataProvider.kind: api+idb` instead of `worker`.
 - **Database**: SQLite3 with FTS5 full-text search
 - **Frontend**: Vanilla JS SPA with hash routing, no build step
 - **Data source**: JSON dump from EHF wiki, imported via build script
@@ -70,8 +71,13 @@ The server opens a new SQLite connection per request (no connection pool — unn
 
 User-authored data (groups, tags, notes, settings) lives in
 `app/relationships.db`, a separate SQLite file from `fellows.db`.
-Cross-DB joins (worker-internal) use SQLite `ATTACH DATABASE ... ?mode=ro`,
-which keeps contact data read-only at the SQLite level. `relationships.db`
+Cross-DB joins happen inside the dedicated worker, attached once per
+worker `init` via `ATTACH DATABASE 'fellows.db' AS f ?mode=ro` — *not*
+per request. The `?mode=ro` suffix enforces read-only access at the
+SQLite level; any stray write into `f.*` raises `OperationalError`.
+(Pre-Phase-1 the dev server did per-request ATTACHes for `/api/groups`
+and friends; those routes are retired and the worker now does it once
+per session.) `relationships.db`
 is durable across both app updates and Clear App Cache; `fellows.db`
 is re-imported **on user request** when its server-reported content SHA
 differs from the SHA recorded in OPFS-side `fellows.db.meta.json` —
@@ -184,6 +190,70 @@ Bright lines for the codebase, not just the plan:
   race on the SAH. Today's behavior — second tab fails to acquire
   — is preserved. A graceful "another instance is open" UI is a
   follow-up, not a goal.
+
+## Workspace data providers (three tiers, mid-boot hot-swap)
+
+The workspace's data layer is a tiered abstraction with three
+implementations and an explicit fall-through path. The active
+provider is the runtime contract every render path consults; it's
+exposed at `window.__dataProvider` for tests and diagnostics.
+
+The tiers, in preference order:
+
+1. **`worker`** — happy path. RPC into the dedicated OPFS-owning
+   worker (see [Worker-owned OPFS](#worker-owned-opfs)). Full reads +
+   writes on both `relationships.db` and `fellows.db` (the latter
+   read-only).
+2. **`api+idb`** — auth-failure / OPFS-incapable fallback. Directory
+   reads come from `/api/fellows` when the session is valid, or from
+   the IndexedDB cache populated by a prior successful boot when it
+   isn't (per [`email_gate.md` invariant 10](email_gate.md)). Writes
+   to relationship-shaped methods (`createGroup`, `setSetting`, …)
+   reject with `localDataUnavailableError` so render paths catch it
+   and surface the unsupported-browser panel.
+3. **`api`** — deepest fallback. Same as `api+idb` without the
+   IndexedDB layer. Used in environments without IndexedDB (rare)
+   and as the dev passthrough.
+
+**Hot-swap on auth failure.** `bootDirectoryAsApp` starts with the
+worker provider; if the worker's `ensureFellowsDb` returns 401 / 403
+(stale session), the boot path swaps to `api+idb` mid-flight without
+unwinding. The worker process stays alive (it still owns OPFS;
+`clearEverything` reaches it through `warmWorker.rpc` for the wipe).
+The build badge flips to `server: offline · using cache`. The user
+keeps browsing the cached directory until they explicitly re-authenticate
+via `/?gate=1`.
+
+This is what makes "stale session must not lock users out of cached
+data" testable: a 401 on `/api/fellows` doesn't propagate as a boot
+failure; it transparently routes through the IDB cache.
+
+## Boot orchestration (named marks + watchdog + slow-boot persistence)
+
+The workspace runs a watchdog (default 20s) over a sequence of named
+boot phase marks: `script_start`, `pick_provider_start`,
+`worker_init_done`, `provider_ready`, `get_list_done`, `get_full_done`,
+`image_prewarm_done`, `summary`. If `get_list_done` doesn't arrive in
+time, a recovery panel (`#boot-stuck-panel`) renders naming the last
+completed mark — diagnostic enough that a stuck-boot report identifies
+which phase stalled before any backtrace. Same recovery affordances as
+the boot-error panel: Reload, Clear App Cache & Reload, send a bug
+report.
+
+Slow boots persist to localStorage:
+
+- **Trigger:** total >3000 ms or any single phase >2000 ms.
+- **Storage key:** `fellows_last_slow_boot`. Single record, overwritten
+  on each new slow boot. Survives Clear App Cache by being preserved
+  alongside `fellows_authenticated_once`.
+- **Surface:** the `?diag=1` panel shows it under "Last slow boot
+  recorded" on the next session. A regression captured one session
+  is readable in the next without depending on the user keeping the
+  slow tab open.
+
+`bootMarks` is exposed at `window.__bootMarks` for e2e tests; the
+chronological trace is at `window.__bootDebugLines`. Both are
+read-only by convention.
 
 ## Two-Phase Load
 

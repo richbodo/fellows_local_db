@@ -28,6 +28,20 @@ rsync dist/ ─────SSH (rsb)───▶ /opt/fellows/deploy/dist/   (fe
                           Public Internet
 ```
 
+Caddy and any reverse proxy in front of the Python server **must
+preserve** the `Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: require-corp` headers that the Python
+server sets on every response. These are load-bearing: the
+OPFS-SAH-Pool VFS that holds `relationships.db` and `fellows.db` in
+the browser refuses to install without `crossOriginIsolated=true`.
+If a future deploy switches reverse proxies and the headers don't
+make it through, the silent symptom is "Settings page has no
+backup/restore section" — diagnosable via `?diag=1` showing
+`dataProvider.kind: api+idb` instead of `worker`. Caddy in the
+default `reverse_proxy` config passes them through; explicit
+`header_down` directives that strip them are the failure path to
+look for.
+
 ## Unix identities
 
 Two accounts — one for the human, one for the daemon. This is the smallest separation that lets a code-exec bug in the service not become a code-rewrite opportunity.
