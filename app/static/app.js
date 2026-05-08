@@ -6164,7 +6164,13 @@
    *  width via aspect-ratio scaling, which made bars shrink in both
    *  dimensions on narrow columns. `multicol` opts the section into a
    *  two-column wrap above the desktop breakpoint — appropriate for the
-   *  long Field Completeness list. */
+   *  long Field Completeness list.
+   *
+   *  Per-row width and per-section color are emitted as `data-pct` /
+   *  `data-bar-color` attributes (not inline `style="..."`) so the page
+   *  is CSP-compliant under `style-src 'self'`. The caller applies them
+   *  via `applyStatsBarStyles(rootEl)` after innerHTML lands in the
+   *  DOM — CSSOM writes don't count as inline styles for CSP. */
   function statsSection(title, items, color, multicol) {
     if (!items || !items.length) return '';
     var maxCount = items[0].count;
@@ -6183,15 +6189,34 @@
           '<span class="stats-bar-count">' + escapeHtml(String(item.count)) + '</span>' +
         '</span>' +
         '<span class="stats-bar-track">' +
-          '<span class="stats-bar-fill" style="width: ' + pct.toFixed(1) + '%"></span>' +
+          '<span class="stats-bar-fill" data-pct="' + pct.toFixed(1) + '"></span>' +
         '</span>' +
       '</li>';
     }
     var sectionClass = 'stats-section' + (multicol ? ' stats-section--multicol' : '');
-    return '<section class="' + sectionClass + '" style="--stats-bar-color: ' + color + '">' +
+    return '<section class="' + sectionClass + '" data-bar-color="' + escapeHtml(color) + '">' +
       '<h3 class="stats-section-title">' + escapeHtml(title) + '</h3>' +
       '<ol class="stats-bars">' + rows + '</ol>' +
     '</section>';
+  }
+
+  /** Apply per-row widths and per-section bar colors via CSSOM after
+   *  `gridEl.innerHTML = ...` has parsed the markup. Pairs with
+   *  `statsSection`, which writes the values into `data-pct` /
+   *  `data-bar-color` instead of inline `style="..."` attributes (the
+   *  latter are blocked by `style-src 'self'`; CSSOM is not). */
+  function applyStatsBarStyles(rootEl) {
+    if (!rootEl) return;
+    var fills = rootEl.querySelectorAll('.stats-bar-fill[data-pct]');
+    for (var i = 0; i < fills.length; i++) {
+      var pct = fills[i].getAttribute('data-pct');
+      if (pct) fills[i].style.width = pct + '%';
+    }
+    var sections = rootEl.querySelectorAll('.stats-section[data-bar-color]');
+    for (var j = 0; j < sections.length; j++) {
+      var color = sections[j].getAttribute('data-bar-color');
+      if (color) sections[j].style.setProperty('--stats-bar-color', color);
+    }
   }
 
   function renderAboutPage() {
@@ -6415,6 +6440,7 @@
           gh += statsSection('Fellows by Region', data.by_region, '#2c4a6a');
           gh += statsSection('Field Completeness', data.field_completeness, '#5a5a5a', true);
           gridEl.innerHTML = gh;
+          applyStatsBarStyles(gridEl);
         }
       })
       .catch(function () {

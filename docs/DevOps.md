@@ -196,8 +196,9 @@ That run creates the `fellows` system user, adds the operator to the `fellows` g
 Canonical shape:
 
 ```env
-# Hard-required. The auth gate disables itself if either is unset.
+# Hard-required. The auth gate disables itself if any are unset.
 FELLOWS_SESSION_SECRET=...
+FELLOWS_ALLOWLIST_HMAC_KEY=...
 FELLOWS_POSTMARK_TOKEN=...
 
 # Required in practice. Code has fallbacks but they're fragile.
@@ -208,7 +209,7 @@ FELLOWS_PUBLIC_ORIGIN=https://fellows.globaldonut.com
 FELLOWS_REPLY_TO=you+fellows@example.com
 ```
 
-Generate a session secret:
+Generate a session secret or allowlist HMAC key:
 
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(48))"
@@ -217,10 +218,13 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 | Variable | Tier | Purpose | What breaks if unset or wrong |
 |---|---|---|---|
 | `FELLOWS_SESSION_SECRET` | hard-required | HMAC key (≥48 chars) for the session cookie. | `deploy/server.py` logs "auth disabled" at startup; `/api/auth/status` returns `authEnabled: false` for every request; nobody can sign in. Rotation invalidates every outstanding session. |
+| `FELLOWS_ALLOWLIST_HMAC_KEY` | hard-required | HMAC key used to derive the in-memory allowlist from `contact_email` rows in `fellows.db`. The previous flow shipped an `allowed_emails.json` file in `dist/`; the new flow keeps the key off-disk and the allowlist exists only in process memory. | Auth disables itself with a startup warning. Rotation requires every fellow to log in again only if you also rotate the session secret — the allowlist itself is rebuilt on the next start regardless. |
 | `FELLOWS_POSTMARK_TOKEN` | hard-required | Postmark Server API token. | `POST /api/send-unlock` raises; users see the anti-enumeration "we'll send a link if it's allowed" reply but no email goes out. journald logs `event=send_unlock_email result=error`. |
 | `FELLOWS_MAIL_FROM` | required for non-canonical deploys | Sender on outgoing magic-link emails. In-code default `EHF Directory App <admin@fellows.globaldonut.com>` works for the canonical deploy; **forks must override**. | If set as a bare address (no `Display Name <addr>`), most clients render the local-part as the sender — reads as spam. If unset on a fork, sends as the canonical domain and fails Postmark sender verification. |
 | `FELLOWS_PUBLIC_ORIGIN` | required in practice | Base origin for magic-link URLs in email bodies. | Server falls back to inferring from `X-Forwarded-Proto`/`Host`. Works when Caddy forwards both headers; produces malformed links when either is missing. Set it to take the risk off the table. |
 | `FELLOWS_REPLY_TO` | optional | Sets the email's `Reply-To` header. Use when the From address isn't a human inbox. | Replies fall through to `FELLOWS_MAIL_FROM`. |
+
+**Migration note (one-time, after `security/tier1-hardening` lands):** an existing droplet's `/etc/fellows/fellows-pwa.env` will not have `FELLOWS_ALLOWLIST_HMAC_KEY`. After deploying the new bundle, the service starts with auth disabled until you add the key. Re-run `just prod-configure-env` (which now prompts for it and offers to generate one) or append the line manually with `python -c "import secrets; print(secrets.token_urlsafe(48))"` and `sudo systemctl restart fellows-pwa`. Every fellow's session also re-logs once on this deploy because cookies bumped from v2 to v3 (server-side session registry).
 
 **Dev-only.** `FELLOWS_COOKIE_INSECURE=1` drops the `Secure` flag from the session cookie so it works over plain HTTP. Used by the in-process test fixture; never set on prod. `FELLOWS_DIST_ROOT` overrides the static-root path the prod server reads from (default `<deploy>/dist`) — useful for staging deploys, not in the bootstrap script.
 

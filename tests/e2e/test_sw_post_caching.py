@@ -93,8 +93,12 @@ def deploy_clean_page_with_sw(context, deploy_server):
     deploy_server["sent"].clear()
 
     page.goto(deploy_server["base_url"] + "/?gate=1", wait_until="load")
+    # Wrap as an arrow function so Playwright uses Runtime.callFunctionOn
+    # rather than Runtime.evaluate (the latter trips CSP `script-src 'self'`
+    # because it injects via eval; the former is exempt). The condition
+    # itself is unchanged.
     page.wait_for_function(
-        "navigator.serviceWorker && navigator.serviceWorker.controller !== null",
+        "() => navigator.serviceWorker && navigator.serviceWorker.controller !== null",
         timeout=10000,
     )
 
@@ -111,7 +115,9 @@ def deploy_clean_page_with_sw(context, deploy_server):
 
 
 def _cache_put_attempts(sw):
-    return sw.evaluate("self.__cachePutAttempts__ || []")
+    # Same CSP-bypass dance as wait_for_function: arrow function → Playwright
+    # uses Runtime.callFunctionOn instead of Runtime.evaluate.
+    return sw.evaluate("() => self.__cachePutAttempts__ || []")
 
 
 def test_sw_does_not_attempt_to_cache_post_responses(

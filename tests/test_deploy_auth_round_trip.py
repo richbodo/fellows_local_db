@@ -76,12 +76,15 @@ def _token_from_url(magic_url):
 
 @pytest.fixture(autouse=True)
 def _reset_auth_state(deploy_server):
-    """Each test starts with empty rate buckets, no live tokens, no consumed-token grace records, no recorded sends."""
+    """Each test starts with empty rate buckets, no live tokens, no
+    consumed-token grace records, no registered sessions, and no
+    recorded sends."""
     state = deploy_server["auth_state"]
     with state.lock:
         state.tokens.clear()
         state.consumed.clear()
         state.rate_buckets.clear()
+        state.sessions.clear()
     deploy_server["sent"].clear()
 
 

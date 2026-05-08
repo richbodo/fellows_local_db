@@ -294,6 +294,38 @@ class Handler(BaseHTTPRequestHandler):
         # safe (no cross-origin scripts / fonts / images to break).
         self.send_header("Cross-Origin-Opener-Policy", "same-origin")
         self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
+        # Strict CSP — without it a single XSS today exfiltrates the
+        # entire OPFS (relationships.db + fellows.db) to an attacker-
+        # controlled origin. The policy is strict by design: no inline
+        # scripts/styles, no third-party origins. `'wasm-unsafe-eval'`
+        # is the modern carve-out for sqlite3.wasm's WebAssembly
+        # compilation. Mirrors deploy/server.py so dev and prod enforce
+        # identical policies — drift is the bug that lets a CSP-
+        # incompatible pattern slip into a release.
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; "
+            "script-src 'self' 'wasm-unsafe-eval'; "
+            "worker-src 'self'; "
+            "connect-src 'self'; "
+            "img-src 'self' data:; "
+            "style-src 'self'; "
+            "font-src 'self'; "
+            "object-src 'none'; "
+            "base-uri 'self'; "
+            "frame-ancestors 'none';",
+        )
+        # Disable browser features the app does not use, to reduce the
+        # leverage available to an XSS payload that does land.
+        self.send_header(
+            "Permissions-Policy",
+            "geolocation=(), camera=(), microphone=(), payment=(), "
+            "accelerometer=(), gyroscope=(), magnetometer=(), usb=(), "
+            "midi=(), serial=(), bluetooth=()",
+        )
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+        self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
+        self.send_header("X-Content-Type-Options", "nosniff")
         super().end_headers()
 
     def send_json(self, data, status=200):

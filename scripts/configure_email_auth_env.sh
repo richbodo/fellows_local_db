@@ -45,6 +45,12 @@ generate_session_secret() {
   python3 -c "import secrets; print(secrets.token_urlsafe(48))"
 }
 
+# The allowlist HMAC key is symmetric and only needs to be unguessable.
+# Same generation as the session secret (urlsafe base64 of 48 random bytes).
+generate_hmac_key() {
+  python3 -c "import secrets; print(secrets.token_urlsafe(48))"
+}
+
 require_cmd ssh
 require_cmd scp
 require_cmd python3
@@ -73,12 +79,26 @@ else
   session_secret="$(prompt_secret_required "FELLOWS_SESSION_SECRET (input hidden)")"
 fi
 
+# FELLOWS_ALLOWLIST_HMAC_KEY: HMAC key used to derive the in-memory
+# allowlist from contact_email values in fellows.db. Must be set or
+# the server boots with auth disabled. The key never leaves the prod
+# server — `build/build_pwa.py` no longer writes any allowlist file.
+default_hmac_key="$(generate_hmac_key)"
+read -r -p "Generate FELLOWS_ALLOWLIST_HMAC_KEY now? [Y/n]: " gen_hmac
+if [[ -z "${gen_hmac}" || "${gen_hmac}" =~ ^[Yy]$ ]]; then
+  hmac_key="$default_hmac_key"
+  echo "Generated allowlist HMAC key."
+else
+  hmac_key="$(prompt_secret_required "FELLOWS_ALLOWLIST_HMAC_KEY (input hidden)")"
+fi
+
 echo
 echo "Will configure host ${ssh_user}@${host}:${port}"
 echo "  FELLOWS_MAIL_FROM=${mail_from}"
 echo "  FELLOWS_PUBLIC_ORIGIN=${public_origin}"
 echo "  FELLOWS_POSTMARK_TOKEN=<hidden>"
 echo "  FELLOWS_SESSION_SECRET=<hidden>"
+echo "  FELLOWS_ALLOWLIST_HMAC_KEY=<hidden>"
 read -r -p "Continue? [y/N]: " confirm
 if [[ ! "${confirm}" =~ ^[Yy]$ ]]; then
   echo "Aborted."
@@ -91,6 +111,7 @@ chmod 600 "$tmp_env"
 
 cat >"$tmp_env" <<EOF
 FELLOWS_SESSION_SECRET=$session_secret
+FELLOWS_ALLOWLIST_HMAC_KEY=$hmac_key
 FELLOWS_POSTMARK_TOKEN=$postmark_token
 FELLOWS_MAIL_FROM=$mail_from
 FELLOWS_PUBLIC_ORIGIN=$public_origin

@@ -2,13 +2,18 @@
 """Assemble deploy/dist/ from app/static/ for production (Python stdlib only).
 
 Copies static assets, sqlite-wasm vendor files, fellows.db, and profile images.
-Writes allowed_emails.json (SHA-256 of lowercased contact_email) for Phase 4 magic-link gate.
+
+The magic-link allowlist is no longer written to ``dist/`` — the
+production server builds it in memory at startup by HMAC-ing every
+distinct ``contact_email`` in ``fellows.db`` (see
+``deploy/magic_link_auth.py:load_allowlist_from_db``). Keeping it
+off-disk means a routing or filesystem mistake cannot expose a hash
+file to the public internet.
 """
 
 import hashlib
 import json
 import shutil
-import sqlite3
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -135,31 +140,6 @@ def write_build_meta(dest: Path, label: str, db_path: Path | None = None) -> Non
     dest.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
 
 
-def write_allowed_email_hashes(db_path: Path, dest_json: Path) -> None:
-    """SHA-256 hex of lowercased contact_email per Phase 4 plan."""
-    conn = sqlite3.connect(str(db_path))
-    try:
-        cur = conn.execute(
-            """
-            SELECT DISTINCT lower(trim(contact_email)) AS e
-            FROM fellows
-            WHERE contact_email IS NOT NULL AND trim(contact_email) != ''
-            """
-        )
-        hashes = []
-        seen = set()
-        for (raw,) in cur.fetchall():
-            if not raw:
-                continue
-            h = hashlib.sha256(raw.encode("utf-8")).hexdigest()
-            if h not in seen:
-                seen.add(h)
-                hashes.append(h)
-        dest_json.write_text(json.dumps({"hashes": hashes}, indent=0) + "\n", encoding="utf-8")
-    finally:
-        conn.close()
-
-
 def main() -> int:
     if not STATIC_DIR.is_dir():
         print(f"Missing static directory: {STATIC_DIR}", file=sys.stderr)
@@ -173,7 +153,6 @@ def main() -> int:
     write_build_meta(DIST_DIR / "build-meta.json", label, db_path=DB_SRC)
     if DB_SRC.is_file():
         shutil.copy2(DB_SRC, DIST_DIR / "fellows.db")
-        write_allowed_email_hashes(DB_SRC, DIST_DIR / "allowed_emails.json")
     else:
         print(f"Warning: no database at {DB_SRC} — run build/restore_from_knack_scrapefile.py", file=sys.stderr)
     img_src = IMAGES_SRC if IMAGES_SRC.is_dir() else (IMAGES_FALLBACK if IMAGES_FALLBACK.is_dir() else None)
