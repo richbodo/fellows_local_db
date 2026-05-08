@@ -12,7 +12,7 @@ Operator procedures (Postmark, env file, Postmark response interpretation) stay 
 
 ## Definitions
 
-- **Session cookie** — `fellows_session`, HttpOnly, HMAC-signed, carrying `token_issued_at` (epoch seconds). v2 format; v1 cookies are rejected on sight so prior sessions re-login cleanly after this ships.
+- **Session cookie** — `fellows_session`, HttpOnly, HMAC-signed, carrying `token_issued_at` (epoch seconds) and a server-side `session_id`. v3 format; v1 and v2 cookies are rejected on sight so prior sessions re-login cleanly after each version bump.
 - **Magic-link token** — single-use, `TOKEN_TTL = 30 min` from issue. Random 32-byte hex.
 - **Install window** — `INSTALL_WINDOW = 30 min` measured from token issue (not from click). Same duration as token TTL by design: a user has 30 min from the email being sent to finish clicking and installing.
 - **Display mode** — *browser* (`display-mode != standalone`) vs *PWA* (`display-mode: standalone`).
@@ -251,16 +251,19 @@ Operator query: `journalctl -u fellows-pwa | grep '"kind": "worker"'`. Pair `boo
 
 
 
-## Cookie format (v2)
+## Cookie format (v3)
 
-Plaintext payload (utf-8): `v2:<session_expires_at>:<token_issued_at>:<nonce>`
+Plaintext payload (utf-8): `v3:<session_expires_at>:<token_issued_at>:<session_id>:<nonce>`
 Cookie value: `base64url(payload) + "." + hex(hmac_sha256(secret, payload))`
 
-- `session_expires_at` = `int(time.time()) + SESSION_MAX_AGE`
+- `session_expires_at` = `int(time.time()) + SESSION_MAX_AGE`.
 - `token_issued_at` = the `issued_at` of the magic-link token that granted this session (epoch seconds). `0` only in legacy/test paths.
+- `session_id` = a 32-char hex identifier minted by `consume_token` and recorded in `AuthState.sessions`. Required: a cookie whose `session_id` is not in the registry fails verification, so a leaked `FELLOWS_SESSION_SECRET` alone cannot mint a working cookie.
 - Sig = `hmac_sha256(FELLOWS_SESSION_SECRET, payload)`.
 
-On every request the server recomputes HMAC, rejects on mismatch, and rejects if `session_expires_at < now`. The install-window check is *separate*: `now - token_issued_at < INSTALL_WINDOW`.
+On every request the server recomputes HMAC, rejects on mismatch, rejects if `session_expires_at < now`, and rejects if `session_id` is missing from the in-memory registry. The install-window check is *separate*: `now - token_issued_at < INSTALL_WINDOW`.
+
+The session registry is in-memory only — a server restart drops it, which is the deliberate one-time logout on each deploy. Every fellow re-authenticates once; subsequent requests within the cookie's 7-day TTL keep working.
 
 ## Security notes
 

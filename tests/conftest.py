@@ -1,6 +1,4 @@
 """Pytest configuration and shared fixtures."""
-import hashlib
-import json
 import os
 import shutil
 import sqlite3
@@ -141,18 +139,35 @@ def deploy_server(tmp_path_factory):
             f"DB not found at {src_db}. Run: python build/restore_from_knack_scrapefile.py"
         )
 
-    # Build a tmp dist root: app shell + a copy of fellows.db + a single-entry
-    # allowlist for the test email. Copy (not symlink) so a stray write through
-    # any future code path can't corrupt the dev DB.
+    # Build a tmp dist root: app shell + a copy of fellows.db. Copy
+    # (not symlink) so a stray write through any future code path
+    # can't corrupt the dev DB. The allowlist now lives in memory on
+    # the server (built from contact_email rows in fellows.db at
+    # init_auth() time), so we INSERT a row for the test email rather
+    # than writing a separate allowed_emails.json file.
     dist_dir = tmp_path_factory.mktemp("deploy_dist")
     shutil.copytree(repo_root / "app" / "static", dist_dir, dirs_exist_ok=True)
     shutil.copy2(src_db, dist_dir / "fellows.db")
 
     test_email = "round-trip-tester@example.com"
-    email_hash = hashlib.sha256(test_email.strip().lower().encode("utf-8")).hexdigest()
-    (dist_dir / "allowed_emails.json").write_text(
-        json.dumps({"hashes": [email_hash]}), encoding="utf-8"
-    )
+    test_db = dist_dir / "fellows.db"
+    conn = sqlite3.connect(str(test_db))
+    try:
+        # `slug` is NOT NULL with a UNIQUE index — pick a stable slug
+        # that won't collide with any real fellow.
+        conn.execute(
+            "INSERT OR REPLACE INTO fellows "
+            "(record_id, slug, name, contact_email) VALUES (?, ?, ?, ?)",
+            (
+                "test-rt-record",
+                "round-trip-tester",
+                "Round Trip Tester",
+                test_email,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
     # `deploy/server.py` reads DIST_DIR / PORT at import time. Set env first,
     # save originals so teardown leaves the process clean.
@@ -160,6 +175,7 @@ def deploy_server(tmp_path_factory):
     for k in (
         "FELLOWS_DIST_ROOT",
         "FELLOWS_SESSION_SECRET",
+        "FELLOWS_ALLOWLIST_HMAC_KEY",
         "FELLOWS_COOKIE_INSECURE",
         "PORT",
         "FELLOWS_POSTMARK_TOKEN",
@@ -167,6 +183,7 @@ def deploy_server(tmp_path_factory):
         saved_env[k] = os.environ.get(k)
     os.environ["FELLOWS_DIST_ROOT"] = str(dist_dir)
     os.environ["FELLOWS_SESSION_SECRET"] = "test-secret-for-round-trip-suite"
+    os.environ["FELLOWS_ALLOWLIST_HMAC_KEY"] = "test-hmac-key-for-round-trip-suite"
     os.environ["FELLOWS_COOKIE_INSECURE"] = "1"
     os.environ["PORT"] = str(DEPLOY_PORT)
     os.environ.pop("FELLOWS_POSTMARK_TOKEN", None)

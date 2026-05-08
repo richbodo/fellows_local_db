@@ -1,5 +1,6 @@
 """Unit tests for deploy/magic_link_auth.py (no HTTP)."""
 import base64
+import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -19,20 +20,137 @@ def test_sha256_email_normalizes():
     assert len(a) == 64
 
 
-def test_session_roundtrip_v2_carries_token_issued_at(monkeypatch):
+def test_hmac_email_normalizes():
+    """HMAC matches the SHA-256 normalization rules (trim + lowercase)
+    so the allowlist hash for an email is stable across input casing
+    and whitespace."""
+    key = b"unit-test-key"
+    a = ml.hmac_email("  Test@Example.COM  ", key)
+    b = ml.hmac_email("test@example.com", key)
+    assert a == b
+    assert len(a) == 64
+    # Different key on the same email yields a distinct hash. This is
+    # the property that prevents a stolen allowlist from being cracked
+    # with a wordlist when the key remains in /etc/fellows/.
+    assert ml.hmac_email("test@example.com", b"different-key") != a
+
+
+def test_load_allowlist_from_db(tmp_path):
+    """load_allowlist_from_db reads contact_email rows, normalizes them,
+    and HMAC's each. NULL / empty strings are excluded."""
+    db = tmp_path / "fellows.db"
+    conn = sqlite3.connect(str(db))
+    conn.execute(
+        "CREATE TABLE fellows (record_id TEXT PRIMARY KEY, slug TEXT, contact_email TEXT)"
+    )
+    conn.execute("INSERT INTO fellows VALUES ('1', 'a', 'A@example.com')")
+    conn.execute("INSERT INTO fellows VALUES ('2', 'b', '  b@example.COM  ')")
+    conn.execute("INSERT INTO fellows VALUES ('3', 'c', '')")
+    conn.execute("INSERT INTO fellows VALUES ('4', 'd', NULL)")
+    conn.commit()
+    conn.close()
+
+    key = b"unit-test-key"
+    s = ml.load_allowlist_from_db(db, key)
+    expected = {
+        ml.hmac_email("a@example.com", key),
+        ml.hmac_email("b@example.com", key),
+    }
+    assert s == expected
+
+
+def test_load_allowlist_from_db_returns_empty_when_db_missing(tmp_path):
+    """Missing DB → empty set rather than raising; init_auth flips
+    AUTH_ACTIVE to False on this path."""
+    s = ml.load_allowlist_from_db(tmp_path / "nope.db", b"unit-test-key")
+    assert s == set()
+
+
+def test_session_roundtrip_v3_carries_token_issued_at_and_session_id(monkeypatch):
+    """Happy path: a cookie minted with a registered session_id verifies
+    and recovers both token_issued_at and session_id."""
     monkeypatch.setenv("FELLOWS_SESSION_SECRET", "unit-test-secret")
     sec = ml.session_secret_bytes()
     assert sec
     tia = int(time.time()) - 60
-    v = ml.sign_session_value(sec, token_issued_at=tia)
+    sid = "deadbeef" * 4  # 32 hex chars
+    with ml.AuthState.lock:
+        ml.AuthState.sessions.clear()
+        ml.AuthState.sessions[sid] = {
+            "issued_at": tia,
+            "expires_at": time.time() + 3600,
+        }
+    v = ml.sign_session_value(sec, token_issued_at=tia, session_id=sid)
     payload = ml.verify_session_value(v, sec)
     assert payload is not None
     assert payload["token_issued_at"] == tia
+    assert payload["session_id"] == sid
+    # Tampered signature still rejected.
     assert ml.verify_session_value(v + "x", sec) is None
 
 
+def test_verify_rejects_cookie_with_unregistered_session_id(monkeypatch):
+    """Defence against leaked FELLOWS_SESSION_SECRET: a cookie whose
+    session_id was never registered fails verification even when the
+    signature is otherwise valid. This is the property that makes the
+    secret leak alone insufficient to mint working cookies."""
+    monkeypatch.setenv("FELLOWS_SESSION_SECRET", "unit-test-secret")
+    sec = ml.session_secret_bytes()
+    with ml.AuthState.lock:
+        ml.AuthState.sessions.clear()
+    forged_sid = "ff" * 16  # 32 hex chars, not registered
+    v = ml.sign_session_value(
+        sec, token_issued_at=int(time.time()), session_id=forged_sid
+    )
+    assert ml.verify_session_value(v, sec) is None
+
+
+def test_verify_rejects_cookie_with_empty_session_id(monkeypatch):
+    """Cookies signed without a session_id (test-only path) must not
+    verify against a real running server."""
+    monkeypatch.setenv("FELLOWS_SESSION_SECRET", "unit-test-secret")
+    sec = ml.session_secret_bytes()
+    v = ml.sign_session_value(sec, token_issued_at=int(time.time()), session_id=None)
+    assert ml.verify_session_value(v, sec) is None
+
+
+def test_revoke_session_makes_cookie_invalid(monkeypatch):
+    """Logout's revoke_session() drops the session_id from the registry;
+    subsequent presentations of the same cookie value fail verification."""
+    monkeypatch.setenv("FELLOWS_SESSION_SECRET", "unit-test-secret")
+    sec = ml.session_secret_bytes()
+    sid = "ab" * 16
+    with ml.AuthState.lock:
+        ml.AuthState.sessions.clear()
+        ml.AuthState.sessions[sid] = {
+            "issued_at": int(time.time()),
+            "expires_at": time.time() + 3600,
+        }
+    v = ml.sign_session_value(sec, token_issued_at=int(time.time()), session_id=sid)
+    assert ml.verify_session_value(v, sec) is not None
+    ml.revoke_session(sid)
+    assert ml.verify_session_value(v, sec) is None
+
+
+def test_consume_token_yields_session_id_and_registers_it():
+    """consume_token's success result includes a 32-char hex session_id,
+    and that session_id is now in AuthState.sessions — so any cookie
+    signed with it passes verify_session_value."""
+    with ml.AuthState.lock:
+        ml.AuthState.tokens.clear()
+        ml.AuthState.consumed.clear()
+        ml.AuthState.sessions.clear()
+    tok = ml.issue_token()
+    r = ml.consume_token(tok)
+    assert r["status"] == "ok"
+    sid = r["session_id"]
+    assert isinstance(sid, str) and len(sid) == 32
+    with ml.AuthState.lock:
+        assert sid in ml.AuthState.sessions
+
+
 def test_verify_rejects_v1_cookies(monkeypatch):
-    """Old v1 cookies must no longer verify — forces clean re-login on deploy."""
+    """Old v1 cookies (no version prefix) must not verify."""
     monkeypatch.setenv("FELLOWS_SESSION_SECRET", "unit-test-secret")
     sec = ml.session_secret_bytes()
     import hmac as _hmac
@@ -44,6 +162,24 @@ def test_verify_rejects_v1_cookies(monkeypatch):
     v1_cookie = base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=") + "." + sig
 
     assert ml.verify_session_value(v1_cookie, sec) is None
+
+
+def test_verify_rejects_v2_cookies(monkeypatch):
+    """v2 cookies (token_issued_at but no server-side registry binding)
+    must not verify after the v3 cutover. Every fellow re-logs-in once
+    when this PR ships — deliberate one-time logout."""
+    monkeypatch.setenv("FELLOWS_SESSION_SECRET", "unit-test-secret")
+    sec = ml.session_secret_bytes()
+    import hmac as _hmac
+    import hashlib as _hashlib
+
+    exp = int(time.time()) + 3600
+    tia = int(time.time()) - 30
+    payload = f"v2:{exp}:{tia}:deadbeefcafebabe".encode("utf-8")
+    sig = _hmac.new(sec, payload, _hashlib.sha256).hexdigest()
+    v2_cookie = base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=") + "." + sig
+
+    assert ml.verify_session_value(v2_cookie, sec) is None
 
 
 def test_install_recently_allowed_window_math():
@@ -149,6 +285,26 @@ def test_cleanup_stale_tokens_drops_expired_consumed_entries():
         assert "fresh-consumed" in ml.AuthState.consumed
 
 
+def test_cleanup_stale_tokens_drops_expired_sessions():
+    """cleanup_stale_tokens also prunes session_ids past expires_at,
+    keeping AuthState.sessions bounded across long uptimes."""
+    with ml.AuthState.lock:
+        ml.AuthState.sessions.clear()
+        now = time.time()
+        ml.AuthState.sessions["expired-sid"] = {
+            "issued_at": now - 100,
+            "expires_at": now - 10,
+        }
+        ml.AuthState.sessions["fresh-sid"] = {
+            "issued_at": now - 5,
+            "expires_at": now + 3600,
+        }
+    ml.cleanup_stale_tokens()
+    with ml.AuthState.lock:
+        assert "expired-sid" not in ml.AuthState.sessions
+        assert "fresh-sid" in ml.AuthState.sessions
+
+
 def test_clear_session_cookie_line_has_max_age_0():
     class H:
         def get(self, key, default=None):
@@ -158,13 +314,6 @@ def test_clear_session_cookie_line_has_max_age_0():
     assert ml.SESSION_COOKIE + "=" in line
     assert "Max-Age=0" in line
     assert "Path=/" in line
-
-
-def test_allowlist_load(tmp_path):
-    p = tmp_path / "allowed_emails.json"
-    p.write_text('{"hashes": ["aa", "bb"]}', encoding="utf-8")
-    s = ml.load_allowlist(tmp_path)
-    assert s == {"aa", "bb"}
 
 
 def test_gated_paths():

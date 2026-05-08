@@ -1,6 +1,11 @@
 """Magic-link authentication helpers for deploy/server.py (stdlib only).
 
-Used when allowed_emails.json exists in the dist root and FELLOWS_SESSION_SECRET is set.
+Auth is active when both ``FELLOWS_SESSION_SECRET`` and
+``FELLOWS_ALLOWLIST_HMAC_KEY`` are set, and ``fellows.db`` contains at
+least one ``contact_email`` row. The allowlist is materialised in
+memory at server startup by HMAC-ing every distinct ``contact_email``
+in the bundled DB — there is no longer any ``allowed_emails.json``
+artifact on disk.
 """
 
 from __future__ import annotations
@@ -12,6 +17,7 @@ import json
 import os
 import re
 import secrets
+import sqlite3
 import threading
 import time
 import urllib.error
@@ -34,7 +40,7 @@ INSTALL_WINDOW = TOKEN_TTL  # window (from token issue) during which install lan
 GRACE_WINDOW = 60
 RATE_WINDOW = 3600
 RATE_MAX = 3
-SESSION_VERSION = "v2"
+SESSION_VERSION = "v3"
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -47,22 +53,70 @@ class AuthState:
     # token within GRACE_WINDOW seconds. Cleaned up by cleanup_stale_tokens.
     consumed: dict[str, dict] = {}
     rate_buckets: dict[str, list[float]] = {}
-
-
-def load_allowlist(dist_dir: Path) -> set[str]:
-    p = dist_dir / "allowed_emails.json"
-    if not p.is_file():
-        return set()
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-        hashes = data.get("hashes") or []
-        return {str(h).lower() for h in hashes if h}
-    except (json.JSONDecodeError, OSError):
-        return set()
+    # session_id (32-char hex) -> {"issued_at": float, "expires_at": float}.
+    # Populated by consume_token on each successful magic-link verify;
+    # required by verify_session_value (a cookie whose session_id isn't here
+    # is rejected). This is the server-side binding that defends against a
+    # leaked FELLOWS_SESSION_SECRET — without the registry an attacker
+    # holding only the secret could mint arbitrary cookies. In-memory only:
+    # a server restart revokes every outstanding session, which is the
+    # intentional one-time logout behaviour on each deploy.
+    sessions: dict[str, dict] = {}
 
 
 def sha256_email(email: str) -> str:
+    """Plain SHA-256 of the normalized email. Used for journald
+    correlation prefixes (``email_hash_prefix``) and rate-limit bucket
+    keys — both stable identifiers, neither security-load-bearing.
+    Allowlist comparison uses ``hmac_email`` instead.
+    """
     return hashlib.sha256(email.strip().lower().encode("utf-8")).hexdigest()
+
+
+def hmac_email(email: str, key: bytes) -> str:
+    """HMAC-SHA256 of the normalized email, hex-encoded.
+
+    Used for allowlist membership comparison only. The HMAC key lives
+    in ``/etc/fellows/fellows-pwa.env`` (``FELLOWS_ALLOWLIST_HMAC_KEY``)
+    and never leaves the server's memory. With the key kept off-bundle,
+    a wordlist crack of intercepted hashes is no longer feasible even
+    for a known-org email pattern: an attacker would need both the
+    hash set *and* the key, where the prior plain-SHA-256 scheme
+    allowed crack-from-file-alone once the file was reachable.
+    """
+    normalized = email.strip().lower().encode("utf-8")
+    return hmac.new(key, normalized, hashlib.sha256).hexdigest()
+
+
+def allowlist_hmac_key() -> Optional[bytes]:
+    """Return the HMAC key bytes from env, or None if unset."""
+    s = os.environ.get("FELLOWS_ALLOWLIST_HMAC_KEY", "").strip()
+    if not s:
+        return None
+    return s.encode("utf-8")
+
+
+def load_allowlist_from_db(db_path: Path, hmac_key: bytes) -> set[str]:
+    """Build the allowlist set in memory by HMAC-ing every distinct
+    ``contact_email`` in ``fellows.db``. No file artifact is written;
+    the allowlist exists only as in-memory state on the server. A cold
+    start re-reads the DB; a deploy that ships a new ``fellows.db``
+    re-derives the set on the next restart.
+    """
+    if not db_path.is_file():
+        return set()
+    try:
+        conn = sqlite3.connect(str(db_path))
+        try:
+            cur = conn.execute(
+                "SELECT DISTINCT lower(trim(contact_email)) FROM fellows "
+                "WHERE contact_email IS NOT NULL AND trim(contact_email) != ''"
+            )
+            return {hmac_email(raw, hmac_key) for (raw,) in cur.fetchall() if raw}
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return set()
 
 
 def is_valid_email_shape(email: str) -> bool:
@@ -79,6 +133,29 @@ def cleanup_stale_tokens() -> None:
         for t, rec in list(AuthState.consumed.items()):
             if (now - rec["consumed_at"]) >= GRACE_WINDOW:
                 del AuthState.consumed[t]
+        for sid, srec in list(AuthState.sessions.items()):
+            if srec["expires_at"] < now:
+                del AuthState.sessions[sid]
+
+
+def _register_session(now: float, token_issued_at: float) -> str:
+    """Mint and register a session_id. Caller must hold ``AuthState.lock``."""
+    session_id = secrets.token_hex(16)
+    AuthState.sessions[session_id] = {
+        "issued_at": token_issued_at,
+        "expires_at": now + SESSION_MAX_AGE,
+    }
+    return session_id
+
+
+def revoke_session(session_id: Optional[str]) -> None:
+    """Drop a session_id from the registry. Used by the logout handler
+    so that explicitly-cleared cookies cannot be replayed even if
+    captured from a network log later."""
+    if not session_id:
+        return
+    with AuthState.lock:
+        AuthState.sessions.pop(session_id, None)
 
 
 def check_rate_limit(email_hash: str) -> bool:
@@ -107,12 +184,16 @@ def consume_token(tok: str) -> dict:
     """Consume a magic-link token.
 
     Returns one of:
-      {"status": "ok", "issued_at": <epoch>} — token was valid and unexpired,
-          OR was consumed within the last GRACE_WINDOW seconds. On a fresh
-          consume the issued_at is derived from the live token's stored
-          expiry; on a re-consume within the grace window it's the
-          issued_at that was captured at first consume. Caller signs the
-          session cookie with this value.
+      {"status": "ok", "issued_at": <epoch>, "session_id": <hex>} —
+          token was valid and unexpired, OR was consumed within the
+          last GRACE_WINDOW seconds. On a fresh consume the issued_at
+          is derived from the live token's stored expiry; on a
+          re-consume within the grace window it's the issued_at that
+          was captured at first consume. The session_id is freshly
+          minted on each consume and registered in
+          ``AuthState.sessions`` so the cookie that signs over it
+          will pass ``verify_session_value`` until the session
+          expires or is revoked.
       {"status": "expired"} — token existed but was past TTL. Shown to user as
           "that link expired".
       {"status": "invalid"} — token was never issued, or was consumed more
@@ -133,11 +214,21 @@ def consume_token(tok: str) -> dict:
                 "issued_at": issued_at,
                 "consumed_at": now,
             }
-            return {"status": "ok", "issued_at": issued_at}
+            session_id = _register_session(now, issued_at)
+            return {
+                "status": "ok",
+                "issued_at": issued_at,
+                "session_id": session_id,
+            }
         # Token not in the live set — check whether it was just consumed.
         rec = AuthState.consumed.get(tok)
         if rec and (now - rec["consumed_at"]) < GRACE_WINDOW:
-            return {"status": "ok", "issued_at": rec["issued_at"]}
+            session_id = _register_session(now, rec["issued_at"])
+            return {
+                "status": "ok",
+                "issued_at": rec["issued_at"],
+                "session_id": session_id,
+            }
         if rec:
             # Past the grace window; drop opportunistically so memory doesn't
             # accumulate even when cleanup_stale_tokens hasn't run recently.
@@ -238,18 +329,33 @@ def send_postmark_magic_link(to_email: str, magic_url: str) -> dict:
         }
 
 
-def sign_session_value(secret: bytes, token_issued_at: Optional[float] = None) -> str:
-    """Sign a v2 session cookie carrying token_issued_at.
+def sign_session_value(
+    secret: bytes,
+    token_issued_at: Optional[float] = None,
+    session_id: Optional[str] = None,
+) -> str:
+    """Sign a v3 session cookie binding to a server-recorded session_id.
 
-    Payload format (utf-8): ``v2:<exp>:<token_issued_at>:<nonce>``
-    token_issued_at is ``int(time.time())`` of the magic-link token that granted
-    this session. Pass None only in legacy/test paths where no token context is
-    available — callers in production must always pass a value.
+    Payload format (utf-8): ``v3:<exp>:<token_issued_at>:<session_id>:<nonce>``
+
+    The session_id is required for verification: ``verify_session_value``
+    rejects any cookie whose session_id is not in
+    ``AuthState.sessions``. This means a leaked
+    ``FELLOWS_SESSION_SECRET`` alone cannot mint a valid cookie — an
+    attacker would also need to have written into the in-memory
+    session registry, which no HTTP path exposes.
+
+    Pass ``session_id=None`` (or empty) only in unit tests that pin
+    the pure crypto path; such cookies will fail verification against
+    a real running server. Production callers in
+    ``deploy/server.py:_handle_verify_token`` always pass the
+    session_id minted by ``consume_token``.
     """
     exp = int(time.time()) + SESSION_MAX_AGE
     nonce = secrets.token_hex(16)
     tia = int(token_issued_at) if token_issued_at is not None else 0
-    payload = f"{SESSION_VERSION}:{exp}:{tia}:{nonce}".encode("utf-8")
+    sid = session_id or ""
+    payload = f"{SESSION_VERSION}:{exp}:{tia}:{sid}:{nonce}".encode("utf-8")
     sig = hmac.new(secret, payload, hashlib.sha256).hexdigest()
     return (
         base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=") + "." + sig
@@ -257,11 +363,14 @@ def sign_session_value(secret: bytes, token_issued_at: Optional[float] = None) -
 
 
 def verify_session_value(cookie_val: str, secret: bytes) -> Optional[dict]:
-    """Verify a v2 session cookie.
+    """Verify a v3 session cookie.
 
-    Returns ``{"token_issued_at": <int>}`` on success. Returns None on any
-    failure (bad signature, expired, malformed, v1 cookies). Callers relying on
-    boolean semantics still work because None is falsy and a dict is truthy.
+    Returns ``{"token_issued_at": <int>, "session_id": <str>}`` on
+    success. Returns None on any failure: bad signature, expired,
+    malformed, v1/v2 cookies (always rejected — forces a clean
+    re-login on each version bump), missing session_id, or session_id
+    not present in ``AuthState.sessions``. Callers relying on boolean
+    semantics still work because None is falsy and a dict is truthy.
     """
     try:
         parts = cookie_val.strip().split(".", 1)
@@ -275,14 +384,24 @@ def verify_session_value(cookie_val: str, secret: bytes) -> Optional[dict]:
             return None
         text = payload.decode("utf-8")
         fields = text.split(":")
-        if len(fields) < 4 or fields[0] != SESSION_VERSION:
-            # v1 cookies (no version prefix) land here and are rejected by
-            # design — forces a clean re-login after this deploy.
+        if len(fields) < 5 or fields[0] != SESSION_VERSION:
+            # v1 / v2 cookies land here and are rejected by design —
+            # forces a clean re-login on the v2→v3 cutover (server-
+            # side session registry).
             return None
-        _ver, exp_s, tia_s, _nonce = fields[0], fields[1], fields[2], ":".join(fields[3:])
+        _ver, exp_s, tia_s, sid = fields[0], fields[1], fields[2], fields[3]
         if int(exp_s) < time.time():
             return None
-        return {"token_issued_at": int(tia_s)}
+        if not sid:
+            return None
+        with AuthState.lock:
+            rec = AuthState.sessions.get(sid)
+            if rec is None:
+                return None
+            if rec["expires_at"] < time.time():
+                AuthState.sessions.pop(sid, None)
+                return None
+        return {"token_issued_at": int(tia_s), "session_id": sid}
     except (ValueError, UnicodeDecodeError):
         return None
 

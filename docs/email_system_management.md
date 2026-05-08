@@ -10,7 +10,8 @@ Environment variables used in this section:
 
 | Variable | Purpose |
 |---|---|
-| `FELLOWS_SESSION_SECRET` | Long random signing key. Generate with `python -c "import secrets; print(secrets.token_urlsafe(48))"`. |
+| `FELLOWS_SESSION_SECRET` | Long random signing key for session cookies. Generate with `python -c "import secrets; print(secrets.token_urlsafe(48))"`. |
+| `FELLOWS_ALLOWLIST_HMAC_KEY` | HMAC key used to derive the in-memory allowlist from `contact_email` rows in `fellows.db`. Generate the same way as the session secret. Replaces the prior `allowed_emails.json` file artifact (no longer written to `dist/`); the allowlist exists only in the running server's memory. |
 | `FELLOWS_POSTMARK_TOKEN` | Postmark Server API token from the server's settings page. |
 | `FELLOWS_MAIL_FROM` | Sender that users see on the magic-link email. Defaults to `EHF Directory App <admin@fellows.globaldonut.com>` — the display name (`EHF Directory App`) is what shows in the inbox; the address part must be a verified Sender Signature (or an address on a domain-verified domain) in Postmark. Override only if your fork uses a different domain or display name. **Always use the `Display Name <addr>` shape** when overriding — a bare address renders as just the local-part (`admin`) in most mail clients, which reads as spam. **Do not use `noreply@` addresses** — Postmark actively refuses them and they hurt your sender reputation. |
 | `FELLOWS_REPLY_TO` | Optional. When set, becomes the `Reply-To` header. Use this to route replies to a real operator mailbox (e.g. `richbodo+fellows@gmail.com`) while `admin@fellows.globaldonut.com` is the visible sender. When unset, replies go to `FELLOWS_MAIL_FROM`. |

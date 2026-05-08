@@ -8,17 +8,22 @@ When ``fellows.db`` is present in that directory, also serves the same read-only
 JSON API as ``app/server.py`` so the installed PWA can fall back if sqlite-wasm
 / OPFS is unavailable (static distribution has no separate API process).
 
-Phase 4 (optional): magic-link auth when ``allowed_emails.json`` exists in dist
-and ``FELLOWS_SESSION_SECRET`` is set. See ``magic_link_auth.py`` and README.
+Magic-link auth activates when both ``FELLOWS_SESSION_SECRET`` and
+``FELLOWS_ALLOWLIST_HMAC_KEY`` are set, and ``fellows.db`` contains at
+least one ``contact_email`` row. The allowlist is built in memory at
+startup by HMAC-ing every distinct contact_email — no
+``allowed_emails.json`` file is written. See ``magic_link_auth.py`` and
+``docs/email_gate.md``.
 
 Environment:
-  PORT                  Listen port (default 8765).
-  FELLOWS_DIST_ROOT     Absolute path to the static root (default: <this_dir>/dist).
-  FELLOWS_SESSION_SECRET   HMAC secret for session cookie (required for auth).
-  FELLOWS_POSTMARK_TOKEN   Send magic links via Postmark (required to actually email).
-  FELLOWS_MAIL_FROM        From address (default: EHF Directory App <admin@fellows.globaldonut.com>).
-  FELLOWS_PUBLIC_ORIGIN    Base URL for magic links (default: infer from Host / X-Forwarded-Proto).
-  FELLOWS_COOKIE_INSECURE  Set to 1 to omit Secure on session cookie (local HTTP testing).
+  PORT                          Listen port (default 8765).
+  FELLOWS_DIST_ROOT             Absolute path to the static root (default: <this_dir>/dist).
+  FELLOWS_SESSION_SECRET        HMAC secret for session cookie (required for auth).
+  FELLOWS_ALLOWLIST_HMAC_KEY    HMAC key used to build the in-memory allowlist (required for auth).
+  FELLOWS_POSTMARK_TOKEN        Send magic links via Postmark (required to actually email).
+  FELLOWS_MAIL_FROM             From address (default: EHF Directory App <admin@fellows.globaldonut.com>).
+  FELLOWS_PUBLIC_ORIGIN         Base URL for magic links (default: infer from Host / X-Forwarded-Proto).
+  FELLOWS_COOKIE_INSECURE       Set to 1 to omit Secure on session cookie (local HTTP testing).
 
 Request lines are logged to stdout for journald under systemd.
 """
@@ -44,6 +49,15 @@ DB_PATH = DIST_DIR / "fellows.db"
 
 # Set by init_auth() before listen.
 AUTH_ACTIVE = False
+# In-memory allowlist of HMAC'd contact_emails, populated by init_auth() at
+# startup. Replaces the prior dist/allowed_emails.json artifact — the
+# allowlist now lives only in this process's RAM, derived from fellows.db
+# at boot. Never written to disk; never served over HTTP.
+ALLOWLIST: set[str] = set()
+# HMAC key used to derive ALLOWLIST entries and to hash incoming emails on
+# /api/send-unlock. Sourced from FELLOWS_ALLOWLIST_HMAC_KEY at init_auth();
+# kept in memory for the life of the process.
+HMAC_KEY: bytes | None = None
 # Populated in main() from dist/build-meta.json (written by build/build_pwa.py).
 BUILD_META: dict = {}
 
@@ -61,18 +75,41 @@ def load_build_meta(dist_dir: Path) -> dict:
 
 
 def init_auth() -> None:
-    global AUTH_ACTIVE
-    allow = ml.load_allowlist(DIST_DIR)
+    """Populate AUTH_ACTIVE / ALLOWLIST / HMAC_KEY from env + fellows.db.
+
+    Called once at startup and from the test fixture. Auth is active
+    when:
+      * FELLOWS_SESSION_SECRET is set, and
+      * FELLOWS_ALLOWLIST_HMAC_KEY is set, and
+      * fellows.db exists and has at least one contact_email row.
+
+    Any missing piece flips AUTH_ACTIVE to False and logs a one-line
+    warning. The send-unlock / verify-token / cookie paths all gate on
+    AUTH_ACTIVE, so the failure mode is "no magic links can be issued"
+    rather than "anyone can sign in" — fail-closed.
+    """
+    global AUTH_ACTIVE, ALLOWLIST, HMAC_KEY
     sec = ml.session_secret_bytes()
-    AUTH_ACTIVE = bool(sec and allow)
-    if sec and not allow:
+    HMAC_KEY = ml.allowlist_hmac_key()
+    if sec and not HMAC_KEY:
         print(
-            "Warning: FELLOWS_SESSION_SECRET set but allowed_emails.json missing or empty — auth disabled.",
+            "Warning: FELLOWS_SESSION_SECRET set but FELLOWS_ALLOWLIST_HMAC_KEY unset — auth disabled.",
             file=sys.stderr,
         )
-    if allow and not sec:
+    if HMAC_KEY and not sec:
         print(
-            "Warning: allowed_emails.json present but FELLOWS_SESSION_SECRET unset — auth disabled.",
+            "Warning: FELLOWS_ALLOWLIST_HMAC_KEY set but FELLOWS_SESSION_SECRET unset — auth disabled.",
+            file=sys.stderr,
+        )
+    if not sec or not HMAC_KEY:
+        ALLOWLIST = set()
+        AUTH_ACTIVE = False
+        return
+    ALLOWLIST = ml.load_allowlist_from_db(DB_PATH, HMAC_KEY)
+    AUTH_ACTIVE = bool(ALLOWLIST)
+    if not ALLOWLIST:
+        print(
+            "Warning: FELLOWS_ALLOWLIST_HMAC_KEY set but fellows.db missing or has no contact_email rows — auth disabled.",
             file=sys.stderr,
         )
 
@@ -136,6 +173,49 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header("X-Fellows-Build", bid[:64])
         self.send_header("X-Fellows-Auth-Active", "1" if AUTH_ACTIVE else "0")
 
+    def _security_headers(self) -> None:
+        """Strict CSP + adjacent hardening, on every response.
+
+        CSP is the load-bearing one — without it a single XSS bug today
+        exfiltrates the entire OPFS (relationships.db + fellows.db) to
+        an attacker-controlled origin. The policy is strict by design:
+        no inline scripts/styles, no third-party origins, no eval.
+        `'wasm-unsafe-eval'` is the modern carve-out for sqlite3.wasm's
+        WebAssembly compilation in the dedicated worker.
+
+        HSTS, Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy
+        are set by Caddy at the edge (see
+        ansible/roles/caddy/templates/Caddyfile.j2) and not duplicated
+        here. The dev server (app/server.py) mirrors this exact CSP /
+        Permissions-Policy / CORP block so dev and prod enforce
+        identical policies — any drift is the bug that lets a
+        CSP-incompatible pattern slip into a release.
+        """
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; "
+            "script-src 'self' 'wasm-unsafe-eval'; "
+            "worker-src 'self'; "
+            "connect-src 'self'; "
+            "img-src 'self' data:; "
+            "style-src 'self'; "
+            "font-src 'self'; "
+            "object-src 'none'; "
+            "base-uri 'self'; "
+            "frame-ancestors 'none';",
+        )
+        # Disable browser features the app does not use, to reduce the
+        # leverage available to an XSS payload that does land.
+        self.send_header(
+            "Permissions-Policy",
+            "geolocation=(), camera=(), microphone=(), payment=(), "
+            "accelerometer=(), gyroscope=(), magnetometer=(), usb=(), "
+            "midi=(), serial=(), bluetooth=()",
+        )
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+        self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
+        self.send_header("X-Content-Type-Options", "nosniff")
+
     def has_valid_session(self) -> bool:
         return self.session_payload() is not None
 
@@ -169,6 +249,10 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if path == "/allowed_emails.json":
+            # Defence in depth. The file no longer exists in dist (the
+            # allowlist is built in memory from fellows.db at startup),
+            # but this stub stays so a future routing change or stale
+            # dist tree can't accidentally reintroduce the leak.
             self.send_error(HTTPStatus.NOT_FOUND, "Not Found")
             return
 
@@ -209,14 +293,15 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if path == "/api/debug/diagnostics":
-            allow = ml.load_allowlist(DIST_DIR)
             sec = ml.session_secret_bytes()
+            hkey = ml.allowlist_hmac_key()
             postmark = bool(os.environ.get("FELLOWS_POSTMARK_TOKEN", "").strip())
             self.send_json(
                 {
                     "authActive": AUTH_ACTIVE,
-                    "allowlistHashCount": len(allow),
+                    "allowlistHashCount": len(ALLOWLIST),
                     "sessionSecretConfigured": bool(sec),
+                    "allowlistHmacKeyConfigured": bool(hkey),
                     "postmarkTokenConfigured": postmark,
                     "fellowsDbPresent": DB_PATH.is_file(),
                     "build": BUILD_META,
@@ -308,7 +393,21 @@ class Handler(SimpleHTTPRequestHandler):
 
         Always 200 — we don't reveal whether the caller had a valid session.
         Client navigates to ``/?gate=1`` after this.
+
+        Also revokes the cookie's session_id from the in-memory registry
+        when the cookie is well-formed, so the same cookie value cannot
+        be replayed even if captured from a network log later. Logout
+        does not require a valid session (idempotent by design), so a
+        bad/expired cookie is silently accepted; only the registry side
+        effect is gated on a parseable cookie.
         """
+        sec = ml.session_secret_bytes()
+        if sec:
+            cookie_val = ml.parse_cookie_header(self.headers.get("Cookie"), ml.SESSION_COOKIE)
+            if cookie_val:
+                payload = ml.verify_session_value(cookie_val, sec)
+                if payload:
+                    ml.revoke_session(payload.get("session_id"))
         cookie = ml.clear_session_cookie_line(self.headers)
         self.send_json_with_headers({"ok": True}, 200, [("Set-Cookie", cookie)])
 
@@ -318,16 +417,21 @@ class Handler(SimpleHTTPRequestHandler):
         if not ml.is_valid_email_shape(email):
             self.send_json({"sent": True})
             return
-        if not AUTH_ACTIVE:
+        if not AUTH_ACTIVE or HMAC_KEY is None:
             self.send_json({"sent": True})
             return
+        # Rate-limit and journald correlation use plain SHA-256 of the
+        # email — neither is security-load-bearing (rate-limit key is a
+        # dict bucket; the prefix is a non-reversible 12-hex correlator
+        # that the client also computes for lastSubmitHashPrefix). The
+        # *allowlist* check uses HMAC, so a leaked log line cannot be
+        # cross-referenced against any persisted hash file.
         h = ml.sha256_email(email)
         if not ml.check_rate_limit(h):
             print("Rate limit: send-unlock for hash prefix " + h[:12], file=sys.stderr)
             self.send_json({"sent": True})
             return
-        allow = ml.load_allowlist(DIST_DIR)
-        if h not in allow:
+        if ml.hmac_email(email, HMAC_KEY) not in ALLOWLIST:
             self.send_json({"sent": True})
             return
         token = ml.issue_token()
@@ -404,7 +508,11 @@ class Handler(SimpleHTTPRequestHandler):
         if not sec:
             self.send_json({"ok": False, "error": "server_misconfigured"}, status=500)
             return
-        val = ml.sign_session_value(sec, token_issued_at=result.get("issued_at"))
+        val = ml.sign_session_value(
+            sec,
+            token_issued_at=result.get("issued_at"),
+            session_id=result.get("session_id"),
+        )
         cookie = ml.set_session_cookie_line(val, self.headers)
         self.send_json_with_headers({"ok": True}, 200, [("Set-Cookie", cookie)])
 
@@ -514,6 +622,7 @@ class Handler(SimpleHTTPRequestHandler):
             else:
                 self.send_header("Cache-Control", "no-cache")
         self._telemetry_headers()
+        self._security_headers()
         super().end_headers()
 
 
