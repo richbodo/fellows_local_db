@@ -204,7 +204,13 @@ Export them or inline: `FELLOWS_BASE_URL=https://staging.example.com just smoke`
   sudo password — values shown raw for paste-ready rotation). Wraps
   `scripts/show_server_env.sh`.
 - **`prod-configure-env`** — interactive wizard to set Postmark / session
-  secret / mail-from on a fresh droplet (or rotate). Wraps
+  secret / allowlist HMAC key / mail-from on a fresh droplet (or to
+  edit one or two values on an existing droplet without re-typing the
+  rest). Fetches the current `/etc/fellows/fellows-pwa.env` over SSH
+  (sudo prompt) and offers each existing value as the default — Enter
+  keeps it. Validates `FELLOWS_MAIL_FROM` for the bare-address or
+  RFC 5322 `Display Name <addr>` shape before uploading, so a
+  paste-typo can't silently mangle the From header. Wraps
   `scripts/configure_email_auth_env.sh`.
 - **`prod-repair-env`** — reference repair for a malformed env file. Wraps
   `scripts/repair_email_auth_env.sh`. Background in the script header.
