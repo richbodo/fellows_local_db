@@ -6,15 +6,13 @@ Data and assets are local-first (SQLite + static files), served by Python stdlib
 
 ## Design Stance: Local-Only, Not SaaS
 
-**This app must never become a SaaS.** It is a single-user, local-only directory. The PWA + magic-link delivery is a *distribution and update channel*, not a service: production exists to hand a fellow the bundle and the contact DB, then get out of the way.
+**This app is Never-SaaS.** It is a single-user, local-only directory. The PWA + magic-link delivery is a *distribution and update channel*, not a service: production exists to hand a fellow the bundle and the contact DB, then get out of the way.
 
 After install, the app must keep working without further server contact. Concretely:
 
 - **All user-authored state** (groups, notes, tags, settings) lives in the user's browser (`relationships.db` in OPFS). Production's `deploy/server.py` does not expose `/api/groups` or `/api/settings` — there are no per-user resources on the server, no per-user storage to back up, no multi-tenant model to defend.
-- **Reads of contact data** run against the locally-cached `fellows.db` (OPFS) and the IndexedDB fallback cache. A stale session or an offline server must not lock the user out of data they've already downloaded — see [`docs/email_gate.md`](docs/email_gate.md) invariant 10.
-- **Server contact is bounded to two purposes only:** (1) the magic-link gate that authorizes a download, and (2) fetching new bundle / DB bytes when the user opts in to an update (app-shell updates auto-prompt via the *New version available — Reload* banner; directory-data updates are user-initiated from the About page — see [`docs/users_manual.md` § Updates](docs/users_manual.md#updates)). Anything else added server-side needs a strong justification against this constraint.
-
-What this rules out, even if individually convenient: cross-device sync, server-side backups of `relationships.db`, an "edit once, see it everywhere" share feature, real-time collaboration, an admin console showing other users' groups, telemetry beyond the unauthenticated client-error sink. If a feature requires per-user state on the server, it doesn't belong in this app.
+- **Reads of contact data** run against the locally-cached `fellows.db` (OPFS) and the IndexedDB fallback cache. A stale session or an offline server must not lock the user out of data they've already downloaded — see `[docs/email_gate.md](docs/email_gate.md)` invariant 10.
+- **Server contact is bounded to two purposes only:** (1) the magic-link gate that authorizes a download, and (2) fetching new bundle / DB bytes when the user opts in to an update (app-shell updates auto-prompt via the *New version available — Reload* banner; directory-data updates are user-initiated from the About page — see `[docs/users_manual.md` § Updates](docs/users_manual.md#updates)). Anything else added server-side needs a strong justification against this constraint.
 
 ## Table of Contents
 
@@ -29,7 +27,7 @@ What this rules out, even if individually convenient: cross-device sync, server-
   - [API Endpoints](#api-endpoints)
   - [Two-Phase Load](#two-phase-load)
 - [Testing The Latest Code In A Browser](#testing-the-latest-code-in-a-browser)
-  - [1. Local Dev — See The Latest `main`](#1-local-dev--see-the-latest-main)
+  - [1. Local Dev — See The Latest `main](#1-local-dev--see-the-latest-main)`
   - [2. Local Dev — Exercise The Email-Gate UI](#2-local-dev--exercise-the-email-gate-ui)
   - [3. Prod — First-Time Visitor Simulation](#3-prod--first-time-visitor-simulation)
   - [4. Prod — Reset State In An Existing Tab](#4-prod--reset-state-in-an-existing-tab)
@@ -76,7 +74,7 @@ The origin of this app was [prt](https://github.com/richbodo/prt) and the next v
 
 `requirements-dev.txt` only covers dev/test tools (pytest, Playwright). The app runtime itself does not need them.
 
-> Commands below use the project's `just` command runner. **Run `just` (or `just --list`) at the repo root for a grouped menu of every recipe**; run `just <recipe>` to invoke one (e.g. `just doctor`). Full reference with what each recipe wraps: [`docs/justfile.md`](docs/justfile.md). The long-form scripts still work — `just` is a shortcut, not a replacement.
+> Commands below use the project's `just` command runner. **Run `just` (or `just --list`) at the repo root for a grouped menu of every recipe**; run `just <recipe>` to invoke one (e.g. `just doctor`). Full reference with what each recipe wraps: `[docs/justfile.md](docs/justfile.md)`. The long-form scripts still work — `just` is a shortcut, not a replacement.
 
 ### First-Time Setup (Developers)
 
@@ -153,7 +151,7 @@ Static / bootstrap:
 - `GET /images/<slug>.jpg|.png` — profile image lookup by slug/name fallback.
 - `GET /` — static app shell.
 
-Production (`deploy/server.py`) adds magic-link auth (`/api/send-unlock`, `/api/verify-token`, `/api/logout`), an unauthenticated client-error sink (`POST /api/client-errors` — sanitized, rate-limited, always 204; see [`docs/email_gate.md` § Client error reporting](docs/email_gate.md#client-error-reporting) for the schema and privacy boundary), and build/diagnostics endpoints (`/healthz`, `/build-meta.json`, `/api/debug/diagnostics`); see [`docs/email_gate.md`](docs/email_gate.md).
+Production (`deploy/server.py`) adds magic-link auth (`/api/send-unlock`, `/api/verify-token`, `/api/logout`), an unauthenticated client-error sink (`POST /api/client-errors` — sanitized, rate-limited, always 204; see `[docs/email_gate.md` § Client error reporting](docs/email_gate.md#client-error-reporting) for the schema and privacy boundary), and build/diagnostics endpoints (`/healthz`, `/build-meta.json`, `/api/debug/diagnostics`); see `[docs/email_gate.md](docs/email_gate.md)`.
 
 ### Two-Phase Load
 
@@ -178,6 +176,7 @@ Then **hard-reload** the localhost tab (Cmd-Shift-R / Ctrl-Shift-R). Restarting 
 If the page still feels stale, open an **incognito/private window** at `http://localhost:8765/` — no SW registered, no localStorage, no OPFS for that profile; you're guaranteed to see the latest bundle.
 
 What persists across this flow on localhost (intentionally):
+
 - `relationships.db` in OPFS — your saved groups and notes.
 - `fellows.db` in OPFS — re-imported on every boot anyway.
 
@@ -205,14 +204,11 @@ just drift                # confirm prod is on current main
 When you need to test from inside a tab you've already used (an installed PWA, a session locked into a stale shell, a debugging trail you don't want to abandon), DevTools' "Clear site data" misses the HttpOnly session cookie *and* OPFS. Use this sequence:
 
 1. **Drop the HttpOnly session cookie.** It's HttpOnly — JS can't see or unset it. Only the server can. Paste into the DevTools console:
-
-   ```js
+  ```js
    await fetch('/api/logout', { method: 'POST', credentials: 'include' });
-   ```
-
+  ```
 2. **Nuke every browser-side persistence layer (except OPFS).** Paste into the DevTools console:
-
-   ```js
+  ```js
    localStorage.clear();
    sessionStorage.clear();
    indexedDB.deleteDatabase('fellows-local-db');
@@ -220,8 +216,7 @@ When you need to test from inside a tab you've already used (an installed PWA, a
      .then(() => navigator.serviceWorker.getRegistrations())
      .then(rs => Promise.all(rs.map(r => r.unregister())))
      .then(() => location.reload());
-   ```
-
+  ```
 3. After the reload you land at the **email gate** as a first-time visitor.
 
 What this does *not* clear:
@@ -272,7 +267,7 @@ just db-verify          # bytewise-diff vs app/fellows.db.backup.2026-04-08
 just db-open            # open app/fellows.db in sqlite3
 ```
 
-See [`docs/data_provenance.md`](docs/data_provenance.md) for the full data pipeline.
+See `[docs/data_provenance.md](docs/data_provenance.md)` for the full data pipeline.
 
 Under the hood (the ETL script the recipes call):
 
@@ -338,7 +333,7 @@ A few notes:
 
 ## Local Dev Notes
 
-- **Port 8765:** Prefer `just port` (or `./scripts/ensure_port_8765_free.sh`) before manual testing when the port is occupied. Equivalent one-liner: `lsof -ti:8765 | xargs kill -9`. Every `just test*` recipe frees the port automatically.
+- **Port 8765:** Prefer `just port` (or `./scripts/ensure_port_8765_free.sh`) before manual testing when the port is occupied. Equivalent one-liner: `lsof -ti:8765 | xargs kill -9`. Every `just test`* recipe frees the port automatically.
 - **Automation hygiene:** test runs should not leave long-lived servers running. If the port is stuck, run the script above or re-run pytest (which also attempts cleanup in fixtures).
 - **Virtualenv scope:** use `.venv` for dev/test tooling on your workstation; production server runtime uses system Python.
 - **Debugging a stuck PWA / service worker:** when a bug reproduces on your own browser but not on a clean Playwright profile, see `[docs/debugging.md](docs/debugging.md)` for the chrome-devtools-mcp setup that attaches Claude Code to your running Chrome.
