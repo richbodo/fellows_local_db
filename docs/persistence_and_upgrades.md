@@ -42,12 +42,16 @@ OPFS-root iteration that `removeEntry`s every top-level entry. See
 
 The key architectural decision: **`relationships.db` is a separate
 OPFS file from `fellows.db`** rather than a set of new tables inside
-`fellows.db`. That's because `fellows.db` is bundled with the build
-and re-imported on every boot, while OPFS files we don't explicitly
-touch are durable. Cross-DB joins use SQLite `ATTACH DATABASE
-'fellows.db' AS f ?mode=ro`, which also enforces read-only access to
-contact data at the SQLite level (any stray write into `f.*` raises
-`OperationalError`).
+`fellows.db`. That's because `fellows.db` is *replaceable* — its
+bytes derive from a buildable source and the user can opt into a
+refresh from the About page — while OPFS files we don't explicitly
+touch are durable. Cross-DB joins happen inside the dedicated worker,
+attached once per worker `init` via `ATTACH DATABASE 'fellows.db' AS
+f ?mode=ro` — *not* per request. The `?mode=ro` suffix enforces
+read-only access at the SQLite level; any stray write into `f.*`
+raises `OperationalError`. (Pre-Phase-1 the dev server did
+per-request ATTACHes for `/api/groups` and friends; those routes
+are retired and the worker now does it once per session.)
 
 The OPFS path is used in **both** standalone PWA mode and browser-tab
 mode. Production's `deploy/server.py` does not serve `/api/groups` or
