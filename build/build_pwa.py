@@ -11,6 +11,7 @@ off-disk means a routing or filesystem mistake cannot expose a hash
 file to the public internet.
 """
 
+import base64
 import hashlib
 import json
 import shutil
@@ -33,6 +34,15 @@ IMAGES_FALLBACK = REPO_ROOT / "final_fellows_set" / "fellow_profile_images_by_na
 # what the badge shows.
 PLACEHOLDER_UI_DIAG = "__FELLOWS_UI_DIAG__"
 PLACEHOLDER_CACHE_VERSION = "__CACHE_VERSION__"
+
+# Subresource Integrity placeholders in app/static/index.html. Substituted
+# at build time and at request time so a tampered `app.js` or vendor
+# `jspdf-...js` is rejected by the browser before execution. Compute order
+# matters: stamp_static_assets must run before stamp_sri_attributes,
+# because app.js carries build-label substitutions and the SRI hash must
+# cover the *post-stamp* bytes the browser will fetch.
+PLACEHOLDER_APP_JS_INTEGRITY = "__APP_JS_INTEGRITY__"
+PLACEHOLDER_JSPDF_INTEGRITY = "__JSPDF_INTEGRITY__"
 
 
 def get_short_sha(repo_root: Path = REPO_ROOT) -> str | None:
@@ -72,6 +82,47 @@ def substitute_build_label(text: str, label: str) -> str:
     return text.replace(PLACEHOLDER_UI_DIAG, label).replace(
         PLACEHOLDER_CACHE_VERSION, label
     )
+
+
+def compute_sri_hash_bytes(b: bytes) -> str:
+    """Return ``sha384-<base64>`` for the given bytes — the value the
+    browser puts in a script tag's ``integrity`` attribute. SHA-384 is
+    SRI's middle option; SHA-256 is acceptable but SHA-384 is the
+    common recommendation. Base64 (not base64url) per the SRI spec."""
+    digest = hashlib.sha384(b).digest()
+    return "sha384-" + base64.b64encode(digest).decode("ascii")
+
+
+def compute_sri_hash(path: Path) -> str:
+    """SRI hash for the on-disk bytes at ``path``."""
+    return compute_sri_hash_bytes(path.read_bytes())
+
+
+def stamp_sri_attributes(dist_dir: Path) -> None:
+    """Substitute SRI placeholders in ``index.html`` with hashes of the
+    scripts the browser will actually fetch.
+
+    Must run AFTER ``stamp_static_assets`` so the hash for ``app.js``
+    reflects the build-label-stamped bytes, not the source placeholders.
+    No-op when ``index.html`` is missing. If a target script is missing
+    the placeholder ships unchanged — that's a fail-loud signal in the
+    browser console (broken integrity), not a silent no-op.
+
+    The dev server (``app/server.py``) performs the equivalent
+    substitution on ``index.html`` at request time so dev and prod
+    enforce the same integrity check.
+    """
+    index_path = dist_dir / "index.html"
+    if not index_path.is_file():
+        return
+    text = index_path.read_text(encoding="utf-8")
+    app_js = dist_dir / "app.js"
+    if app_js.is_file():
+        text = text.replace(PLACEHOLDER_APP_JS_INTEGRITY, compute_sri_hash(app_js))
+    jspdf = dist_dir / "vendor" / "jspdf-2.5.1.umd.min.js"
+    if jspdf.is_file():
+        text = text.replace(PLACEHOLDER_JSPDF_INTEGRITY, compute_sri_hash(jspdf))
+    index_path.write_text(text, encoding="utf-8")
 
 
 def stamp_static_assets(dist_dir: Path, label: str) -> None:
@@ -150,6 +201,7 @@ def main() -> int:
     shutil.copytree(STATIC_DIR, DIST_DIR)
     label = compute_build_label()
     stamp_static_assets(DIST_DIR, label)
+    stamp_sri_attributes(DIST_DIR)
     write_build_meta(DIST_DIR / "build-meta.json", label, db_path=DB_SRC)
     if DB_SRC.is_file():
         shutil.copy2(DB_SRC, DIST_DIR / "fellows.db")

@@ -149,6 +149,17 @@ def deploy_server(tmp_path_factory):
     shutil.copytree(repo_root / "app" / "static", dist_dir, dirs_exist_ok=True)
     shutil.copy2(src_db, dist_dir / "fellows.db")
 
+    # Mirror what `build/build_pwa.py main()` does to a real prod dist:
+    # stamp the build label into app.js / sw.js / vendor/sqlite-worker.js,
+    # then compute the SRI hashes and substitute them into index.html.
+    # Without this the browser would refuse to execute app.js (literal
+    # `__APP_JS_INTEGRITY__` placeholder doesn't match any computed
+    # SHA-384) and every e2e test would fail at script-load time.
+    sys.path.insert(0, str(repo_root / "build"))
+    import build_pwa as _build_pwa  # noqa: E402  (path-dependent)
+    _build_pwa.stamp_static_assets(dist_dir, _build_pwa.compute_build_label(repo_root))
+    _build_pwa.stamp_sri_attributes(dist_dir)
+
     test_email = "round-trip-tester@example.com"
     test_db = dist_dir / "fellows.db"
     conn = sqlite3.connect(str(test_db))
