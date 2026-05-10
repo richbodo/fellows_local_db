@@ -1,6 +1,6 @@
 # Email System Management
 
-The production email system is a magic-link gate on `deploy/server.py`: users submit an email to `POST /api/send-unlock`, the server checks a SHA-256 hash against `deploy/dist/allowed_emails.json`, issues a short-lived token (30 minutes — see [`email_gate.md`](email_gate.md)), and sends a Postmark email with a `/#/unlock/<token>` link. When that token is posted to `POST /api/verify-token`, the server sets a signed session cookie and the browser can access protected directory assets (`/fellows.db`, `/images/*`, directory `/api/*`). The system is stateless at deploy-time except for in-memory tokens/rate buckets, so restarts invalidate outstanding tokens by design.
+The production email system is a magic-link gate on `deploy/server.py`: users submit an email to `POST /api/send-unlock`, the server HMAC-hashes the address with `FELLOWS_ALLOWLIST_HMAC_KEY` and checks it against the in-memory allowlist (built at startup from `contact_email` rows in `deploy/dist/fellows.db`), issues a short-lived token (30 minutes — see [`email_gate.md`](email_gate.md)), and sends a Postmark email with a `/#/unlock/<token>` link. When that token is posted to `POST /api/verify-token`, the server mints a `session_id`, registers it in an in-memory session table, and sets a v3 signed session cookie carrying that id; the browser can then access protected directory assets (`/fellows.db`, `/images/*`, directory `/api/*`). The system is stateless on disk — outstanding tokens, the allowlist, and the session registry all live in memory, so a service restart invalidates magic-link tokens *and* every active session by design.
 
 > Commands below use `just` recipes where available. See [`justfile.md`](justfile.md) for the full menu; every recipe falls through to the underlying script shown in each step.
 
@@ -17,13 +17,15 @@ Environment variables used in this section:
 | `FELLOWS_REPLY_TO` | Optional. When set, becomes the `Reply-To` header. Use this to route replies to a real operator mailbox (e.g. `richbodo+fellows@gmail.com`) while `admin@fellows.globaldonut.com` is the visible sender. When unset, replies go to `FELLOWS_MAIL_FROM`. |
 | `FELLOWS_PUBLIC_ORIGIN` | Public HTTPS origin for the deployed app, for example `https://fellows.globaldonut.com`. Used to build the magic-link URL in the email body. |
 
-1. **[Machine: local dev machine] Build fresh bundle with allowlist**
+1. **[Machine: local dev machine] Build fresh bundle**
    ```bash
    cd /path/to/fellows_local_db
    just build
    # under the hood: python build/build_pwa.py
    ```
-   Confirm `deploy/dist/allowed_emails.json` exists.
+   Confirm `deploy/dist/fellows.db` exists. The allowlist is no longer
+   written to `dist/` — it's built in memory on the server at startup
+   by HMAC-ing every distinct `contact_email` row in that DB.
 
 2. **[Machine: local dev machine] Install/update Ansible collection (once per machine)**
    ```bash

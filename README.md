@@ -291,7 +291,7 @@ just build              # assemble deploy/dist/
 just build-meta         # print the build-meta.json (timestamp + git sha) of the last build
 ```
 
-Under the hood: `python build/build_pwa.py` assembles `deploy/dist/` from `app/static/`, adds `fellows.db`, images, and writes `allowed_emails.json` (SHA-256 hashes of normalized `contact_email` values from the DB).
+Under the hood: `python build/build_pwa.py` assembles `deploy/dist/` from `app/static/` and adds `fellows.db` plus profile images. The magic-link allowlist is no longer written to `dist/`; the production server builds it in memory at startup by HMAC-ing each `contact_email` row in `fellows.db` with `FELLOWS_ALLOWLIST_HMAC_KEY` (see `[docs/email_system_management.md](docs/email_system_management.md)`).
 
 ## Production / DevOps
 
