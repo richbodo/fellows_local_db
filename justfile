@@ -256,6 +256,54 @@ build:
 build-meta:
     @if [ -f deploy/dist/build-meta.json ]; then cat deploy/dist/build-meta.json; else echo "No deploy/dist/build-meta.json — run 'just build' first."; fi
 
+# Pre-deploy sanity check. Warns (and prompts) if the working tree is
+# in an unusual state for a deploy: branch != main, HEAD differs from
+# origin/main, or there are uncommitted changes. Prompts y/N so a
+# side-branch deploy remains possible when intentional. Set
+# FELLOWS_DEPLOY_SKIP_PREFLIGHT=1 to bypass.
+#
+# `deploy` and `deploy-fast` depend on this; `ship` / `ship-fast` list
+# it first so the check happens before the (slow) test step.
+[group('deploy')]
+deploy-preflight:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    if [ "${FELLOWS_DEPLOY_SKIP_PREFLIGHT:-0}" = "1" ]; then
+        echo "Deploy preflight: skipped (FELLOWS_DEPLOY_SKIP_PREFLIGHT=1)."
+        exit 0
+    fi
+    branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')
+    head_sha=$(git rev-parse --short HEAD 2>/dev/null || echo '?')
+    origin_main_sha=$(git rev-parse --short origin/main 2>/dev/null || echo '')
+    dirty=$(git status --porcelain 2>/dev/null | head -c 1)
+    warnings=()
+    if [ "$branch" != "main" ]; then
+        warnings+=("on branch '$branch' (not main) — prod will run this branch")
+    fi
+    if [ -n "$origin_main_sha" ] && [ "$head_sha" != "$origin_main_sha" ]; then
+        ahead=$(git rev-list "origin/main..HEAD" --count 2>/dev/null || echo '?')
+        behind=$(git rev-list "HEAD..origin/main" --count 2>/dev/null || echo '?')
+        warnings+=("HEAD ($head_sha) differs from origin/main ($origin_main_sha): ahead $ahead, behind $behind")
+    fi
+    if [ -n "$dirty" ]; then
+        warnings+=("working tree is dirty — uncommitted changes will be bundled but the SHA won't reflect them")
+    fi
+    if [ ${#warnings[@]} -eq 0 ]; then
+        echo "Deploy preflight: $branch @ $head_sha — clean, matches origin/main. OK."
+        exit 0
+    fi
+    echo "Deploy preflight — heads up:"
+    for w in "${warnings[@]}"; do
+        echo "  - $w"
+    done
+    echo
+    printf "Deploy %s @ %s anyway? [y/N] " "$branch" "$head_sha"
+    read -r reply || reply=""
+    case "$reply" in
+        y|Y|yes|YES) echo "Continuing." ;;
+        *) echo "Deploy aborted."; exit 1 ;;
+    esac
+
 # Deploy to prod (build + ansible + HTTPS smoke, via ansible/deploy_pwa.yml).
 #
 # The build step (build/build_pwa.py) stamps the current git short SHA into
@@ -264,7 +312,7 @@ build-meta:
 # step. See docs/DevOps.md for the routine flow and `just whats-running`
 # for the local-vs-prod label snapshot.
 [group('deploy')]
-deploy:
+deploy: deploy-preflight
     ./scripts/deploy_pwa.sh --ask-become-pass
 
 # Deploy, reusing existing deploy/dist/ (skips the build step).
@@ -273,7 +321,7 @@ deploy:
 # same code, surprising if HEAD has moved. Run `just build` first if in
 # doubt, or use `just deploy` for the rebuild-then-push path.
 [group('deploy')]
-deploy-fast:
+deploy-fast: deploy-preflight
     ansible-playbook ansible/deploy_pwa.yml --ask-become-pass --extra-vars "fellows_skip_build=true"
 
 # Ansible --check (dry run, no changes made).
@@ -281,13 +329,16 @@ deploy-fast:
 deploy-check:
     ansible-playbook ansible/deploy_pwa.yml --ask-become-pass --check
 
-# Full ship: test-fast → deploy (ansible does build + deploy + smoke).
+# Full ship: preflight → test-fast → deploy. Preflight runs first so a
+# wrong-branch/dirty-tree deploy is caught before sitting through the
+# test suite. `deploy` also depends on preflight; just dedupes within a
+# single invocation.
 [group('deploy')]
-ship: test-fast deploy
+ship: deploy-preflight test-fast deploy
 
-# Fast ship: deploy-fast → smoke (skip tests and rebuild).
+# Fast ship: preflight → deploy-fast → smoke (skip tests and rebuild).
 [group('deploy')]
-ship-fast: deploy-fast smoke
+ship-fast: deploy-preflight deploy-fast smoke
 
 # First-time bootstrap: ansible site.yml --tags bootstrap.
 [group('deploy')]
@@ -351,11 +402,8 @@ whats-running:
         echo "  git_sha:             ${prod_sha}"
         echo "  built_at:            ${prod_built}"
         rm -f /tmp/_fellows_bm.json
-        if [ "${prod_sha}" != "?" ] && [ "${prod_sha}" != "${head_sha}" ]; then
-            commits_ahead=$(git rev-list "${prod_sha}..HEAD" --count 2>/dev/null || echo '?')
-            echo "  drift:               local HEAD is ${commits_ahead} commits ahead of prod"
-        elif [ "${prod_sha}" = "${head_sha}" ]; then
-            echo "  drift:               none — prod matches local HEAD"
+        if [ "${prod_sha}" != "?" ]; then
+            ./scripts/show_prod_drift.sh "${prod_sha}" "${head_sha}" "  drift:              "
         fi
     else
         echo "  (could not fetch /build-meta.json)"
@@ -392,6 +440,11 @@ drift:
     git log -1 --format='  %h %cI  %s' HEAD
     echo "origin/main:"
     git log -1 --format='  %h %cI  %s' origin/main 2>/dev/null || echo "  (no origin/main)"
+    echo
+    if [ -n "${prod_sha:-}" ] && [ "${prod_sha}" != "?" ]; then
+        head_sha=$(git rev-parse --short HEAD 2>/dev/null || echo '')
+        ./scripts/show_prod_drift.sh "${prod_sha}" "${head_sha}" "Drift:"
+    fi
 
 # Interactive SSH into the prod droplet (uses FELLOWS_HOST / FELLOWS_SSH_PORT / FELLOWS_SSH_USER).
 [group('prod')]
