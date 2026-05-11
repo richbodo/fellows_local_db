@@ -602,6 +602,30 @@ class Handler(BaseHTTPRequestHandler):
             text = data.decode("utf-8")
             stamped = _build_pwa.substitute_build_label(text, BUILD_LABEL)
             data = stamped.encode("utf-8")
+        # SRI substitution for index.html. The integrity for app.js must
+        # cover the post-stamp bytes the dev server WILL serve, not the
+        # source-tree bytes — otherwise the browser computes one hash and
+        # rejects the script. We mirror the stamping rule above (file
+        # name in {app.js, sw.js, vendor/sqlite-worker.js}) but here only
+        # app.js's hash is consumed.
+        if file_path.name == "index.html":
+            text = data.decode("utf-8")
+            app_js_path = STATIC_DIR / "app.js"
+            if app_js_path.is_file():
+                stamped_app_js = _build_pwa.substitute_build_label(
+                    app_js_path.read_text(encoding="utf-8"), BUILD_LABEL
+                ).encode("utf-8")
+                text = text.replace(
+                    _build_pwa.PLACEHOLDER_APP_JS_INTEGRITY,
+                    _build_pwa.compute_sri_hash_bytes(stamped_app_js),
+                )
+            jspdf_path = STATIC_DIR / "vendor" / "jspdf-2.5.1.umd.min.js"
+            if jspdf_path.is_file():
+                text = text.replace(
+                    _build_pwa.PLACEHOLDER_JSPDF_INTEGRITY,
+                    _build_pwa.compute_sri_hash(jspdf_path),
+                )
+            data = text.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
