@@ -14,6 +14,7 @@ file to the public internet.
 import base64
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -43,6 +44,43 @@ PLACEHOLDER_CACHE_VERSION = "__CACHE_VERSION__"
 # cover the *post-stamp* bytes the browser will fetch.
 PLACEHOLDER_APP_JS_INTEGRITY = "__APP_JS_INTEGRITY__"
 PLACEHOLDER_JSPDF_INTEGRITY = "__JSPDF_INTEGRITY__"
+
+# Files included in the signed bundle manifest. The SW's
+# precacheVerified iterates this list (via the served manifest.json),
+# fetches each, and re-hashes against the manifest entry before
+# accepting. Images are *not* included — they're not security-critical
+# and the manifest would balloon to ~250 entries. `fellows.db` is also
+# not in the manifest itself; its hash is in `build-meta.json` (which
+# IS in the manifest), so its integrity flows transitively through the
+# manifest signature.
+MANIFEST_INCLUDE_PATHS = (
+    "index.html",
+    "app.js",
+    "sw.js",
+    "styles.css",
+    "manifest.webmanifest",
+    "build-meta.json",
+    "vendor/jspdf-2.5.1.umd.min.js",
+    "vendor/sqlite-worker.js",
+    "vendor/sqlite3.js",
+    "vendor/sqlite3.wasm",
+    "icons/icon-180.png",
+    "icons/icon-192.png",
+    "icons/icon-512.png",
+    "icons/icon-maskable-192.png",
+    "icons/icon-maskable-512.png",
+    "icons/favicon-16.png",
+    "icons/favicon-32.png",
+    "icons/donut-ehf.svg",
+)
+
+# Matches the `PROD_PUBLIC_KEY_HEX = '...'` constant in sw.js. The
+# captured group is the hex string; if it's the unsubstituted
+# `__PROD_PUBLIC_KEY_HEX__` placeholder or any other non-hex value, the
+# fingerprint helper returns None.
+_PROD_PUBKEY_RE = re.compile(
+    r"PROD_PUBLIC_KEY_HEX\s*=\s*['\"]([0-9a-fA-F_]+)['\"]"
+)
 
 
 def get_short_sha(repo_root: Path = REPO_ROOT) -> str | None:
@@ -164,7 +202,48 @@ def compute_fellows_db_sha(db_path: Path) -> str | None:
     return h.hexdigest()
 
 
-def write_build_meta(dest: Path, label: str, db_path: Path | None = None) -> None:
+def compute_pubkey_fingerprint(sw_js_path: Path) -> str | None:
+    """Read ``PROD_PUBLIC_KEY_HEX`` from ``sw.js`` source and return the
+    SHA-384 hex fingerprint of the decoded raw public key bytes.
+
+    Returns ``None`` when the constant is missing, when it's the
+    ``__PROD_PUBLIC_KEY_HEX__`` placeholder, or when the hex isn't a
+    well-formed 65-byte uncompressed P-256 point (130 hex chars).
+    Callers (build-meta, magic-link email, About page) treat ``None``
+    as "signing not yet configured" and surface that to the user.
+
+    The same fingerprint is what ``scripts/keygen_signing_key.py``
+    prints when the operator generates their key, so what's shown on
+    the About page should match what arrives in the magic-link email,
+    which should match what `keygen` printed at setup. Three
+    independent paths to the same value — a defense against any one
+    of them being silently swapped.
+    """
+    try:
+        text = sw_js_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    m = _PROD_PUBKEY_RE.search(text)
+    if not m:
+        return None
+    hex_str = m.group(1)
+    if "_" in hex_str or len(hex_str) != 130:
+        return None
+    try:
+        raw = bytes.fromhex(hex_str)
+    except ValueError:
+        return None
+    if len(raw) != 65 or raw[0] != 0x04:
+        return None
+    return hashlib.sha384(raw).hexdigest()
+
+
+def write_build_meta(
+    dest: Path,
+    label: str,
+    db_path: Path | None = None,
+    sw_js_path: Path | None = None,
+) -> None:
     """Fingerprint for deploy debugging (client vs server bundle drift).
 
     The git_sha here matches the SHA-half of the build label so a single
@@ -176,6 +255,12 @@ def write_build_meta(dest: Path, label: str, db_path: Path | None = None) -> Non
     fetch, different SHA → atomic re-import. Omitted when `db_path` is
     None or missing — the worker treats that as "no comparison
     available" and falls back to its Phase 1 cold-start-only behavior.
+
+    `pubkey_fingerprint` (security/signed-bundles) carries the SHA-384
+    of the prod signing-key public bytes when ``sw_js_path`` points at
+    a sw.js whose ``PROD_PUBLIC_KEY_HEX`` has been replaced from the
+    placeholder. Omitted otherwise; the About page renders "signing
+    not yet configured" when the field is absent.
     """
     sha = label.rsplit("-", 1)[-1] if label else None
     meta = {
@@ -188,7 +273,48 @@ def write_build_meta(dest: Path, label: str, db_path: Path | None = None) -> Non
         fellows_sha = compute_fellows_db_sha(db_path)
         if fellows_sha is not None:
             meta["fellows_db_sha"] = fellows_sha
+    if sw_js_path is not None:
+        fp = compute_pubkey_fingerprint(sw_js_path)
+        if fp is not None:
+            meta["pubkey_fingerprint"] = fp
     dest.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+
+
+def write_bundle_manifest(dist_dir: Path, build_label: str) -> Path:
+    """Write ``dist/manifest.json`` listing every shell file with its
+    SHA-384. The result is what the maintainer signs with
+    ``scripts/sign_bundle.py``; the resulting ``manifest.sig`` is the
+    trust anchor the service worker verifies on install.
+
+    Must run AFTER ``stamp_static_assets``, ``stamp_sri_attributes``,
+    AND ``write_build_meta`` — those each modify or write files this
+    manifest hashes over. Missing files are silently skipped; a build
+    that lacks an icon won't fail the manifest, but the file the SW
+    fetches via the served manifest must match whatever's in this
+    list, so any drift between disk and manifest fails-loud at the
+    SW's precacheVerified step.
+
+    Output is sorted-key + 2-space JSON so the bytes are deterministic
+    for a given input set — important because the signature is over
+    these exact bytes.
+    """
+    files: dict[str, str] = {}
+    for relpath in MANIFEST_INCLUDE_PATHS:
+        p = dist_dir / relpath
+        if p.is_file():
+            files[relpath] = compute_sri_hash(p)
+    manifest = {
+        "version": 1,
+        "build_label": build_label,
+        "alg": "ECDSA-P256-SHA256",
+        "files": files,
+    }
+    out = dist_dir / "manifest.json"
+    out.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return out
 
 
 def main() -> int:
@@ -202,7 +328,13 @@ def main() -> int:
     label = compute_build_label()
     stamp_static_assets(DIST_DIR, label)
     stamp_sri_attributes(DIST_DIR)
-    write_build_meta(DIST_DIR / "build-meta.json", label, db_path=DB_SRC)
+    write_build_meta(
+        DIST_DIR / "build-meta.json",
+        label,
+        db_path=DB_SRC,
+        sw_js_path=DIST_DIR / "sw.js",
+    )
+    write_bundle_manifest(DIST_DIR, label)
     if DB_SRC.is_file():
         shutil.copy2(DB_SRC, DIST_DIR / "fellows.db")
     else:

@@ -252,6 +252,129 @@ just prod-env             # confirm new value (paste-ready)
 
 `just prod-repair-env` is the documented playbook for a malformed env file. Full operator runbook (Postmark sender setup, debugging, journald event schema): [`docs/email_system_management.md`](email_system_management.md).
 
+## Signing keys and bundle verification
+
+The service worker refuses to install a new bundle unless the manifest signature verifies against the prod public key embedded in `app/static/sw.js` (`PROD_PUBLIC_KEY_HEX`). The trust anchor is therefore the SW that's already on the user's device — a compromise of the prod box after a user installs cannot push a malicious update to that user, because the SW won't accept it.
+
+This section covers: (1) one-time keypair generation; (2) per-deploy signing; (3) the out-of-band fingerprint publication that closes the TOFU gap on first install; (4) the supporting DNS records (CAA) and HSTS preload submission.
+
+### One-time setup — generate the prod signing keypair
+
+Run on your laptop (NOT on the prod droplet):
+
+```bash
+just keygen
+```
+
+This generates an ECDSA P-256 keypair, prompts for a passphrase, writes the encrypted private key to `~/.fellows/signing-key.enc.pem` (mode `0600`), and prints the public key in two forms:
+
+- **130-char hex** (raw uncompressed point) — paste this into `app/static/sw.js`'s `PROD_PUBLIC_KEY_HEX` constant, replacing the literal `'__PROD_PUBLIC_KEY_HEX__'` placeholder. Commit and push.
+- **96-char SHA-384 fingerprint** — print this. Tape it to your monitor. Email it to yourself. This is the value users will compare against the About page on first install (see § Out-of-band fingerprint publication below).
+
+After committing the public key, the next `just ship` signs the bundle automatically.
+
+**Back up the encrypted private key.** If you lose this file you cannot push further updates — users keep running their currently-installed version forever. In the archival-directory model that's a survivable failure (`SECURITY.md` § 1), but it should be a deliberate decision, not an accident. Recommended:
+
+- Copy to a USB stick stored at a different physical location.
+- Optionally, also export the encrypted private key into a printed QR (a single P-256 PEM is ~250 bytes — fits trivially in a printable QR).
+- Verify a backup by running `python scripts/sign_bundle.py --dry-run --key <backup-path>` on a fresh machine.
+
+The unencrypted private key is **never** written to disk by the keygen tool. The passphrase is read interactively so it never lands in shell history.
+
+### Per-deploy signing
+
+Every `just deploy` and `just ship` now chains `build` → `sign` → push:
+
+```bash
+just ship
+```
+
+Internally this is `deploy-preflight → test-fast → deploy`, where `deploy` is `build sign deploy-fast`. The `sign` step prompts for the passphrase once (`Passphrase for /Users/.../.fellows/signing-key.enc.pem:`), produces `deploy/dist/manifest.sig`, and the ansible playbook rsyncs it to prod alongside `manifest.json`. The post-deploy smoke check confirms HTTPS reachability; the SW signature verify runs the next time any browser fetches a new `sw.js`.
+
+For automated re-deploys where you've already built and signed locally (e.g. retrying after a transient ansible failure), use:
+
+```bash
+just ship-fast       # deploy-fast → smoke; skips build AND sign
+```
+
+The ansible playbook has a trip-wire that refuses to rsync if `deploy/dist/manifest.sig` is missing — it fails loud with a "Run `just sign`" message rather than silently shipping an unsigned bundle.
+
+### Migration path — first time signing is enabled
+
+The PR that introduces signing (`security/signed-bundles`) ships with `PROD_PUBLIC_KEY_HEX = '__PROD_PUBLIC_KEY_HEX__'` as a placeholder. Until the operator runs `just keygen` and replaces the constant, prod SW installs **will fail signature verification**.
+
+Failure mode is safe: the *old* SW on every installed device keeps serving the old shell. New users arriving during the migration window don't get an SW (no offline cache) but the page itself still loads — script tags fetch directly from the server.
+
+**Order of operations for activation:**
+
+1. Run `just keygen` on your laptop. Choose a passphrase. Back up the encrypted private key.
+2. Edit `app/static/sw.js`: replace the `'__PROD_PUBLIC_KEY_HEX__'` placeholder with the hex the keygen tool printed.
+3. Commit and merge that change to `main`.
+4. `just ship`. The build will succeed, the sign step prompts for the passphrase, the deploy rolls out.
+5. Watch `just prod-logs` for `event=client_error` entries with `kind=sw` — those are SW install failures, which during the activation window should drop to zero as new bundles roll out across users.
+6. (Recommended) Test from a fresh incognito window: open `https://fellows.globaldonut.com/`, request a magic link, install. Open DevTools → Application → Service Worker — confirm a fresh SW is active and there are no integrity errors.
+
+### Out-of-band fingerprint publication (closes the TOFU gap)
+
+The trust anchor (`PROD_PUBLIC_KEY_HEX` in `sw.js`) is established on first install. If an attacker intercepts that *first* install, they can plant their own key. Three channels carry the public-key fingerprint so a security-conscious fellow can cross-check:
+
+1. **The magic-link email body** (automatic). After signing is configured, every magic-link email includes a "Public key fingerprint" block. A compromised HTTPS server *cannot also forge the email body* unless the attacker has also stolen the Postmark token — a separate compromise that requires SSH access to the droplet's `/etc/fellows/fellows-pwa.env`.
+2. **The About page in the installed app** (`#/about` → "Signing key" row). Users compare what the app shows against what arrived in the email.
+3. **The git repo** (`app/static/sw.js`). Independent auditors can compute the fingerprint from `PROD_PUBLIC_KEY_HEX` and compare to what the served bundle reports. The maintainer is encouraged to also paste the fingerprint into a high-visibility second host (a public Gist, the README, social media) so paranoid users have a third comparison path.
+
+All three should match. Mismatch on any pair = stop installing and report.
+
+### Supporting DNS: CAA records
+
+Add to your DNS provider (Cloudflare for `globaldonut.com`):
+
+```
+fellows.globaldonut.com.  CAA  0 issue "letsencrypt.org"
+fellows.globaldonut.com.  CAA  0 issuewild ";"
+fellows.globaldonut.com.  CAA  0 iodef "mailto:richbodo@gmail.com"
+```
+
+Tells every CA: "Only Let's Encrypt may issue certificates for this name. Wildcard certs are forbidden. Report attempted misissuance to this mailbox." A rogue CA (or one tricked by a phishing-style domain-validation attack) is required by RFC 8659 to refuse — this raises the bar substantially against a fraudulent-cert MITM at first install.
+
+Verify after publication:
+
+```bash
+dig +short CAA fellows.globaldonut.com
+# Expect three lines, matching the above.
+```
+
+### HSTS preload submission
+
+Caddy already sets `Strict-Transport-Security: max-age=31536000; includeSubDomains; preload`. The `preload` directive is necessary but not sufficient — Chrome/Firefox/Safari only honor it for sites on their **preload list**. Submit at:
+
+<https://hstspreload.org/?domain=fellows.globaldonut.com>
+
+The form runs a series of checks (HSTS header present, redirect from HTTP to HTTPS, no expired certs); pass them, click submit. Inclusion lags by one major browser release (~6–10 weeks). Once on the list, every browser refuses HTTP for `fellows.globaldonut.com` from the very first visit, closing the "first HTTP request gets MITM'd before HSTS takes effect" window entirely.
+
+This is opt-in but free; do it once.
+
+### Certificate Transparency monitoring (optional but recommended)
+
+Subscribe to crt.sh notifications for `fellows.globaldonut.com`. Any new cert issuance — by Let's Encrypt or anyone else — generates an email. If a cert appears that you didn't trigger (e.g. an attacker tricked a CA into issuing one despite the CAA records), you find out the same day rather than after a user reports.
+
+Free signup: <https://crt.sh/?domain=fellows.globaldonut.com> → click the email-monitor link.
+
+### What gets signed and what doesn't
+
+The signed manifest at `dist/manifest.json` covers every shell file the SW precaches:
+
+- `index.html`, `app.js`, `sw.js`, `styles.css`, `manifest.webmanifest`
+- `vendor/jspdf-2.5.1.umd.min.js`, `vendor/sqlite-worker.js`, `vendor/sqlite3.js`, `vendor/sqlite3.wasm`
+- All icons under `icons/`
+- `build-meta.json` (which itself carries `fellows_db_sha`, so `fellows.db` integrity flows transitively)
+
+Not in the manifest:
+
+- `fellows.db` — verified transitively via `build-meta.json:fellows_db_sha`; the sqlite worker does that check independently.
+- `/images/*` — ~250 profile photos; not security-critical, would balloon the manifest.
+
+If a future change adds a new script or worker to the bundle, **add it to `MANIFEST_INCLUDE_PATHS`** in `build/build_pwa.py`. There's a test (`test_write_bundle_manifest_covers_security_critical_paths`) that pins the must-have entries, but it's an allow-list — it won't catch a newly-introduced file that should be in the list.
+
 ## Debugging
 
 - **Service**: `just prod-logs` (`journalctl -u fellows-pwa -f`) streams structured JSON (`event=auth_status`, `event=send_unlock_email`, `event=build_meta`). Pass a different unit with `just prod-logs caddy`.

@@ -9,22 +9,171 @@ const APP_SHELL_CACHE = `fellows-app-shell-${CACHE_VERSION}`;
 // Separate cache so shell-version bumps don't evict the ~34 MB of profile images.
 const IMAGES_CACHE = 'fellows-images-v1';
 
-// fellows.db is fetched only after magic-link session (Phase 4); not precached here.
-const APP_SHELL_ASSETS = [
-  '/',
-  '/index.html',
-  '/styles.css',
-  '/app.js',
-  '/sw.js',
-  '/vendor/sqlite-worker.js',
-  '/manifest.webmanifest',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png',
-  '/icons/icon-maskable-512.png',
-  '/vendor/sqlite3.js',
-  '/vendor/sqlite3.wasm',
-  '/vendor/jspdf-2.5.1.umd.min.js'
-];
+// Public keys for bundle signature verification (security/signed-bundles).
+//
+// The SW refuses to install a new shell unless `/manifest.sig` verifies
+// against the appropriate public key for the current origin. The
+// signature covers `/manifest.json`, which itself lists every shell
+// file's SHA-384 — precacheVerified re-hashes each file before caching.
+//
+// PROD_PUBLIC_KEY_HEX is the maintainer's ECDSA P-256 public key (raw
+// uncompressed point, 130 hex chars). Until the maintainer has run
+// `python scripts/keygen_signing_key.py` and replaced the placeholder
+// below, prod installs WILL FAIL signature verification by design —
+// old SW continues serving the old shell, no app-visible break.
+// See docs/DevOps.md § Signing keys and bundle verification.
+//
+// DEV_PUBLIC_KEY_HEX is the test key from tests/fixtures/. Accepted
+// only on http://localhost(:port) and http://127.0.0.1(:port) origins.
+// tests/fixtures/README.md explains why a "private" test key in git
+// is not a vulnerability (origin gate keeps it inert in production).
+const PROD_PUBLIC_KEY_HEX = '__PROD_PUBLIC_KEY_HEX__';
+const DEV_PUBLIC_KEY_HEX = '04cf5cb8286e8d401937f48ab1a53c264dac8de3e92b5f66714e7366101f3870bcfc8ec70f930234ba6c97b5af025bb8d585f9b0a1d5c57a774b939f3e07b1dc06';
+
+function isDevOrigin() {
+  const o = self.location.origin;
+  return o === 'http://localhost' || o.startsWith('http://localhost:') ||
+         o === 'http://127.0.0.1' || o.startsWith('http://127.0.0.1:');
+}
+
+function selectPublicKeyHex() {
+  return isDevOrigin() ? DEV_PUBLIC_KEY_HEX : PROD_PUBLIC_KEY_HEX;
+}
+
+function hexToBytes(hex) {
+  if (!hex || typeof hex !== 'string' || hex.length % 2 !== 0) return null;
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    const b = parseInt(hex.substr(i * 2, 2), 16);
+    if (Number.isNaN(b)) return null;
+    bytes[i] = b;
+  }
+  return bytes;
+}
+
+function base64ToBytes(b64) {
+  const bin = atob((b64 || '').replace(/\s+/g, ''));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bytes.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+function bytesToBase64(bytes) {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+
+async function importVerifyKey() {
+  const hex = selectPublicKeyHex();
+  const raw = hexToBytes(hex);
+  if (!raw || raw.length !== 65 || raw[0] !== 0x04) {
+    // 65-byte uncompressed point starts with 0x04. Anything else is
+    // either the unsubstituted `__PROD_PUBLIC_KEY_HEX__` placeholder
+    // (signing not configured) or a manually corrupted constant.
+    throw new Error('sw: public key constant is not a valid raw P-256 point');
+  }
+  return crypto.subtle.importKey(
+    'raw',
+    raw,
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    false,
+    ['verify']
+  );
+}
+
+async function fetchAndVerifyManifest() {
+  const manifestResp = await fetch('/manifest.json', { cache: 'no-store' });
+  if (!manifestResp.ok) {
+    throw new Error('sw: manifest fetch failed status=' + manifestResp.status);
+  }
+  const manifestBuf = await manifestResp.arrayBuffer();
+
+  const sigResp = await fetch('/manifest.sig', { cache: 'no-store' });
+  if (!sigResp.ok) {
+    throw new Error('sw: signature fetch failed status=' + sigResp.status);
+  }
+  const sigText = (await sigResp.text()).trim();
+  const sigBytes = base64ToBytes(sigText);
+  if (sigBytes.length !== 64) {
+    throw new Error('sw: signature wrong length ' + sigBytes.length + ' (expected 64)');
+  }
+
+  const key = await importVerifyKey();
+  const ok = await crypto.subtle.verify(
+    { name: 'ECDSA', hash: 'SHA-256' },
+    key,
+    sigBytes,
+    manifestBuf
+  );
+  if (!ok) {
+    throw new Error('sw: manifest signature did not verify');
+  }
+
+  let manifest;
+  try {
+    manifest = JSON.parse(new TextDecoder().decode(manifestBuf));
+  } catch (e) {
+    throw new Error('sw: manifest JSON parse failed ' + (e && e.message));
+  }
+  if (!manifest || typeof manifest !== 'object' || !manifest.files || typeof manifest.files !== 'object') {
+    throw new Error('sw: manifest shape invalid');
+  }
+  return manifest;
+}
+
+async function computeSha384(buf) {
+  const digest = await crypto.subtle.digest('SHA-384', buf);
+  return 'sha384-' + bytesToBase64(new Uint8Array(digest));
+}
+
+async function reportSwError(message) {
+  // Best-effort post to the client-error sink so a verify-fail surfaces
+  // in journald rather than only console. credentials:'omit' because
+  // SW install runs without any UI context; the sink doesn't require
+  // auth anyway (see deploy/client_error_sanitizer.py).
+  try {
+    await fetch('/api/client-errors', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'omit',
+      keepalive: true,
+      body: JSON.stringify({
+        events: [{ kind: 'sw', msg: ('bundle verify: ' + String(message)).slice(0, 500) }],
+        ua: (self.navigator && self.navigator.userAgent) || '',
+        build: CACHE_VERSION,
+      }),
+    });
+  } catch (_) { /* sink may itself be unreachable in some failure modes */ }
+}
+
+async function precacheVerified(cache, manifest) {
+  const paths = Object.keys(manifest.files);
+  const total = paths.length;
+  let loaded = 0;
+  for (const path of paths) {
+    const expectedSri = manifest.files[path];
+    const url = '/' + path;
+    const resp = await fetch(url, { cache: 'no-store' });
+    if (!resp.ok) {
+      throw new Error('sw: precache fetch failed ' + url + ' status=' + resp.status);
+    }
+    const buf = await resp.arrayBuffer();
+    const computedSri = await computeSha384(buf);
+    if (computedSri !== expectedSri) {
+      throw new Error('sw: hash mismatch ' + path + ' expected=' + expectedSri + ' got=' + computedSri);
+    }
+    // Re-wrap into a Response so the cached entry preserves the original
+    // headers (Cache-Control, Content-Type, etc.) when later served.
+    await cache.put(url, new Response(buf, {
+      status: resp.status,
+      statusText: resp.statusText,
+      headers: resp.headers,
+    }));
+    loaded += 1;
+    postCacheProgress({ type: 'sw-cache-progress', url: url, loaded: loaded, total: total });
+  }
+}
 
 function postCacheProgress(payload) {
   self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
@@ -37,23 +186,21 @@ function postCacheProgress(payload) {
 }
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(APP_SHELL_CACHE).then(async (cache) => {
-      const total = APP_SHELL_ASSETS.length;
-      let loaded = 0;
-      for (let i = 0; i < APP_SHELL_ASSETS.length; i++) {
-        const url = APP_SHELL_ASSETS[i];
-        const res = await fetch(url);
-        if (!res.ok) {
-          throw new Error('sw install fetch failed ' + url + ' ' + res.status);
-        }
-        await cache.put(url, res);
-        loaded += 1;
-        postCacheProgress({ type: 'sw-cache-progress', url: url, loaded: loaded, total: total });
-      }
+  event.waitUntil((async () => {
+    try {
+      const manifest = await fetchAndVerifyManifest();
+      const cache = await caches.open(APP_SHELL_CACHE);
+      await precacheVerified(cache, manifest);
       await self.skipWaiting();
-    })
-  );
+    } catch (e) {
+      const msg = (e && e.message) || String(e);
+      try { console.error('[sw] install failed:', msg); } catch (_) {}
+      await reportSwError(msg);
+      // Rethrow so the SW install fails, the new SW does not activate,
+      // and any old SW continues serving the old shell. Fail-safe.
+      throw e;
+    }
+  })());
 });
 
 self.addEventListener('activate', (event) => {

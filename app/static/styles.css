@@ -1591,6 +1591,24 @@ h1 {
   display: none;
 }
 
+.about-fingerprint {
+  /* 96 hex chars — let it wrap rather than horizontally scroll on
+     narrow viewports. Monospace makes character-by-character
+     comparison with the magic-link email easier. */
+  display: inline-block;
+  font-size: 0.78rem;
+  word-break: break-all;
+  line-height: 1.4;
+  margin-bottom: 0.3rem;
+}
+
+.about-signing-hint {
+  font-size: 0.82rem;
+  color: #6a6a6a;
+  margin-top: 0.25rem;
+  font-style: italic;
+}
+
 .about-update-action-btn {
   background: var(--accent, #6b3aa0);
   color: #fff;

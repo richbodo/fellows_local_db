@@ -14,6 +14,7 @@ Run from repo root: python app/server.py
 Then open http://localhost:8765/
 """
 
+import base64
 import json
 import re
 import sqlite3
@@ -62,18 +63,132 @@ def _dev_build_meta(label: str) -> dict:
     and build badge work identically in dev. The `git_sha` half of
     `label` reflects the currently checked-out commit when the server
     was started; `built_at` is the server start time.
+
+    `pubkey_fingerprint` carries the SHA-384 of the **prod** signing
+    key when sw.js's `PROD_PUBLIC_KEY_HEX` has been replaced from the
+    placeholder. Dev *verifies* with the dev key (see sw.js), but the
+    About-page fingerprint we surface to users is always the prod one
+    — that's the value users compare against the magic-link email at
+    install time, and the value that matters once we leave localhost.
     """
     sha = label.rsplit("-", 1)[-1] if label else None
-    return {
+    meta = {
         "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "git_sha": sha,
         "build_label": label,
         "generator": "app/server.py (dev)",
     }
+    fp = _build_pwa.compute_pubkey_fingerprint(STATIC_DIR / "sw.js")
+    if fp is not None:
+        meta["pubkey_fingerprint"] = fp
+    return meta
+
+
+def _dev_load_signing_key():
+    """Lazily import + load the committed dev ECDSA P-256 private key.
+
+    Imported lazily because `cryptography` is a dev dependency; we
+    don't want `import app.server` to fail when the dev tools haven't
+    been installed for a tests-only workflow.
+    """
+    global _DEV_SIGNING_KEY
+    if _DEV_SIGNING_KEY is None:
+        from cryptography.hazmat.primitives import serialization
+        _DEV_SIGNING_KEY = serialization.load_pem_private_key(
+            _DEV_SIGNING_KEY_PATH.read_bytes(),
+            password=None,
+        )
+    return _DEV_SIGNING_KEY
+
+
+def _dev_sign_bytes(manifest_bytes: bytes) -> bytes:
+    """Sign manifest_bytes with the dev ECDSA P-256 key, return raw
+    64-byte r||s (the Web Crypto-friendly form, what the SW expects
+    after base64-decoding manifest.sig)."""
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+    key = _dev_load_signing_key()
+    der = key.sign(manifest_bytes, ec.ECDSA(hashes.SHA256()))
+    r, s = decode_dss_signature(der)
+    return r.to_bytes(32, "big") + s.to_bytes(32, "big")
+
+
+def _dev_file_bytes_as_served(relpath: str) -> bytes | None:
+    """Return the bytes the dev server WOULD write to the wire when a
+    client requests `/relpath`. This is what the SW will compute
+    SHA-384 over and compare to the manifest entry — so the manifest
+    must be hashed over the same bytes. Mirrors the substitution rules
+    in `do_GET`'s static-file branch (build-label stamp for
+    app.js/sw.js/vendor/sqlite-worker.js, SRI substitution for
+    index.html). Returns None when the file doesn't exist.
+    """
+    # build-meta.json is a synthesized blob, not a file on disk in dev.
+    if relpath == "build-meta.json":
+        meta = dict(BUILD_META)
+        sha = _build_pwa.compute_fellows_db_sha(DB_PATH)
+        if sha is not None:
+            meta["fellows_db_sha"] = sha
+        return json.dumps(meta).encode("utf-8")
+    p = STATIC_DIR / relpath
+    if not p.is_file():
+        return None
+    data = p.read_bytes()
+    name = Path(relpath).name
+    rel_str = relpath.replace("\\", "/")
+    if name in ("app.js", "sw.js") or rel_str == "vendor/sqlite-worker.js":
+        text = data.decode("utf-8")
+        data = _build_pwa.substitute_build_label(text, BUILD_LABEL).encode("utf-8")
+    if name == "index.html":
+        text = data.decode("utf-8")
+        app_js = STATIC_DIR / "app.js"
+        if app_js.is_file():
+            stamped_app = _build_pwa.substitute_build_label(
+                app_js.read_text(encoding="utf-8"), BUILD_LABEL
+            ).encode("utf-8")
+            text = text.replace(
+                _build_pwa.PLACEHOLDER_APP_JS_INTEGRITY,
+                _build_pwa.compute_sri_hash_bytes(stamped_app),
+            )
+        jspdf = STATIC_DIR / "vendor" / "jspdf-2.5.1.umd.min.js"
+        if jspdf.is_file():
+            text = text.replace(
+                _build_pwa.PLACEHOLDER_JSPDF_INTEGRITY,
+                _build_pwa.compute_sri_hash(jspdf),
+            )
+        data = text.encode("utf-8")
+    return data
+
+
+def _dev_compute_manifest() -> bytes:
+    """Build the same shape of manifest.json that `build/build_pwa.py`
+    writes in prod, but using on-the-fly substituted bytes from
+    `app/static/`. Recomputed per request; SHA-384 over ~1MB total is
+    sub-millisecond. Deterministic encoding (sort_keys + indent) so
+    repeated requests produce byte-identical output."""
+    files: dict[str, str] = {}
+    for relpath in _build_pwa.MANIFEST_INCLUDE_PATHS:
+        b = _dev_file_bytes_as_served(relpath)
+        if b is not None:
+            files[relpath] = _build_pwa.compute_sri_hash_bytes(b)
+    manifest = {
+        "version": 1,
+        "build_label": BUILD_LABEL,
+        "alg": "ECDSA-P256-SHA256",
+        "files": files,
+    }
+    return (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
 BUILD_LABEL: str = _build_pwa.compute_build_label(REPO_ROOT)
 BUILD_META: dict = _dev_build_meta(BUILD_LABEL)
+# Lazy-loaded ECDSA private key used to sign the dev /manifest.sig so
+# the service worker's verify path runs in dev e2e tests exactly as in
+# production. Loaded from tests/fixtures/dev_signing_key.pem on first
+# need; see that file's sibling README.md for why a "private" test key
+# in git is acceptable (origin gate in sw.js renders it inert on prod).
+_DEV_SIGNING_KEY = None
+_DEV_SIGNING_KEY_PATH = REPO_ROOT / "tests" / "fixtures" / "dev_signing_key.pem"
 
 # Columns in fellows table (exclude extra_json for row dict)
 FELLOW_COLUMNS = [
@@ -479,6 +594,34 @@ class Handler(BaseHTTPRequestHandler):
             if sha is not None:
                 meta["fellows_db_sha"] = sha
             self.send_json(meta)
+            return
+
+        # /manifest.json and /manifest.sig are the SW's signed-bundle
+        # verification inputs. In prod they're static files written by
+        # build_pwa.py + scripts/sign_bundle.py; in dev we compute the
+        # manifest on the fly and sign it with the committed test key
+        # so the SW's `fetchAndVerifyManifest` path runs in e2e tests
+        # exactly as it does on real users' devices.
+        if path == "/manifest.json":
+            data = _dev_compute_manifest()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(data)
+            return
+
+        if path == "/manifest.sig":
+            manifest = _dev_compute_manifest()
+            raw_sig = _dev_sign_bytes(manifest)
+            body = base64.b64encode(raw_sig) + b"\n"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(body)
             return
 
         # Diagnostics stub for the in-app `?diag=1` panel and the SW

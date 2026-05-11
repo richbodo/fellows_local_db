@@ -14,14 +14,19 @@ import hashlib
 import json
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
 from build.build_pwa import (
+    MANIFEST_INCLUDE_PATHS,
     PLACEHOLDER_APP_JS_INTEGRITY,
     PLACEHOLDER_JSPDF_INTEGRITY,
     compute_fellows_db_sha,
+    compute_pubkey_fingerprint,
     compute_sri_hash,
     compute_sri_hash_bytes,
     stamp_sri_attributes,
     write_build_meta,
+    write_bundle_manifest,
 )
 
 
@@ -166,3 +171,131 @@ def test_stamp_sri_attributes_leaves_placeholder_when_target_missing(tmp_path: P
     html = (tmp_path / "index.html").read_text(encoding="utf-8")
     assert PLACEHOLDER_APP_JS_INTEGRITY in html
     assert PLACEHOLDER_JSPDF_INTEGRITY in html
+
+
+# ---- manifest generation (security/signed-bundles) -----------------------
+
+
+def test_write_bundle_manifest_includes_present_files(tmp_path: Path):
+    """`write_bundle_manifest` hashes whatever files in
+    `MANIFEST_INCLUDE_PATHS` actually exist in dist. Missing files are
+    skipped (not errors); present files get SHA-384'd."""
+    (tmp_path / "app.js").write_bytes(b"// app.js bytes")
+    (tmp_path / "sw.js").write_bytes(b"// sw.js bytes")
+    (tmp_path / "icons").mkdir()
+    (tmp_path / "icons" / "icon-192.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    out = write_bundle_manifest(tmp_path, "2026-05-11-abc123")
+    assert out == tmp_path / "manifest.json"
+
+    manifest = json.loads(out.read_text())
+    assert manifest["version"] == 1
+    assert manifest["alg"] == "ECDSA-P256-SHA256"
+    assert manifest["build_label"] == "2026-05-11-abc123"
+    assert "app.js" in manifest["files"]
+    assert "sw.js" in manifest["files"]
+    assert "icons/icon-192.png" in manifest["files"]
+    # Files that aren't on disk are silently omitted.
+    assert "vendor/sqlite3.wasm" not in manifest["files"]
+    # Hash is SHA-384 base64.
+    expected_app_js = compute_sri_hash_bytes(b"// app.js bytes")
+    assert manifest["files"]["app.js"] == expected_app_js
+
+
+def test_write_bundle_manifest_is_deterministic(tmp_path: Path):
+    """Manifest output is byte-stable for the same inputs. Required:
+    the signature is computed over these exact bytes; non-deterministic
+    JSON serialization would break verify-after-redeploy."""
+    (tmp_path / "app.js").write_bytes(b"x")
+    (tmp_path / "sw.js").write_bytes(b"y")
+    first = write_bundle_manifest(tmp_path, "label-1").read_bytes()
+    # Rewrite (same inputs); should match byte for byte.
+    second = write_bundle_manifest(tmp_path, "label-1").read_bytes()
+    assert first == second
+
+
+def test_write_bundle_manifest_covers_security_critical_paths():
+    """The manifest's include list MUST cover every script and worker
+    file the page actually loads at runtime. If a file's added to the
+    bundle but forgotten here, an attacker could swap it without
+    breaking the signature check."""
+    must_have = {
+        "index.html",
+        "app.js",
+        "sw.js",
+        "styles.css",
+        "build-meta.json",
+        "vendor/jspdf-2.5.1.umd.min.js",
+        "vendor/sqlite-worker.js",
+        "vendor/sqlite3.js",
+        "vendor/sqlite3.wasm",
+    }
+    assert must_have.issubset(set(MANIFEST_INCLUDE_PATHS))
+
+
+# ---- pubkey fingerprint (security/signed-bundles) ------------------------
+
+
+def test_compute_pubkey_fingerprint_returns_none_for_placeholder(tmp_path: Path):
+    """The default sw.js source has `PROD_PUBLIC_KEY_HEX = '__PROD_PUBLIC_KEY_HEX__'`.
+    Until the operator runs keygen + updates the constant, fingerprint
+    is None so build-meta.json omits the field and the About page renders
+    "not configured for this build" — soft signal, not a hard error."""
+    sw = tmp_path / "sw.js"
+    sw.write_text("const PROD_PUBLIC_KEY_HEX = '__PROD_PUBLIC_KEY_HEX__';\n")
+    assert compute_pubkey_fingerprint(sw) is None
+
+
+def test_compute_pubkey_fingerprint_returns_none_for_garbage(tmp_path: Path):
+    """A constant that's not a 65-byte uncompressed P-256 point also
+    returns None. Belt-and-suspenders: if someone pastes a malformed
+    hex (truncated, wrong curve point, etc.) we render the same
+    soft-warning UX rather than crashing the build."""
+    sw = tmp_path / "sw.js"
+    sw.write_text("const PROD_PUBLIC_KEY_HEX = 'deadbeef';\n")  # only 8 chars
+    assert compute_pubkey_fingerprint(sw) is None
+
+
+def test_compute_pubkey_fingerprint_returns_hex_for_real_key(tmp_path: Path):
+    """A valid 65-byte uncompressed P-256 point yields a 96-char SHA-384
+    hex string."""
+    sw = tmp_path / "sw.js"
+    # Use the committed dev pubkey hex — it's a real P-256 point.
+    pub_hex = (REPO_ROOT / "tests" / "fixtures" / "dev_signing_key_pub.hex").read_text().strip()
+    sw.write_text(f"const PROD_PUBLIC_KEY_HEX = '{pub_hex}';\n")
+    fp = compute_pubkey_fingerprint(sw)
+    assert fp is not None
+    assert len(fp) == 96
+    assert all(c in "0123456789abcdef" for c in fp)
+
+
+def test_compute_pubkey_fingerprint_returns_none_for_missing_file(tmp_path: Path):
+    """Missing sw.js → None rather than raising, so the build doesn't
+    explode in odd developer environments."""
+    assert compute_pubkey_fingerprint(tmp_path / "no-such-sw.js") is None
+
+
+def test_write_build_meta_includes_pubkey_fingerprint_when_configured(tmp_path: Path):
+    """When sw.js carries a real PROD_PUBLIC_KEY_HEX, build-meta.json
+    gets the SHA-384 fingerprint. This is what the About page reads
+    via bootBuildMeta.pubkey_fingerprint."""
+    sw = tmp_path / "sw.js"
+    pub_hex = (REPO_ROOT / "tests" / "fixtures" / "dev_signing_key_pub.hex").read_text().strip()
+    sw.write_text(f"const PROD_PUBLIC_KEY_HEX = '{pub_hex}';\n")
+    dest = tmp_path / "build-meta.json"
+    write_build_meta(dest, "2026-05-11-abc", db_path=None, sw_js_path=sw)
+    meta = json.loads(dest.read_text())
+    assert "pubkey_fingerprint" in meta
+    assert len(meta["pubkey_fingerprint"]) == 96
+
+
+def test_write_build_meta_omits_pubkey_fingerprint_when_placeholder(tmp_path: Path):
+    """With the unsubstituted placeholder, build-meta.json doesn't
+    carry the field at all. The page treats absence as "not yet
+    configured" rather than rendering `null`."""
+    sw = tmp_path / "sw.js"
+    sw.write_text("const PROD_PUBLIC_KEY_HEX = '__PROD_PUBLIC_KEY_HEX__';\n")
+    dest = tmp_path / "build-meta.json"
+    write_build_meta(dest, "2026-05-11-abc", db_path=None, sw_js_path=sw)
+    meta = json.loads(dest.read_text())
+    assert "pubkey_fingerprint" not in meta

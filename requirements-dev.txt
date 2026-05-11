@@ -8,3 +8,10 @@ pytest-playwright>=0.4.0
 # native cairo library — on macOS: `brew install cairo`.
 cairosvg>=2.7
 pillow>=10.0
+
+# Bundle signing (scripts/sign_bundle.py + scripts/keygen_signing_key.py).
+# Also used by the dev server to sign manifests on the fly so e2e tests
+# exercise the same SW signature-verify path as production. The prod
+# server never imports this — it only serves the static manifest.sig
+# that the maintainer rsyncs up.
+cryptography>=42.0

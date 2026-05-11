@@ -363,3 +363,60 @@ def test_build_postmark_body_mail_from_override(monkeypatch):
     monkeypatch.setenv("FELLOWS_MAIL_FROM", "hello@fellows.globaldonut.com")
     body = ml.build_postmark_body("u@x.com", "https://example/#/unlock/tok")
     assert body["From"] == "hello@fellows.globaldonut.com"
+
+
+def test_build_postmark_body_includes_fingerprint_when_provided():
+    """When ``pubkey_fingerprint`` is set, both text and HTML bodies
+    carry the signing-key fingerprint plus the "compare on install"
+    instruction. This is the MITM mitigation per SECURITY.md — the
+    email arrives via Postmark (a different channel than the HTTPS
+    bundle), so a compromised prod server can't trivially swap the
+    fingerprint on both."""
+    fp = "abc123" * 16  # 96-char string, mock fingerprint shape
+    body = ml.build_postmark_body(
+        "user@example.com",
+        "https://fellows.globaldonut.com/#/unlock/tok",
+        pubkey_fingerprint=fp,
+    )
+    assert fp in body["TextBody"]
+    assert fp in body["HtmlBody"]
+    assert "fingerprint" in body["TextBody"].lower()
+    assert "do not install" in body["TextBody"].lower()
+    # The plain-text block points the user at where to compare.
+    assert "About row" in body["TextBody"]
+
+
+def test_build_postmark_body_omits_fingerprint_block_when_none():
+    """When ``pubkey_fingerprint`` is None (signing not yet configured
+    on this deploy), the email body doesn't mention fingerprints at
+    all — we don't want to render a "your software is unsigned"
+    warning to every fellow during the rollout window."""
+    body = ml.build_postmark_body(
+        "user@example.com",
+        "https://example/#/unlock/tok",
+        pubkey_fingerprint=None,
+    )
+    assert "fingerprint" not in body["TextBody"].lower()
+    assert "fingerprint" not in body["HtmlBody"].lower()
+
+
+def test_compute_pubkey_fingerprint_matches_build_pwa(tmp_path):
+    """`magic_link_auth.compute_pubkey_fingerprint` (used by prod
+    server) must produce IDENTICAL output to `build_pwa.compute_pubkey_fingerprint`
+    (used by build to write build-meta.json). If they drift, the email
+    body and the About page show different values and users can't
+    actually compare them. Both implementations exist because the prod
+    server can't import build_pwa (which doesn't ship to prod); this
+    test pins their equivalence."""
+    sys.path.insert(0, str(REPO_ROOT / "build"))
+    import build_pwa as bp
+
+    pub_hex = (REPO_ROOT / "tests" / "fixtures" / "dev_signing_key_pub.hex").read_text().strip()
+    sw = tmp_path / "sw.js"
+    sw.write_text(f"const PROD_PUBLIC_KEY_HEX = '{pub_hex}';\n")
+
+    assert ml.compute_pubkey_fingerprint(sw) == bp.compute_pubkey_fingerprint(sw)
+    # Placeholder also matches: both return None.
+    sw.write_text("const PROD_PUBLIC_KEY_HEX = '__PROD_PUBLIC_KEY_HEX__';\n")
+    assert ml.compute_pubkey_fingerprint(sw) is None
+    assert bp.compute_pubkey_fingerprint(sw) is None

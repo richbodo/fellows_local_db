@@ -150,15 +150,46 @@ def deploy_server(tmp_path_factory):
     shutil.copy2(src_db, dist_dir / "fellows.db")
 
     # Mirror what `build/build_pwa.py main()` does to a real prod dist:
-    # stamp the build label into app.js / sw.js / vendor/sqlite-worker.js,
-    # then compute the SRI hashes and substitute them into index.html.
-    # Without this the browser would refuse to execute app.js (literal
-    # `__APP_JS_INTEGRITY__` placeholder doesn't match any computed
-    # SHA-384) and every e2e test would fail at script-load time.
+    # stamp the build label, compute SRI hashes, write build-meta.json
+    # and the signed bundle manifest. Without these the SW's install
+    # path would 404 on /manifest.json or /manifest.sig and every e2e
+    # test would fail at SW install time (no shell precached).
     sys.path.insert(0, str(repo_root / "build"))
     import build_pwa as _build_pwa  # noqa: E402  (path-dependent)
-    _build_pwa.stamp_static_assets(dist_dir, _build_pwa.compute_build_label(repo_root))
+    label = _build_pwa.compute_build_label(repo_root)
+    _build_pwa.stamp_static_assets(dist_dir, label)
     _build_pwa.stamp_sri_attributes(dist_dir)
+    _build_pwa.write_build_meta(
+        dist_dir / "build-meta.json",
+        label,
+        db_path=dist_dir / "fellows.db",
+        sw_js_path=dist_dir / "sw.js",
+    )
+    _build_pwa.write_bundle_manifest(dist_dir, label)
+
+    # Sign the manifest with the committed dev test key (same key the
+    # dev server uses on the fly). The SW's verify path will run in
+    # full against e2e tests; an SRI / manifest / signing bug surfaces
+    # at SW install time rather than only on a real prod deploy.
+    import base64 as _b64
+    from cryptography.hazmat.primitives import hashes as _hashes
+    from cryptography.hazmat.primitives import serialization as _serialization
+    from cryptography.hazmat.primitives.asymmetric import ec as _ec
+    from cryptography.hazmat.primitives.asymmetric.utils import (
+        decode_dss_signature as _decode_dss_signature,
+    )
+    _dev_key = _serialization.load_pem_private_key(
+        (repo_root / "tests" / "fixtures" / "dev_signing_key.pem").read_bytes(),
+        password=None,
+    )
+    _manifest_bytes = (dist_dir / "manifest.json").read_bytes()
+    _der = _dev_key.sign(_manifest_bytes, _ec.ECDSA(_hashes.SHA256()))
+    _r, _s = _decode_dss_signature(_der)
+    _raw_sig = _r.to_bytes(32, "big") + _s.to_bytes(32, "big")
+    (dist_dir / "manifest.sig").write_text(
+        _b64.b64encode(_raw_sig).decode("ascii") + "\n",
+        encoding="utf-8",
+    )
 
     test_email = "round-trip-tester@example.com"
     test_db = dist_dir / "fellows.db"
@@ -211,8 +242,8 @@ def deploy_server(tmp_path_factory):
     sent: list[dict] = []
     real_send = ml.send_postmark_magic_link
 
-    def fake_send(to_email, magic_url):
-        sent.append({"to": to_email, "url": magic_url})
+    def fake_send(to_email, magic_url, pubkey_fingerprint=None):
+        sent.append({"to": to_email, "url": magic_url, "pubkey_fingerprint": pubkey_fingerprint})
         return {
             "status": 200,
             "message_id": "stub-message-id",

@@ -394,6 +394,8 @@
                 built_at: meta.built_at || null,
                 fellows_db_sha: (typeof meta.fellows_db_sha === 'string' && meta.fellows_db_sha)
                   ? meta.fellows_db_sha : null,
+                pubkey_fingerprint: (typeof meta.pubkey_fingerprint === 'string' && meta.pubkey_fingerprint)
+                  ? meta.pubkey_fingerprint : null,
                 capturedAt: new Date().toISOString()
               };
             }
@@ -432,6 +434,8 @@
           bootBuildMeta = {
             git_sha: (meta && meta.git_sha) || null,
             built_at: (meta && meta.built_at) || null,
+            pubkey_fingerprint: (meta && typeof meta.pubkey_fingerprint === 'string' && meta.pubkey_fingerprint)
+              ? meta.pubkey_fingerprint : null,
             capturedAt: new Date().toISOString()
           };
           updateCheckState.lastResult = 'no-boot-snapshot';
@@ -6251,6 +6255,25 @@
     aboutHtml += '<div class="about-update-row-label">Directory data</div>';
     aboutHtml += '<div class="about-update-row-status" id="about-data-status" role="status" aria-live="polite">Click "Check for updates" to compare with the server.</div>';
     aboutHtml += '<div class="about-update-row-action" id="about-data-action"></div>';
+    aboutHtml += '</div>';
+    // Signing-key row. The fingerprint here should match the value
+    // printed in the magic-link email; mismatch means the bundle did
+    // not come from the maintainer (or the email did not). See
+    // SECURITY.md § Signing keys.
+    var fingerprint = (bootBuildMeta && bootBuildMeta.pubkey_fingerprint) || '';
+    var fingerprintHtml = fingerprint
+      ? '<code class="about-build-value about-fingerprint">' + escapeHtml(fingerprint) + '</code>'
+      : '<em>not configured for this build</em>';
+    aboutHtml += '<div class="about-update-row" id="about-signing-row">';
+    aboutHtml += '<div class="about-update-row-label">Signing key</div>';
+    aboutHtml += '<div class="about-update-row-status" id="about-signing-status">';
+    aboutHtml += fingerprintHtml;
+    aboutHtml += '<div class="about-signing-hint">';
+    aboutHtml += fingerprint
+      ? 'Compare against the fingerprint shown in the magic-link email that brought you here. Mismatch → do not trust this bundle.'
+      : 'The maintainer has not yet activated signature verification for this build. Updates are delivered over HTTPS but are not cryptographically signed.';
+    aboutHtml += '</div></div>';
+    aboutHtml += '<div class="about-update-row-action"></div>';
     aboutHtml += '</div>';
     aboutHtml += '<p class="about-update-check">';
     aboutHtml += '<button type="button" id="about-check-updates" class="about-check-updates-btn">Check for updates</button>';
