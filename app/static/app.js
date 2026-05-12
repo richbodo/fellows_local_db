@@ -4186,6 +4186,59 @@
     } catch (e) { /* ignore */ }
   }
 
+  // Fire-once guard for reportBootEvent — see comments there.
+  var bootBeaconFired = false;
+
+  // Reports a single boot-success beacon to /api/client-errors so the
+  // maintainer can grep journald for `event=client_error` lines with
+  // `"kind": "boot"` and answer "what build is each installed PWA
+  // actually running right now?" This is the load-bearing telemetry
+  // for `just installed-versions` (plans/install_version_telemetry.md
+  // Phase B); the `build` field carries the running build_label, and
+  // `lastSubmitHashPrefix` (when present from a prior magic-link gate
+  // submit) is the join key back to the user's email.
+  //
+  // Cardinality is exactly one event per page load — guarded by
+  // bootBeaconFired so retries / re-renders don't multiply events.
+  // Fire-and-forget; never blocks boot.
+  function reportBootEvent() {
+    if (bootBeaconFired) return;
+    bootBeaconFired = true;
+    var build = '';
+    if (bootBuildMeta && (bootBuildMeta.git_sha || bootBuildMeta.built_at)) {
+      build = (bootBuildMeta.git_sha || '') +
+        (bootBuildMeta.built_at ? ' @ ' + bootBuildMeta.built_at : '');
+    }
+    var route = '';
+    try { route = String(location.hash || location.pathname || ''); } catch (e) {}
+    var displayMode = isStandaloneDisplayMode() ? 'standalone' : 'browser-tab';
+    var providerKind = '';
+    try { providerKind = String((window.__dataProvider && window.__dataProvider.kind) || ''); } catch (e) {}
+    var extraParts = ['displayMode=' + displayMode];
+    if (providerKind) extraParts.push('provider=' + providerKind);
+    var ev = { kind: 'boot', msg: 'cold_start', extra: extraParts.join(' ') };
+    var payload = {
+      events: [ev],
+      ua: String(navigator.userAgent || ''),
+      build: build,
+      route: route,
+      displayMode: displayMode
+    };
+    try { payload.online = Boolean(navigator.onLine); } catch (e) {}
+    if (lastSubmitInfo && lastSubmitInfo.emailHashPrefix) {
+      payload.lastSubmitHashPrefix = lastSubmitInfo.emailHashPrefix;
+    }
+    try {
+      fetch('/api/client-errors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(payload),
+        keepalive: true
+      }).catch(function () { /* ignore — telemetry is best-effort */ });
+    } catch (e) { /* ignore */ }
+  }
+
   // Reports a single worker spawn/init outcome to /api/client-errors so
   // the operator can grep journald for `event=client_error` lines with
   // `"kind": "worker"` to answer questions like "what fraction of boots
@@ -9310,6 +9363,13 @@
         // browser has been authenticated here at least once. Record the
         // marker so the URL-just-works path works on next visit.
         markAuthenticatedOnce();
+        // Phase B of install-version telemetry: fire the one-per-load
+        // boot beacon so the operator can answer "what build is this
+        // user actually running?" via `just installed-versions`. Same
+        // signal as markAuthenticatedOnce — both mean "boot succeeded
+        // for this origin." Guarded internally; safe to call from any
+        // path that reaches this point.
+        reportBootEvent();
         list = Array.isArray(data) ? data : [];
         // Backfill display names for any draft members loaded before
         // we had data (record_id was saved, name wasn't, or the saved
