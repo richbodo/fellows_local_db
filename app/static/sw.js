@@ -27,7 +27,7 @@ const IMAGES_CACHE = 'fellows-images-v1';
 // only on http://localhost(:port) and http://127.0.0.1(:port) origins.
 // tests/fixtures/README.md explains why a "private" test key in git
 // is not a vulnerability (origin gate keeps it inert in production).
-const PROD_PUBLIC_KEY_HEX = '__PROD_PUBLIC_KEY_HEX__';
+const PROD_PUBLIC_KEY_HEX = '04c046df2b582a4543feb9a617e38a0fc1e461dc5824a9672d749610ce51ae5c2a8550b3ecc1bb909bcfa9a9e78301494e6ebac0e241fbb320506f311d885e0eb7';
 const DEV_PUBLIC_KEY_HEX = '04cf5cb8286e8d401937f48ab1a53c264dac8de3e92b5f66714e7366101f3870bcfc8ec70f930234ba6c97b5af025bb8d585f9b0a1d5c57a774b939f3e07b1dc06';
 
 function isDevOrigin() {
