@@ -5,7 +5,7 @@
 > - `docs/pna_toolkit/PNA_Spec.md` — universal personal network app spec; lifts to `personal_network_toolkit/` when that repo is created
 > - `docs/pna_toolkit/axes.md` — flavor axis taxonomy + attested picks per axis + flavor-derived ACs grouped by axis-pick trigger
 > - `docs/pna_toolkit/use_cases.md` — attested use case catalog (Directory Archive realized; Personal Relationship Manager draft)
-> - `docs/pna_toolkit/spec/contracts/` — generic typed contracts (JSON Schema for RPC + handshake, OpenAPI fragments for distribution, SQL DDL for schemas, TypeScript declaration for transport interface)
+> - `docs/pna_toolkit/spec/contracts/` — generic typed contracts (JSON Schema for RPC + handshake, OpenAPI fragments for distribution, SQL DDL for schemas, TypeScript declaration for transport interface, JSON Schema for each canonical MCP server's tool surface)
 > - `docs/pna_toolkit/llms.txt` — discovery for the spec itself (lifts with the toolkit)
 > - `docs/Architecture.md` — fellows_local_db's specialization + spec-conformance declaration
 > - `llms.txt` at repo root — discovery for fellows (stays here)
@@ -16,7 +16,7 @@
 > 1. **Vocabulary** — small, deliberate term set
 > 2. **Goals** — five user-facing needs we satisfy, with reasoning
 > 3. **Use cases** — attested classes of PNA (Directory Archive realized; Personal Relationship Manager draft)
-> 4. **Flavor axes** — seven axes a PNA varies along; each axis-pick may trigger flavor-derived ACs
+> 4. **Flavor axes** — eight axes a PNA varies along; each axis-pick may trigger flavor-derived ACs
 > 5. **Composition** — the two attested compositional models (`build-time-bundle`, `runtime-shell-pipeline`) and what they imply for the toolkit
 > 6. **Architectural commitments** — universal ACs (apply to every PNA) + flavor-derived ACs (tagged by axis-pick triggers)
 > 7. **Slot map** — three interfaces, five components
@@ -53,7 +53,9 @@ This doc — and the eventual spec — uses a small, deliberate set of terms.
 
 - **Use case.** A user-facing class of PNA — "Directory Archive," "Personal Relationship Manager." Names a coherent shape from the user's perspective. v0.1 attests two; future versions will add more. Use cases typically have default axis picks but the axes remain independent — a hypothetical Directory Archive shipped as a Tauri shell is conceivable.
 
-- **Flavor axis.** A developer-side decomposition of a PNA's shape. Each axis is an independent dimension a builder picks along: composition model, distribution, storage substrate, ingestion shape, workspace shell, comms transport set, plus the use case label itself (which the spec treats as a seventh axis for tagging consistency). Use case is what the user calls the app; flavor axes are what the builder picks.
+- **Flavor axis.** A developer-side decomposition of a PNA's shape. Each axis is an independent dimension a builder picks along: composition model, distribution, storage substrate, ingestion shape, workspace shell, comms transport set, MCP-exposure, plus the use case label itself (which the spec treats as an axis for tagging consistency). Use case is what the user calls the app; flavor axes are what the builder picks.
+
+- **MCP server.** A process exposing PNA capabilities as MCP tools (Anthropic's Model Context Protocol — JSON-RPC over stdio or socket). The spec defines four canonical MCP servers per PNA — Data operations (the Storage slot's read/write surface), Ingestion (drive imports + dedup + orphan preview), Communications (with workspace-mediated user consent), and Diagnostics (read-only access to the Debug contract). An AI client (Claude Desktop, Cursor, a local-Ollama-backed agent, etc.) consumes these servers to drive the PNA. MCP servers are the basis of the *runtime-MCP-RPC* composition pattern: a PNA exposing MCP becomes externally composable so an AI agent can wire multiple PNAs together at runtime even though each is its own bundle.
 
 - **Axis pick.** One value on one flavor axis (e.g., `storage:opfs-sqlite-wasm`).
 
@@ -77,7 +79,9 @@ V0.1 PNAs all operate downstream of SaaS systems of record - they do not modify 
 
 The spec matters because users will increasingly compose software by prompting AI agents. We expect most PNAs to be built and rebuilt by AIs — adapting a thematic reference design like fellows_local_db, or building fresh against this spec. When an AI is asked to build the P&A, it is required to follow the contracts of the PNA on the user's behalf, and they're written so the AI can pick them up and check its own work. The user's confidence comes from the spec being clear enough that both they and the AI can read it; as long as the contracts hold, an AI can rewrite a PNA from scratch while the user is still talking to it without changing the user's sovereignty, durability, or privacy posture. The goals below are user-facing needs; the architectural commitments after them are the choices that make those needs achievable.
 
-We also expect that PNAs will often need to be automated to meet user needs, so we will define MCP server interfaces at important connection points.
+The longer-arc target is an ecosystem of cooperating PNAs on a single user's device — a Personal Relationship Manager (where private relationship data lives) running alongside one or more Directory Archives, a Contact Manager, and a Calendar app, each in its own bundle. The PRM acts as the meta-workspace: relationship data layered on top of a deduplicated read-only meta-view composed from the other apps' shared stores (Bob's cell from Google + work history from a fellowship directory + email from a Facebook export, resolved into one coherent contact view; the PRM's private overlay attached through stable IDs). The user can also work in clean per-app workspaces when they want a single context. Composing the meta-view requires per-source connectors, dedup with conflict resolution, and disciplined provenance — work for later spec versions. The eventual *ecosystem reference design* is the goal; v0.1 ships one PNA (fellows_local_db) and the spec it conforms to, with the architectural seams sized to let the ecosystem grow into place.
+
+PNAs that participate in such an ecosystem need to be reachable not just to humans but to AI agents acting on the user's behalf. The spec therefore defines MCP server interfaces at four canonical connection points: a **Data operations server** (the Storage slot's read/write surface), an **Ingestion server** (drive imports, dedup, orphan preview), a **Communications server** (with workspace-mediated user consent per AC-19), and a **Diagnostics server** (read-only access to the Debug contract). An AI client (Claude Desktop, Cursor, a local-Ollama-backed agent, or any MCP-capable runtime) can drive a PNA through these servers without modifying its core; canonical implementations will ship with the personal_network_toolkit. Cloud AI clients (anything that sends Private DB rows off-device) require explicit per-call consent — see AC-MCP-A below.
 
 ### Goal 1 — Private data sovereignty
 
@@ -127,20 +131,39 @@ The user's *own* contact databases (Google + Apple + Facebook + LinkedIn + organ
 
 PRT (`../prt/`) is the inspiration but pre-dates this spec. A future PRM reference design built against PNA Spec v0.1 will live in its own repo. AC-PRM-* entries in this triage are **[draft]** until that reference design lands. Capturing the draft now is deliberate: a second use case stress-tests the universal-vs-flavor partition — an AC that fires for both DA and PRM is genuinely universal; an AC that fires for only one is flavor-derived and gets axis-pick triggers.
 
+### Multi-PNA ecosystem — target use case (v0.2+, no reference design)
+
+The longer-arc goal introduced in the Preamble: multiple PNAs cooperating on one user's device, wired together at runtime by an AI agent via MCP. Roles in the ecosystem:
+
+- **Personal Relationship Manager** — holds private relationship data (notes, tags, groups, history); hosts the meta-workspace where the user sees their full picture.
+- **Contact Manager** — edits and manipulates shared contact data (typically downstream of Google / Apple / Facebook exports). A contact manager could also exist as a plugin to the PRM, or interact via MCP.
+- **Directory Archive(s)** — one or more snapshots of external organizational rosters (a fellowship, a school, an old workplace). fellows_local_db is one instance.
+- **Calendar app** — events, scheduling, relationship-temporal data.
+
+The user wants two complementary modes:
+
+- **Per-PNA workspaces (always clean).** Just the fellows directory; just Google contacts; just Facebook contacts. Single-context, focused, fast — useful for tasks scoped to one source.
+- **Unified meta-view (in the PRM).** A read-only composed database deduplicating across the per-PNA shared stores. Bob's cell from Google + work history from a fellowship directory + email from a Facebook export combine into one coherent contact view. The PRM's private overlay (notes, tags, groups) references unified-view records via stable IDs; private data stays in the PRM regardless of which shared source contributed the underlying contact record.
+
+Achieving the unified meta-view requires per-source database connectors, careful dedup and conflict resolution, and disciplined provenance — substantial work that's deferred to later spec versions. The eventual *ecosystem reference design* would demonstrate this; v0.1 establishes the architectural seams (composition models, MCP server contracts, AC-10's opt-in non-destructive re-imports, AC-PRM-B's multi-source dedup contract, the four canonical MCP servers) that let the ecosystem grow into place.
+
+This is the deep "why" behind defining slot contracts substrate-neutrally: when the second PNA exists, an AI agent can wire it to fellows without modifying either; when the fifth PNA exists, the same. Composability isn't bolted on; it's the architecture's primary deliverable.
+
 ---
 
 ## Flavor axes
 
-Seven independent axes a PNA picks along. A PNA's *flavor* is the full constellation of picks. Each pick may trigger flavor-derived ACs (see Architectural commitments below for the trigger tags).
+Eight independent axes a PNA picks along. A PNA's *flavor* is the full constellation of picks. Each pick may trigger flavor-derived ACs (see Architectural commitments below for the trigger tags).
 
 | Axis | fellows_local_db pick | PRM (draft) pick | Other plausible picks |
 |---|---|---|---|
-| Composition model | `build-time-bundle` | `runtime-shell-pipeline` | (browser distribution typically forces build-time; CLI typically forces runtime) |
+| Composition model | `build-time-bundle` | `runtime-shell-pipeline` | `runtime-MCP-RPC` (composes *across* bundles via MCP); browser distribution typically forces build-time, CLI typically forces runtime |
 | Distribution | `web-bundle-with-magic-link` | `never-distributed-single-user` | `web-bundle-open`, `app-store-native`, `sideloaded-native` |
 | Storage substrate | `opfs-sqlite-wasm` | `native-sqlite-via-filesystem` | `idb-only-browser`, `native-sqlcipher` |
 | Ingestion shape | `single-source-static-mirror` | `multi-source-merge-with-dedup` | `single-source-live-pull`, `federated-read` (deferred) |
 | Workspace shell | `vanilla-js-spa` | `tui-textual` or `cli-subcommands` | `framework-spa`, `native-shell-tauri`, `native-shell-native` |
 | Comms transport set | `mailto-only` (Signal planned) | `shell-out-to-cli-clients` | `mailto-plus-signal`, `mailto-plus-matrix` |
+| MCP-exposure | `none` (v1); `data-ops-only` planned | `full` (all four servers) | `none`, `data-ops-only`, `data-ops+comms`, `full` |
 | Use case | `directory-archive` | `personal-relationship-manager` | (extensible per use case attested) |
 
 Notes on axis independence:
@@ -153,13 +176,15 @@ Notes on axis independence:
 
 ## Composition
 
-The personal_network_toolkit's stated goal is to make PNAs fast to build. Two attested compositional models, both legitimately "Unix tools philosophy" applied to different substrates:
+The personal_network_toolkit's stated goal is to make PNAs fast to build. Three attested compositional models, all legitimately "Unix tools philosophy" applied to different substrates:
 
-**Build-time-bundle** (browser PNAs). Slots are JS modules. The composer is a build tool. The bundle is the unit of distribution. IPC inside a bundle is `postMessage` + structured-clone + OPFS handles owned by the dedicated worker. Inter-bundle composition is impossible — browser origin isolation rules it out; the "system" is the single bundle. Composition is at *build time*: the toolkit's composer takes axis picks and assembles a bundle from stock slot modules.
+**Build-time-bundle** (browser PNAs, *intra-bundle*). Slots are JS modules. The composer is a build tool. The bundle is the unit of distribution. IPC inside a bundle is `postMessage` + structured-clone + OPFS handles owned by the dedicated worker. Inter-bundle composition is impossible — browser origin isolation rules it out; the "system" is the single bundle. Composition is at *build time*: the toolkit's composer takes axis picks and assembles a bundle from stock slot modules.
 
-**Runtime-shell-pipeline** (CLI PNAs). Slots are OS processes. The composer is the shell pipeline. SQLite files on disk and stdin/stdout streams serve as pipes. Composition is at *runtime*: the user pipes one tool's output into another (`pnt-contacts-ingest google.zip | pnt-dedup | pnt-directory-build → directory.html`). The toolkit ships independently-installable CLI subcommands; users assemble pipelines ad-hoc.
+**Runtime-shell-pipeline** (CLI PNAs, *intra-PNA*). Slots are OS processes. The composer is the shell pipeline. SQLite files on disk and stdin/stdout streams serve as pipes. Composition is at *runtime*: the user pipes one tool's output into another (`pnt-contacts-ingest google.zip | pnt-dedup | pnt-directory-build → directory.html`). The toolkit ships independently-installable CLI subcommands; users assemble pipelines ad-hoc.
 
-Both models share the same slot contracts (see Slot map + Part 1 + Part 4 below). A storage module conforming to the spec satisfies the same contract whether it's loaded as a JS module or invoked as a subprocess; the *plumbing* differs, the *contract* doesn't. This is the spec's load-bearing claim: it describes slot contracts substrate-neutrally, so the toolkit can ship two parallel implementations of each slot — one per composition model — that prove the same conformance.
+**Runtime-MCP-RPC** (multi-PNA ecosystem, *inter-PNA*). PNAs expose MCP servers; an AI client (Claude Desktop, Cursor, a custom agent) connects to multiple PNAs simultaneously and orchestrates across them. Composition is at *runtime*, by the AI agent on the user's behalf. Unlike build-time-bundle (impossible across bundles) and runtime-shell-pipeline (CLI-only), runtime-MCP-RPC bridges browser-flavored PNAs and CLI-flavored PNAs because each PNA's MCP server runs as a separate process — browser origin isolation is no obstacle when the composition seam is at the MCP-protocol level, not at the bundle level. This is the composition pattern that makes the ecosystem reference design (multiple PNAs cooperating on one user's device, per the Preamble) possible. The toolkit ships canonical MCP server implementations; each PNA declares its `mcp-exposure` axis pick. See AC-MCP-A and AC-MCP-B below for the load-bearing constraints.
+
+All three models share the same slot contracts (see Slot map + Part 1 + Part 4 below). A storage module conforming to the spec satisfies the same contract whether it's loaded as a JS module, invoked as a subprocess, or exposed as an MCP server; the *plumbing* differs, the *contract* doesn't. This is the spec's load-bearing claim: it describes slot contracts substrate-neutrally, so the toolkit can ship parallel implementations of each slot — one per composition model — that prove the same conformance.
 
 At the algorithm level (dedup, slug generation, FTS query building, comms eligibility evaluation, image-fallback resolution, multi-source merge), code is shareable across composition models *in principle* — though in practice it's typically written twice, once per host language (Python for CLI, JS for browser), with the spec acting as the shared conformance target. A future spec version may add algorithm specifications precise enough that an automated conformance check can validate both implementations against the same definition.
 
@@ -194,6 +219,8 @@ Some original ACs were generalized during the partition pass. Where the original
 | AC-19 | **User-visible payload before send.** Any workspace-initiated communication shows the user the full payload — recipients, body, and any data merged in from the Shared or Private store — before the transport is launched. The user can edit or cancel. This applies even to bulk operations (e.g., "email this group of 50"). Workspaces never auto-blast data through transports without the user seeing the composition. | Goal 3 |
 | AC-PRM-A | **LLM calls over user data are transports.** Any LLM invocation over Private or Shared data is treated as a transport: local-model is default; cloud-model is opt-in per call; user sees the prompt and merged data before send (extension of AC-18 + AC-19 to a new transport class). Promoted from PRM-flavor to universal because any PNA may add LLM features. | Goal 3 |
 | AC-PRM-D | **Re-ingestion is always user-initiated.** No background polling of source services (Google Contacts, IMAP, organizational directories). Strengthening of AC-10: the user always knows when fresh data is being fetched. | Goal 1, Goal 4 |
+| AC-MCP-A | **Cloud AI clients require per-call consent for Private DB access via MCP.** Any MCP tool that returns Private DB rows must either refuse, or require explicit per-session opt-in, when the consuming MCP client is not locally hosted. Local clients (Claude Desktop with a local model, Cursor + local Ollama) are the default green path; cloud clients (Claude API direct, OpenAI API, etc.) are opt-in per call. Concrete realization of AC-PRM-A at the MCP surface. | Goal 1, Goal 3 |
+| AC-MCP-B | **MCP Communications tools stage outreach; the workspace launches.** A Communications MCP tool call must not directly fire a transport. It returns a staging ID with the full payload preview; the user confirms via the workspace before the transport launches. The MCP server proposes; the workspace disposes. AC-19 (user-visible payload before send) is enforced at the workspace boundary and cannot be bypassed by AI clients. | Goal 3 |
 
 ### Flavor-derived ACs (triggered by axis picks)
 
@@ -875,7 +902,7 @@ The partition pass (this reorg) is now done. Working from the destination-tagged
    - `PNA_Spec.md` with version header (`Spec-Version: 0.1`) and section skeleton (Vocabulary, Goals, Use cases, Flavor axes, Composition, Universal ACs, Slot map, Scope/versioning)
    - `axes.md` with one H2 per axis (Composition model, Distribution, Storage substrate, Ingestion shape, Workspace shell, Comms transport set, Use case)
    - `use_cases.md` with one H2 per attested use case
-   - `spec/contracts/` directory with placeholder files for each typed contract (worker-init-handshake.schema.json, worker-rpc-protocol.schema.json, distribution-auth.openapi.yaml, client-errors-payload.schema.json, transport-interface.d.ts, shared-db.schema.sql, private-db.schema.sql)
+   - `spec/contracts/` directory with placeholder files for each typed contract (worker-init-handshake.schema.json, worker-rpc-protocol.schema.json, distribution-auth.openapi.yaml, client-errors-payload.schema.json, transport-interface.d.ts, shared-db.schema.sql, private-db.schema.sql, plus MCP server tool surfaces: mcp-data-ops.schema.json, mcp-ingestion.schema.json, mcp-comms.schema.json, mcp-diagnostics.schema.json)
    - `CHANGELOG.md` with the v0.1 entry
    - `llms.txt` (for the spec itself; will lift with the toolkit)
 2. **Draft `docs/pna_toolkit/PNA_Spec.md`** from this triage's universal content (Goals + Vocabulary + Use cases + Flavor axes overview + Composition section + Universal ACs + Slot map + Scope/versioning). Self-contained; no fellows references except as cross-links to the reference design.
