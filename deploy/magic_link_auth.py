@@ -275,6 +275,41 @@ def consume_token(tok: str) -> dict:
         return {"status": "invalid"}
 
 
+_VALID_VERIFY_RESULTS = ("ok", "expired", "invalid")
+_UA_MAX = 240
+
+
+def verify_token_event(
+    *,
+    result_status: Optional[str],
+    token: Optional[str],
+    user_agent: Optional[str],
+    build_label: Optional[str],
+) -> dict:
+    """Shape the journald event for a /api/verify-token attempt.
+
+    Pure: no I/O. The handler in deploy/server.py emits the dict via
+    ``print(json.dumps(...), file=sys.stderr)``.
+
+    The join key is ``token_prefix`` (12 hex chars) — tokens are not
+    bound to emails in AuthState, so we recover the email at query
+    time by matching against the ``send_unlock_email`` event with the
+    same ``token_prefix``. Both events land in journald within minutes
+    of each other.
+
+    Unknown ``result_status`` values clamp to ``"invalid"`` so a log
+    consumer can rely on the three-value enum.
+    """
+    result = result_status if result_status in _VALID_VERIFY_RESULTS else "invalid"
+    return {
+        "event": "verify_token",
+        "result": result,
+        "token_prefix": (token or "")[:12],
+        "user_agent": (user_agent or "")[:_UA_MAX],
+        "build_label": build_label or "",
+    }
+
+
 def install_recently_allowed(token_issued_at: Optional[float], now: Optional[float] = None) -> bool:
     """True when the browser should still show the install landing.
 

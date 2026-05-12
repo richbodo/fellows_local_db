@@ -516,6 +516,23 @@ class Handler(SimpleHTTPRequestHandler):
             return
         result = ml.consume_token(tok)
         status = (result or {}).get("status")
+        # Structured event for journald — captures the UA and the server's
+        # currently-stamped build_label so triage can answer "what build is
+        # this user on?" without a screenshot. token_prefix is the join key
+        # back to the matching send_unlock_email event (which carries
+        # email_hash_prefix). See plans/install_version_telemetry.md.
+        print(
+            json.dumps(
+                ml.verify_token_event(
+                    result_status=status,
+                    token=tok,
+                    user_agent=self.headers.get("User-Agent", ""),
+                    build_label=BUILD_META.get("build_label")
+                    or BUILD_META.get("git_sha", ""),
+                )
+            ),
+            file=sys.stderr,
+        )
         if status != "ok":
             # "expired" and "invalid" are both 401 but carry distinct error
             # strings so the client can render "link expired" vs "link invalid"

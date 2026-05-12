@@ -420,3 +420,74 @@ def test_compute_pubkey_fingerprint_matches_build_pwa(tmp_path):
     sw.write_text("const PROD_PUBLIC_KEY_HEX = '__PROD_PUBLIC_KEY_HEX__';\n")
     assert ml.compute_pubkey_fingerprint(sw) is None
     assert bp.compute_pubkey_fingerprint(sw) is None
+
+
+# --- verify_token_event (journald shape for /api/verify-token) -----------
+
+
+def test_verify_token_event_happy_path_carries_required_fields():
+    e = ml.verify_token_event(
+        result_status="ok",
+        token="abcd" * 16,  # 64 hex
+        user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 16_3)",
+        build_label="2026-05-12-deadbeef",
+    )
+    assert e == {
+        "event": "verify_token",
+        "result": "ok",
+        "token_prefix": "abcdabcdabcd",  # first 12 chars — the join key
+        "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_3)",
+        "build_label": "2026-05-12-deadbeef",
+    }
+
+
+def test_verify_token_event_caps_user_agent_at_240_chars():
+    """UA length cap matches client_error.ua. Pathological strings won't
+    blow up journald lines."""
+    long_ua = "x" * 500
+    e = ml.verify_token_event(
+        result_status="invalid",
+        token="tok",
+        user_agent=long_ua,
+        build_label="",
+    )
+    assert len(e["user_agent"]) == 240
+    assert e["user_agent"] == "x" * 240
+
+
+def test_verify_token_event_clamps_unknown_status_to_invalid():
+    """Unknown statuses (defense in depth — consume_token only returns
+    ok/expired/invalid today) collapse to the three-value enum so log
+    consumers can rely on it."""
+    e = ml.verify_token_event(
+        result_status="something_weird",
+        token="tok",
+        user_agent="ua",
+        build_label="lbl",
+    )
+    assert e["result"] == "invalid"
+
+
+def test_verify_token_event_handles_none_inputs():
+    """Defense: callers pass through .get(...) results, which can be
+    None. Don't raise; collapse to empty strings instead."""
+    e = ml.verify_token_event(
+        result_status=None,
+        token=None,
+        user_agent=None,
+        build_label=None,
+    )
+    assert e["result"] == "invalid"
+    assert e["token_prefix"] == ""
+    assert e["user_agent"] == ""
+    assert e["build_label"] == ""
+
+
+def test_verify_token_event_expired_result_preserved():
+    e = ml.verify_token_event(
+        result_status="expired",
+        token="t",
+        user_agent="",
+        build_label="2026-05-12-abcdef0",
+    )
+    assert e["result"] == "expired"
