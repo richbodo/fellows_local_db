@@ -224,10 +224,10 @@ test-e2e filter="":
         ./scripts/ensure_port_8765_free.sh tests/e2e/ -v -k "{{filter}}"
     fi
 
-# DB + API + prod-stats only (skip Playwright; ~10x faster).
+# DB + API + prod-stats + installed-versions only (skip Playwright; ~10x faster).
 [group('test')]
 test-fast:
-    ./scripts/ensure_port_8765_free.sh tests/test_database.py tests/test_api.py tests/test_prod_stats.py -v
+    ./scripts/ensure_port_8765_free.sh tests/test_database.py tests/test_api.py tests/test_prod_stats.py tests/test_installed_versions.py -v
 
 # Mobile screenshot harness across device matrix → tests/e2e/mobile/current_state/.
 # The committed baselines under __snapshots__/ are a visual reference, not a
@@ -481,6 +481,13 @@ prod-stats since="24 hours ago":
 [group('prod')]
 prod-stats-long:
     ssh -p {{ssh_port}} {{ssh_user}}@{{host}} "/opt/fellows/bin/prod_stats --include-emails"
+
+# Per-email install vs currently-running build (joins verify_token + kind=boot).
+# Plaintext-confidential output (joins to fellow emails). See
+# plans/install_version_telemetry.md.
+[group('prod')]
+installed-versions since="30 days ago":
+    ssh -p {{ssh_port}} {{ssh_user}}@{{host}} "/opt/fellows/bin/installed_versions --since '{{since}}'"
 
 # 4xx/5xx counters and the 10 most recent error access lines (default 24h).
 [group('prod')]

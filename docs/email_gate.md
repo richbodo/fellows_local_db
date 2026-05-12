@@ -261,6 +261,8 @@ Operator query: `journalctl -u fellows-pwa | grep '"kind": "boot"'`. `just insta
 
 `just prod-errors [SINCE]` (see `docs/justfile.md`) prints the 4xx + 5xx access-line counters AND the new `Client error reports:` count, with the recent-errors list interleaving both kinds tagged `[client_error]` vs raw access lines. Pair with the user's `lastSubmitHashPrefix` (if they shared a screenshot of the diag block) to find the matching `event=send_unlock_email` entry: `journalctl -u fellows-pwa | grep '"email_hash_prefix": "ab12cd34ef56"'`.
 
+`just installed-versions [SINCE]` (see [`docs/justfile.md`](justfile.md) and [`plans/install_version_telemetry.md`](../plans/install_version_telemetry.md)) is the "what build is this user actually running?" view. Joins `verify_token` + `kind=boot` events to plaintext emails via `fellows.db`, with a `⚠ STUCK` flag when a user's install build differs from their currently-running build — the dominant symptom of a service-worker update path that didn't take. Plaintext-confidential.
+
 
 
 ## Cookie format (v3)
