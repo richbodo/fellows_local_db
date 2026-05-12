@@ -58,6 +58,14 @@ ALLOWLIST: set[str] = set()
 # /api/send-unlock. Sourced from FELLOWS_ALLOWLIST_HMAC_KEY at init_auth();
 # kept in memory for the life of the process.
 HMAC_KEY: bytes | None = None
+# SHA-384 of the prod signing key's public bytes, parsed out of
+# dist/sw.js at startup. Embedded in outgoing magic-link emails as an
+# out-of-band MITM mitigation: the email arrives via Postmark (a
+# different channel than the HTTPS bundle), so a compromised prod
+# server cannot trivially also rewrite the email body. None when
+# signing isn't yet configured — magic-link emails simply omit the
+# fingerprint block until the operator has run `just keygen`.
+PUBKEY_FINGERPRINT: str | None = None
 # Populated in main() from dist/build-meta.json (written by build/build_pwa.py).
 BUILD_META: dict = {}
 
@@ -72,6 +80,15 @@ def load_build_meta(dist_dir: Path) -> dict:
         return json.loads(p.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {}
+
+
+def _init_pubkey_fingerprint() -> None:
+    """Cache the prod signing-key fingerprint at startup so every
+    magic-link send doesn't re-read sw.js. Read from DIST_DIR/sw.js
+    (the served bundle); ``None`` when signing isn't configured.
+    """
+    global PUBKEY_FINGERPRINT
+    PUBKEY_FINGERPRINT = ml.compute_pubkey_fingerprint(DIST_DIR / "sw.js")
 
 
 def init_auth() -> None:
@@ -439,7 +456,9 @@ class Handler(SimpleHTTPRequestHandler):
         origin = ml.public_origin_for_request(host, self.headers)
         magic_url = origin + "/#/unlock/" + token
         try:
-            meta = ml.send_postmark_magic_link(email, magic_url)
+            meta = ml.send_postmark_magic_link(
+                email, magic_url, pubkey_fingerprint=PUBKEY_FINGERPRINT
+            )
             print(
                 json.dumps(
                     {
@@ -629,6 +648,7 @@ class Handler(SimpleHTTPRequestHandler):
 def main():
     global AUTH_ACTIVE, BUILD_META
     init_auth()
+    _init_pubkey_fingerprint()
     BUILD_META = load_build_meta(DIST_DIR)
     if BUILD_META:
         print(json.dumps({"event": "build_meta", "build": BUILD_META}), file=sys.stderr)

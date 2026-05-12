@@ -251,6 +251,22 @@ test-mobile-promote:
 build:
     python3 build/build_pwa.py
 
+# Generate the prod ECDSA P-256 signing keypair (one-time, per maintainer).
+# Prompts for a passphrase, writes ~/.fellows/signing-key.enc.pem, prints
+# the public key hex to paste into app/static/sw.js's PROD_PUBLIC_KEY_HEX.
+# See docs/DevOps.md § Signing keys and bundle verification.
+[group('build')]
+keygen:
+    {{venv}}/bin/python scripts/keygen_signing_key.py
+
+# Sign deploy/dist/manifest.json with the prod private key. Writes
+# deploy/dist/manifest.sig. Run after `just build`, before `just deploy`.
+# Reads ~/.fellows/signing-key.enc.pem; prompts for the passphrase
+# interactively unless FELLOWS_SIGNING_PASSPHRASE is exported.
+[group('build')]
+sign:
+    {{venv}}/bin/python scripts/sign_bundle.py
+
 # Print deploy/dist/build-meta.json.
 [group('build')]
 build-meta:
@@ -312,17 +328,17 @@ deploy-preflight:
 # step. See docs/DevOps.md for the routine flow and `just whats-running`
 # for the local-vs-prod label snapshot.
 [group('deploy')]
-deploy: deploy-preflight
-    ./scripts/deploy_pwa.sh --ask-become-pass
+deploy: deploy-preflight build sign
+    ansible-playbook ansible/deploy_pwa.yml --ask-become-pass --extra-vars "fellows_skip_build=true"
 
-# Deploy, reusing existing deploy/dist/ (skips the build step).
-# Skips the rebuild, so the label baked into deploy/dist/ is whatever was
-# stamped on the last `just build` — usually fine for re-pushing the
-# same code, surprising if HEAD has moved. Run `just build` first if in
-# doubt, or use `just deploy` for the rebuild-then-push path.
+# Deploy, reusing existing deploy/dist/ (skips build AND sign).
+# For re-pushing a bundle that's already been built and signed locally
+# (e.g. after a transient deploy failure). Surprising if HEAD has moved
+# since the last build/sign — the deployed manifest still points at
+# the old bytes. Run `just deploy` for the rebuild-and-resign path.
 [group('deploy')]
 deploy-fast: deploy-preflight
-    ansible-playbook ansible/deploy_pwa.yml --ask-become-pass --extra-vars "fellows_skip_build=true"
+    ansible-playbook ansible/deploy_pwa.yml --ask-become-pass --extra-vars "fellows_skip_build=true fellows_skip_sign=true"
 
 # Ansible --check (dry run, no changes made).
 [group('deploy')]

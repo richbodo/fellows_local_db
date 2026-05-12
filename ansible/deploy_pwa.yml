@@ -30,6 +30,30 @@
       changed_when: "'Wrote' in (_build.stdout | default(''))"
       when: not (fellows_skip_build | default(false) | bool)
 
+    # Verify that deploy/dist/manifest.sig exists and is newer than
+    # manifest.json. If the operator forgot to run `just sign` between
+    # build and deploy, fail loudly here rather than rsync an unsigned
+    # bundle that the SW will refuse to install. The signing step
+    # itself happens outside ansible (interactive passphrase prompt
+    # doesn't compose well with the command module); the justfile
+    # chains build → sign → deploy-fast so this check is normally a
+    # no-op trip-wire, never the active failure mode.
+    - name: Verify bundle manifest is signed
+      ansible.builtin.stat:
+        path: "{{ repo_root }}/deploy/dist/manifest.sig"
+      register: _manifest_sig
+      when: not (fellows_skip_sign | default(false) | bool)
+    - name: Fail if manifest.sig is missing
+      ansible.builtin.fail:
+        msg: >-
+          deploy/dist/manifest.sig is missing. Run `just sign` after
+          `just build`, then re-run deploy. (Or pass
+          --extra-vars fellows_skip_sign=true to deploy an unsigned
+          bundle for testing.)
+      when:
+        - not (fellows_skip_sign | default(false) | bool)
+        - not (_manifest_sig.stat.exists | default(false))
+
 - name: Deploy to fellows host
   hosts: fellows
   gather_facts: true

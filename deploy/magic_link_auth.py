@@ -44,6 +44,45 @@ SESSION_VERSION = "v3"
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
+# Matches the `PROD_PUBLIC_KEY_HEX = '...'` constant in sw.js. The
+# captured group is the hex; an unsubstituted `__PROD_PUBLIC_KEY_HEX__`
+# placeholder (or any non-hex constant) yields None from
+# compute_pubkey_fingerprint().
+_PUBKEY_HEX_RE = re.compile(
+    r"PROD_PUBLIC_KEY_HEX\s*=\s*['\"]([0-9a-fA-F_]+)['\"]"
+)
+
+
+def compute_pubkey_fingerprint(sw_js_path: Path) -> Optional[str]:
+    """SHA-384 hex of the prod signing-key public bytes parsed out of
+    ``sw.js``. Returns ``None`` when the constant is missing, is the
+    placeholder, or isn't a 65-byte uncompressed P-256 point.
+
+    Mirrors ``build/build_pwa.py:compute_pubkey_fingerprint``. The prod
+    server can't import build_pwa (which doesn't ship to prod), so the
+    small helper is duplicated here. Both paths must produce the same
+    value so that the magic-link email body (this path) and the About
+    page (build-meta.json path) show users the same fingerprint to
+    compare.
+    """
+    try:
+        text = sw_js_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    m = _PUBKEY_HEX_RE.search(text)
+    if not m:
+        return None
+    hex_str = m.group(1)
+    if "_" in hex_str or len(hex_str) != 130:
+        return None
+    try:
+        raw = bytes.fromhex(hex_str)
+    except ValueError:
+        return None
+    if len(raw) != 65 or raw[0] != 0x04:
+        return None
+    return hashlib.sha384(raw).hexdigest()
+
 
 class AuthState:
     lock = threading.Lock()
@@ -252,7 +291,11 @@ def install_recently_allowed(token_issued_at: Optional[float], now: Optional[flo
 DEFAULT_MAIL_FROM = "EHF Directory App <admin@fellows.globaldonut.com>"
 
 
-def build_postmark_body(to_email: str, magic_url: str) -> dict:
+def build_postmark_body(
+    to_email: str,
+    magic_url: str,
+    pubkey_fingerprint: Optional[str] = None,
+) -> dict:
     """Construct the Postmark /email payload. Pure function; no network.
 
     From defaults to ``EHF Directory App <admin@fellows.globaldonut.com>``.
@@ -266,21 +309,56 @@ def build_postmark_body(to_email: str, magic_url: str) -> dict:
     ``Display Name <addr>`` shape. Reply-To is taken from FELLOWS_REPLY_TO
     when set — useful when admin@ doesn't route to a human mailbox yet
     and replies should land with the operator directly.
+
+    ``pubkey_fingerprint``, when set, is the SHA-384 hex of the prod
+    signing key's public bytes. It's appended to both body variants as
+    an MITM-mitigation handle: the email arrives via Postmark (a
+    different channel than the HTTPS install bundle), so a compromise
+    of the prod server cannot trivially also rewrite the email body.
+    The security-conscious fellow compares this value to the one on
+    the install page's About row. When ``None`` (signing not yet
+    configured on the deploy) we simply omit the block — no point
+    showing a "your software is unsigned" warning to every user; the
+    operator's job is to flip signing on before relying on it.
     """
     from_addr = os.environ.get("FELLOWS_MAIL_FROM", DEFAULT_MAIL_FROM).strip()
     reply_to = os.environ.get("FELLOWS_REPLY_TO", "").strip()
+
+    fp_block_text = ""
+    fp_block_html = ""
+    if pubkey_fingerprint:
+        fp_block_text = (
+            "\nPublic key fingerprint (sha-384 of the signing key):\n"
+            f"  {pubkey_fingerprint}\n"
+            "\n"
+            "If the fingerprint shown on the install page's About row"
+            " does not match this, do not install. Report to"
+            " richbodo@gmail.com.\n"
+        )
+        fp_block_html = (
+            "<p style=\"margin-top:1.5em;font-size:0.9em;color:#555\">"
+            "<strong>Public key fingerprint</strong> "
+            "(sha-384 of the signing key):<br />"
+            f"<code>{pubkey_fingerprint}</code><br />"
+            "If the fingerprint shown on the install page&rsquo;s "
+            "About row does not match this, do not install. Report to "
+            "<a href=\"mailto:richbodo@gmail.com\">richbodo@gmail.com</a>."
+            "</p>"
+        )
+
     text_body = (
         "Tap or paste this link to open the install page:\n\n"
         f"{magic_url}\n\n"
         "This link will expire in 30 minutes. If it's expired, request a new one.\n"
-        "\n"
-        "— EHF Fellows Directory\n"
+        f"{fp_block_text}"
+        "\n— EHF Fellows Directory\n"
     )
     html_body = (
         "<p>Tap or paste this link to open the install page:</p>"
         f'<p><a href="{magic_url}">{magic_url}</a></p>'
         "<p><em>This link will expire in 30 minutes. "
         "If it&rsquo;s expired, request a new one.</em></p>"
+        f"{fp_block_html}"
         "<p>&mdash; EHF Fellows Directory</p>"
     )
     body = {
@@ -296,11 +374,15 @@ def build_postmark_body(to_email: str, magic_url: str) -> dict:
     return body
 
 
-def send_postmark_magic_link(to_email: str, magic_url: str) -> dict:
+def send_postmark_magic_link(
+    to_email: str,
+    magic_url: str,
+    pubkey_fingerprint: Optional[str] = None,
+) -> dict:
     api_token = os.environ.get("FELLOWS_POSTMARK_TOKEN", "").strip()
     if not api_token:
         raise RuntimeError("FELLOWS_POSTMARK_TOKEN is not set")
-    body = build_postmark_body(to_email, magic_url)
+    body = build_postmark_body(to_email, magic_url, pubkey_fingerprint=pubkey_fingerprint)
     req = urllib.request.Request(
         "https://api.postmarkapp.com/email",
         data=json.dumps(body).encode("utf-8"),
