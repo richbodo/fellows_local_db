@@ -178,20 +178,57 @@ ssh -p 52221 rsb@fellows.globaldonut.com 'systemctl status fellows-pwa caddy --n
 
 ## Bootstrapping a fresh droplet
 
-If you're forking this repo for your own org, this is the section you want. Bootstrap is **two phases**: provision/playbook, then secrets. Both are required before the email gate works — the service starts after step 4 below but won't be able to send magic links or verify sessions until step 5 lands the secrets.
+If you're forking this repo for your own org, this is the section you want. The flow has four phases — provision + DNS, bootstrap + secrets, signing activation, and trust hardening — and each leaves the deployment more capable than the last. Follow them top to bottom; the later steps assume the earlier ones have landed.
 
 ```bash
-# 1. Provision Droplet, assign Reserved IP (170.64.243.67), create DNS A record.
-# 2. Ensure your SSH key is in /home/<operator>/.ssh/authorized_keys on the droplet.
-# 3. Edit ansible/inventory/hosts.ini and ansible/group_vars/fellows.yml from the
-#    .example templates (host, port, user, key path, caddy_admin_email).
-# 4. From the repo root:
+# ── Phase 1: provision + DNS ──────────────────────────────────────────
+# 1.  Provision Droplet, assign Reserved IP (e.g. 170.64.243.67),
+#     create DNS A record for your hostname.
+# 1a. Add CAA records to DNS so only Let's Encrypt may issue certs
+#     for your hostname. See § Signing keys → Supporting DNS: CAA records
+#     below for the exact records and a `dig` verification step.
+# 2.  Put your SSH key in /home/<operator>/.ssh/authorized_keys on the droplet.
+# 3.  Edit ansible/inventory/hosts.ini and ansible/group_vars/fellows.yml
+#     from the .example templates (host, port, user, key path,
+#     caddy_admin_email).
+
+# ── Phase 2: bootstrap + secrets ──────────────────────────────────────
+# 4.  From the repo root — install Ansible collections, run the
+#     site playbook. Writes the hardened systemd unit, creates the
+#     `fellows` service account, starts the service.
 just ansible-collections    # one-time per workstation
 just bootstrap              # ansible site.yml --tags bootstrap --ask-become-pass
-# 5. Install required env vars (Postmark token, session secret, public origin):
+# 5.  Install required env vars (session secret, allowlist HMAC key,
+#     Postmark token, mail-from, public origin).
 just prod-configure-env     # interactive; writes /etc/fellows/fellows-pwa.env
-# 6. Verify:
-just smoke                  # /healthz, /manifest.webmanifest, /api/debug/diagnostics
+
+# ── Phase 3: signing activation + first deploy ────────────────────────
+# 6.  Generate the prod signing keypair (one-time, kept off the
+#     droplet). Then paste the printed public-key hex into
+#     app/static/sw.js's PROD_PUBLIC_KEY_HEX constant, commit, push.
+#     See § Signing keys → One-time setup for the backup procedure —
+#     you do NOT want to skip the off-laptop backup.
+just keygen
+# 7.  First signed deploy. Chains test-fast → build → sign → push →
+#     smoke. The `sign` step prompts once for the passphrase you
+#     just chose at step 6.
+just ship
+
+# ── Phase 4: trust hardening ──────────────────────────────────────────
+# 8.  Submit to https://hstspreload.org/?domain=<your-host> so first-
+#     time visitors are HTTPS-only from the very first request,
+#     before HSTS headers can take effect. See § Signing keys → HSTS
+#     preload submission. Inclusion lags ~6–10 weeks per browser
+#     release cycle.
+# 9.  (Recommended) Subscribe to https://crt.sh/?domain=<your-host>
+#     email alerts so any future CA misissuance generates a same-day
+#     notification. See § Signing keys → Certificate Transparency
+#     monitoring.
+# 10. Cross-check the signing-key fingerprint shown on /#/about
+#     against what `just keygen` printed at step 6. They MUST match.
+#     If they don't, stop — something between your laptop and the
+#     served bundle has drifted; investigate before letting any
+#     user install.
 ```
 
 Under the hood for step 4:
@@ -202,6 +239,13 @@ ansible-playbook ansible/site.yml --tags bootstrap --ask-become-pass
 ```
 
 That run creates the `fellows` system user, adds the operator to the `fellows` group, writes the hardened systemd unit, and starts the service. If a legacy `deploy` account is present from a pre-migration droplet, the second play in `site.yml` removes it. The service starts but **does not yet have its env vars** — auth status reports `authEnabled: false`, no magic links can be issued — until step 5 runs.
+
+**What happens if you skip a phase:**
+
+- Skip phase 1a (CAA records): Let's Encrypt still issues your cert, but any other CA in the world could too. A phishing-style domain-validation attack at a rogue CA could mint a fraudulent cert. Closing this attack costs ten minutes of DNS work.
+- Skip phase 3 (signing): the deploy works, the SW installs, the directory serves correctly. But you have no cryptographic protection against a compromised deploy pipeline pushing a poisoned bundle. Anyone who can write to `/opt/fellows/deploy/dist/` can push arbitrary JS to every installed device on the next SW update. The whole point of `security/signed-bundles` is to close this — don't skip it.
+- Skip phase 4 step 8 (HSTS preload): your existing users are protected once they've been to the site once; brand-new users on hostile networks are not protected on their very first visit.
+- Skip phase 4 step 10 (fingerprint cross-check): you might deploy a bundle whose `PROD_PUBLIC_KEY_HEX` doesn't actually match the private key you intended to use — every subsequent install fails verification, no further updates can ship until you republish a bundle with the correct key. Cross-check once at first deploy and again any time you've rotated the signing key.
 
 ## Required environment variables
 
