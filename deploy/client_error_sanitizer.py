@@ -59,10 +59,13 @@ MAX_BUILD_LEN = 64
 # iOS Safari advisory). `worker` carries spawn / init-handshake
 # outcomes for the OPFS worker (vendor/sqlite-worker.js) — the worker
 # is the sole OPFS owner post-Phase-1, so a spawn failure means the
-# user dropped to the API+IDB fallback and we want to know. Privacy
-# boundary is the same — same free-text sanitization on `msg` and
-# `extra` — so adding kinds doesn't widen what a caller can put in
-# the journald log.
+# user dropped to the API+IDB fallback and we want to know. `boot`
+# is the once-per-page-load beacon that carries the running
+# build_label back to the maintainer — Phase B of install-version
+# telemetry (plans/install_version_telemetry.md). Privacy boundary
+# is the same — same free-text sanitization on `msg` and `extra` —
+# so adding kinds doesn't widen what a caller can put in the
+# journald log.
 ALLOWED_EVENT_KINDS = frozenset({
     "http",
     "sw",
@@ -71,6 +74,7 @@ ALLOWED_EVENT_KINDS = frozenset({
     "console.error",
     "install",
     "worker",
+    "boot",
 })
 
 ALLOWED_DISPLAY_MODES = frozenset({"standalone", "browser-tab"})

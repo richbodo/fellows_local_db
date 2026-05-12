@@ -188,6 +188,25 @@ def test_sanitize_payload_accepts_worker_kind():
     assert out["events"][1]["extra"] == "rpc=1 schema=1"
 
 
+def test_sanitize_payload_accepts_boot_kind():
+    """Once-per-page-load boot beacon (plans/install_version_telemetry.md
+    Phase B). Carries the running build_label in the top-level `build`
+    field; `kind=boot` is what `just installed-versions` will grep for.
+    Same free-text sanitization as other kinds — the privacy boundary
+    is unchanged."""
+    body = {"events": [
+        {"kind": "boot", "msg": "cold_start",
+         "extra": "displayMode=standalone opfsCapable=true provider=worker"},
+    ]}
+    out = ces.sanitize_payload(body)
+    assert len(out["events"]) == 1
+    assert out["events"][0]["kind"] == "boot"
+    assert out["events"][0]["msg"] == "cold_start"
+    assert out["events"][0]["extra"] == (
+        "displayMode=standalone opfsCapable=true provider=worker"
+    )
+
+
 def test_sanitize_payload_install_kind_still_redacts_email_in_msg():
     """The kind allowlist doesn't bypass the email-redaction rule on
     free-text fields. A buggy caller that tries to send the user's

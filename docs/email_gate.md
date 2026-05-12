@@ -237,6 +237,18 @@ Spawn / init outcomes for the dedicated SQLite worker (`vendor/sqlite-worker.js`
 
 Operator query: `journalctl -u fellows-pwa | grep '"kind": "worker"'`. Pair `boot_stuck` events with the user's `ua` and `lastSubmitHashPrefix` (if any) to find the matching session and reproduce.
 
+#### `kind=boot` events
+
+Once-per-page-load success beacon, fired after `bootMark('get_list_done')` succeeds. This is the load-bearing input for `just installed-versions` (see [`plans/install_version_telemetry.md`](../plans/install_version_telemetry.md)) — it's how the operator learns *what build each installed PWA is currently executing*, regardless of whether the user has done anything in this session beyond opening the app.
+
+| `msg` | Fired when |
+|---|---|
+| `cold_start` | `bootDirectoryAsApp` reached `get_list_done` (success — fresh API or cached). `extra` carries `displayMode=<x>` and, when the data provider has resolved, `provider=<worker|api+idb|api>`. |
+
+Cardinality is bounded to one per page load (module-scope `bootBeaconFired` guard). When `lastSubmitInfo.emailHashPrefix` is in localStorage from a prior magic-link gate submit, the payload includes `lastSubmitHashPrefix` — the join key that ties each boot back to the user's `email_hash_prefix` from the matching `send_unlock_email` event. Anonymous boots (Clear-App-Cache'd, never gated) still report the running `build`, just without the email join.
+
+Operator query: `journalctl -u fellows-pwa | grep '"kind": "boot"'`. `just installed-versions` does the join + plaintext-email lookup automatically.
+
 ### Anti-abuse posture
 
 - **Always 204 No Content.** No echo, no error message, no oracle. A probing attacker can't tell whether their payload was logged, dropped on shape, dropped on rate-limit, or dropped because all events were filtered.
