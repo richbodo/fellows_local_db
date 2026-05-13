@@ -118,6 +118,14 @@
     group: "{{ service_user }}"
     mode: "0755"
 
+- name: Install installed_versions helper
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../scripts/installed_versions.py"
+    dest: "{{ app_root }}/bin/installed_versions"
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
+    mode: "0755"
+
 # Preflight: confirm the operator (ansible_user, not root) can actually write
 # into every dist subdirectory before rsync tries. If normalization above
 # didn't take — filesystem ACLs, mount options, something unexpected — we

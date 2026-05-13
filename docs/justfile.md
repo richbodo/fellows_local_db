@@ -32,8 +32,8 @@ A few recipes respect the same env vars the underlying scripts do:
 | Variable | Default | Affects |
 |---|---|---|
 | `FELLOWS_HOST` | `fellows.globaldonut.com` | `check-env`, SSH targets |
-| `FELLOWS_SSH_PORT` | `52221` | `prod-logs`, `prod-status`, `prod-stats`, `prod-stats-long` |
-| `FELLOWS_SSH_USER` | `rsb` | `prod-logs`, `prod-status`, `prod-stats`, `prod-stats-long` |
+| `FELLOWS_SSH_PORT` | `52221` | `prod-logs`, `prod-status`, `prod-stats`, `prod-stats-long`, `installed-versions` |
+| `FELLOWS_SSH_USER` | `rsb` | `prod-logs`, `prod-status`, `prod-stats`, `prod-stats-long`, `installed-versions` |
 | `FELLOWS_BASE_URL` | `https://fellows.globaldonut.com` | `smoke`, `drift` |
 
 Export them or inline: `FELLOWS_BASE_URL=https://staging.example.com just smoke`.
@@ -187,6 +187,22 @@ Export them or inline: `FELLOWS_BASE_URL=https://staging.example.com just smoke`
   `/opt/fellows/deploy/dist/fellows.db` and matching against the
   `email_hash_prefix` the server logs per send event. Treat output as
   confidential — it contains fellow email addresses.
+- **`installed-versions [SINCE]`** — per-fellow install-build vs
+  currently-running-build inventory, joined to plaintext email. Default
+  window `30 days ago`. Joins three event streams from journald:
+  `event=verify_token` (install moment + UA, via the `token_prefix`
+  hop through `event=send_unlock_email` to recover `email_hash_prefix`)
+  and `event=client_error kind=boot` (every cold boot's running build,
+  keyed by `lastSubmitHashPrefix`). Each row shows the install build,
+  the currently-running build, and a `⚠ STUCK` flag when the two
+  differ — that's the Janine-on-iOS diagnostic (cache evicted, SW
+  update path didn't take). Anonymous boots (Clear-App-Cache'd users
+  with no gate submit in localStorage) are histogrammed at the
+  bottom by build label. Plan and rationale:
+  [`plans/install_version_telemetry.md`](../plans/install_version_telemetry.md).
+  Schema for the underlying events: [`docs/email_gate.md` §
+  Client error reporting](email_gate.md#client-error-reporting).
+  Plaintext-confidential — same posture as `prod-stats-long`.
 - **`prod-errors [SINCE]`** — focused triage view: prints the 4xx + 5xx
   counters, the new `Client error reports:` count, and the 10 most
   recent error entries verbatim — interleaving server-side access
