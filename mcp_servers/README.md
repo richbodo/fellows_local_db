@@ -64,7 +64,12 @@ mcp_servers/.venv/bin/pip install -r mcp_servers/requirements.txt
 ### Wire up Claude Desktop
 
 Edit `~/Library/Application Support/Claude/claude_desktop_config.json`
-(macOS) — create the file if it doesn't exist:
+(macOS). Easiest path: open Claude Desktop → Settings → Developer →
+*Edit Config*, which opens this same file. Create the file if it
+doesn't exist; if it does already exist (Claude Desktop writes
+`preferences` here in normal use), add the `mcpServers` block at the
+top level alongside whatever's already there — don't nest it inside
+`preferences`.
 
 ```json
 {
@@ -81,18 +86,30 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`
 }
 ```
 
-Restart Claude Desktop. The four tools (`search_fellows`, `get_fellow`,
-`list_fellows`, `get_directory_stats`) appear in the available-tools
-list. Sanity prompts:
+**Fully quit Claude Desktop** (⌘Q — closing the window isn't enough;
+the menu bar entry must disappear) and relaunch. Then:
 
-- *"How many fellows are in the directory?"* → fires `get_directory_stats`.
-- *"Find fellows working on climate."* → fires `search_fellows`.
-- *"Who is `<known name>`?"* → fires `get_fellow`.
-- *"List NZ Investor fellows."* → fires `list_fellows` with a `fellow_type` filter.
+1. Open Settings → Developer → *Local MCP servers*. `shared-data-ops`
+   should appear there. If the panel still says "No servers added,"
+   the config didn't parse — most likely a JSON syntax error or
+   `mcpServers` was nested under `preferences`.
+2. Start a new chat and try a sanity prompt:
+   - *"How many fellows are in the directory?"* → fires `get_directory_stats`.
+   - *"Find fellows working on climate."* → fires `search_fellows`.
+   - *"Who is `<known name>`?"* → fires `get_fellow`.
+   - *"List NZ Investor fellows."* → fires `list_fellows` with a `fellow_type` filter.
 
-To verify a tool actually fired (vs. the model answering from training),
-watch the MCP logs in Claude Desktop's developer mode, or compare with
-the same prompts after disabling the server.
+First-run UX: Claude Desktop prompts for approval the first time the
+model invokes each tool, and the model may try a couple of generic
+approaches before reaching for the MCP tool. That's normal — approve
+the tool call and re-ask once it's allowed. Subsequent calls don't
+re-prompt.
+
+To verify a tool actually fired (vs. the model answering from
+training), tail `~/Library/Logs/Claude/mcp*.log` — each invocation
+writes a JSON-RPC frame. The clearest A/B test is to disable the
+server in Settings → Developer, ask the same question, and compare
+the answer.
 
 ### Run it standalone (without an MCP client)
 

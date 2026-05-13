@@ -3,32 +3,37 @@
 # scripts/wt-claude.sh
 
 BRANCH_NAME=$1
-
 if [ -z "$BRANCH_NAME" ]; then
     echo "❌ Please provide a branch name."
     exit 1
 fi
 
-# Get the absolute path to the directory where THIS script lives, 
-# then go up one level to find the repo root.
+# 1. Environment Setup Logic
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 SOURCE_VENV="$REPO_ROOT/.venv"
 
-if [ ! -d "$SOURCE_VENV" ]; then
-    echo "❌ Error: .venv not found at $SOURCE_VENV"
-    exit 1
+# 2. Determine if we need the -c flag
+# Check if branch exists locally or on remote
+if git rev-parse --verify "$BRANCH_NAME" >/dev/null 2>&1 || \
+   git rev-parse --verify "origin/$BRANCH_NAME" >/dev/null 2>&1; then
+    CREATE_FLAG=""
+    echo "🌿 Branch '$BRANCH_NAME' exists. Switching..."
+else
+    CREATE_FLAG="-c"
+    echo "✨ Creating new branch '$BRANCH_NAME'..."
 fi
 
-echo "🚀 Preparing worktree for: $BRANCH_NAME"
+# 3. Use worktrunk with the dynamic flag
+wt switch $CREATE_FLAG "$BRANCH_NAME"
 
-# 2. Use worktrunk to create/switch
-wt switch -c "$BRANCH_NAME"
+# 4. Link the .venv (Absolute path)
+# We check if it exists first to avoid 'File exists' errors on re-entry
+if [ ! -L "./.venv" ] && [ ! -d "./.venv" ]; then
+    ln -s "$SOURCE_VENV" ./.venv
+    echo "✅ Symlinked .venv"
+fi
 
-# 3. Link the .venv (Absolute path is safest)
-ln -s "$SOURCE_VENV" ./.venv
-echo "✅ Symlinked .venv from $SOURCE_VENV"
-
-# 4. Launch Claude
+# 5. Launch Claude
 claude --dangerously-skip-permissions
 
