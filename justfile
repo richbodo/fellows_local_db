@@ -577,3 +577,8 @@ email-debug since="24 hours ago" email="":
         args+=(--email "{{email}}")
     fi
     scripts/debug_email_delivery.py "${args[@]}"
+
+# Launch claude yolo on a new worktree
+# wt branch_name:
+    ./scripts/wt-claude.sh {{branch_name}}
+    
