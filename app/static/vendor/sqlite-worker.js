@@ -356,6 +356,154 @@ async function _rotateRelationshipsBackups() {
   }
 }
 
+// ===== Lock crypto (envelope v1) ============================================
+//
+// Opt-in encryption-at-rest for relationships.db + its OPFS backups.
+// See plans/lock_my_user_data.md.
+//
+// Phase 1: pure crypto primitives — no OPFS reads/writes, no RPCs that
+// touch live state. The OPFS-orchestration RPCs (enableLock, unlock,
+// lock, changePassphrase, disableLock) and the lock-in-progress recovery
+// land in Phase 2 and rely on the round-trip behavior of these helpers.
+//
+// Envelope layout:
+//
+//   Offset    Length    Field
+//   0         8         Magic: "EHFLOCK\0"
+//   8         1         Format version (= 1)
+//   9         1         KDF id          (= 1 → PBKDF2-SHA256)
+//   10        4         KDF iterations  (uint32 big-endian, = 600000 for v1)
+//   14        2         Salt length     (uint16 big-endian, = 16 for v1)
+//   16        <Slen>    Salt
+//   16+Slen   12        AES-GCM IV (96-bit nonce)
+//   28+Slen   <rest>    AES-GCM ciphertext (plaintext + 16-byte auth tag)
+//
+// WebCrypto appends the 128-bit GCM auth tag to the ciphertext, so a
+// wrong password fails decrypt atomically with OperationError. No
+// separate verifier blob is needed.
+//
+// Header is fixed-shape so envelope v2 (e.g. Argon2id once vendored) can
+// land without breaking v1 readers: bump LOCK_FORMAT_VERSION, branch on
+// the KDF id field, leave v1 unchanged.
+
+var LOCK_MAGIC = new Uint8Array([0x45, 0x48, 0x46, 0x4c, 0x4f, 0x43, 0x4b, 0x00]); // "EHFLOCK\0"
+var LOCK_FORMAT_VERSION = 1;
+var LOCK_KDF_PBKDF2_SHA256 = 1;
+var LOCK_KDF_ITERS_V1 = 600000;
+var LOCK_SALT_LEN = 16;
+var LOCK_IV_LEN = 12;
+var LOCK_HEADER_BASE_LEN = 8 + 1 + 1 + 4 + 2; // magic + version + kdf + iters + saltLen
+
+function _lockRandomBytes(n) {
+  var b = new Uint8Array(n);
+  crypto.getRandomValues(b);
+  return b;
+}
+
+// Derive a non-extractable AES-GCM key from the passphrase. The key
+// itself never leaves WebCrypto; callers hold an opaque CryptoKey
+// handle. PBKDF2-SHA256 is in WebCrypto natively — no vendored dep.
+async function _deriveLockKey(passphrase, salt, iters) {
+  var passBytes = new TextEncoder().encode(passphrase);
+  var baseKey = await crypto.subtle.importKey(
+    'raw', passBytes, { name: 'PBKDF2' }, false, ['deriveKey']
+  );
+  return await crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: salt, iterations: iters, hash: 'SHA-256' },
+    baseKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+}
+
+// Pack a v1 envelope from an already-derived key + plaintext. Returns
+// Uint8Array. The salt + iters are stored in the header so
+// unlockBlobWithPassphrase can rederive without external state.
+async function _lockBlobBytes(key, plainBytes, salt, iters) {
+  var iv = _lockRandomBytes(LOCK_IV_LEN);
+  var ctBuf = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: iv }, key, plainBytes
+  );
+  var ct = new Uint8Array(ctBuf);
+  var headerLen = LOCK_HEADER_BASE_LEN + salt.length + LOCK_IV_LEN;
+  var out = new Uint8Array(headerLen + ct.length);
+  var dv = new DataView(out.buffer);
+  out.set(LOCK_MAGIC, 0);
+  dv.setUint8(8, LOCK_FORMAT_VERSION);
+  dv.setUint8(9, LOCK_KDF_PBKDF2_SHA256);
+  dv.setUint32(10, iters >>> 0, false); // big-endian
+  dv.setUint16(14, salt.length, false);
+  out.set(salt, 16);
+  out.set(iv, 16 + salt.length);
+  out.set(ct, headerLen);
+  return out;
+}
+
+// Parse a v1 envelope without decrypting. Returns the header fields +
+// ciphertext slice. Throws on malformed input — DOES NOT throw on a
+// wrong-passphrase ciphertext (the auth-tag check happens during
+// decrypt). Callers should treat a parse error as "this is not a lock
+// envelope" and a decrypt OperationError as "wrong passphrase."
+function _parseLockEnvelope(bytes) {
+  if (!bytes || bytes.byteLength < LOCK_HEADER_BASE_LEN + LOCK_IV_LEN) {
+    throw new Error('Lock envelope too short.');
+  }
+  for (var i = 0; i < LOCK_MAGIC.length; i++) {
+    if (bytes[i] !== LOCK_MAGIC[i]) throw new Error('Not a lock envelope.');
+  }
+  var dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  var version = dv.getUint8(8);
+  if (version !== LOCK_FORMAT_VERSION) {
+    throw new Error('Unsupported lock format version: ' + version);
+  }
+  var kdfId = dv.getUint8(9);
+  if (kdfId !== LOCK_KDF_PBKDF2_SHA256) {
+    throw new Error('Unsupported KDF id: ' + kdfId);
+  }
+  var iters = dv.getUint32(10, false);
+  var saltLen = dv.getUint16(14, false);
+  if (saltLen === 0 || saltLen > 256) {
+    throw new Error('Invalid salt length: ' + saltLen);
+  }
+  var fixedHeader = LOCK_HEADER_BASE_LEN + saltLen + LOCK_IV_LEN;
+  if (bytes.byteLength < fixedHeader) {
+    throw new Error('Lock envelope truncated header.');
+  }
+  return {
+    version: version,
+    kdfId: kdfId,
+    iters: iters,
+    salt: bytes.slice(16, 16 + saltLen),
+    iv: bytes.slice(16 + saltLen, 16 + saltLen + LOCK_IV_LEN),
+    ciphertext: bytes.slice(fixedHeader)
+  };
+}
+
+// Encrypt plainBytes with passphrase. Fresh random salt + iv per call,
+// so encrypting the same plaintext twice yields different envelopes.
+async function lockBlobWithPassphrase(passphrase, plainBytes) {
+  var salt = _lockRandomBytes(LOCK_SALT_LEN);
+  var iters = LOCK_KDF_ITERS_V1;
+  var key = await _deriveLockKey(passphrase, salt, iters);
+  return await _lockBlobBytes(key, plainBytes, salt, iters);
+}
+
+// Decrypt a v1 envelope with passphrase. Returns Uint8Array on success.
+// Throws:
+//   - Error("Not a lock envelope.") / similar — malformed input.
+//   - OperationError (name === 'OperationError') — wrong passphrase or
+//     ciphertext corruption. WebCrypto's GCM auth-tag check is the
+//     verifier; no per-envelope password hash is needed.
+async function unlockBlobWithPassphrase(passphrase, envelope) {
+  var parsed = _parseLockEnvelope(envelope);
+  var key = await _deriveLockKey(passphrase, parsed.salt, parsed.iters);
+  var plainBuf = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: parsed.iv }, key, parsed.ciphertext
+  );
+  return new Uint8Array(plainBuf);
+}
+
 // ===== Auto-backup (debounced per-boot) =====================================
 
 // Per Phase 0 Q-C: trigger flips from "build-SHA differs" to "newest
@@ -1499,6 +1647,77 @@ handlers.getOpfsInventory = async function () {
   var poolFiles = [];
   try { poolFiles = poolUtil.getFileNames(); } catch (e2) {}
   return { root: rootEntries, poolFiles: poolFiles };
+};
+
+// ----- Lock crypto self-test -----------------------------------------------
+//
+// Round-trip smoke test for the lock-envelope primitives. Doesn't touch
+// OPFS, doesn't mutate any worker state. Stays in the worker as a
+// permanent cheap sanity check — the OPFS-orchestration RPCs (Phase 2+)
+// rely on this behavior being correct, and an e2e test that drives this
+// RPC catches WebCrypto / envelope-format regressions in isolation.
+//
+// Reached from a test via window.__dataProvider._rpc.call('__lockSelfTest').
+
+handlers.__lockSelfTest = async function () {
+  var plain = new TextEncoder().encode(
+    'lock-self-test: ' + new Date().toISOString()
+  );
+  var pass = 'correct horse battery staple';
+  var wrong = 'wrong horse battery staple';
+
+  var envelope = await lockBlobWithPassphrase(pass, plain);
+
+  // Envelope must start with the magic.
+  for (var i = 0; i < LOCK_MAGIC.length; i++) {
+    if (envelope[i] !== LOCK_MAGIC[i]) {
+      return { ok: false, error: 'envelope missing EHFLOCK magic at byte ' + i };
+    }
+  }
+
+  // Right passphrase round-trips to identical bytes.
+  var dec = await unlockBlobWithPassphrase(pass, envelope);
+  if (dec.length !== plain.length) {
+    return { ok: false, error: 'round-trip length mismatch: ' + dec.length + ' vs ' + plain.length };
+  }
+  for (var j = 0; j < plain.length; j++) {
+    if (dec[j] !== plain[j]) {
+      return { ok: false, error: 'round-trip byte mismatch at ' + j };
+    }
+  }
+
+  // Wrong passphrase MUST fail atomically (auth-tag check). WebCrypto
+  // surfaces this as a DOMException with name === 'OperationError'.
+  var wrongErrName = null;
+  try {
+    await unlockBlobWithPassphrase(wrong, envelope);
+    return { ok: false, error: 'wrong passphrase did not throw' };
+  } catch (e) {
+    wrongErrName = (e && e.name) || (e && e.message) || String(e);
+  }
+
+  // Header readback exposes the v1 parameters so tests can assert them
+  // without re-parsing the envelope themselves.
+  var parsed;
+  try { parsed = _parseLockEnvelope(envelope); }
+  catch (pe) {
+    return { ok: false, error: 'envelope re-parse failed: ' + ((pe && pe.message) || pe) };
+  }
+
+  return {
+    ok: true,
+    envelopeLen: envelope.length,
+    plainLen: plain.length,
+    wrongPassphraseErrorName: wrongErrName,
+    header: {
+      formatVersion: parsed.version,
+      kdfId: parsed.kdfId,
+      iters: parsed.iters,
+      saltLen: parsed.salt.length,
+      ivLen: parsed.iv.length,
+      ciphertextLen: parsed.ciphertext.length
+    }
+  };
 };
 
 // ===== Dispatcher ===========================================================
