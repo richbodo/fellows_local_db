@@ -3,7 +3,7 @@
 > Intermediate planning artifact for splitting the existing docs into:
 >
 > - `docs/pna_toolkit/PNA_Spec.md` — universal personal network app spec; lifts to `personal_network_toolkit/` when that repo is created
-> - `docs/pna_toolkit/axes.md` — flavor axis taxonomy + attested picks per axis + flavor-derived ACs grouped by axis-pick trigger
+> - `docs/pna_toolkit/axes.md` — Axis taxonomy + attested picks per Axis + flavor-derived ACs grouped by axis-pick trigger
 > - `docs/pna_toolkit/use_cases.md` — attested use case catalog (Directory Archive realized; Personal Relationship Manager draft)
 > - `docs/pna_toolkit/spec/contracts/` — generic typed contracts (JSON Schema for RPC + handshake, OpenAPI fragments for distribution, SQL DDL for schemas, TypeScript declaration for transport interface, JSON Schema for each canonical MCP server's tool surface)
 > - `docs/pna_toolkit/llms.txt` — discovery for the spec itself (lifts with the toolkit)
@@ -16,7 +16,7 @@
 > 1. **Vocabulary** — small, deliberate term set
 > 2. **Goals** — five user-facing needs we satisfy, with reasoning
 > 3. **Use cases** — attested classes of PNA (Directory Archive realized; Personal Relationship Manager draft)
-> 4. **Flavor axes** — seven axes a PNA varies along; each axis-pick may trigger flavor-derived ACs
+> 4. **Axes** — seven Axes a PNA varies along; each axis-pick may trigger flavor-derived ACs
 > 5. **Composition** — the two attested compositional models (`build-time-bundle`, `runtime-shell-pipeline`) and what they imply for the toolkit
 > 6. **Architectural commitments** — universal ACs (apply to every PNA) + flavor-derived ACs (tagged by axis-pick triggers)
 > 7. **Slot map** — three interfaces, five components
@@ -31,7 +31,11 @@
 
 This doc — and the eventual spec — uses a small, deliberate set of terms.
 
-- **Personal network application (PNA).** The category. An app that lets a user view contact data and work on relationship data over it as a firewalled data layer with higher security needs than the contact data.   fellows_local_db is one PNA; Another would be an app that allows you to aggregate personal contact data ingested from the big SaaS providers and operate privately on that data, adding privacy-sensitive notes, and searching and launching tasks from the app.  PNAs bridge the old world of SaaS and offer private, custom tools to operate on contact data.
+- **Personal network application (PNA).** A PNA is an application that helps a user view contact data and work on relationship data over it as a firewalled data layer with higher security needs than the contact data.  The PNA runs local-only, never as SaaS.  The PNA bridges SaaS data, which should never contain private relationship data, into a much more fucntional, customizable work environment suitable for viewing personal networks, updating private data about them, and interacting with them.
+
+Fellows_local_db is one PNA reference design - making a directory archive useful and fast; Another PNA reference design would be an app that allows you to aggregate personal contact data ingested from the big SaaS providers and operate privately on that data, adding privacy-sensitive notes, and searching and launching tasks from the app.  
+
+PNAs bridge the old world of SaaS and offer private, custom tools to operate on contact data.
 
 - **Workspace.** One *component* of a PNA: the viewer + editor. The thing the user looks at and clicks. fellows_local_db's workspace is a vanilla-JS SPA in the browser; another PNA's might be a native shell, a Tauri app, or a separately-distributed mini-app sharing the same data layer.
 
@@ -51,15 +55,19 @@ This doc — and the eventual spec — uses a small, deliberate set of terms.
 
 - **Reference design / thematic example.** A working, deployed PNA that demonstrates one valid combination of slot-fills against the spec. fellows_local_db is the first reference design — its load-bearing adjectives are *magic-link distributed PWA* (Distribution choice) + *static network DB archive* (Ingestion choice — the directory is mirrored once with opt-in updates, not linked to a live contact manager) + *single shared directory* (Source choice). New reference designs accumulate adjectives as their slot-fills land. AIs adapting a thematic example start from one of these and ask the user which slot-fills to keep, swap, or extend.
 
-- **Use case.** A user-facing class of PNA — "Directory Archive," "Personal Relationship Manager." Names what kind of app this is *from the user's perspective*. v0.1 attests two; future versions will add more. Use case is *not* one of the flavor axes (defined next); it's the parent category that a flavor instantiates. A use case typically suggests default axis picks (Directory Archives gravitate toward web-bundle distribution; PRMs toward never-distributed-single-user) but the axes remain independent — a hypothetical Directory Archive shipped as a Tauri shell + native SQLite is conceivable.
+- **Use case.** A user-facing class of PNA — "Directory Archive," "Personal Relationship Manager." A Use Case names what kind of app this is *from the user's perspective*. v0.1 attests two; future versions will add more. Use case is *not* one of the Axes (defined next); it's the parent category that a flavor instantiates. A use case typically suggests default axis picks (Directory Archives gravitate toward web-bundle distribution; PRMs toward never-distributed-single-user) but the axes remain independent — a hypothetical Directory Archive shipped as a Tauri shell + native SQLite is conceivable.
 
-- **Flavor axis.** An independent developer-side dimension along which a PNA's shape varies. Each axis has a small enumerated set of possible values; the builder picks one value per axis when shaping a PNA. *Example:* the **distribution** axis has picks `web-bundle-with-magic-link` (fellows_local_db's pick), `never-distributed-single-user` (PRM's likely pick), `web-bundle-open`, `app-store-native`, `sideloaded-native` — the builder picks one. v0.1 names seven flavor axes: composition model, distribution, storage substrate, ingestion shape, workspace shell, comms transport set, MCP-exposure.
+- **Axes.** Axes are areas of functionality that need to be defined when building a PNA.  We're breaking PNAs down this way because we know that they will be built automatically from the contracts that we define for each area of functionality, or Axis for short.  This is just the first set of decisions that need to be made when building a PNA.  Each Axis offers a pre-defined, limited number of choices to the builder - internally we call these the builders "Axis picks".
 
-- **Axis pick.** One value on one flavor axis. Written `axis:value` — for instance `storage:opfs-sqlite-wasm`, `distribution:web-bundle-with-magic-link`. The set of attested picks per axis is enumerated in `pna_toolkit/axes.md`.
+An example of an Axis would be the **distribution** axis, which offers the Axis picks `web-bundle-with-magic-link` (fellows_local_db's pick), `never-distributed-single-user` (PRM's likely pick), `web-bundle-open`, `app-store-native`, `sideloaded-native` — the builder picks one. 
+
+v0.1 names seven Axes: composition model, distribution, storage substrate, ingestion shape, workspace shell, comms transport set, MCP-exposure.
+
+- **Axis pick.** One value on one Axis. Written `axis:value` — for instance `storage:opfs-sqlite-wasm`, `distribution:web-bundle-with-magic-link`. The set of attested picks per Axis is enumerated in `pna_toolkit/axes.md`.
 
 - **Flavor.** The full constellation of axis picks for a specific PNA. fellows_local_db's flavor: `composition:build-time-bundle + distribution:web-bundle-with-magic-link + storage:opfs-sqlite-wasm + ingestion:single-source-static-mirror + workspace-shell:vanilla-js-spa + comms:mailto-only + mcp-exposure:none`. Two PNAs of the same use case can have different flavors (a TUI PRM vs. a Tauri-wrapped GUI PRM share the use case but differ on workspace shell and storage). A flavor + a use case together fully identify a PNA's shape.
 
-- **Composition model.** One of the seven flavor axes, called out here because its picks shape several other axes. Two attested: `build-time-bundle` (browser PNAs; slots are JS modules; bundler is the seam) and `runtime-shell-pipeline` (CLI PNAs; slots are OS processes; shell pipeline is the seam). A third, `runtime-MCP-RPC`, applies *across* PNAs in the ecosystem composition pattern (see Composition section below). Browser distribution typically forces build-time-bundle; CLI distribution typically forces runtime-shell-pipeline.
+- **Composition model.** One of the seven Axes, called out here because its picks shape several other Axes. Two attested: `build-time-bundle` (browser PNAs; slots are JS modules; bundler is the seam) and `runtime-shell-pipeline` (CLI PNAs; slots are OS processes; shell pipeline is the seam). A third, `runtime-MCP-RPC`, applies *across* PNAs in the ecosystem composition pattern (see Composition section below). Browser distribution typically forces build-time-bundle; CLI distribution typically forces runtime-shell-pipeline.
 
 - **MCP server.** A process exposing PNA capabilities as MCP tools (Anthropic's Model Context Protocol — JSON-RPC over stdio or socket). The spec defines four canonical MCP servers per PNA — Data operations (the Storage slot's read/write surface), Ingestion (drive imports + dedup + orphan preview), Communications (with workspace-mediated user consent), and Diagnostics (read-only access to the Debug contract). An AI client (Claude Desktop, Cursor, a local-Ollama-backed agent, etc.) consumes these servers to drive the PNA. MCP servers are the basis of the `runtime-MCP-RPC` composition model: a PNA exposing MCP becomes externally composable so an AI agent can wire multiple PNAs together at runtime even though each is its own bundle.
 
@@ -123,7 +131,7 @@ A use case names a coherent class of PNA from the user's perspective. v0.1 attes
 
 A snapshot of some external organization's roster (a fellowship, a school, a cohort, a community) plus the user's private overlay on top. Shared data has a *single external source* — typically the organization that previously hosted the directory as a SaaS service, or a maintainer who curates updates. Each distributed user receives the same shared data and accumulates their own private overlay (groups, tags, notes). Distribution typically goes outward to many users from a maintainer or organizer; the toolkit's role is to make that distribution easy and safe.
 
-fellows_local_db (this repo) is the first reference design. Its picks across the seven flavor axes are listed in Flavor axes below; the ACs it inherits are the universal set plus those triggered by its picks.
+fellows_local_db (this repo) is the first reference design. Its picks across the seven Axes are listed in the Axes section below; the ACs it inherits are the universal set plus those triggered by its picks.
 
 ### Personal Relationship Manager — draft (no PNA-spec-conforming reference design yet)
 
@@ -151,9 +159,9 @@ This is the deep "why" behind defining slot contracts substrate-neutrally: when 
 
 ---
 
-## Flavor axes
+## Axes
 
-Seven independent axes a PNA picks along. A PNA's *flavor* is the full constellation of picks. Each pick may trigger flavor-derived ACs (see Architectural commitments below for the trigger tags). Use case is *not* one of these axes — it's the parent category from which a flavor is instantiated; see the Use cases section above.
+Seven independent Axes a PNA picks along. A PNA's *flavor* is the full constellation of picks. Each pick may trigger flavor-derived ACs (see Architectural commitments below for the trigger tags). Use case is *not* one of these Axes — it's the parent category from which a flavor is instantiated; see the Use cases section above.
 
 | Axis | fellows_local_db pick | PRM (draft) pick | Other plausible picks |
 |---|---|---|---|
@@ -169,7 +177,7 @@ Notes on axis independence:
 
 - Some axes correlate strongly. `composition:build-time-bundle` is essentially forced by browser-based distribution; `composition:runtime-shell-pipeline` is essentially forced by CLI distribution.
 - Some axes are genuinely orthogonal. A Directory Archive use case could in principle ship as a Tauri-wrapped native shell + native SQLite + build-time-bundle composition; the use case doesn't determine those picks.
-- Picks attested in PRT but not yet attested against a PNA-spec-conforming reference design are tagged `[draft]` in the flavor table and throughout the AC tables.
+- Picks attested in PRT but not yet attested against a PNA-spec-conforming reference design are tagged `[draft]` in the Axes table above and throughout the AC tables.
 
 ---
 
@@ -191,7 +199,7 @@ At the algorithm level (dedup, slug generation, FTS query building, comms eligib
 
 ---
 
-## Architectural commitments (derived from goals + flavor-axis picks)
+## Architectural commitments (derived from goals + axis picks)
 
 These are load-bearing rules the spec will enforce. They split into two tables:
 
@@ -898,14 +906,14 @@ These cross-slot threads are what make the spec describe a *system* rather than 
 The partition pass (this reorg) is now done. Working from the destination-tagged content above.
 
 1. **Stub `docs/pna_toolkit/`** with skeleton files:
-   - `PNA_Spec.md` with version header (`Spec-Version: 0.1`) and section skeleton (Vocabulary, Goals, Use cases, Flavor axes, Composition, Universal ACs, Slot map, Scope/versioning)
+   - `PNA_Spec.md` with version header (`Spec-Version: 0.1`) and section skeleton (Vocabulary, Goals, Use cases, Axes, Composition, Universal ACs, Slot map, Scope/versioning)
    - `axes.md` with one H2 per axis (Composition model, Distribution, Storage substrate, Ingestion shape, Workspace shell, Comms transport set, Use case)
    - `use_cases.md` with one H2 per attested use case
    - `spec/contracts/` directory with placeholder files for each typed contract (worker-init-handshake.schema.json, worker-rpc-protocol.schema.json, distribution-auth.openapi.yaml, client-errors-payload.schema.json, transport-interface.d.ts, shared-db.schema.sql, private-db.schema.sql, plus MCP server tool surfaces: mcp-data-ops.schema.json, mcp-ingestion.schema.json, mcp-comms.schema.json, mcp-diagnostics.schema.json)
    - `CHANGELOG.md` with the v0.1 entry
    - `llms.txt` (for the spec itself; will lift with the toolkit)
-2. **Draft `docs/pna_toolkit/PNA_Spec.md`** from this triage's universal content (Goals + Vocabulary + Use cases + Flavor axes overview + Composition section + Universal ACs + Slot map + Scope/versioning). Self-contained; no fellows references except as cross-links to the reference design.
-3. **Draft `docs/pna_toolkit/axes.md`** from the Flavor axes section + flavor-derived ACs grouped by axis-pick trigger. Each axis-pick lists which ACs it triggers and which other axis-picks it commonly correlates with.
+2. **Draft `docs/pna_toolkit/PNA_Spec.md`** from this triage's universal content (Goals + Vocabulary + Use cases + Axes overview + Composition section + Universal ACs + Slot map + Scope/versioning). Self-contained; no fellows references except as cross-links to the reference design.
+3. **Draft `docs/pna_toolkit/axes.md`** from the Axes section + flavor-derived ACs grouped by axis-pick trigger. Each axis-pick lists which ACs it triggers and which other axis-picks it commonly correlates with.
 4. **Draft `docs/pna_toolkit/use_cases.md`** from the Use cases section. Directory Archive entry links to fellows's Architecture.md as the reference design; PRM entry remains `[draft]` until a reference design is built.
 5. **Fill `docs/pna_toolkit/spec/contracts/`** with the typed contracts as the spec drafts cite them.
 6. **Rewrite `docs/Architecture.md`** as fellows's specialization-and-conformance layer. New top section: "Spec conformance" declaring spec version + the seven axis picks + which flavor-derived ACs apply. Cross-links to `pna_toolkit/` for everything generic. Specialization-only invariants (fellows-specific operator concerns, fellows-specific HTTP routes, etc.) stay here.
