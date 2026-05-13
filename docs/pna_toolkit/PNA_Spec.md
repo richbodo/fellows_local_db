@@ -107,23 +107,54 @@ When something goes wrong, the issue can be diagnosed without compromising Goal 
 
 ## Use cases
 
-A use case names a coherent class of PNA from the user's perspective. A use case typically suggests default axis picks but does not determine them.
+A use case names a coherent class of PNA from the user's perspective. A use case typically suggests default axis picks but does not determine them. v0.1 attests two named use cases plus a longer-arc target:
 
-See [`use_cases.md`](use_cases.md) for the attested use case catalog.
+- **Directory Archive** — a snapshot of some external organization's roster (a fellowship, a school, a cohort, a community) plus the user's private overlay on top. Shared data has a single external source; each distributed user receives the same shared data and accumulates their own private overlay. Realized in [fellows_local_db](../Architecture.md).
+- **Personal Relationship Manager** — the user's own contact databases (Google + Apple + Facebook + LinkedIn + organizational directories) mirrored locally, plus rich private overlays (notes, tags, groups, comms history, message recency) and tools (LLM-mediated search, visual recall, eventual P2P). Multi-source ingestion. Typically single-user, not distributed onward. PRT-inspired; no PNA-spec-conforming reference design yet. **[draft]**
+- **Multi-PNA ecosystem (target, v0.2+)** — multiple cooperating PNAs on one user's device, wired together at runtime by an AI agent via MCP. The PRM acts as the meta-workspace over a deduplicated read-only meta-view composed from the per-PNA shared stores; per-app workspaces remain available for single-context work. No reference design yet; v0.1's contracts are sized to enable it.
+
+Full catalog with attestation status, default axis picks, and reference-design links: [`use_cases.md`](use_cases.md).
 
 ---
 
 ## Axes
 
-A PNA's *flavor* is the full constellation of axis picks the builder makes. v0.1 names seven Axes: composition model, distribution, storage substrate, ingestion shape, workspace shell, comms transport set, MCP-exposure.
+v0.1 names seven independent Axes a PNA picks along. A PNA's *flavor* is the full constellation of picks. Each pick may trigger flavor-derived ACs (the AC-trigger tags appear in [`axes.md`](axes.md), grouped by axis-pick).
 
-See [`axes.md`](axes.md) for the attested picks per Axis and the flavor-derived ACs each pick triggers.
+- **Composition model** — how slot implementations join. Picks: `build-time-bundle`, `runtime-shell-pipeline`, `runtime-MCP-RPC` (see [§ Composition](#composition)).
+- **Distribution** — how the PNA reaches a user's device. Picks: `web-bundle-with-magic-link`, `never-distributed-single-user`, `web-bundle-open`, `app-store-native`, `sideloaded-native`.
+- **Storage substrate** — what backs the data layer. Picks: `opfs-sqlite-wasm`, `native-sqlite-via-filesystem`, `idb-only-browser`, `native-sqlcipher`.
+- **Ingestion shape** — how the Shared DB is filled and refreshed. Picks: `single-source-static-mirror`, `multi-source-merge-with-dedup`, `single-source-live-pull`, `federated-read` (deferred).
+- **Workspace shell** — what the user sees and clicks. Picks: `vanilla-js-spa`, `framework-spa`, `tui-textual`, `cli-subcommands`, `native-shell-tauri`, `native-shell-native`.
+- **Comms transport set** — which outreach mechanisms the workspace offers. Picks: `mailto-only`, `mailto-plus-signal`, `mailto-plus-matrix`, `shell-out-to-cli-clients`.
+- **MCP-exposure** — which canonical MCP servers (Data ops / Ingestion / Comms / Diagnostics) the PNA hosts. Picks: `none`, `data-ops-only`, `data-ops+comms`, `full`.
+
+Notes on Axis independence:
+
+- Some Axes correlate strongly. `composition:build-time-bundle` is essentially forced by browser-based distribution; `composition:runtime-shell-pipeline` is essentially forced by CLI distribution.
+- Some Axes are genuinely orthogonal. A Directory Archive use case could in principle ship as a Tauri-wrapped native shell + native SQLite + build-time-bundle composition; the use case doesn't determine those picks.
+
+Use case is *not* one of these Axes — it's the parent category from which a flavor is instantiated; see [§ Use cases](#use-cases).
+
+Full per-pick catalog with attestation status, AC triggers, and correlation notes: [`axes.md`](axes.md).
 
 ---
 
 ## Composition
 
-<!-- TODO (step 2): migrate from _pna_triage.md § Composition. Three attested compositional models: build-time-bundle, runtime-shell-pipeline, runtime-MCP-RPC. -->
+The personal_network_toolkit's stated goal is to make PNAs fast to build. Three attested compositional models, all legitimately "Unix tools philosophy" applied to different substrates:
+
+**Build-time-bundle** (browser PNAs, *intra-bundle*). Slots are JS modules. The composer is a build tool. The bundle is the unit of distribution. IPC inside a bundle is `postMessage` + structured-clone + OPFS handles owned by the dedicated worker. Inter-bundle composition is impossible — browser origin isolation rules it out; the "system" is the single bundle. Composition is at *build time*: the toolkit's composer takes axis picks and assembles a bundle from stock slot modules.
+
+**Runtime-shell-pipeline** (CLI PNAs, *intra-PNA*). Slots are OS processes. The composer is the shell pipeline. SQLite files on disk and stdin/stdout streams serve as pipes. Composition is at *runtime*: the user pipes one tool's output into another (`pnt-contacts-ingest google.zip | pnt-dedup | pnt-directory-build → directory.html`). The toolkit ships independently-installable CLI subcommands; users assemble pipelines ad-hoc.
+
+**Runtime-MCP-RPC** (multi-PNA ecosystem, *inter-PNA*). PNAs expose MCP servers; an AI client (Claude Desktop, Cursor, a custom agent) connects to multiple PNAs simultaneously and orchestrates across them. Composition is at *runtime*, by the AI agent on the user's behalf. Unlike build-time-bundle (impossible across bundles) and runtime-shell-pipeline (CLI-only), runtime-MCP-RPC bridges browser-flavored PNAs and CLI-flavored PNAs because each PNA's MCP server runs as a separate process — browser origin isolation is no obstacle when the composition seam is at the MCP-protocol level, not at the bundle level. This is the composition pattern that makes the ecosystem reference design (multiple PNAs cooperating on one user's device, per the [§ Preamble](#preamble)) possible. The toolkit ships canonical MCP server implementations; each PNA declares its `mcp-exposure` axis pick. See AC-MCP-A and AC-MCP-B in [§ Universal architectural commitments](#universal-architectural-commitments) for the load-bearing constraints.
+
+All three models share the same slot contracts (see [§ Slot map](#slot-map)). A storage module conforming to the spec satisfies the same contract whether it's loaded as a JS module, invoked as a subprocess, or exposed as an MCP server; the *plumbing* differs, the *contract* doesn't. This is the spec's load-bearing claim: it describes slot contracts substrate-neutrally, so the toolkit can ship parallel implementations of each slot — one per composition model — that prove the same conformance.
+
+At the algorithm level (dedup, slug generation, FTS query building, comms eligibility evaluation, image-fallback resolution, multi-source merge), code is shareable across composition models *in principle* — though in practice it's typically written twice, once per host language (Python for CLI, JS for browser), with the spec acting as the shared conformance target. A future spec version may add algorithm specifications precise enough that an automated conformance check can validate both implementations against the same definition.
+
+**v0.1 doesn't ship a composer or stock slot modules.** It ships the spec + one reference design (fellows_local_db). The composer + module library follow when the second reference design (PRM) forces the factoring. This is ship-and-iterate applied to the toolkit: build the monolith first, factor into modules when patterns emerge, ship the modules as a library, let the original app become one consumer of the library.
 
 ---
 
