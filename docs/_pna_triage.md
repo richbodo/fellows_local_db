@@ -2,21 +2,28 @@
 
 > Intermediate planning artifact for splitting the existing docs into:
 >
-> - `docs/PNA_Spec.md` — generic personal network app spec (the target
->   for the personal_network_toolkit toolkit)
-> - `docs/Architecture.md` — fellows_local_db's specialization layer
+> - `docs/pna_toolkit/PNA_Spec.md` — universal personal network app spec; lifts to `personal_network_toolkit/` when that repo is created
+> - `docs/pna_toolkit/axes.md` — flavor axis taxonomy + attested picks per axis + flavor-derived ACs grouped by axis-pick trigger
+> - `docs/pna_toolkit/use_cases.md` — attested use case catalog (Directory Archive realized; Personal Relationship Manager draft)
+> - `docs/pna_toolkit/spec/contracts/` — generic typed contracts (JSON Schema for RPC + handshake, OpenAPI fragments for distribution, SQL DDL for schemas, TypeScript declaration for transport interface, JSON Schema for each canonical MCP server's tool surface)
+> - `docs/pna_toolkit/llms.txt` — discovery for the spec itself (lifts with the toolkit)
+> - `docs/Architecture.md` — fellows_local_db's specialization + spec-conformance declaration
+> - `llms.txt` at repo root — discovery for fellows (stays here)
 >
-> Working sessions: 2026-05-08 with @richbodo. Iterative — vocabulary
-> and decomposition will evolve as we go.
+> Working sessions: 2026-05-08, 2026-05-11, 2026-05-12 with @richbodo. Iterative — vocabulary and decomposition evolve as we go.
 >
 > Read in this order:
 > 1. **Vocabulary** — small, deliberate term set
 > 2. **Goals** — five user-facing needs we satisfy, with reasoning
-> 3. **Architectural commitments** — load-bearing rules derived from goals + runtime constraints
-> 4. **Slot map** — three interfaces, five components
-> 5. **Part 1** — synthesis per slot (what `PNA_Spec.md` will say)
-> 6. **Part 2** — source map (verification: where each claim came from)
-> 7. **Part 3** — bugs, missing items, open questions
+> 3. **Use cases** — attested classes of PNA (Directory Archive realized; Personal Relationship Manager draft)
+> 4. **Flavor axes** — eight axes a PNA varies along; each axis-pick may trigger flavor-derived ACs
+> 5. **Composition** — the two attested compositional models (`build-time-bundle`, `runtime-shell-pipeline`) and what they imply for the toolkit
+> 6. **Architectural commitments** — universal ACs (apply to every PNA) + flavor-derived ACs (tagged by axis-pick triggers)
+> 7. **Slot map** — three interfaces, five components
+> 8. **Part 1** — synthesis per slot (what `PNA_Spec.md` will say)
+> 9. **Part 2** — source map (verification: where each claim came from)
+> 10. **Part 3** — bugs, missing items, open questions
+> 11. **Part 4** — component decomposition (sub-contracts per slot)
 
 ---
 
@@ -24,25 +31,39 @@
 
 This doc — and the eventual spec — uses a small, deliberate set of terms.
 
-- **Personal network app (PNA).** The category. An app that lets a user view contact data and work on relationship data over it, with private-data sovereignty as a first principle. fellows_local_db is one PNA; a personal-aggregator app that ingests Google + Apple + Facebook contacts is another.
+- **Personal network application (PNA).** The category. An app that lets a user view contact data and work on relationship data over it as a firewalled data layer with higher security needs than the contact data.   fellows_local_db is one PNA; Another would be an app that allows you to aggregate personal contact data ingested from the big SaaS providers and operate privately on that data, adding privacy-sensitive notes, and searching and launching tasks from the app.  PNAs bridge the old world of SaaS and offer private, custom tools to operate on contact data.
 
 - **Workspace.** One *component* of a PNA: the viewer + editor. The thing the user looks at and clicks. fellows_local_db's workspace is a vanilla-JS SPA in the browser; another PNA's might be a native shell, a Tauri app, or a separately-distributed mini-app sharing the same data layer.
 
-- **Shared data.** Data that exists in more than one place — typically, a copy held by an external system the user uses (Google Contacts, Apple Contacts, Facebook friends, a fellowship's directory, a school's roster). The user is OK with that external system continuing to hold it. *Examples:* name, email, photo, organizational membership. The PNA mirrors this data locally so the user can browse and search it without depending on the external system being reachable.
+- **Shared data.** In the context of a PNA, shared data is data that exists in more than one place — typically, a copy held by an external system the user uses (Google Contacts, Apple Contacts, Facebook friends, a fellowship's directory, a school's roster). The user is OK with that external system continuing to hold it, and often has no say in the matter. *Examples:* name, email, photo, organizational membership. The PNA mirrors this data locally so the user can browse and search it without depending on the external system being reachable.
 
-  > "Shared" is the key word — not "public" in the everyday sense.  Shaerd data can be data that the user publicly shared, or shared with Apple Contacts and exported, and is typically maintained outside the users systems.  The contact data in your Google account isn't *publicly visible*; it just isn't *exclusively yours* and shared with Google.  In all cases, some external system has a copy, or once did.
+  > "Shared" is the key word — not "public" in the everyday sense.  Shared data can be data that the user publicly shared, or shared with Apple Contacts and exported, and is typically maintained outside the users systems.  The contact data in your Google account isn't *publicly visible*; it just isn't *exclusively yours* - it is shared with Google and any controlling governments or google partners who it is sold to.  In all cases, some external system has a copy, or once did.
 
-- **Private data.** Data that exists only on the user's device. The user is *not* OK with any external system holding a copy. *Examples:* notes the user keeps about a contact, tags they apply, groups they assemble, communication history. The PNA's central architectural job is to keep this layer protected, durable, and exclusively local.  This data must never be sent across insecure channels, and must only be explicitly sent by the users command in any form.
+- **Private data.** Data that exists only on the user's device(s). The user is *not* OK with any external system holding a copy. *Examples:* notes the user keeps about a contact, tags they apply, groups they assemble, communication history. The PNA's central architectural job is to keep this layer protected, durable, and exclusively local.  This data must never be sent across insecure channels, and must only be explicitly sent by the users command in any form.
 
-- **Shared DB / Private DB.** The two databases that a PNA stores. The Shared DB holds shared data (read-only inside the PNA — written only by the Ingestion component). The Private DB holds private data (read-write from the workspace).
+- **Shared DB / Private DB.** The two databases that a PNA stores. The Shared DB holds shared data (read-only inside the PNA — written only by the Ingestion component). The Private DB holds private data (read-write from the workspace).  Further decomposition and isolation of data according to privacy constraints is reasonable but unnecessary for the first PNAs envisioned.
 
   In fellows_local_db, the shared DB is `fellows.db` and the private DB is `relationships.db`. The spec uses the generic names; specializations may rename for ergonomics, or change database engines for practical reasons, as long as the data stays local.
 
-- **Mirroring.** The act of producing a fresh shared DB from an external source. Done by the Ingestion component. Re-mirrors are atomic from the workspace's view (stage, validate, swap) and never silently orphan private references.
+- **Mirroring.** The act of producing a fresh shared DB from an external source of shared data. A snapshot is created by the Ingestion component. Re-mirrors are atomic from the workspace's view (stage, validate, swap) and never silently orphan private references.
 
-- **Plugin / extension.** Anything that adds a capability to a composed PNA without modifying it's core. A memory-assistant view, a calendar overlay, a federated portrait pull, a community-statistics survey tool — all plugins.
+- **Plugin / extension.** Anything that adds a capability to a composed PNA without modifying it's core. A memory-assistant view, a calendar overlay, a federated portrait pull, a community-statistics survey tool — all plugins. PNAs themselves will expose MCP server interfaces as well.
 
 - **Reference design / thematic example.** A working, deployed PNA that demonstrates one valid combination of slot-fills against the spec. fellows_local_db is the first reference design — its load-bearing adjectives are *magic-link distributed PWA* (Distribution choice) + *static network DB archive* (Ingestion choice — the directory is mirrored once with opt-in updates, not linked to a live contact manager) + *single shared directory* (Source choice). New reference designs accumulate adjectives as their slot-fills land. AIs adapting a thematic example start from one of these and ask the user which slot-fills to keep, swap, or extend.
+
+- **Use case.** A user-facing class of PNA — "Directory Archive," "Personal Relationship Manager." Names a coherent shape from the user's perspective. v0.1 attests two; future versions will add more. Use cases typically have default axis picks but the axes remain independent — a hypothetical Directory Archive shipped as a Tauri shell is conceivable.
+
+- **Flavor axis.** A developer-side decomposition of a PNA's shape. Each axis is an independent dimension a builder picks along: composition model, distribution, storage substrate, ingestion shape, workspace shell, comms transport set, MCP-exposure, plus the use case label itself (which the spec treats as an axis for tagging consistency). Use case is what the user calls the app; flavor axes are what the builder picks.
+
+- **MCP server.** A process exposing PNA capabilities as MCP tools (Anthropic's Model Context Protocol — JSON-RPC over stdio or socket). The spec defines four canonical MCP servers per PNA — Data operations (the Storage slot's read/write surface), Ingestion (drive imports + dedup + orphan preview), Communications (with workspace-mediated user consent), and Diagnostics (read-only access to the Debug contract). An AI client (Claude Desktop, Cursor, a local-Ollama-backed agent, etc.) consumes these servers to drive the PNA. MCP servers are the basis of the *runtime-MCP-RPC* composition pattern: a PNA exposing MCP becomes externally composable so an AI agent can wire multiple PNAs together at runtime even though each is its own bundle.
+
+- **Axis pick.** One value on one flavor axis (e.g., `storage:opfs-sqlite-wasm`).
+
+- **Flavor.** The full constellation of axis picks for a specific PNA. fellows_local_db's flavor: `composition:build-time-bundle + distribution:web-bundle-with-magic-link + storage:opfs-sqlite-wasm + ingestion:single-source-static-mirror + workspace-shell:vanilla-js-spa + comms:mailto-only + use-case:directory-archive`.
+
+- **Composition model.** How slot implementations join. Two attested: `build-time-bundle` (browser PNAs; slots are JS modules; bundler is the seam) and `runtime-shell-pipeline` (CLI PNAs; slots are OS processes; shell pipeline is the seam). A foundational pick that constrains several other axis picks (browser distribution forces build-time; CLI distribution typically forces runtime).
+
+- **Universal AC vs flavor-derived AC.** Universal ACs derive from goals alone and apply to every PNA. Flavor-derived ACs are triggered by specific axis picks (e.g., `[storage:opfs-sqlite-wasm]`) and apply only when the flavor matches. The AC tables tag each entry.
 
 ---
 
@@ -50,27 +71,33 @@ This doc — and the eventual spec — uses a small, deliberate set of terms.
 
 ### Preamble
 
-We are at an inflection point. Two shifts are arriving at the same time. Personal data is withdrawing from centralized systems: users are increasingly unwilling to trust Facebook with who they talk to about politics or mental health, and increasingly unwilling to trust SaaS directories not to shut down with their data inside. At the same time, edge compute and AI agents capable of running serious work locally are arriving fast. The first shift creates demand for tools that keep user data sovereign; the second makes such tools practical to build, run, and recompose at the user's own pace.
+We are at an inflection point. Two shifts are arriving at the same time. Personal data is withdrawing from centralized systems: users are increasingly unwilling to trust Facebook with who they talk to about politics or mental health. At the same time, edge compute and AI agents capable of running serious work locally are arriving fast. The first shift creates demand for tools that keep user data sovereign; the second makes such tools practical to build, run, and recompose at the user's own pace.
 
-A personal network app is a tool that handles a user's contact data and personal-relationship data with strong, declared contracts about how that data is treated. The PNA separates the concerns of editing data shared with other systems from data created and held locally as private. A real contact manager might well exist as a plugin to a PNA, or interact with one via protocol. What distinguishes the category is the architectural promise: shared data is local-first and replaceable; private data is sovereign and protected; the user can reclassify a record's privacy at any time, and the PNA honors it durably; communication transports are user-chosen to meet the user's privacy and other requirements; the user can reason about where their data lives without trusting a vendor.
+A personal network application is a tool for users to manage and use contact and relationship data that makes up their personal networks.  A PNA handles a user's contact data and personal-relationship data with strong, declared contracts about how that data is treated. The PNA separates the concerns of editing data shared with other systems from data created and held locally as private. 
 
-The spec matters because users will increasingly compose software by prompting AI agents. We expect most PNAs to be built and rebuilt by AIs — adapting a thematic reference design like fellows_local_db, or building fresh against this spec. The contracts below are what the AI follows on the user's behalf, and they're written so the AI can pick them up and check its own work. The user's confidence comes from the spec being clear enough that both they and the AI can read it; as long as the contracts hold, an AI can rewrite a PNA from scratch while the user is still talking to it without changing the user's sovereignty, durability, or privacy posture. The goals below are user-facing needs; the architectural commitments after them are the choices that make those needs achievable.
+V0.1 PNAs all operate downstream of SaaS systems of record - they do not modify contact data, although a contact manager might well exist as a plugin to a PNA, or vice-versa. What distinguishes the niche is the architectural promise: shared data is local-first and replaceable; private data is sovereign and protected; the user can reclassify a record's privacy at any time, and the PNA honors it durably; communication transports are user-chosen to meet the user's privacy and other requirements; the user can reason about where their data lives without trusting a vendor.
+
+The spec matters because users will increasingly compose software by prompting AI agents. We expect most PNAs to be built and rebuilt by AIs — adapting a thematic reference design like fellows_local_db, or building fresh against this spec. When an AI is asked to build the P&A, it is required to follow the contracts of the PNA on the user's behalf, and they're written so the AI can pick them up and check its own work. The user's confidence comes from the spec being clear enough that both they and the AI can read it; as long as the contracts hold, an AI can rewrite a PNA from scratch while the user is still talking to it without changing the user's sovereignty, durability, or privacy posture. The goals below are user-facing needs; the architectural commitments after them are the choices that make those needs achievable.
+
+The longer-arc target is an ecosystem of cooperating PNAs on a single user's device — a Personal Relationship Manager (where private relationship data lives) running alongside one or more Directory Archives, a Contact Manager, and a Calendar app, each in its own bundle. The PRM acts as the meta-workspace: relationship data layered on top of a deduplicated read-only meta-view composed from the other apps' shared stores (Bob's cell from Google + work history from a fellowship directory + email from a Facebook export, resolved into one coherent contact view; the PRM's private overlay attached through stable IDs). The user can also work in clean per-app workspaces when they want a single context. Composing the meta-view requires per-source connectors, dedup with conflict resolution, and disciplined provenance — work for later spec versions. The eventual *ecosystem reference design* is the goal; v0.1 ships one PNA (fellows_local_db) and the spec it conforms to, with the architectural seams sized to let the ecosystem grow into place.
+
+PNAs that participate in such an ecosystem need to be reachable not just to humans but to AI agents acting on the user's behalf. The spec therefore defines MCP server interfaces at four canonical connection points: a **Data operations server** (the Storage slot's read/write surface), an **Ingestion server** (drive imports, dedup, orphan preview), a **Communications server** (with workspace-mediated user consent per AC-19), and a **Diagnostics server** (read-only access to the Debug contract). An AI client (Claude Desktop, Cursor, a local-Ollama-backed agent, or any MCP-capable runtime) can drive a PNA through these servers without modifying its core; canonical implementations will ship with the personal_network_toolkit. Cloud AI clients (anything that sends Private DB rows off-device) require explicit per-call consent — see AC-MCP-A below.
 
 ### Goal 1 — Private data sovereignty
 
-The PNA stores two databases: a Shared DB (data the user is OK with external systems mirroring) and a Private DB (data that must stay only on the user's device). The Private DB is protected forever — it never leaves the device, never lands on any server, and is durable across app updates and routine cache clears. The Shared DB doesn't need that lifetime protection.
+The PNA stores two databases: a Shared DB (data the user is OK with external systems mirroring) and a Private DB (data that must stay only on the user's device). The Private DB is protected forever — it never leaves the device, never lands on any server, and is durable across app updates and routine cache clears. The Shared DB doesn't need that lifetime protection.  Further decomposition and isolation of data according to privacy constraints is reasonable but unnecessary for the first PNAs envisioned.
 
 > **Why it matters:** Private data — who you confide in, your private notes on people, your communication history — is what most exposes you to surveillance, social-graph mining, and platform abuse. Keeping it on the user's device is the only durable defense. The architectural job of the PNA is to keep the line between shared and private data unmistakably bright.
 
 ### Goal 2 — Mirror centralized data sources locally
 
-Users keep contacts in centralized platforms — Google, Apple, Facebook, work directories, organizational directories. A PNA mirrors those locally, producing a Shared DB the workspace can browse offline. Mirroring runs from exports today and may grow to richer pipelines (federated reads, multi-source dedup wizards) as the toolkit matures.
+V0.1 PNAs all operate downstream of SaaS systems of record.  This goal exists due to the transitionary period we are in - where it is not possible to take back data from centralized SaaS over time, but necessary to continue to interact with those platforms for some time.  Users keep contacts in centralized platforms — Google, Apple, Facebook, work directories, organizational directories. A PNA mirrors those locally, producing a Shared DB the workspace can browse offline. Mirroring runs from exports today and may grow to richer pipelines (federated reads, multi-source dedup wizards) as the toolkit matures.
 
 > **Why it matters:** We're in a transitional period. Users won't migrate cold. The bridge from "my contacts are scattered across Google + Apple + Facebook + my fellowship's directory" to "my contacts are local-first" runs through ingesting their existing data, not asking them to maintain a parallel master list. The toolkit makes that ingestion a swappable component so a PNA can mirror one source or many.
 
 ### Goal 3 — Secure communication options from inside workspaces
 
-When the user wants to reach out to a contact, the workspace offers a choice of transports — including secure / decentralized options like Signal, not just `mailto:` and `tel:`.
+When the user wants to reach out to a contact, the workspace offers a choice of transports — including more secure / decentralized options like Signal, not just `mailto:` and `tel:`.
 
 > **Why it matters:** A user who demands sovereignty of their local data has the same high bar for the private transfer of that data. Defaulting every outreach to email — routed through whoever runs their mail server — is inconsistent with goal 1. The architectural commitment is that transports are pluggable and the user picks per outreach.
 
@@ -82,37 +109,132 @@ Private data travels with the user across devices, browsers, and PNA versions. A
 
 ### Goal 5 — Locally diagnosable
 
-When something goes wrong, the issue can be diagnosed without compromising goal 1. Sanitized error capture, runtime build labels, in-app diagnostic panels, user-controlled bug-report flows — all sized to a privacy posture consistent with the rest of the app. In single-user instances with no remote maintainer, the diagnostics primarily serve the user themselves.
+When something goes wrong, the issue can be diagnosed without compromising goal 1. Sanitized error capture, runtime build labels, in-app diagnostic panels, user-controlled bug-report flows — all sized to a privacy posture consistent with the rest of the app. In single-user instances with no remote maintainer, the diagnostics primarily serve the user themselves.  It goes without saying that source code must be available to the user to modify as they please for the diagnostics to be useful.
 
 > **Why it matters:** A privacy-sovereign user's threshold for what diagnostic data flows anywhere is the same as for the rest of their data. The diagnostic surface is part of the privacy surface, not an exception to it. Many eventual PNAs will be single-user installations with no maintainer at all; the debug substrate has to work in that mode without sending anything anywhere by default. When a sink *is* configured (fellows_local_db sends to a maintainer mailbox), it has to be sanitized and rate-limited so the user trusts using it.
 
 ---
 
-## Architectural commitments (derived from goals + runtime constraints)
+## Use cases
 
-These are load-bearing rules the spec will enforce. Each links back to the goal(s) or runtime constraint that produces it.
+A use case names a coherent class of PNA from the user's perspective. v0.1 attests two; the toolkit composer will eventually target both.
+
+### Directory Archive — realized in fellows_local_db
+
+A snapshot of some external organization's roster (a fellowship, a school, a cohort, a community) plus the user's private overlay on top. Shared data has a *single external source* — typically the organization that previously hosted the directory as a SaaS service, or a maintainer who curates updates. Each distributed user receives the same shared data and accumulates their own private overlay (groups, tags, notes). Distribution typically goes outward to many users from a maintainer or organizer; the toolkit's role is to make that distribution easy and safe.
+
+fellows_local_db (this repo) is the first reference design. Its picks across the seven flavor axes are listed in Flavor axes below; the ACs it inherits are the universal set plus those triggered by its picks.
+
+### Personal Relationship Manager — draft (no PNA-spec-conforming reference design yet)
+
+The user's *own* contact databases (Google + Apple + Facebook + LinkedIn + organizational directories) mirrored locally, plus rich private overlays (notes, tags, groups, comms history, message recency) and tools (LLM-mediated search, visual recall, eventual P2P). Shared data has multiple sources the user controls; ingestion involves a dedup pass. Typically single-user, not distributed onward — the PRM is for one person's contact graph.
+
+PRT (`../prt/`) is the inspiration but pre-dates this spec. A future PRM reference design built against PNA Spec v0.1 will live in its own repo. AC-PRM-* entries in this triage are **[draft]** until that reference design lands. Capturing the draft now is deliberate: a second use case stress-tests the universal-vs-flavor partition — an AC that fires for both DA and PRM is genuinely universal; an AC that fires for only one is flavor-derived and gets axis-pick triggers.
+
+### Multi-PNA ecosystem — target use case (v0.2+, no reference design)
+
+The longer-arc goal introduced in the Preamble: multiple PNAs cooperating on one user's device, wired together at runtime by an AI agent via MCP. Roles in the ecosystem:
+
+- **Personal Relationship Manager** — holds private relationship data (notes, tags, groups, history); hosts the meta-workspace where the user sees their full picture.
+- **Contact Manager** — edits and manipulates shared contact data (typically downstream of Google / Apple / Facebook exports). A contact manager could also exist as a plugin to the PRM, or interact via MCP.
+- **Directory Archive(s)** — one or more snapshots of external organizational rosters (a fellowship, a school, an old workplace). fellows_local_db is one instance.
+- **Calendar app** — events, scheduling, relationship-temporal data.
+
+The user wants two complementary modes:
+
+- **Per-PNA workspaces (always clean).** Just the fellows directory; just Google contacts; just Facebook contacts. Single-context, focused, fast — useful for tasks scoped to one source.
+- **Unified meta-view (in the PRM).** A read-only composed database deduplicating across the per-PNA shared stores. Bob's cell from Google + work history from a fellowship directory + email from a Facebook export combine into one coherent contact view. The PRM's private overlay (notes, tags, groups) references unified-view records via stable IDs; private data stays in the PRM regardless of which shared source contributed the underlying contact record.
+
+Achieving the unified meta-view requires per-source database connectors, careful dedup and conflict resolution, and disciplined provenance — substantial work that's deferred to later spec versions. The eventual *ecosystem reference design* would demonstrate this; v0.1 establishes the architectural seams (composition models, MCP server contracts, AC-10's opt-in non-destructive re-imports, AC-PRM-B's multi-source dedup contract, the four canonical MCP servers) that let the ecosystem grow into place.
+
+This is the deep "why" behind defining slot contracts substrate-neutrally: when the second PNA exists, an AI agent can wire it to fellows without modifying either; when the fifth PNA exists, the same. Composability isn't bolted on; it's the architecture's primary deliverable.
+
+---
+
+## Flavor axes
+
+Eight independent axes a PNA picks along. A PNA's *flavor* is the full constellation of picks. Each pick may trigger flavor-derived ACs (see Architectural commitments below for the trigger tags).
+
+| Axis | fellows_local_db pick | PRM (draft) pick | Other plausible picks |
+|---|---|---|---|
+| Composition model | `build-time-bundle` | `runtime-shell-pipeline` | `runtime-MCP-RPC` (composes *across* bundles via MCP); browser distribution typically forces build-time, CLI typically forces runtime |
+| Distribution | `web-bundle-with-magic-link` | `never-distributed-single-user` | `web-bundle-open`, `app-store-native`, `sideloaded-native` |
+| Storage substrate | `opfs-sqlite-wasm` | `native-sqlite-via-filesystem` | `idb-only-browser`, `native-sqlcipher` |
+| Ingestion shape | `single-source-static-mirror` | `multi-source-merge-with-dedup` | `single-source-live-pull`, `federated-read` (deferred) |
+| Workspace shell | `vanilla-js-spa` | `tui-textual` or `cli-subcommands` | `framework-spa`, `native-shell-tauri`, `native-shell-native` |
+| Comms transport set | `mailto-only` (Signal planned) | `shell-out-to-cli-clients` | `mailto-plus-signal`, `mailto-plus-matrix` |
+| MCP-exposure | `none` (v1); `data-ops-only` planned | `full` (all four servers) | `none`, `data-ops-only`, `data-ops+comms`, `full` |
+| Use case | `directory-archive` | `personal-relationship-manager` | (extensible per use case attested) |
+
+Notes on axis independence:
+
+- Some axes correlate strongly. `composition:build-time-bundle` is essentially forced by browser-based distribution; `composition:runtime-shell-pipeline` is essentially forced by CLI distribution.
+- Some axes are genuinely orthogonal. A Directory Archive use case could in principle ship as a Tauri-wrapped native shell + native SQLite + build-time-bundle composition; the use case doesn't determine those picks.
+- Picks attested in PRT but not yet attested against a PNA-spec-conforming reference design are tagged `[draft]` in the flavor table and throughout the AC tables.
+
+---
+
+## Composition
+
+The personal_network_toolkit's stated goal is to make PNAs fast to build. Three attested compositional models, all legitimately "Unix tools philosophy" applied to different substrates:
+
+**Build-time-bundle** (browser PNAs, *intra-bundle*). Slots are JS modules. The composer is a build tool. The bundle is the unit of distribution. IPC inside a bundle is `postMessage` + structured-clone + OPFS handles owned by the dedicated worker. Inter-bundle composition is impossible — browser origin isolation rules it out; the "system" is the single bundle. Composition is at *build time*: the toolkit's composer takes axis picks and assembles a bundle from stock slot modules.
+
+**Runtime-shell-pipeline** (CLI PNAs, *intra-PNA*). Slots are OS processes. The composer is the shell pipeline. SQLite files on disk and stdin/stdout streams serve as pipes. Composition is at *runtime*: the user pipes one tool's output into another (`pnt-contacts-ingest google.zip | pnt-dedup | pnt-directory-build → directory.html`). The toolkit ships independently-installable CLI subcommands; users assemble pipelines ad-hoc.
+
+**Runtime-MCP-RPC** (multi-PNA ecosystem, *inter-PNA*). PNAs expose MCP servers; an AI client (Claude Desktop, Cursor, a custom agent) connects to multiple PNAs simultaneously and orchestrates across them. Composition is at *runtime*, by the AI agent on the user's behalf. Unlike build-time-bundle (impossible across bundles) and runtime-shell-pipeline (CLI-only), runtime-MCP-RPC bridges browser-flavored PNAs and CLI-flavored PNAs because each PNA's MCP server runs as a separate process — browser origin isolation is no obstacle when the composition seam is at the MCP-protocol level, not at the bundle level. This is the composition pattern that makes the ecosystem reference design (multiple PNAs cooperating on one user's device, per the Preamble) possible. The toolkit ships canonical MCP server implementations; each PNA declares its `mcp-exposure` axis pick. See AC-MCP-A and AC-MCP-B below for the load-bearing constraints.
+
+All three models share the same slot contracts (see Slot map + Part 1 + Part 4 below). A storage module conforming to the spec satisfies the same contract whether it's loaded as a JS module, invoked as a subprocess, or exposed as an MCP server; the *plumbing* differs, the *contract* doesn't. This is the spec's load-bearing claim: it describes slot contracts substrate-neutrally, so the toolkit can ship parallel implementations of each slot — one per composition model — that prove the same conformance.
+
+At the algorithm level (dedup, slug generation, FTS query building, comms eligibility evaluation, image-fallback resolution, multi-source merge), code is shareable across composition models *in principle* — though in practice it's typically written twice, once per host language (Python for CLI, JS for browser), with the spec acting as the shared conformance target. A future spec version may add algorithm specifications precise enough that an automated conformance check can validate both implementations against the same definition.
+
+**v0.1 doesn't ship a composer or stock slot modules.** It ships the spec + one reference design (fellows_local_db). The composer + module library follow when the second reference design (PRM) forces the factoring. This is ship-and-iterate applied to the toolkit: build the monolith first, factor into modules when patterns emerge, ship the modules as a library, let the original app become one consumer of the library.
+
+---
+
+## Architectural commitments (derived from goals + flavor-axis picks)
+
+These are load-bearing rules the spec will enforce. They split into two tables:
+
+- **Universal ACs** derive from goals alone. They apply to every PNA regardless of flavor. The wording is substrate-neutral; specific *forms* (URL parameter vs CLI flag, OPFS vs native filesystem) are flavor-derived realizations of the universal contract.
+- **Flavor-derived ACs** are triggered by specific axis picks. They apply only when the flavor matches. Each is tagged with axis-pick triggers; multiple triggers mean *all must match* for the AC to fire (logical AND).
+
+Some original ACs were generalized during the partition pass. Where the original fellows-specific form was load-bearing (`?gate=1`, `OPFS SAH-pool`, etc.), the universal form names the contract and the flavor-derived form names the realization. References to the original AC numbers are preserved.
+
+### Universal ACs (apply to every PNA)
 
 | ID | Commitment | Serves |
 |---|---|---|
-| AC-1 | **Two-DB ownership split.** Shared data is read-only and externally managed; private data is read-write and locally owned. Two SQLite databases, separate concerns, separate privacy postures. | Goal 1 |
-| AC-2 | **No SaaS surface.** Server (when present) is a delivery channel, not a service. No per-user RW endpoints, no server-side persistence of private data, no admin console, no cross-device sync. | Goal 1 |
-| AC-3 | **Single OPFS owner.** All OPFS handles and SQLite-WASM instances live in one dedicated worker. The workspace is an RPC client. No parallel main-thread OPFS. | Goal 1, Goal 4 |
-| AC-4 | **Versioned page↔worker handshake, decoupled from build label.** RPC version + schema version checked at init; mutating ops refused on mismatch; reads still work. Build label is *not* the gate. | Goal 4 |
-| AC-5 | **Stale session never locks users out of cached data.** A 401/403 from any shared-side fetch falls through to the local cache. Fresh data requires explicit user action. | Goal 1, Goal 4 |
-| AC-6 | **Always-reachable forced-gate URL.** Some hardcoded URL parameter (the project's `?gate=1`) forces the distribution UI regardless of cookie / localStorage state, surviving stuck-state debugging. | Goal 5 |
-| AC-7 | **Self-service field-debug substrate.** Build badge, sanitized error sink, ?diag panel, bug-report dialog, force-gate escape hatch, boot watchdog with named phase marks, slow-boot persistence. | Goal 5 |
-| AC-8 | **Anti-enumeration on auth + abuse-bounded analytics.** Distribution-channel auth endpoints always return neutral payloads; per-IP rate limits; sanitized error sink doubles as analytics pipe (`kind=install`, `kind=worker`, …) with no widening of the privacy boundary. | Goal 1, Goal 5 |
-| AC-9 | **Auto-backup of private data on user-edit cadence.** Snapshot the Private DB on a per-boot debounced schedule (not per-deploy); rotate to keep a small ring of recoverable points. | Goal 4 |
-| AC-10 | **Re-imports of the Shared DB are opt-in and non-destructive.** Whether the Shared DB is being refreshed from the original source (a directory operator pushes an update) or re-mirrored from a centralized platform (the user re-exports their Google contacts), the workspace previews any private references that would be orphaned by the update before the user commits. | Goal 2, Goal 4 |
-| AC-11 | **Multi-tab is detected and surfaced cleanly.** OPFS SAH-pool serializes per file; a second concurrent opener fails. Implementations distinguish this case from generic "your browser doesn't support this" and show a specific "another tab/window holds the data layer" message. | runtime constraint |
-| AC-12 | **Capability detection inside the worker, UA-parsing for messaging only.** Browsers lie about main-thread OPFS support; the worker is the only context where the answer is reliable. UA strings inform error messages, never gating. | runtime constraint |
-| AC-13 | **COOP/COEP required.** OPFS-SAH-Pool needs `crossOriginIsolated`; both dev server and prod reverse proxy must send `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`. Without this, the storage substrate silently fails to install. | runtime constraint |
-| AC-14 | **Service worker never owns SQLite.** SW lifecycle (idle eviction, multi-instance, restart on push) is hostile to data ownership. SW is app-shell + update detection only. The Shared DB URL is explicitly bypassed in the SW fetch handler. | runtime constraint |
-| AC-15 | **Build label = `<date>-<short-sha>`, substituted at build *and* serve time.** Each served bundle carries a runtime-visible unique label tied to the source revision, with no manual chore-bump commits. Dev and dist agree byte-for-byte on the substituted files. | Goal 5 |
+| AC-1 | **Two-store ownership split.** Shared data is read-only and externally managed; private data is read-write and locally owned. Separate storage namespaces, separate privacy postures. (Storage substrate — what the stores are *made of* — is flavor-derived; fellows realizes this as two SQLite databases via OPFS; PRT realizes it as two SQLite files on the filesystem.) | Goal 1 |
+| AC-4 | **Versioned cross-boundary handshake.** Every PNA with a storage boundary (worker ↔ workspace in a browser bundle, CLI ↔ DB module in a TUI/CLI tool, native shell ↔ DB process) version-checks at init; mutating ops refused on mismatch; reads still work. Build label is *not* the gate. *Generalized from the original `[shell:web-spa] + [storage:opfs-sqlite-wasm]` form.* | Goal 4 |
+| AC-6 | **Always-reachable diagnostic escape.** A force-reset / force-unlock affordance is reachable regardless of stuck app state. Form depends on shell: URL parameter for web SPAs (`?gate=1`), CLI flag for terminal apps (`--reset`), key chord for native shells. *Generalized from the original fellows-specific `?gate=1` form.* | Goal 5 |
+| AC-7 | **Self-service field-debug substrate.** Build label, sanitized error capture, diagnostic state-dump, bug-report flow, escape hatch (AC-6), boot watchdog with named phase marks, slow-boot persistence. Specific affordances are shell-derived (badge in a web UI; `--diag` subcommand in a CLI; native diagnostic menu); the substrate is required everywhere. | Goal 5 |
+| AC-9 | **Auto-backup of private data on user-edit cadence.** Snapshot the Private store on a per-boot debounced schedule (not per-deploy); rotate to keep a small ring of recoverable points. | Goal 4 |
+| AC-10 | **Re-imports of the Shared store are opt-in and non-destructive.** Whether refreshed from the original source (a directory operator pushes an update) or re-mirrored from a centralized platform (the user re-exports their Google contacts), the workspace previews any private references that would be orphaned by the update before the user commits. | Goal 2, Goal 4 |
+| AC-11 | **Storage substrate detects concurrent access.** Multi-tab in browsers, multi-process in native — when something else holds the data layer, surface it cleanly with a specific message (not a generic "unsupported"). *Generalized from the original `[storage:opfs-sqlite-wasm]` multi-tab form.* | Goal 4 |
+| AC-15 | **Build label tied to source revision, substituted at build *and* serve time.** Each delivered artifact carries a runtime-visible unique label tied to the source revision. Format is implementation-specific (`<YYYY-MM-DD>-<short-sha>` in fellows; whatever `--version` reports in CLI tools). | Goal 5 |
 | AC-16 | **Communication-transport selection is user-driven.** The workspace surfaces multiple transports — including secure / decentralized options when configured — and the user chooses per outreach. No transport is hardcoded. | Goal 3 |
-| AC-17 | **Mirrored data is sourced.** Every record in the Shared DB traces to a specific external source the user has explicitly configured. The toolkit doesn't introduce contact data the user hasn't approved. | Goal 2 |
+| AC-17 | **Mirrored data is sourced.** Every record in the Shared store traces to a specific external source the user has explicitly configured. The toolkit doesn't introduce contact data the user hasn't approved. | Goal 2 |
 | AC-18 | **Transports cannot read message contents.** A transport's acceptability is about the transport mechanism itself, not the chain it kicks off. mailto: passes (hands off to whichever client the user has configured; the downstream provider's behavior — Gmail, Outlook — is outside the toolkit's enforcement). Signal-class protocols pass (encryption-in-protocol). Centralized message-broker SaaS that decodes payloads as part of operating (Slack, Discord) does not pass. Contact-graph retention by the transport is *not* part of the rule — too hard to enforce uniformly across protocols, and varies by user threat model. | Goal 3 |
-| AC-19 | **User-visible payload before send.** Any workspace-initiated communication shows the user the full payload — recipients, body, and any data merged in from the Shared or Private DB — before the transport is launched. The user can edit or cancel. This applies even to bulk operations (e.g., "email this group of 50"). Workspaces never auto-blast data through transports without the user seeing the composition. | Goal 3 |
+| AC-19 | **User-visible payload before send.** Any workspace-initiated communication shows the user the full payload — recipients, body, and any data merged in from the Shared or Private store — before the transport is launched. The user can edit or cancel. This applies even to bulk operations (e.g., "email this group of 50"). Workspaces never auto-blast data through transports without the user seeing the composition. | Goal 3 |
+| AC-PRM-A | **LLM calls over user data are transports.** Any LLM invocation over Private or Shared data is treated as a transport: local-model is default; cloud-model is opt-in per call; user sees the prompt and merged data before send (extension of AC-18 + AC-19 to a new transport class). Promoted from PRM-flavor to universal because any PNA may add LLM features. | Goal 3 |
+| AC-PRM-D | **Re-ingestion is always user-initiated.** No background polling of source services (Google Contacts, IMAP, organizational directories). Strengthening of AC-10: the user always knows when fresh data is being fetched. | Goal 1, Goal 4 |
+| AC-MCP-A | **Cloud AI clients require per-call consent for Private DB access via MCP.** Any MCP tool that returns Private DB rows must either refuse, or require explicit per-session opt-in, when the consuming MCP client is not locally hosted. Local clients (Claude Desktop with a local model, Cursor + local Ollama) are the default green path; cloud clients (Claude API direct, OpenAI API, etc.) are opt-in per call. Concrete realization of AC-PRM-A at the MCP surface. | Goal 1, Goal 3 |
+| AC-MCP-B | **MCP Communications tools stage outreach; the workspace launches.** A Communications MCP tool call must not directly fire a transport. It returns a staging ID with the full payload preview; the user confirms via the workspace before the transport launches. The MCP server proposes; the workspace disposes. AC-19 (user-visible payload before send) is enforced at the workspace boundary and cannot be bypassed by AI clients. | Goal 3 |
+
+### Flavor-derived ACs (triggered by axis picks)
+
+| ID | Commitment | Triggered by |
+|---|---|---|
+| AC-2 | **No SaaS surface.** Server (when present) is a delivery channel, not a service. No per-user RW endpoints, no server-side persistence of private data, no admin console, no cross-device sync. | `[dist:server-backed]` |
+| AC-3 | **Single OPFS owner.** All OPFS handles and SQLite-WASM instances live in one dedicated worker. The workspace is an RPC client. No parallel main-thread OPFS. *Form-of-AC-1 + form-of-AC-11 for this substrate.* | `[storage:opfs-sqlite-wasm]` |
+| AC-5 | **Stale session never locks users out of cached data.** A 401/403 from any shared-side fetch falls through to the local cache. Fresh data requires explicit user action. | `[dist:auth-gated]` |
+| AC-8 | **Anti-enumeration on auth + abuse-bounded analytics.** Distribution-channel auth endpoints always return neutral payloads; per-IP rate limits; sanitized error sink doubles as analytics pipe (`kind=install`, `kind=worker`, …) with no widening of the privacy boundary. | `[dist:auth-server]` + `[debug:has-error-sink]` |
+| AC-12 | **Capability detection inside the worker, UA-parsing for messaging only.** Browsers lie about main-thread OPFS support; the worker is the only context where the answer is reliable. UA strings inform error messages, never gating. | `[storage:opfs-sqlite-wasm]` |
+| AC-13 | **COOP/COEP required.** OPFS-SAH-Pool needs `crossOriginIsolated`; both dev server and prod reverse proxy must send `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`. Without this, the storage substrate silently fails to install. | `[storage:opfs-sqlite-wasm]` + `[dist:web-served]` |
+| AC-14 | **Service worker never owns SQLite.** SW lifecycle (idle eviction, multi-instance, restart on push) is hostile to data ownership. SW is app-shell + update detection only. The Shared store URL is explicitly bypassed in the SW fetch handler. | `[dist:pwa]` |
+| AC-PRM-B | **Multi-source dedup contract.** Stable `record_id` survives merge across sources; dedup wizard surfaces conflicts; per-source provenance is recorded *per field*, not just per record. Lifts the deferred "multi-source dedup contract" from Scope into v0.1 for PRM-flavor PNAs. **[draft — no reference design yet]** | `[ingestion:multi-source-merge-with-dedup]` |
+| AC-PRM-C | **Single-instance file-lock.** Native SQLite demands one writer; second process refuses cleanly with a specific message naming the holding process. *Form-of-AC-11 for this substrate.* **[draft — no reference design yet]** | `[storage:native-sqlite-via-filesystem]` |
 
 ---
 
@@ -158,14 +280,18 @@ When any of these become near-term, they get a v0.2+ spec bump and the relevant 
 
 | Tag | Meaning | Destination |
 |---|---|---|
-| `pna-cat` | Category-level (no single slot) — invariants AC-1 through AC-17 | PNA_Spec.md, top-level |
-| `pna-shared` / `pna-private` / `pna-debug` | Generic, lives under that interface | PNA_Spec.md, interface section |
-| `pna-ingest` / `pna-storage` / `pna-workspace` / `pna-comms` / `pna-dist` | Generic, lives under that component | PNA_Spec.md, component section |
-| `fellows-{slot}` | fellows_local_db's choice for that slot | Architecture.md, slot section |
-| `fellows-cat` | Specialization-only invariant or operator concern | Architecture.md |
+| `pna-cat` | Category-level (no single slot) — universal invariants | `pna_toolkit/PNA_Spec.md`, top-level |
+| `pna-shared` / `pna-private` / `pna-debug` | Generic, lives under that interface | `pna_toolkit/PNA_Spec.md`, interface section |
+| `pna-ingest` / `pna-storage` / `pna-workspace` / `pna-comms` / `pna-dist` | Generic, lives under that component | `pna_toolkit/PNA_Spec.md`, component section |
+| `axis:<axis-pick>` | Flavor-derived; lives in axes.md under the relevant axis-pick (e.g., `axis:storage:opfs-sqlite-wasm`) | `pna_toolkit/axes.md`, axis-pick section |
+| `use-case:<name>` | Lives in use_cases.md under the named use case | `pna_toolkit/use_cases.md` |
+| `fellows-{slot}` | fellows_local_db's choice for that slot | `docs/Architecture.md`, slot section |
+| `fellows-cat` | Specialization-only invariant or operator concern | `docs/Architecture.md` |
 | `STALE` | Wrong / outdated; fix in place before either spec inherits | Source doc |
-| `MISSING` | Not in any doc; needs to be added | PNA_Spec.md or Architecture.md |
+| `MISSING` | Not in any doc; needs to be added | `pna_toolkit/PNA_Spec.md` or `docs/Architecture.md` |
 | `DROP` | Tribal knowledge; doesn't earn a spec line | — |
+
+**Note on `pna-cat` ↔ axis tags:** Source-map rows previously tagged `pna-cat` that referenced AC-2 through AC-14's *original* forms have been left as `pna-cat` for now; the AC table partition above is the authoritative source for whether the AC is universal or flavor-derived. Part 2's source map will get a `Destination` column refinement pass after the AC partition has settled.
 
 ---
 
@@ -175,7 +301,7 @@ What `PNA_Spec.md` will declare for each interface / component, drawn from the t
 
 ## Category-level invariants (`pna-cat`)
 
-The 17 commitments above. PNA_Spec.md leads with these. Each gets one paragraph; the goals section sits above.
+The universal ACs from the partition above (AC-1, AC-4, AC-6, AC-7, AC-9, AC-10, AC-11, AC-15, AC-16, AC-17, AC-18, AC-19, AC-PRM-A, AC-PRM-D — 14 in v0.1). `PNA_Spec.md` leads with these; each gets one paragraph. The flavor-derived ACs are not category-level — they live in `axes.md` under the axis-pick that triggers them. The goals section sits above the universal ACs.
 
 ## Shared schema (`pna-shared`)
 
@@ -770,13 +896,22 @@ These cross-slot threads are what make the spec describe a *system* rather than 
 
 ## Next steps (proposed, in dependency order)
 
-1. **Stub the spec scaffolding** per `_pna_spec_format_landscape.md`'s recommendation:
-   - Empty `docs/PNA_Spec.md` with version header (`Spec-Version: 0.1`) and section skeleton
-   - Empty `docs/spec/contracts/` directory with placeholder files for each typed contract
-   - `llms.txt` at repo root pointing at the above
-   - Initial `CHANGELOG.md` with the v0.1 entry
-2. **Draft `docs/PNA_Spec.md`** from Part 1 (high-level synthesis) and Part 4 (sub-contract decomposition). Self-contained; no fellows references except as cross-links.
-3. **Fill `docs/spec/contracts/`** with the typed contracts as the spec drafts cite them.
-4. **Rewrite `docs/Architecture.md`** to be the specialization layer: declares spec version targeted, slot-fill choices, load-bearing adjectives, specialization-only invariants. Cross-links to `PNA_Spec.md` for everything generic.
-5. **Demote `docs/email_gate.md`, `docs/persistence_and_upgrades.md`, `docs/browser_support.md`, `docs/data_provenance.md`** to Architecture.md annexes.
-6. **Delete this file and `_pna_spec_format_landscape.md`** once steps 2–5 are committed.
+The partition pass (this reorg) is now done. Working from the destination-tagged content above.
+
+1. **Stub `docs/pna_toolkit/`** with skeleton files:
+   - `PNA_Spec.md` with version header (`Spec-Version: 0.1`) and section skeleton (Vocabulary, Goals, Use cases, Flavor axes, Composition, Universal ACs, Slot map, Scope/versioning)
+   - `axes.md` with one H2 per axis (Composition model, Distribution, Storage substrate, Ingestion shape, Workspace shell, Comms transport set, Use case)
+   - `use_cases.md` with one H2 per attested use case
+   - `spec/contracts/` directory with placeholder files for each typed contract (worker-init-handshake.schema.json, worker-rpc-protocol.schema.json, distribution-auth.openapi.yaml, client-errors-payload.schema.json, transport-interface.d.ts, shared-db.schema.sql, private-db.schema.sql, plus MCP server tool surfaces: mcp-data-ops.schema.json, mcp-ingestion.schema.json, mcp-comms.schema.json, mcp-diagnostics.schema.json)
+   - `CHANGELOG.md` with the v0.1 entry
+   - `llms.txt` (for the spec itself; will lift with the toolkit)
+2. **Draft `docs/pna_toolkit/PNA_Spec.md`** from this triage's universal content (Goals + Vocabulary + Use cases + Flavor axes overview + Composition section + Universal ACs + Slot map + Scope/versioning). Self-contained; no fellows references except as cross-links to the reference design.
+3. **Draft `docs/pna_toolkit/axes.md`** from the Flavor axes section + flavor-derived ACs grouped by axis-pick trigger. Each axis-pick lists which ACs it triggers and which other axis-picks it commonly correlates with.
+4. **Draft `docs/pna_toolkit/use_cases.md`** from the Use cases section. Directory Archive entry links to fellows's Architecture.md as the reference design; PRM entry remains `[draft]` until a reference design is built.
+5. **Fill `docs/pna_toolkit/spec/contracts/`** with the typed contracts as the spec drafts cite them.
+6. **Rewrite `docs/Architecture.md`** as fellows's specialization-and-conformance layer. New top section: "Spec conformance" declaring spec version + the seven axis picks + which flavor-derived ACs apply. Cross-links to `pna_toolkit/` for everything generic. Specialization-only invariants (fellows-specific operator concerns, fellows-specific HTTP routes, etc.) stay here.
+7. **Add `llms.txt` at repo root** for fellows (distinct from the one inside `pna_toolkit/`). Points at fellows's `docs/Architecture.md` and, during the transition, the `pna_toolkit/` subdir.
+8. **Demote** `docs/email_gate.md`, `docs/persistence_and_upgrades.md`, `docs/browser_support.md`, `docs/data_provenance.md` to Architecture.md annexes (unchanged from prior plan).
+9. **When the personal_network_toolkit repo is created**: `git mv docs/pna_toolkit/` over to its destination; update fellows's `Architecture.md` cross-links from local paths to toolkit-repo URLs; delete the now-empty `docs/pna_toolkit/` here. fellows's repo retains only fellows-specific content (Architecture.md + annexes + repo-root llms.txt).
+10. **PRM reference design** (separate repo, separate effort): builds against the spec; its `docs/Architecture.md` declares PRM-flavor axis picks; PRM-flavor ACs (AC-PRM-B, AC-PRM-C) lose their `[draft]` tags once realized. At that point, `pna_toolkit/use_cases.md` gets a link to the PRM reference design.
+11. **Delete `_pna_triage.md` and `_pna_spec_format_landscape.md`** once steps 2-8 are committed.
