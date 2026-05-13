@@ -236,12 +236,45 @@ AC IDs are sparse on purpose. Gaps in the numbering below (no AC-2, AC-3, AC-5, 
 
 ## Slot map
 
-<!-- TODO (step 2): migrate from _pna_triage.md § Slot map. -->
+The spec defines **five slots** (positions filled by code) and **three interfaces** (cross-cutting contracts spanning multiple slots). The Slot and Interface vocab terms are defined in [§ Vocabulary](#vocabulary).
+
+### Slots
+
+| Slot | Purpose |
+|---|---|
+| **Ingestion** | Produces a Shared DB conforming to the Shared schema, from one or many external sources. |
+| **Storage** | Owns both DB files (Shared + Private) and serves queries. Implements AC-1's two-store ownership split and AC-4's cross-boundary version handshake. |
+| **Workspace** | The user-facing surface — UI, routing, rendering shared + private data, launching communications. Enforces AC-19's user-visible payload before send. |
+| **Communications** | Pluggable transport layer for outreach. Honors AC-16's user-driven selection and AC-18's transport eligibility rule. |
+| **Distribution** *(optional)* | Delivers the PNA to other users' devices. When the PNA isn't distributed (single-user CLI / native), this slot is empty. |
+
+### Interfaces
+
+| Interface | Purpose |
+|---|---|
+| **Shared schema** | Data contract for the Shared DB — tables, columns, optional FTS structure, optional per-record asset URL conventions. Produced by Ingestion; consumed by Storage and Workspace. |
+| **Private schema** | Data contract for the Private DB — `groups`, `group_members`, `record_tags`, `record_notes`, `settings`, opt-in `record_comms_history`. Owned by Storage; accessed by Workspace through Storage. Durability rules (survives app update + Clear App Cache; wiped only by Reset Everything) are part of the contract. |
+| **Debug contract** | Capabilities every slot must implement: build label substitution at build *and* serve time (AC-15), sanitized error capture (with sink endpoint when configured), diagnostic state-dump, bug-report flow, always-reachable escape hatch (AC-6), boot watchdog with named phase marks. |
+
+Each slot has a code-level contract. The typed contracts — JSON Schema for RPC + handshake, OpenAPI fragments for distribution, SQL DDL for schemas, TypeScript declaration for the Communications transport interface, JSON Schema for each canonical MCP server's tool surface — live in [`spec/contracts/`](spec/contracts/).
+
+Many Universal ACs (see [§ Universal architectural commitments](#universal-architectural-commitments)) cite specific slots in their wording. The slot map is the architectural skeleton; the ACs are the load-bearing constraints over it.
 
 ---
 
 ## Scope and versioning
 
-<!-- TODO (step 2): migrate from _pna_triage.md § Scope and versioning. -->
+This spec is intentionally narrow. It addresses the user demand and runtime realities we can implement and deploy now. New demand develops further versions of the spec; reference designs continue to satisfy whatever spec version they were built against.
 
-See [`CHANGELOG.md`](CHANGELOG.md) for the version history.
+**This is PNA Spec v0.1** (placeholder until real numbering lands). When new demand surfaces or runtime constraints shift, we bump the version, declare what changed in [`CHANGELOG.md`](CHANGELOG.md), and update the architectural commitments accordingly.
+
+Items deliberately deferred to future spec versions:
+
+- **Privacy reclassification migration mechanics.** The Preamble commits PNAs to honoring user-driven privacy reclassification of a record (shared → private). The *implementation pattern* — does the record stay in the Shared DB with a private-side override row that supersedes? Get copied into the Private DB and removed from the Shared DB on next re-mirror? — is not pinned in v0.1. The contract is declared; the migration is left for a future version when the first reference design needs it.
+- **Multi-source dedup implementation.** AC-PRM-B (catalogued in [`axes.md`](axes.md) as a draft flavor-derived AC) captures the v0.1 commitment for `ingestion:multi-source-merge-with-dedup` flavors — stable `record_id` survives merge, dedup wizard surfaces conflicts, per-field provenance. The concrete implementation (merge UI, conflict-resolution algorithms) awaits the first multi-source reference design.
+- **Per-database (or finer) transport requirements.** A future spec version may let each database — Shared, Private, or any custom database in a richer PNA — declare which transport properties it requires for outbound flow. v0.1 handles the data-transport matching implicitly: AC-18 filters out transports that read content; AC-19 ensures the user sees the full payload before launch; the user resolves the matching in the moment. Explicit per-DB rules (workspaces auto-suggesting or auto-filtering transports based on source DB sensitivity) land when a reference design has an auto-send feature that needs them.
+- **Cross-device sync.** Out of scope for v0.1. Future versions may declare a sync protocol; v0.1 explicitly does not.
+- **Federated P2P capabilities.** Signed-repo asset pulls (a community member's photos), community-stats aggregation tools (the CRT vision). Out of scope for v0.1.
+- **Formally verifiable code.** A longer-arc goal. v0.1 aims for AI-checkable contracts (markdown prose + JSON Schema / OpenAPI / SQL DDL / TypeScript declarations); formal verification (TLA+ / Alloy / etc.) is reserved for a later version.
+
+When any of these become near-term, they get a v0.2+ spec bump and the relevant architectural commitments are revised.
