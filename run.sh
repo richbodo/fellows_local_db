@@ -12,6 +12,15 @@ cd "$(dirname "$0")"
 PIDFILE=".server.pid"
 PORT=8765
 DB="app/fellows.db"
+# Prefer the venv's Python when `just setup` has been run. Bare `python3`
+# (system) won't see dev-only deps like `cryptography` (needed for SW
+# bundle-signing in dev — added in PR #146). Falls back to system
+# `python3` when the venv isn't materialised yet (fresh clone).
+if [ -x ".venv/bin/python" ]; then
+  PY=".venv/bin/python"
+else
+  PY="python3"
+fi
 
 server_pid() {
   # Return PID if server is running on our port, empty otherwise
@@ -52,9 +61,9 @@ do_start() {
   fi
   if [ ! -f "$DB" ]; then
     echo "Database not found. Building from JSON..."
-    python3 build/restore_from_knack_scrapefile.py
+    "$PY" build/restore_from_knack_scrapefile.py
   fi
-  python3 app/server.py &
+  "$PY" app/server.py &
   echo $! > "$PIDFILE"
   echo "Server started (PID $!) at http://localhost:$PORT/"
   sleep 1
@@ -73,7 +82,7 @@ do_status() {
 do_reset() {
   echo "Rebuilding database..."
   do_stop
-  python3 build/restore_from_knack_scrapefile.py
+  "$PY" build/restore_from_knack_scrapefile.py
   do_start
 }
 
