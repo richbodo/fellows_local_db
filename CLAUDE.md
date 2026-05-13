@@ -6,7 +6,7 @@ Read README.md for project setup, API docs, and test commands. Read docs/Archite
 
 - **No frameworks.** Python stdlib only (http.server, sqlite3, json, pathlib). No Flask, Django, Express, etc.
 - **No frontend build tools.** Vanilla JS, no npm, no bundlers, no transpilers.
-- **No new pip dependencies** for the app. Dev deps go in requirements-dev.txt.
+- **No new pip dependencies** for the app. Dev deps go in requirements-dev.txt. The `mcp_servers/` directory is the only exception — its servers may pull in non-stdlib runtime deps (the official `mcp` SDK), isolated in `mcp_servers/.venv` so the app's stdlib-only boundary stays clean. `mcp_servers/` imports from `app/` only via pure-logic helpers (e.g. `app/fellows_queries.py`).
 - **No authentication.** Local-only tool.
 - **Port 8765.** Do not change.
 

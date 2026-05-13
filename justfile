@@ -253,6 +253,39 @@ test-mobile-promote:
     @echo "Baselines updated. Review the diff in git, then commit."
 
 
+# ---- MCP servers ---------------------------------------------------------
+
+mcp_venv   := "mcp_servers/.venv"
+mcp_python := mcp_venv / "bin/python"
+mcp_pytest := mcp_venv / "bin/pytest"
+
+# Create mcp_servers/.venv and install the mcp SDK (separate from the
+# project venv to keep app/'s strict no-deps boundary clean).
+[group('mcp')]
+mcp-install-deps:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -d {{mcp_venv}} ]; then
+        python3 -m venv {{mcp_venv}}
+    fi
+    {{mcp_venv}}/bin/pip install --upgrade pip
+    {{mcp_venv}}/bin/pip install -r mcp_servers/requirements.txt
+    echo "MCP venv ready at {{mcp_venv}}. See mcp_servers/README.md for Claude Desktop config."
+
+# Run the Shared Data Ops MCP server over stdio against app/fellows.db.
+# By itself this just blocks waiting for JSON-RPC frames on stdin — useful
+# for piping into a test harness, not for interactive use. For real use,
+# register it with Claude Desktop (see mcp_servers/README.md).
+[group('mcp')]
+shared-data-ops:
+    {{mcp_python}} mcp_servers/shared_data_ops.py --db {{db}}
+
+# Run the Shared Data Ops MCP server's unit tests via mcp_servers/.venv.
+[group('mcp')]
+test-shared-data-ops:
+    {{mcp_pytest}} tests/test_shared_data_ops.py -v
+
+
 # ---- build / deploy ------------------------------------------------------
 
 # Assemble deploy/dist/ (runs build/build_pwa.py).
