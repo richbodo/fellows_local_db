@@ -57,7 +57,51 @@ The spec uses a small, deliberate set of terms. Worked examples below cite `fell
 
 ## Goals
 
-<!-- TODO (step 2): migrate Preamble + Goals 1-5 from _pna_triage.md § Goals. -->
+### Preamble
+
+We are at an inflection point. Two shifts are arriving at the same time. Personal data is withdrawing from centralized systems: users are increasingly unwilling to trust Facebook with who they talk to about politics or mental health. At the same time, edge compute and AI agents capable of running serious work locally are arriving fast. The first shift creates demand for tools that keep user data sovereign; the second makes such tools practical to build, run, and recompose at the user's own pace.
+
+A personal network application is a tool for users to manage and use contact and relationship data that makes up their personal networks. A PNA handles a user's contact data and personal-relationship data with strong, declared contracts about how that data is treated. The PNA separates the concerns of editing data shared with other systems from data created and held locally as private.
+
+v0.1 PNAs all operate downstream of SaaS systems of record — they do not modify contact data, although a contact manager might well exist as a plugin to a PNA, or vice-versa. What distinguishes the niche is the architectural promise: shared data is local-first and replaceable; private data is sovereign and protected; the user can reclassify a record's privacy at any time, and the PNA honors it durably; communication transports are user-chosen to meet the user's privacy and other requirements; the user can reason about where their data lives without trusting a vendor.
+
+Specs are foundational because users will increasingly compose software by prompting AI agents. The Personal Network Toolkit project is an attempt to offer the foundational specs for PNAs, production-ready reference applications, and MCP servers (the composability layer of Software 3.0), to ensure that both the humans and the AIs in modern human-AI builder teams can build PNAs that they understand fully and behave as expected. The Personal Network Toolkit augments the human-AI builder teams; it doesn't automatically build applications itself.
+
+So we expect most PNAs to be built and rebuilt by AIs — adapting a thematic reference design like fellows_local_db, or building fresh against this spec. When an AI is asked to build a PNA, it is required to follow the contracts of the PNA on the user's behalf, and those contracts are written so the AI can pick them up and check its own work. The user's confidence comes from the spec being clear enough that both they and the AI can read it; as long as the contracts hold, an AI can rewrite a PNA from scratch while the user is still talking to it without changing the user's sovereignty, durability, or privacy posture. The goals below are user-facing needs; the architectural commitments after them are the choices that make those needs achievable.
+
+The longer-arc target is an ecosystem of cooperating PNAs on a single user's device — a Personal Relationship Manager (where private relationship data lives) running alongside one or more Directory Archives, a Contact Manager, and a Calendar app, each in its own bundle. The PRM acts as the meta-workspace: relationship data layered on top of a deduplicated read-only meta-view composed from the other apps' shared stores (Bob's cell from Google + work history from a fellowship directory + email from a Facebook export, resolved into one coherent contact view; the PRM's private overlay attached through stable IDs). The user can also work in clean per-app workspaces when they want a single context. Composing the meta-view requires per-source connectors, dedup with conflict resolution, and disciplined provenance — work for later spec versions. The eventual *ecosystem reference design* is the goal; v0.1 ships one PNA (fellows_local_db) and the spec it conforms to, with the architectural seams sized to let the ecosystem grow into place.
+
+PNAs that participate in such an ecosystem need to be reachable not just to humans but to AI agents acting on the user's behalf. The spec therefore defines MCP server interfaces at four canonical connection points: a **Data operations server** (the Storage slot's read/write surface), an **Ingestion server** (drive imports, dedup, orphan preview), a **Communications server** (with workspace-mediated user consent per AC-19), and a **Diagnostics server** (read-only access to the Debug contract). An AI client (Claude Desktop, Cursor, a local-Ollama-backed agent, or any MCP-capable runtime) can drive a PNA through these servers without modifying its core; canonical implementations will ship with the personal_network_toolkit. Cloud AI clients (anything that sends Private DB rows off-device) require explicit per-call consent — see AC-MCP-A in [§ Universal architectural commitments](#universal-architectural-commitments).
+
+### Goal 1 — Private data sovereignty
+
+The PNA stores two databases: a Shared DB (data the user is OK with external systems mirroring) and a Private DB (data that must stay only on the user's device). The Private DB is protected forever — it never leaves the device, never lands on any server, and is durable across app updates and routine cache clears. The Shared DB doesn't need that lifetime protection. Further decomposition and isolation of data according to privacy constraints is reasonable but unnecessary for the first PNAs envisioned.
+
+> **Why it matters:** Private data — who you confide in, your private notes on people, your communication history — is what most exposes you to surveillance, social-graph mining, and platform abuse. Keeping it on the user's device is the only durable defense. The architectural job of the PNA is to keep the line between shared and private data unmistakably bright.
+
+### Goal 2 — Mirror centralized data sources locally
+
+v0.1 PNAs all operate downstream of SaaS systems of record. This goal exists due to the transitional period we are in — where it is not possible to take back data from centralized SaaS over time, but necessary to continue to interact with those platforms for some time. Users keep contacts in centralized platforms — Google, Apple, Facebook, work directories, organizational directories. A PNA mirrors those locally, producing a Shared DB the workspace can browse offline. Mirroring runs from exports today and may grow to richer pipelines (federated reads, multi-source dedup wizards) as the toolkit matures.
+
+> **Why it matters:** We're in a transitional period. Users won't migrate cold. The bridge from "my contacts are scattered across Google + Apple + Facebook + my fellowship's directory" to "my contacts are local-first" runs through ingesting their existing data, not asking them to maintain a parallel master list. The toolkit makes that ingestion a swappable component so a PNA can mirror one source or many.
+
+### Goal 3 — Secure communication options from inside workspaces
+
+When the user wants to reach out to a contact, the workspace offers a choice of transports — including more secure / decentralized options like Signal, not just `mailto:` and `tel:`.
+
+> **Why it matters:** A user who demands sovereignty of their local data has the same high bar for the private transfer of that data. Defaulting every outreach to email — routed through whoever runs their mail server — is inconsistent with Goal 1. The architectural commitment is that transports are pluggable and the user picks per outreach.
+
+### Goal 4 — Portable, durable, recoverable user data
+
+Private data travels with the user across devices, browsers, and PNA versions. Auto-backup, restore-from-file, and explicit opt-in update flows ensure no silent data loss.
+
+> **Why it matters:** Local-first only delivers on Goal 1 if "local" doesn't mean "trapped on this exact installation forever." Users replace devices, switch browsers, reinstall PNAs. The Private DB has to be exportable, importable, and resilient against accidental wipes — otherwise sovereignty becomes fragility.
+
+### Goal 5 — Locally diagnosable
+
+When something goes wrong, the issue can be diagnosed without compromising Goal 1. Sanitized error capture, runtime build labels, in-app diagnostic panels, user-controlled bug-report flows — all sized to a privacy posture consistent with the rest of the app. In single-user instances with no remote maintainer, the diagnostics primarily serve the user themselves. It goes without saying that source code must be available to the user to modify as they please for the diagnostics to be useful.
+
+> **Why it matters:** A privacy-sovereign user's threshold for what diagnostic data flows anywhere is the same as for the rest of their data. The diagnostic surface is part of the privacy surface, not an exception to it. Many eventual PNAs will be single-user installations with no maintainer at all; the debug substrate has to work in that mode without sending anything anywhere by default. When a sink *is* configured (fellows_local_db sends to a maintainer mailbox), it has to be sanitized and rate-limited so the user trusts using it.
 
 ---
 
