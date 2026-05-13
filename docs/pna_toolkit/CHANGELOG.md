@@ -11,7 +11,7 @@ Initial release of the PNA Spec. Establishes:
 - Two target environments for a single PNA (Browser PNAs and CLI / native PNAs) plus one runtime cooperation pattern across PNAs (the ecosystem reference design, mediated by canonical MCP servers).
 - Universal ACs: AC-1, AC-4, AC-6, AC-7, AC-9, AC-10, AC-11, AC-15, AC-16, AC-17, AC-18, AC-19, AC-PRM-A, AC-PRM-D, AC-MCP-A, AC-MCP-B (16 in v0.1).
 - Flavor-derived ACs: AC-2, AC-3, AC-5, AC-8, AC-12, AC-13, AC-14 from the original set; AC-PRM-B and AC-PRM-C as [draft] PRM-flavor commitments.
-- Slot map: three interfaces (Shared schema, Private schema, Debug contract) + five components (Ingestion, Storage, Workspace, Communications, Distribution).
+- Slot map: five slots (Ingestion, Storage, Workspace, Communications, Distribution) + three interfaces (Shared schema, Private schema, Debug contract).
 - Four canonical MCP server contracts: Data operations, Ingestion, Communications, Diagnostics.
 
 Working draft is in `docs/_pna_triage.md`. Substantive content migrates into this directory across the steps listed in that doc's Next Steps section, after which the triage doc is retired.

@@ -17,9 +17,19 @@ The spec uses a small, deliberate set of terms. Worked examples below cite `fell
 
   fellows_local_db is one PNA reference design — making a directory archive useful and fast. Another PNA reference design would be an app that aggregates personal contact data ingested from the big SaaS providers and lets the user operate privately on that data, adding privacy-sensitive notes, searching, and launching tasks from the app. PNAs bridge the old world of SaaS and offer private, custom tools to operate on contact data.
 
-- **Slot.** An interchangeable position in a PNA's architecture. The spec defines a contract for each slot; any code that satisfies the contract can fill that slot. v0.1 names five **component slots** (Ingestion, Storage, Workspace, Communications, Distribution) plus three cross-cutting **interfaces** (Shared schema, Private schema, Debug contract). The full catalog and contracts are in [§ Slot map](#slot-map).
+- **Slot.** A slot is a part of a PNA — a code module that handles a specific job within the system. v0.1 names five slots:
 
-- **Workspace.** One of the component slots in a PNA: the viewer + editor. The thing the user looks at and clicks. fellows_local_db's workspace is a vanilla-JS SPA in the browser; another PNA's might be a native shell, a Tauri app, a TUI, or a separately-distributed mini-app sharing the same data layer.
+  - **Ingestion** — loads contact data into the Shared DB
+  - **Storage** — owns the data files and serves queries
+  - **Workspace** — runs the UI
+  - **Communications** — launches outreach
+  - **Distribution** — ships the PNA to other users
+
+  Each slot has a contract; any code that satisfies the contract can fill it — a JavaScript module, a Python package, or an OS process, depending on the target environment. The full catalog and contracts are in [§ Slot map](#slot-map).
+
+- **Interface.** A contract that spans multiple slots. Where a slot is filled by *one* code module, an interface is a shared constraint — either a data shape that multiple slots produce and consume (the Shared and Private DB schemas), or a capability requirement every slot must implement (the Debug contract). v0.1 names three interfaces: **Shared schema**, **Private schema**, **Debug contract**. Catalogued in [§ Slot map](#slot-map) alongside the slots they bind.
+
+- **Workspace.** One of the slots in a PNA: the viewer + editor. The thing the user looks at and clicks. fellows_local_db's workspace is a vanilla-JS SPA in the browser; another PNA's might be a native shell, a Tauri app, a TUI, or a separately-distributed mini-app sharing the same data layer.
 
 - **Shared data.** In the context of a PNA, shared data is data that exists in more than one place — typically, a copy held by an external system the user uses (Google Contacts, Apple Contacts, Facebook friends, a fellowship's directory, a school's roster). The user is OK with that external system continuing to hold it, and often has no say in the matter. *Examples:* name, email, photo, organizational membership. The PNA mirrors this data locally so the user can browse and search it without depending on the external system being reachable.
 
