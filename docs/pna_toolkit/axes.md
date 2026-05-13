@@ -3,17 +3,11 @@
 > **Spec-Version:** 0.1 (draft)
 > **Status:** Skeleton — substantive content to be migrated from `../_pna_triage.md` § Axes + § Architectural commitments § Flavor-derived ACs.
 
-This document catalogs the seven Axes a PNA picks along, the attested picks on each Axis, and the flavor-derived ACs each pick triggers.
+This document catalogs the six Axes a PNA picks along, the attested picks on each Axis, and the flavor-derived ACs each pick triggers.
 
 The Axis concept is defined in [`PNA_Spec.md` § Vocabulary](PNA_Spec.md#vocabulary). The Axes section in `PNA_Spec.md` summarizes; this file is the authoritative catalog.
 
 For each Axis below: a one-paragraph description, the attested picks (each with a short note on what it implies + which flavor-derived ACs it triggers + which other axis-picks it commonly correlates with), and any deferred picks queued for future spec versions.
-
----
-
-## Composition model
-
-<!-- TODO (step 3): attested picks — build-time-bundle, runtime-shell-pipeline, runtime-MCP-RPC. Composition section in PNA_Spec.md is the prose framing; this is the axis-pick catalog. -->
 
 ---
 

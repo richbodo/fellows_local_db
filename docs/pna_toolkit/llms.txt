@@ -1,11 +1,11 @@
 # PNA Spec
 
-> Universal specification for personal network applications (PNAs). Defines vocabulary, goals, use cases, axes, composition models, architectural commitments, and slot contracts. Targeted at AI agents and humans building PNAs together. Currently lives inside the `fellows_local_db` repo as a working draft; will move to the `personal_network_toolkit` repo when that exists.
+> Universal specification for personal network applications (PNAs). Defines vocabulary, goals, use cases, axes, composition (how PNAs get built), architectural commitments, and slot contracts. Targeted at AI agents and humans building PNAs together. Currently lives inside the `fellows_local_db` repo as a working draft; will move to the `personal_network_toolkit` repo when that exists.
 
 ## Spec
 
 - [PNA Spec](PNA_Spec.md) — universal spec; Spec-Version 0.1 (draft)
-- [Axes](axes.md) — the seven Axes a PNA varies along, attested picks per Axis, and the flavor-derived ACs each pick triggers
+- [Axes](axes.md) — the six Axes a PNA varies along, attested picks per Axis, and the flavor-derived ACs each pick triggers
 - [Use cases](use_cases.md) — attested classes of PNA (Directory Archive, Personal Relationship Manager [draft], Multi-PNA ecosystem [target v0.2+])
 - [CHANGELOG](CHANGELOG.md) — spec version history
 
