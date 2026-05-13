@@ -1,8 +1,37 @@
 # Lock My User Data — opt-in encryption-at-rest for `relationships.db`
 
-**Status:** plan, not yet implemented. Tier 2 #3 of the security review
-(`security_review/2026-05-08_local_vs_saas_risk.md`), following SRI (PR
-#143) and signed bundles (PR #146).
+**Status:** in flight on branch `feat/lock-my-data`, PR
+[#155](https://github.com/richbodo/fellows_local_db/pull/155). Tier 2
+#3 of the security review
+(`security_review/2026-05-08_local_vs_saas_risk.md`), following SRI
+(PR #143) and signed bundles (PR #146).
+
+## Implementation status
+
+| Phase | Status | Notes / commits on `feat/lock-my-data` |
+|---|---|---|
+| 1 — Crypto primitives + envelope | ✅ shipped | `d0e11d3` — `lockBlobWithPassphrase` / `unlockBlobWithPassphrase` + `__lockSelfTest` RPC + `tests/e2e/test_lock_crypto.py` |
+| 2 — Worker orchestration RPCs | ✅ shipped | `503e976` — `getLockState`, `enableLock`, `unlock`, `lock`, `changePassphrase`, `disableLock`; `WORKER_RPC_VERSION` and `EXPECTED_WORKER_RPC_VERSION` bumped 2→3 in lockstep; `tests/e2e/test_lock_rpcs.py` |
+| 3 — Backup encryption + rotation | ✅ shipped | `2568880` — `maybeBackupRelationshipsDb` lock-aware; `unlock` triggers a post-cache backup pass; `listRelationshipsBackups`/`restoreRelationshipsBackup` handle `.locked` entries; rotation is newest-5-of-any-kind; `tests/e2e/test_lock_backups.py` |
+| 4 — Settings UI + topbar chips | 🟡 next | See § Phase 4 pickup details |
+| 5 — Locked-boot UX | ⏳ | See § Locked-boot UX |
+| 6 — Diagnostics + docs | ⏳ | `users_manual.md`, `persistence_and_upgrades.md`, `Architecture.md`, `SECURITY.md` |
+| 7 — Full e2e cycle tests | ⏳ | Combined enable→reload→unlock→edit→lock→disable cycle; cross-browser smoke |
+
+**Full regression after each shipped phase:** 452 passed, 12 skipped, 0
+failures.
+
+**Where the worker-side contract is** (what Phase 4 consumes):
+- Worker RPCs reachable from page via
+  `window.__dataProvider._rpc.call(opName, args)`. Direct route used by
+  the e2e tests; Phase 4 will wrap the lock-specific ops in
+  `createWorkerDataProvider` to match the existing wrapper shape.
+- `init` handshake now returns `lockEnabled` and `lockLocked` booleans.
+  Phase 4/5 read these to choose the boot route (directory vs. unlock
+  card).
+- Structured error names (`WrongPassphraseError`, `LockEnvelopeError`,
+  `LockStateError`, `DataLockedError`) reach the page via `e.name` on
+  rejected RPCs — see § Structured error names.
 
 **Scope:** user-driven, opt-in app-layer encryption of the user-authored
 `relationships.db` and its OPFS backups. `fellows.db` is *not* encrypted
@@ -349,29 +378,123 @@ Per CLAUDE.md convention ("UI/UX changes belong in `docs/users_manual.md`"):
 
 ## Implementation phases (one PR; phased commits)
 
-1. **Crypto primitives + envelope.** Module-local `lockCrypto.js`-shape
-   helpers inside `vendor/sqlite-worker.js` (we don't add a new vendored
-   file): `deriveKey(passphrase, salt, iters)`, `encryptBlob(key, plain)`,
-   `decryptBlob(key, blob)`, header pack/unpack. Unit-style tests via a
-   tiny e2e Playwright test that drives the worker's RPCs.
-2. **Worker RPCs.** `getLockState`, `enableLock`, `unlock`, `lock`,
-   `changePassphrase`, `disableLock`. Lock-in-progress recovery on
-   `init`.
-3. **Backup encryption.** Extend `maybeBackupRelationshipsDb` +
-   `snapshotRelationshipsDbToBackup` to honor lock state.
-4. **Settings UI.** Three-state panel + four modals (enable, change,
-   disable, unlock-when-already-on-settings).
-5. **Locked-boot UX.** Unlock card before `bootDirectoryAsApp`'s normal
-   route dispatch; browse-directory-only mode; topbar Unlock button on
-   locked routes.
-6. **Diagnostics + docs.** `?diag=1` rows, `users_manual.md` section,
-   `persistence_and_upgrades.md` table rows, `Architecture.md` note,
-   `SECURITY.md` row.
-7. **E2E tests.** Enable → reload → unlock-gate → wrong-passphrase →
-   right-passphrase → directory-only escape → unlock from gate →
-   change-passphrase → disable. Verify on-disk `.locked` files via the
-   worker RPC (we can't poke OPFS directly from the test runner, but
-   `getLockState` + `listRelationshipsBackups` cover it).
+Implementation status table is at the top of the file. Phase-by-phase
+detail below; phases 1–3 are shipped, the rest are the pickup spec.
+
+### Phase 4 — Settings UI + topbar chips (next)
+
+**Hook points in `app/static/app.js`:**
+
+| Location | What lands here |
+|---|---|
+| `createWorkerDataProvider` (~3518) | Add six wrapper methods: `getLockState`, `enableLock(passphrase)`, `unlock(passphrase)`, `lock()`, `changePassphrase(oldP, newP)`, `disableLock(passphrase)`. Each is a thin `rpc.call('opName', args)` — no `refuseIfVersionSkew` gate (the version check happened at init handshake; if it failed the page is in api+idb fallback and these methods aren't reachable). |
+| `renderSettingsPage` (~7900) | Append a `<div class="settings-section settings-lock-section">` after the existing `settings-export-section`. Renders one of three states from `getLockState()`. Markup uses `class` only — no inline styles (CSP). |
+| Topbar render path | Add a chip slot read from `getLockState()` on every route render. (Find existing topbar — it's the title strip with the build badge; grep for `header-bar` or `app-header` to locate.) |
+
+**dataProvider wrapper shape (drop in to `createWorkerDataProvider`):**
+```js
+getLockState: function () { return rpc.call('getLockState'); },
+enableLock: function (passphrase) { return rpc.call('enableLock', { passphrase: passphrase }); },
+unlock:     function (passphrase) { return rpc.call('unlock',     { passphrase: passphrase }); },
+lock:       function ()           { return rpc.call('lock'); },
+changePassphrase: function (oldP, newP) {
+  return rpc.call('changePassphrase', { oldPassphrase: oldP, newPassphrase: newP });
+},
+disableLock: function (passphrase) { return rpc.call('disableLock', { passphrase: passphrase }); },
+```
+
+**Settings panel — three rendered states, decided by `await getLockState()`:**
+
+1. `enabled === false` → "Lock my saved data: off" + **Set up locking…**
+   button. Click opens the two-step honesty-first modal (copy already
+   written below).
+2. `enabled === true && locked === false` → status row + three buttons.
+   Status copy depends on `hasKey`:
+   - `hasKey === true` → "Lock is set up. Your data is currently unlocked
+     in this session."
+   - `hasKey === false` (stale-unlocked from a prior session) → "Lock
+     is set up. Your data is currently unlocked. Click **Lock now** to
+     encrypt it." Lock now in this state opens a password prompt first
+     (since we need to derive the key); the prompt calls `unlock(p)`
+     then `lock()` in sequence.
+3. `enabled === true && locked === true` → unreachable: route is gated
+   behind Phase 5's unlock card.
+
+**Decision: topbar chip behavior.** Click → **immediately call `lock()`**;
+no confirm modal. Rationale: locking is *reversible* (user unlocks
+again), the user already opted in by enabling, and a confirm modal on
+every lock would train them to dismiss it. The Settings *Lock now*
+button stays identical — same RPC, no confirm.
+
+**Decision: "Set up locking…" submit reloads the page.** After
+`enableLock` resolves, call `location.reload()` so the user lands on
+the boot unlock card. Self-demos the steady-state and gives password
+managers a chance to capture the credential they just saw.
+
+**Decision: per-modal autocomplete attributes:**
+- Set-up modal new password: `autocomplete="new-password"` (both fields).
+- Change-password modal old field: `autocomplete="current-password"`;
+  new fields: `autocomplete="new-password"`.
+- Disable modal: `autocomplete="current-password"`.
+- Phase 5's boot unlock card: `autocomplete="current-password"`.
+
+**Decision: error display.** Inline below the password field — never a
+modal-on-modal. Map errorName → user-facing copy:
+| `errorName` | Copy |
+|---|---|
+| `WrongPassphraseError` | "Wrong password." |
+| `LockEnvelopeError` | "Your locked data appears damaged. Use **Reset everything** to start over." |
+| `LockStateError` | "Couldn't complete this action. Reload and try again." |
+| `DataLockedError` | (shouldn't surface in Settings — Settings is unreachable when locked.) |
+
+**Cleanup of stale references:** `renderSettingsPage` mentions "auto-
+snapshots ... rotated to keep the newest 3" in its existing copy
+(app.js:7928). The actual rotation is 5 (BACKUP_KEEP). This copy was
+already stale before Phase 4; fix it as part of Phase 4 since we're
+touching the same function.
+
+### Phase 5 — Locked-boot UX
+
+**Hook point:** `bootDirectoryAsApp` (~9232). Read
+`provider.getLockState()` (or just `provider._init.lockLocked`) before
+the normal route dispatch. If locked, render the unlock card and
+return early.
+
+**`__lockedMode` flag** (page-side window prop):
+- Set to `"directory-only"` when user clicks Browse directory only.
+- Read by `route()` (~6528) for `#/groups`, `#/groups/<id>`,
+  `#/edit/<id>`, `#/settings` → render the small "Locked — Unlock to
+  view." panel + topbar 🔒 Unlock chip.
+- Cleared when `unlock()` succeeds (returns to normal routing).
+
+**Unlock card markup** lives in a new `renderLockUnlockCard()` function
+called by `bootDirectoryAsApp`. Copy + structure already specified in
+§ Locked-boot UX above.
+
+### Phase 6 — Diagnostics + docs
+
+- `?diag=1` panel rows (rendered from `getLockState()`): "Lock enabled:
+  yes/no", "Currently locked: yes/no", "Lock format: v1 (PBKDF2-SHA256,
+  600000 iters)".
+- `docs/users_manual.md` § "Locking your saved data" — enable, lock,
+  unlock, change, disable. Mirror the honesty-first set-up modal copy.
+- `docs/persistence_and_upgrades.md` storage-layer table — add rows for
+  `relationships.db.locked` (worker, doesn't auto-clear on Clear App
+  Cache) and `relationships.db.bak.<ISO>.locked`.
+- `docs/Architecture.md` § Worker-owned OPFS — note the lock RPCs and
+  the v1 envelope.
+- `SECURITY.md` § Defensive controls — add app-layer-encryption row.
+
+### Phase 7 — Full e2e cycle tests
+
+The shipped tests cover state machine + crypto + backups in isolation.
+Phase 7 adds the user-flow cycle:
+- Enable from Settings → page reloads → unlock card shows → wrong
+  password → right password → land in directory → mutate groups → click
+  Lock now in topbar → unlock card shows → unlock → change-password →
+  reload → unlock with new → disable → fully plaintext access.
+- Cross-browser smoke (Firefox / WebKit) for the WebCrypto + OPFS
+  `move()` paths. Document any browser-specific quirks discovered.
 
 ## Open follow-ups (NOT in v1)
 
