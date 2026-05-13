@@ -107,29 +107,64 @@ separate "verifier" blob — the GCM tag is the verifier.
 This avoids a separate "lock enabled" sentinel that could disagree with
 the actual file state.
 
-## Lock-in-progress recovery
+## Lock-in-progress recovery and crash safety
 
-A naïve lock sequence (`encrypt all → delete all plaintext`) can leave
-half-encrypted state on crash. Order matters because a backup ciphertext
-must replace its plaintext atomically before we delete the source.
+### State observability vs. transition crash (Q2-A)
 
-**Lock sequence (worker):**
-1. For each `relationships.db.bak.<ISO>` (oldest first):
-   - Read plaintext, encrypt, write `relationships.db.bak.<ISO>.locked`.
-   - Read back, decrypt-and-verify (auth tag check).
-   - `removeEntry` the plaintext.
-2. Export live `relationships.db` from the SAH pool, encrypt, write
-   `relationships.db.locked` at OPFS root.
-3. Read back, decrypt-and-verify.
-4. Close `relDb` handle, `removeEntry` the SAH-pool slot.
+A subtle but load-bearing observation: **the on-disk state "both
+`.locked` and plaintext exist for the same logical file" is
+indistinguishable between a `lock()` that crashed mid-flight and a
+session that legitimately ended in `enabled+unlocked` without the
+user clicking Lock Now.** Both produce identical OPFS inventories.
 
-**Boot-time recovery:** on `init`, if both plaintext and `.locked`
-siblings exist for the same logical file (e.g. `bak.2026-05-13T...`
-*and* `bak.2026-05-13T....locked`), trust the `.locked` (it survived
-crash + auth-tag verifies) and delete the plaintext. If the `.locked`
-exists but auth tag fails on the resume check, log + leave both in
-place; the user sees an unlock failure with a diagnostic message and
-can use **Reset Everything**.
+For v1 we adopt the simpler interpretation: **don't try to
+distinguish.** Both states boot as `enabled+unlocked`. The user sees
+the 🔓 Lock chip in the topbar (the awareness affordance) and can
+click it to re-lock. Init does *not* run a recovery pass that tries
+to "finish" a crashed lock.
+
+**Follow-up:** crash-scenario testing for the lock/unlock/change/disable
+operations needs a definitive harness — Playwright can drop a page mid-
+operation but reproducing a worker crash mid-RPC is harder. Tracked as
+an open follow-up against the Phase 7 test surface.
+
+### Two-pass write for multi-file ops (Q1-A)
+
+`changePassphrase` and `disableLock` touch every `.locked` file at
+once (live DB + up to 5 backups = 6 files). OPFS has no batch rename,
+so a crash mid-operation could split files between two states. v1
+mitigates by **writing all new envelopes first, then deleting old
+artifacts only after every new file is verified.**
+
+**Lock-sequence primitive (used by `enableLock`, `lock`, and
+`changePassphrase`'s write phase):**
+1. Encrypt plaintext to envelope bytes (in memory).
+2. Write to `<name>.locked.new` at OPFS root.
+3. Read bytes back and parse the envelope header (magic +
+   format-version sanity check — no decrypt needed).
+4. Rename `.locked.new` → `.locked` via
+   `FileSystemFileHandle.move()` when available; fall back to "write
+   to final name, then delete `.new`" for older browsers.
+5. After the rename, delete the source plaintext (only relevant for
+   `enableLock` / `lock` — the previous `.locked` is overwritten by
+   step 4).
+
+**Init-time orphan cleanup:** worker `init` scans OPFS root and
+removes any `*.locked.new` and `*.tmp` files. These can only exist
+when a prior operation was interrupted between steps 2 and 4 — the
+old `.locked` is still intact, so the orphan is safe to delete.
+
+## Structured error names
+
+Worker handlers throw `Error` with these `.name` values; the dispatcher
+forwards `errorName` to the page, which routes accordingly:
+
+| `errorName` | When | Page UI response |
+|---|---|---|
+| `WrongPassphraseError` | `unlock` / `changePassphrase` / `disableLock` got the wrong passphrase (WebCrypto's `OperationError` wrapped). | Show "Wrong password." on the same input. |
+| `LockEnvelopeError` | `.locked` file unparseable (corrupt magic / version / length). | Surface "Locked file appears corrupt — Reset Everything to recover." |
+| `LockStateError` | RPC called in an incompatible state (e.g. `enableLock` while already enabled, `lock` while no key cached). | Bug indicator; log + show diagnostic. Should not be reachable in normal UI. |
+| `DataLockedError` | Any `relDb`-touching RPC (`listGroups`, `createGroup`, …) called while in `enabled+locked` state. | Route to "Unlock to view" panel; offer the unlock card. |
 
 ## Worker RPCs
 

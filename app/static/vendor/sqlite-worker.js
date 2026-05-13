@@ -43,7 +43,12 @@ importScripts('./sqlite3.js');
 // arg and SHA-keyed refresh semantics. Page bumps its expected value in
 // lockstep; a stale page paired with this worker (or vice versa) refuses
 // mutations and waits for the SW's "New version available" reload banner.
-var WORKER_RPC_VERSION = 2;
+//
+// v3 (lock-my-user-data Phase 2): adds the lock-orchestration RPCs
+// (getLockState, enableLock, unlock, lock, changePassphrase, disableLock)
+// and structured error names (WrongPassphraseError, LockEnvelopeError,
+// LockStateError, DataLockedError) that the page UI routes on.
+var WORKER_RPC_VERSION = 3;
 
 // Same value as relationships.db's PRAGMA user_version. Bumped only on
 // schema migrations. Mirrored from app/relationships.py:SCHEMA_VERSION.
@@ -169,6 +174,16 @@ var FELLOWS_META_FILE = 'fellows.db.meta.json';
 
 var REQUIRED_RESTORE_TABLES = ['groups', 'group_members', 'fellow_tags', 'fellow_notes', 'settings'];
 
+// Lock-feature file names (OPFS root). See plans/lock_my_user_data.md.
+// The live DB's encrypted blob and each backup's .locked sibling all live
+// at OPFS root, not inside the SAH pool — the pool is for sqlite-wasm-
+// managed slots, and the .locked envelopes are plain files we read/write
+// directly via FileSystemFileHandle.
+var LOCKED_DB_NAME = 'relationships.db.locked';
+var LOCKED_SUFFIX = '.locked';
+var LOCKED_NEW_SUFFIX = '.locked.new';
+var TMP_SUFFIX = '.tmp';
+
 // ===== State ================================================================
 
 var sqlite3 = null;
@@ -182,6 +197,26 @@ var bootTrace = [];
 // stagingId that the page must echo back. Bytes live in the staging
 // slot, not in JS memory.
 var pendingFellowsDbSwap = null;
+
+// ===== Lock state ===========================================================
+//
+// Steady-state invariants:
+//   lockEnabled === true  iff  /relationships.db.locked exists on init
+//   relDb !== null         iff  /relationships.db plaintext is in SAH pool
+//   lockKey !== null       iff  caller proved they hold the passphrase
+//                               this session (via enableLock or unlock)
+//
+// Three observable states (see plans/lock_my_user_data.md):
+//   disabled         : lockEnabled=false, relDb open, lockKey=null
+//   enabled+locked   : lockEnabled=true,  relDb=null,  lockKey=null
+//   enabled+unlocked : lockEnabled=true,  relDb open,  lockKey=(non-null
+//                      this session, null after a reload that found both
+//                      plaintext and .locked on disk)
+
+var lockEnabled = false;
+var lockKey = null;
+var lockSalt = null;   // Uint8Array — needed by changePassphrase to verify old
+var lockIters = null;  // int        — same; mirrors envelope header field
 
 function trace(msg) { bootTrace.push(new Date().toISOString() + ' ' + String(msg)); }
 
@@ -354,6 +389,139 @@ async function _rotateRelationshipsBackups() {
       trace('backup: rotate removeEntry failed for ' + oldest.name);
     }
   }
+}
+
+// ===== Lock orchestration helpers ===========================================
+//
+// Used by enableLock / unlock / lock / changePassphrase / disableLock to
+// move bytes around OPFS root with crash-safe two-step writes.
+// See plans/lock_my_user_data.md § "Two-pass write for multi-file ops."
+
+async function _opfsRename(fromName, toName) {
+  var root = await _opfsRoot();
+  var fh = await root.getFileHandle(fromName);
+  if (typeof fh.move === 'function') {
+    await fh.move(toName);
+    return;
+  }
+  // Fallback for browsers without FileSystemFileHandle.move():
+  // copy bytes to the target name, then remove source. Not atomic, but
+  // init-time orphan cleanup of `.locked.new` covers the half-finished
+  // case on next boot.
+  var f = await fh.getFile();
+  var bytes = new Uint8Array(await f.arrayBuffer());
+  await _opfsWriteBinary(toName, bytes);
+  await root.removeEntry(fromName);
+}
+
+async function _opfsHasEntry(name) {
+  try {
+    var root = await _opfsRoot();
+    await root.getFileHandle(name);
+    return true;
+  } catch (e) { return false; }
+}
+
+// Write encrypted bytes to OPFS via the two-step .new-then-rename
+// pattern. Used by enableLock, lock, changePassphrase. Verifies the
+// bytes round-trip an envelope header parse before committing.
+async function _opfsWriteLockedFile(finalName, envelopeBytes) {
+  var newName = finalName + '.new';
+  await _opfsWriteBinary(newName, envelopeBytes);
+  // Sanity-check the file landed parseably before renaming over the
+  // previous .locked. We don't decrypt — just verify the envelope header
+  // makes sense, which catches truncated writes and bit-flips.
+  var readback = await _opfsReadBinary(newName);
+  _parseLockEnvelope(readback); // throws on corrupt
+  await _opfsRename(newName, finalName);
+}
+
+// Init-time cleanup: remove orphan .locked.new and .tmp files at OPFS
+// root. These can only exist when a prior operation was interrupted
+// between writing the .new file and renaming it — the old .locked is
+// still intact, so the orphan is always safe to delete.
+async function _cleanupLockOrphans() {
+  try {
+    var root = await _opfsRoot();
+    var orphans = [];
+    for await (var entry of root.values()) {
+      if (entry.kind !== 'file') continue;
+      var nm = entry.name;
+      if (nm.length > LOCKED_NEW_SUFFIX.length &&
+          nm.slice(-LOCKED_NEW_SUFFIX.length) === LOCKED_NEW_SUFFIX) {
+        orphans.push(nm);
+      } else if (nm.length > TMP_SUFFIX.length &&
+                 nm.slice(-TMP_SUFFIX.length) === TMP_SUFFIX) {
+        orphans.push(nm);
+      }
+    }
+    for (var i = 0; i < orphans.length; i++) {
+      try {
+        await root.removeEntry(orphans[i]);
+        trace('lock: cleaned orphan ' + orphans[i]);
+      } catch (e) {}
+    }
+  } catch (e) {}
+}
+
+// List backup files at OPFS root, split into plaintext and .locked
+// subsets. Both prefixes are `relationships.db.bak.<ISO>`; the .locked
+// variant has the LOCKED_SUFFIX appended. Excludes .new / .tmp orphans.
+async function _listAllRelationshipsBackups() {
+  var plain = [], locked = [];
+  try {
+    var root = await _opfsRoot();
+    for await (var entry of root.values()) {
+      if (entry.kind !== 'file') continue;
+      var nm = entry.name;
+      if (nm.indexOf(BACKUP_PREFIX) !== 0) continue;
+      // Skip orphans.
+      if (nm.length > LOCKED_NEW_SUFFIX.length &&
+          nm.slice(-LOCKED_NEW_SUFFIX.length) === LOCKED_NEW_SUFFIX) continue;
+      if (nm.length > TMP_SUFFIX.length &&
+          nm.slice(-TMP_SUFFIX.length) === TMP_SUFFIX) continue;
+      var f = await entry.getFile();
+      var info = { name: nm, size: f.size, lastModified: f.lastModified };
+      if (nm.length > LOCKED_SUFFIX.length &&
+          nm.slice(-LOCKED_SUFFIX.length) === LOCKED_SUFFIX) {
+        locked.push(info);
+      } else {
+        plain.push(info);
+      }
+    }
+    plain.sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
+    locked.sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
+  } catch (e) {}
+  return { plain: plain, locked: locked };
+}
+
+// Structured error factory — the dispatcher already forwards
+// `errorName` to the page in the {ok: false, errorName} response.
+function _lockError(name, message) {
+  var err = new Error(message);
+  err.name = name;
+  return err;
+}
+
+// Maps WebCrypto's atomic GCM auth-tag failure ('OperationError') to our
+// structured WrongPassphraseError; rethrows anything else. Use inside a
+// try/catch around `crypto.subtle.decrypt`.
+function _mapDecryptError(e, contextLabel) {
+  if (e && (e.name === 'OperationError' || /OperationError/.test(String(e)))) {
+    return _lockError('WrongPassphraseError', contextLabel || 'Wrong password.');
+  }
+  return e;
+}
+
+// Throws if the worker can't currently serve a relDb read. Distinguishes
+// the lock-enabled case (DataLockedError → page routes to unlock card)
+// from generic "relDb not open" (a real bug or pre-init call).
+function _requireRelDb() {
+  if (relDb) return;
+  if (lockEnabled) {
+    throw _lockError('DataLockedError', 'Data is locked — call unlock first.');
+  }
+  throw new Error('relationships db not open');
 }
 
 // ===== Lock crypto (envelope v1) ============================================
@@ -726,20 +894,53 @@ handlers.init = async function () {
   var sentinelRemoved = await _opfsRemoveEntry(LEGACY_SENTINEL);
   if (sentinelRemoved) trace('cleanup: removed legacy ' + LEGACY_SENTINEL);
 
-  // Auto-backup runs before opening relationships.db for app use, so the
-  // snapshot reflects the user's last-saved state, not anything mutated
-  // this session. Failure is non-fatal — logged via bootTrace.
-  await maybeBackupRelationshipsDb();
+  // Lock-orphan cleanup: any *.locked.new / *.tmp files at OPFS root
+  // are residue from a prior op that crashed between the .new write
+  // and the rename. Safe to delete unconditionally — the old .locked
+  // (if any) is still intact.
+  await _cleanupLockOrphans();
+
+  // Probe lock state. .locked file presence is the canonical signal —
+  // see plans/lock_my_user_data.md § OPFS layout.
+  lockEnabled = await _opfsHasEntry(LOCKED_DB_NAME);
+  if (lockEnabled) trace('lock: enabled (' + LOCKED_DB_NAME + ' present)');
+
+  // Detect the steady-state-unlocked vs. locked split before we touch
+  // the SAH pool. We're "locked" if .locked exists AND no plaintext is
+  // in the pool; "stale-unlocked" if both exist (previous session
+  // didn't call lock() before closing — see Q2-A in the plan).
+  var initialPoolFiles = [];
+  try { initialPoolFiles = poolUtil.getFileNames(); } catch (e) {}
+  var plaintextInPool = initialPoolFiles.indexOf(RELATIONSHIPS_DB_SLOT) !== -1;
+
+  // Auto-backup: skip when locked (no key to encrypt with — Phase 3
+  // will lock-aware this) and also when stale-unlocked (a plaintext
+  // .bak.<ISO> would defeat the lock the user enabled). Leaves the
+  // backup chain untouched until lock() or disableLock() runs.
+  if (lockEnabled) {
+    trace('backup: skipped (lock enabled — Phase 3 will revisit)');
+  } else {
+    await maybeBackupRelationshipsDb();
+  }
 
   var hasRelationshipsDb = false;
-  try {
-    relDb = new poolUtil.OpfsSAHPoolDb(RELATIONSHIPS_DB_SLOT);
-    bootstrapRelationshipsSchema(relDb);
-    hasRelationshipsDb = true;
-    trace('relationships.db: open + schema OK');
-  } catch (relErr) {
-    trace('relationships.db: open failed (' + (relErr && relErr.message || relErr) + ')');
+  if (lockEnabled && !plaintextInPool) {
+    // Locked: don't create an empty SAH-pool slot that would mask the
+    // .locked file. relDb stays null until unlock() imports decrypted
+    // bytes.
+    trace('relationships.db: locked, awaiting unlock RPC');
     relDb = null;
+  } else {
+    try {
+      relDb = new poolUtil.OpfsSAHPoolDb(RELATIONSHIPS_DB_SLOT);
+      bootstrapRelationshipsSchema(relDb);
+      hasRelationshipsDb = true;
+      trace('relationships.db: open + schema OK' +
+            (lockEnabled ? ' (stale-unlocked — key not cached)' : ''));
+    } catch (relErr) {
+      trace('relationships.db: open failed (' + (relErr && relErr.message || relErr) + ')');
+      relDb = null;
+    }
   }
 
   // Open fellows.db if it's already on disk. Cold-start fetch is the
@@ -757,6 +958,10 @@ handlers.init = async function () {
     relDbOpen: hasRelationshipsDb,
     hasFellowsDb: hasFellowsDb,
     poolFiles: (function () { try { return poolUtil.getFileNames(); } catch (e) { return []; } })(),
+    // Lock state surfaced in the handshake so the page can route the
+    // boot flow into the unlock card before calling any relDb ops.
+    lockEnabled: lockEnabled,
+    lockLocked: lockEnabled && relDb === null,
     trace: bootTrace.slice()
   };
 };
@@ -764,7 +969,7 @@ handlers.init = async function () {
 // ----- Relationships (groups + settings) ------------------------------------
 
 handlers.listGroups = async function () {
-  if (!relDb) throw new Error('relationships db not open');
+  _requireRelDb();
   return dbSelectAll(
     relDb,
     'SELECT g.id, g.name, g.note, g.created_at, g.updated_at, ' +
@@ -776,7 +981,7 @@ handlers.listGroups = async function () {
 };
 
 handlers.getGroup = async function (args) {
-  if (!relDb) throw new Error('relationships db not open');
+  _requireRelDb();
   var id = args && args.id;
   var row = dbSelectOne(relDb, 'SELECT * FROM groups WHERE id = ?', [id]);
   if (!row) return null;
@@ -790,7 +995,7 @@ handlers.getGroup = async function (args) {
 };
 
 handlers.createGroup = async function (data) {
-  if (!relDb) throw new Error('relationships db not open');
+  _requireRelDb();
   var name = data && data.name;
   var note = (data && typeof data.note === 'string') ? data.note : '';
   var ids = dedupeRecordIds(data && data.fellow_record_ids);
@@ -813,7 +1018,7 @@ handlers.createGroup = async function (data) {
 };
 
 handlers.updateGroup = async function (args) {
-  if (!relDb) throw new Error('relationships db not open');
+  _requireRelDb();
   var id = args && args.id;
   var patch = (args && args.patch) || {};
   var existing = dbSelectOne(relDb, 'SELECT 1 AS x FROM groups WHERE id = ?', [id]);
@@ -842,7 +1047,7 @@ handlers.updateGroup = async function (args) {
 };
 
 handlers.deleteGroup = async function (args) {
-  if (!relDb) throw new Error('relationships db not open');
+  _requireRelDb();
   var id = args && args.id;
   var existing = dbSelectOne(relDb, 'SELECT 1 AS x FROM groups WHERE id = ?', [id]);
   if (!existing) return false;
@@ -865,7 +1070,7 @@ handlers.getSettings = async function () {
 };
 
 handlers.setSetting = async function (args) {
-  if (!relDb) throw new Error('relationships db not open');
+  _requireRelDb();
   var key = args && args.key;
   var value = args && args.value;
   if (value === null || value === undefined || value === '') {
@@ -884,6 +1089,7 @@ handlers.setSetting = async function (args) {
 
 handlers.exportRelationshipsBytes = async function () {
   if (!poolUtil) throw new Error('pool util unavailable');
+  _requireRelDb();
   return poolUtil.exportFile(RELATIONSHIPS_DB_SLOT);
 };
 
@@ -904,6 +1110,7 @@ handlers.countRelationships = async function () {
 
 handlers.importRelationshipsBytes = async function (args) {
   if (!poolUtil) throw new Error('pool util unavailable');
+  _requireRelDb();
   var bytes = args && args.bytes;
   var inspection = await inspectBytes(bytes);
   if (!inspection.valid) {
@@ -953,7 +1160,15 @@ handlers.listRelationshipsBackups = async function () {
 
 handlers.restoreRelationshipsBackup = async function (args) {
   if (!poolUtil) throw new Error('pool util unavailable');
+  _requireRelDb();
   var name = args && args.name;
+  // Phase 2: refuse .locked backups. Phase 3 will teach this handler to
+  // decrypt with the cached lockKey before importing.
+  if (name && name.length > LOCKED_SUFFIX.length &&
+      name.slice(-LOCKED_SUFFIX.length) === LOCKED_SUFFIX) {
+    throw _lockError('LockStateError',
+      'Restoring encrypted backups is not supported yet (Phase 3 follow-up).');
+  }
   var backups = await listRelationshipsBackups();
   var match = null;
   for (var i = 0; i < backups.length; i++) {
@@ -962,6 +1177,375 @@ handlers.restoreRelationshipsBackup = async function (args) {
   if (!match) throw new Error('Backup not found: ' + name);
   var bytes = await _opfsReadBinary(name);
   return await handlers.importRelationshipsBytes({ bytes: bytes });
+};
+
+// ----- Lock orchestration ---------------------------------------------------
+//
+// See plans/lock_my_user_data.md. State machine:
+//
+//   disabled              ──enableLock──>  enabled+locked
+//   enabled+locked        ──unlock──────>  enabled+unlocked  (cached key)
+//   enabled+unlocked      ──lock────────>  enabled+locked
+//   enabled+unlocked      ──changePass──>  enabled+unlocked  (new cached key)
+//   enabled+unlocked      ──disableLock──> disabled
+//
+// All RPCs in this section gate on `lockEnabled` to refuse no-op
+// transitions (e.g. unlock when not enabled) with LockStateError.
+// Wrong-passphrase failures (WebCrypto OperationError) get rewrapped as
+// WrongPassphraseError so the page can route on the structured name.
+
+handlers.getLockState = async function () {
+  var out = {
+    enabled: lockEnabled,
+    locked: lockEnabled && relDb === null,
+    hasKey: lockKey !== null,
+    formatVersion: null,
+    kdfId: null,
+    iters: null
+  };
+  if (!lockEnabled) return out;
+  // Read the v1 header without decrypting (magic + version + kdf id +
+  // iters is plaintext). Surfaces envelope corruption so the page can
+  // offer Reset Everything.
+  try {
+    var bytes = await _opfsReadBinary(LOCKED_DB_NAME);
+    var hdr = _parseLockEnvelope(bytes);
+    out.formatVersion = hdr.version;
+    out.kdfId = hdr.kdfId;
+    out.iters = hdr.iters;
+  } catch (e) {
+    out.envelopeError = (e && e.message) || String(e);
+  }
+  return out;
+};
+
+handlers.enableLock = async function (args) {
+  if (lockEnabled) {
+    throw _lockError('LockStateError', 'Lock is already enabled.');
+  }
+  var passphrase = args && args.passphrase;
+  if (!passphrase || typeof passphrase !== 'string') {
+    throw _lockError('LockStateError', 'enableLock requires a passphrase.');
+  }
+  if (!poolUtil) throw new Error('pool util unavailable');
+
+  // One salt + iter count for every file written by this op — a future
+  // unlock derives one key that decrypts all of them.
+  var salt = _lockRandomBytes(LOCK_SALT_LEN);
+  var iters = LOCK_KDF_ITERS_V1;
+  var key = await _deriveLockKey(passphrase, salt, iters);
+
+  // Snapshot live plaintext from the SAH pool.
+  var livePlain;
+  try { livePlain = poolUtil.exportFile(RELATIONSHIPS_DB_SLOT); }
+  catch (e) { throw new Error('enableLock: exportFile failed: ' + ((e && e.message) || e)); }
+  if (!livePlain || !livePlain.byteLength) {
+    throw new Error('enableLock: live DB is empty');
+  }
+
+  // Encrypt every plaintext backup before the live DB — oldest first
+  // (per the plan). Each envelope gets a fresh IV; salt/iters identical
+  // across all files written here.
+  var backupSet = await _listAllRelationshipsBackups();
+  var plaintextBackups = backupSet.plain;
+  for (var i = 0; i < plaintextBackups.length; i++) {
+    var bk = plaintextBackups[i];
+    var bkBytes = await _opfsReadBinary(bk.name);
+    var bkEnvelope = await _lockBlobBytes(key, bkBytes, salt, iters);
+    await _opfsWriteLockedFile(bk.name + LOCKED_SUFFIX, bkEnvelope);
+    try { await (await _opfsRoot()).removeEntry(bk.name); }
+    catch (e) { trace('enableLock: removeEntry failed for ' + bk.name + ': ' + ((e && e.message) || e)); }
+    trace('enableLock: encrypted ' + bk.name);
+  }
+
+  // Live DB: write .locked first, then close handle and unlink the
+  // SAH-pool slot. If the unlink fails the state is still consistent —
+  // next init sees both files and treats it as stale-unlocked.
+  var liveEnvelope = await _lockBlobBytes(key, livePlain, salt, iters);
+  await _opfsWriteLockedFile(LOCKED_DB_NAME, liveEnvelope);
+  if (relDb) {
+    try { relDb.close(); } catch (e) {}
+    relDb = null;
+  }
+  try { poolUtil.unlink(RELATIONSHIPS_DB_SLOT); }
+  catch (e) { trace('enableLock: poolUtil.unlink failed: ' + ((e && e.message) || e)); }
+
+  // Per the plan, enableLock leaves the worker in the locked state.
+  // The page reloads → unlock card → user re-enters the password they
+  // just typed in the set-up modal. (Self-teaching steady-state demo.)
+  lockEnabled = true;
+  lockKey = null;
+  lockSalt = null;
+  lockIters = null;
+  trace('enableLock: complete');
+  return { ok: true, encryptedBackups: plaintextBackups.length };
+};
+
+handlers.unlock = async function (args) {
+  if (!lockEnabled) {
+    throw _lockError('LockStateError', 'unlock called but lock is not enabled.');
+  }
+  var passphrase = args && args.passphrase;
+  if (!passphrase || typeof passphrase !== 'string') {
+    throw _lockError('LockStateError', 'unlock requires a passphrase.');
+  }
+  if (!poolUtil) throw new Error('pool util unavailable');
+
+  var envelope;
+  try { envelope = await _opfsReadBinary(LOCKED_DB_NAME); }
+  catch (e) { throw _lockError('LockEnvelopeError', 'Could not read .locked file: ' + ((e && e.message) || e)); }
+  var parsed;
+  try { parsed = _parseLockEnvelope(envelope); }
+  catch (e) { throw _lockError('LockEnvelopeError', (e && e.message) || String(e)); }
+
+  var key = await _deriveLockKey(passphrase, parsed.salt, parsed.iters);
+  var plainBuf;
+  try {
+    plainBuf = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: parsed.iv }, key, parsed.ciphertext
+    );
+  } catch (e) {
+    throw _mapDecryptError(e, 'Wrong password.');
+  }
+  var plainBytes = new Uint8Array(plainBuf);
+
+  // If plaintext isn't already in the SAH pool (true `locked` state),
+  // import the just-decrypted bytes. In the stale-unlocked path the
+  // pool slot already exists — we just cache the key and leave it.
+  var poolFiles = [];
+  try { poolFiles = poolUtil.getFileNames(); } catch (e) {}
+  if (poolFiles.indexOf(RELATIONSHIPS_DB_SLOT) === -1) {
+    poolUtil.importDb(RELATIONSHIPS_DB_SLOT, plainBytes);
+  }
+  if (!relDb) {
+    relDb = new poolUtil.OpfsSAHPoolDb(RELATIONSHIPS_DB_SLOT);
+    bootstrapRelationshipsSchema(relDb);
+  }
+
+  lockKey = key;
+  lockSalt = parsed.salt;
+  lockIters = parsed.iters;
+  trace('unlock: success');
+  return {
+    ok: true,
+    counts: {
+      groups: dbSelectOne(relDb, 'SELECT COUNT(*) AS n FROM groups', null).n,
+      members: dbSelectOne(relDb, 'SELECT COUNT(*) AS n FROM group_members', null).n,
+      tags: dbSelectOne(relDb, 'SELECT COUNT(*) AS n FROM fellow_tags', null).n,
+      notes: dbSelectOne(relDb, 'SELECT COUNT(*) AS n FROM fellow_notes', null).n,
+      settings: dbSelectOne(relDb, 'SELECT COUNT(*) AS n FROM settings', null).n
+    }
+  };
+};
+
+handlers.lock = async function () {
+  if (!lockEnabled) {
+    throw _lockError('LockStateError', 'lock called but lock is not enabled.');
+  }
+  if (!lockKey) {
+    // Stale-unlocked: cached key is missing (reload after an unlocked
+    // session that never called lock()). Page-side UI prompts for the
+    // passphrase and calls unlock() first to cache the key, then lock().
+    throw _lockError('LockStateError',
+      'Cannot lock — no cached key. Unlock first, then lock.');
+  }
+  if (!relDb) {
+    throw _lockError('LockStateError', 'lock called but relDb is not open.');
+  }
+  if (!poolUtil) throw new Error('pool util unavailable');
+
+  var livePlain = poolUtil.exportFile(RELATIONSHIPS_DB_SLOT);
+  var envelope = await _lockBlobBytes(lockKey, livePlain, lockSalt, lockIters);
+  await _opfsWriteLockedFile(LOCKED_DB_NAME, envelope);
+
+  try { relDb.close(); } catch (e) {}
+  relDb = null;
+  try { poolUtil.unlink(RELATIONSHIPS_DB_SLOT); }
+  catch (e) { trace('lock: poolUtil.unlink failed: ' + ((e && e.message) || e)); }
+
+  lockKey = null;
+  lockSalt = null;
+  lockIters = null;
+  trace('lock: complete');
+  return { ok: true };
+};
+
+handlers.changePassphrase = async function (args) {
+  if (!lockEnabled) {
+    throw _lockError('LockStateError', 'changePassphrase called but lock is not enabled.');
+  }
+  var oldPass = args && args.oldPassphrase;
+  var newPass = args && args.newPassphrase;
+  if (!oldPass || typeof oldPass !== 'string' ||
+      !newPass || typeof newPass !== 'string') {
+    throw _lockError('LockStateError',
+      'changePassphrase requires oldPassphrase and newPassphrase.');
+  }
+
+  // Verify oldPass via the live .locked, regardless of whether we have
+  // a cached key — the explicit confirmation is the point.
+  var liveEnvelope = await _opfsReadBinary(LOCKED_DB_NAME);
+  var liveParsed;
+  try { liveParsed = _parseLockEnvelope(liveEnvelope); }
+  catch (e) { throw _lockError('LockEnvelopeError', (e && e.message) || String(e)); }
+  var oldKey = await _deriveLockKey(oldPass, liveParsed.salt, liveParsed.iters);
+  var livePlain;
+  try {
+    livePlain = new Uint8Array(await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: liveParsed.iv }, oldKey, liveParsed.ciphertext
+    ));
+  } catch (e) {
+    throw _mapDecryptError(e, 'Wrong current password.');
+  }
+
+  // Decrypt every .locked backup with the old key.
+  var backupSet = await _listAllRelationshipsBackups();
+  var lockedBackups = backupSet.locked;
+  var backupPlaintexts = [];
+  for (var i = 0; i < lockedBackups.length; i++) {
+    var lb = lockedBackups[i];
+    var lbBytes = await _opfsReadBinary(lb.name);
+    var lbParsed;
+    try { lbParsed = _parseLockEnvelope(lbBytes); }
+    catch (pe) {
+      throw _lockError('LockEnvelopeError',
+        'Backup ' + lb.name + ' has a corrupt envelope: ' + ((pe && pe.message) || pe));
+    }
+    var lbPlain;
+    try {
+      lbPlain = new Uint8Array(await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: lbParsed.iv }, oldKey, lbParsed.ciphertext
+      ));
+    } catch (e2) {
+      throw _lockError('LockEnvelopeError',
+        'Backup ' + lb.name + ' could not be decrypted with the current password.');
+    }
+    backupPlaintexts.push({ name: lb.name, plain: lbPlain });
+  }
+
+  // Derive new key with a fresh salt + same iter count.
+  var newSalt = _lockRandomBytes(LOCK_SALT_LEN);
+  var newIters = LOCK_KDF_ITERS_V1;
+  var newKey = await _deriveLockKey(newPass, newSalt, newIters);
+
+  // Two-pass write: every new envelope lands at *.locked.new before
+  // any rename. A crash before the rename phase leaves old .locked
+  // files intact + .locked.new orphans that init cleans up. A crash
+  // mid-rename leaves mixed keys — known v1 limitation (Q1-A in plan).
+  var newLiveEnvelope = await _lockBlobBytes(newKey, livePlain, newSalt, newIters);
+  await _opfsWriteBinary(LOCKED_DB_NAME + '.new', newLiveEnvelope);
+  _parseLockEnvelope(await _opfsReadBinary(LOCKED_DB_NAME + '.new'));
+
+  var pendingRenames = [];
+  for (var j = 0; j < backupPlaintexts.length; j++) {
+    var bp = backupPlaintexts[j];
+    var env = await _lockBlobBytes(newKey, bp.plain, newSalt, newIters);
+    var newName = bp.name + '.new';
+    await _opfsWriteBinary(newName, env);
+    _parseLockEnvelope(await _opfsReadBinary(newName));
+    pendingRenames.push({ from: newName, to: bp.name });
+  }
+
+  // Rename phase.
+  await _opfsRename(LOCKED_DB_NAME + '.new', LOCKED_DB_NAME);
+  for (var k = 0; k < pendingRenames.length; k++) {
+    await _opfsRename(pendingRenames[k].from, pendingRenames[k].to);
+  }
+
+  lockKey = newKey;
+  lockSalt = newSalt;
+  lockIters = newIters;
+  trace('changePassphrase: complete (' + (1 + pendingRenames.length) + ' files re-keyed)');
+  return { ok: true, rekeyedCount: 1 + pendingRenames.length };
+};
+
+handlers.disableLock = async function (args) {
+  if (!lockEnabled) {
+    throw _lockError('LockStateError', 'disableLock called but lock is not enabled.');
+  }
+  var passphrase = args && args.passphrase;
+  if (!passphrase || typeof passphrase !== 'string') {
+    throw _lockError('LockStateError', 'disableLock requires a passphrase.');
+  }
+  if (!poolUtil) throw new Error('pool util unavailable');
+
+  // Verify passphrase against live .locked (gives us plaintext bytes
+  // for free, useful when relDb is currently null).
+  var liveEnvelope = await _opfsReadBinary(LOCKED_DB_NAME);
+  var liveParsed;
+  try { liveParsed = _parseLockEnvelope(liveEnvelope); }
+  catch (e) { throw _lockError('LockEnvelopeError', (e && e.message) || String(e)); }
+  var key = await _deriveLockKey(passphrase, liveParsed.salt, liveParsed.iters);
+  var livePlain;
+  try {
+    livePlain = new Uint8Array(await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: liveParsed.iv }, key, liveParsed.ciphertext
+    ));
+  } catch (e) {
+    throw _mapDecryptError(e, 'Wrong password.');
+  }
+
+  // Decrypt every .locked backup.
+  var backupSet = await _listAllRelationshipsBackups();
+  var lockedBackups = backupSet.locked;
+  var decryptedBackups = [];
+  for (var i = 0; i < lockedBackups.length; i++) {
+    var lb = lockedBackups[i];
+    var lbBytes = await _opfsReadBinary(lb.name);
+    var lbParsed;
+    try { lbParsed = _parseLockEnvelope(lbBytes); }
+    catch (pe) {
+      throw _lockError('LockEnvelopeError',
+        'Backup ' + lb.name + ' has a corrupt envelope: ' + ((pe && pe.message) || pe));
+    }
+    var lbPlain;
+    try {
+      lbPlain = new Uint8Array(await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: lbParsed.iv }, key, lbParsed.ciphertext
+      ));
+    } catch (e2) {
+      throw _lockError('LockEnvelopeError',
+        'Backup ' + lb.name + ' could not be decrypted.');
+    }
+    decryptedBackups.push({
+      lockedName: lb.name,
+      plainName: lb.name.slice(0, -LOCKED_SUFFIX.length),
+      plain: lbPlain
+    });
+  }
+
+  // Two-pass: write all plaintext .tmp targets first.
+  for (var j = 0; j < decryptedBackups.length; j++) {
+    var bp = decryptedBackups[j];
+    await _opfsWriteBinary(bp.plainName + TMP_SUFFIX, bp.plain);
+  }
+  // Rename phase + cleanup of .locked sources.
+  var root = await _opfsRoot();
+  for (var m = 0; m < decryptedBackups.length; m++) {
+    var bp2 = decryptedBackups[m];
+    await _opfsRename(bp2.plainName + TMP_SUFFIX, bp2.plainName);
+    try { await root.removeEntry(bp2.lockedName); } catch (e3) {}
+  }
+
+  // Live DB: import the freshly-decrypted plaintext if not already in
+  // the SAH pool, then remove the live .locked file.
+  var poolFiles = [];
+  try { poolFiles = poolUtil.getFileNames(); } catch (e) {}
+  if (poolFiles.indexOf(RELATIONSHIPS_DB_SLOT) === -1) {
+    poolUtil.importDb(RELATIONSHIPS_DB_SLOT, livePlain);
+  }
+  if (!relDb) {
+    relDb = new poolUtil.OpfsSAHPoolDb(RELATIONSHIPS_DB_SLOT);
+    bootstrapRelationshipsSchema(relDb);
+  }
+  try { await root.removeEntry(LOCKED_DB_NAME); } catch (e) {}
+
+  lockEnabled = false;
+  lockKey = null;
+  lockSalt = null;
+  lockIters = null;
+  trace('disableLock: complete (' + decryptedBackups.length + ' backups decrypted)');
+  return { ok: true, decryptedBackups: decryptedBackups.length };
 };
 
 // ----- fellows.db query handlers (sole local read source post-cutover) ------
