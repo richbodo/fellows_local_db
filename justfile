@@ -8,6 +8,15 @@ db_backup  := "app/fellows.db.backup.2026-04-08"
 port       := "8765"
 venv       := ".venv"
 pytest     := venv / "bin/pytest"
+# Pick the venv's Python when it's been materialised by `just setup`,
+# fall back to system `python3` (fresh clone, pre-setup). Evaluated at
+# parse time on every `just` invocation, so the first run after setup
+# automatically switches over — no shell re-source needed. Recipes
+# that historically used bare `python3` (serve-fg, build, db-*, etc.)
+# silently picked up system Python and missed venv-installed deps
+# like `cryptography` (added in PR #146 for SW signature verify); this
+# variable removes that footgun without forcing users to `source .venv/bin/activate`.
+python     := `if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python3; fi`
 host       := env_var_or_default("FELLOWS_HOST", "fellows.globaldonut.com")
 ssh_port   := env_var_or_default("FELLOWS_SSH_PORT", "52221")
 ssh_user   := env_var_or_default("FELLOWS_SSH_USER", "rsb")
@@ -34,7 +43,7 @@ setup:
     {{venv}}/bin/playwright install chromium
     ansible-galaxy collection install -r ansible/collections/requirements.yml -p ansible/collections
     if [ ! -f {{db}} ]; then
-        python3 build/restore_from_knack_scrapefile.py
+        {{venv}}/bin/python build/restore_from_knack_scrapefile.py
     fi
     echo "Setup complete."
 
@@ -79,7 +88,7 @@ serve:
 # Start dev server in foreground (Ctrl-C to stop).
 [group('dev')]
 serve-fg:
-    python3 app/server.py
+    {{python}} app/server.py
 
 # Stop the background dev server.
 [group('dev')]
@@ -129,18 +138,18 @@ serve-lan:
 # Canonical rebuild from Knack dump (auto-backup first).
 [group('db')]
 db-rebuild: data-backup
-    python3 build/restore_from_knack_scrapefile.py
+    {{python}} build/restore_from_knack_scrapefile.py
     @just db-stats
 
 # Bytewise-diff app/fellows.db against the Apr 8 reference backup.
 [group('db')]
 db-verify:
-    python3 build/diff_fellows_db.py {{db}} {{db_backup}}
+    {{python}} build/diff_fellows_db.py {{db}} {{db_backup}}
 
 # Bytewise-diff app/fellows.db against OTHER.
 [group('db')]
 db-diff other:
-    python3 build/diff_fellows_db.py {{db}} {{other}}
+    {{python}} build/diff_fellows_db.py {{db}} {{other}}
 
 # Row / email / image counts.
 [group('db')]
@@ -162,12 +171,12 @@ db-open:
 # Download missing profile images from Knack S3.
 [group('db')]
 images-fetch:
-    python3 build/fetch_missing_images.py
+    {{python}} build/fetch_missing_images.py
 
 # Print what images WOULD be fetched (--dry-run).
 [group('db')]
 images-fetch-dry:
-    python3 build/fetch_missing_images.py --dry-run
+    {{python}} build/fetch_missing_images.py --dry-run
 
 
 # ---- backup / restore ----------------------------------------------------
@@ -249,7 +258,7 @@ test-mobile-promote:
 # Assemble deploy/dist/ (runs build/build_pwa.py).
 [group('build')]
 build:
-    python3 build/build_pwa.py
+    {{python}} build/build_pwa.py
 
 # Generate the prod ECDSA P-256 signing keypair (one-time, per maintainer).
 # Prompts for a passphrase, writes ~/.fellows/signing-key.enc.pem, prints

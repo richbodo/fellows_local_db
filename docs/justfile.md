@@ -271,6 +271,16 @@ Export them or inline: `FELLOWS_BASE_URL=https://staging.example.com just smoke`
 - **Recipes are idempotent where the underlying script is.** `setup` checks
   for `.venv` before creating; `db-rebuild` always snapshots first;
   `serve` detects a running server and no-ops.
+- **Python invocations prefer the venv.** A top-of-file `python` variable
+  resolves to `.venv/bin/python` when present (post `just setup`) and
+  falls back to system `python3` otherwise. Every recipe that runs a
+  Python script (`serve-fg`, `build`, `db-rebuild`, `images-fetch`, …)
+  uses `{{python}}`, so dev-only deps like `cryptography` (added in
+  PR #146 for SW bundle-signing in dev) are picked up automatically
+  after setup — no `source .venv/bin/activate` needed. `run.sh` does
+  the same selection in shell. The `keygen` and `sign` recipes use
+  `{{venv}}/bin/python` explicitly because they *require* the venv
+  (`cryptography` is mandatory there, not optional).
 - **Production recipes are identified by the `prod-` prefix** so a careless
   tab-complete doesn't fire something destructive. The one exception is
   `smoke` (it's read-only and hits prod by default).
