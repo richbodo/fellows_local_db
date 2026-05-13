@@ -76,16 +76,45 @@ How the Shared DB is filled and refreshed — whether from a single export, a si
 
 ## Workspace shell
 
-<!-- TODO (step 3): attested picks — vanilla-js-spa, framework-spa, tui-textual, cli-subcommands, native-shell-tauri, native-shell-native. -->
+What the user sees and clicks — the surface that renders the data and accepts user input. The workspace shell pick is the highest-impact axis on user experience but does not trigger flavor-derived ACs in v0.1; universal ACs (AC-19 in particular) apply regardless of shell.
+
+### Picks
+
+- **`vanilla-js-spa`** — A hand-written JavaScript single-page application, no framework. Routing typically hash-based. Attested in [fellows_local_db](../Architecture.md).
+- **`framework-spa`** — A SPA built on React / Vue / Svelte / etc. No reference design in v0.1.
+- **`tui-textual`** — A terminal UI built with Textual / Bubbletea / a similar TUI library. PRT-inspired (not yet against this spec).
+- **`cli-subcommands`** — Bare CLI subcommands; the workspace is the shell prompt itself. Useful for scripting and headless use.
+- **`native-shell-tauri`** — Tauri (Rust-backed) wrapping a web SPA in a native shell. Bridges browser UI with native OS access.
+- **`native-shell-native`** — Fully native GUI (SwiftUI, Qt, GTK, etc.). No reference design in v0.1.
+
+No flavor-derived ACs are triggered by picks on this axis in v0.1. The universal AC-6 (always-reachable diagnostic escape) takes shell-specific *forms* — URL parameter for SPAs (`?gate=1`), CLI flag for terminal apps (`--reset`), key chord for native — but the contract itself is universal.
 
 ---
 
 ## Comms transport set
 
-<!-- TODO (step 3): attested picks — mailto-only, mailto-plus-signal, mailto-plus-matrix, shell-out-to-cli-clients. -->
+Which outreach mechanisms the workspace offers — what shows up in the user's "reach out" picker.
+
+### Picks
+
+- **`mailto-only`** — Just `mailto:` (plus `tel:` for phone). Attested in [fellows_local_db](../Architecture.md); Signal planned.
+- **`mailto-plus-signal`** — Adds Signal protocol (encrypted-in-protocol; passes AC-18).
+- **`mailto-plus-matrix`** — Adds Matrix (encrypted-room mode; passes AC-18).
+- **`shell-out-to-cli-clients`** — CLI / native PNAs that invoke `signal-cli`, IMAP libraries, or other transports via subprocess. PRT-inspired (not yet against this spec).
+
+No flavor-derived ACs are triggered by picks on this axis in v0.1. The universal comms ACs — AC-16 (user-driven selection), AC-18 (mechanism cannot read content), AC-19 (user-visible payload before send), AC-PRM-A (LLM-as-transport), AC-MCP-B (MCP comms stage; workspace launches) — apply regardless of pick.
 
 ---
 
 ## MCP-exposure
 
-<!-- TODO (step 3): attested picks — none, data-ops-only, data-ops+comms, full. Triggers AC-MCP-A and AC-MCP-B when non-none. -->
+Which canonical MCP servers (Data ops / Ingestion / Comms / Diagnostics) the PNA hosts — and therefore which capabilities an AI client can drive without modifying the PNA's core. The MCP-exposure pick determines whether the MCP-related universal ACs apply at all (they're universal, but vacuous when `mcp-exposure:none`).
+
+### Picks
+
+- **`none`** — No MCP servers exposed. The PNA is reachable only to humans. AC-MCP-A and AC-MCP-B are vacuous. Default for v0.1 fellows_local_db.
+- **`data-ops-only`** — The Data operations server is exposed; AI clients can read/write Shared and Private DB through it. AC-MCP-A applies (cloud-client consent for Private DB access). Planned next for fellows_local_db.
+- **`data-ops+comms`** — Both Data operations and Communications servers exposed. AC-MCP-A and AC-MCP-B both apply.
+- **`full`** — All four canonical servers exposed: Data ops, Ingestion, Communications, Diagnostics. Maximum AI-client reachability. All MCP ACs apply.
+
+No axis-specific flavor-derived ACs are introduced here. The MCP-related ACs are universal — AC-MCP-A and AC-MCP-B in [`PNA_Spec.md` § Universal architectural commitments](PNA_Spec.md#universal-architectural-commitments) — and apply whenever this pick is non-`none`.
