@@ -16,7 +16,7 @@
 > 1. **Vocabulary** — small, deliberate term set
 > 2. **Goals** — five user-facing needs we satisfy, with reasoning
 > 3. **Use cases** — attested classes of PNA (Directory Archive realized; Personal Relationship Manager draft)
-> 4. **Flavor axes** — eight axes a PNA varies along; each axis-pick may trigger flavor-derived ACs
+> 4. **Flavor axes** — seven axes a PNA varies along; each axis-pick may trigger flavor-derived ACs
 > 5. **Composition** — the two attested compositional models (`build-time-bundle`, `runtime-shell-pipeline`) and what they imply for the toolkit
 > 6. **Architectural commitments** — universal ACs (apply to every PNA) + flavor-derived ACs (tagged by axis-pick triggers)
 > 7. **Slot map** — three interfaces, five components
@@ -51,17 +51,17 @@ This doc — and the eventual spec — uses a small, deliberate set of terms.
 
 - **Reference design / thematic example.** A working, deployed PNA that demonstrates one valid combination of slot-fills against the spec. fellows_local_db is the first reference design — its load-bearing adjectives are *magic-link distributed PWA* (Distribution choice) + *static network DB archive* (Ingestion choice — the directory is mirrored once with opt-in updates, not linked to a live contact manager) + *single shared directory* (Source choice). New reference designs accumulate adjectives as their slot-fills land. AIs adapting a thematic example start from one of these and ask the user which slot-fills to keep, swap, or extend.
 
-- **Use case.** A user-facing class of PNA — "Directory Archive," "Personal Relationship Manager." Names a coherent shape from the user's perspective. v0.1 attests two; future versions will add more. Use cases typically have default axis picks but the axes remain independent — a hypothetical Directory Archive shipped as a Tauri shell is conceivable.
+- **Use case.** A user-facing class of PNA — "Directory Archive," "Personal Relationship Manager." Names what kind of app this is *from the user's perspective*. v0.1 attests two; future versions will add more. Use case is *not* one of the flavor axes (defined next); it's the parent category that a flavor instantiates. A use case typically suggests default axis picks (Directory Archives gravitate toward web-bundle distribution; PRMs toward never-distributed-single-user) but the axes remain independent — a hypothetical Directory Archive shipped as a Tauri shell + native SQLite is conceivable.
 
-- **Flavor axis.** A developer-side decomposition of a PNA's shape. Each axis is an independent dimension a builder picks along: composition model, distribution, storage substrate, ingestion shape, workspace shell, comms transport set, MCP-exposure, plus the use case label itself (which the spec treats as an axis for tagging consistency). Use case is what the user calls the app; flavor axes are what the builder picks.
+- **Flavor axis.** An independent developer-side dimension along which a PNA's shape varies. Each axis has a small enumerated set of possible values; the builder picks one value per axis when shaping a PNA. *Example:* the **distribution** axis has picks `web-bundle-with-magic-link` (fellows_local_db's pick), `never-distributed-single-user` (PRM's likely pick), `web-bundle-open`, `app-store-native`, `sideloaded-native` — the builder picks one. v0.1 names seven flavor axes: composition model, distribution, storage substrate, ingestion shape, workspace shell, comms transport set, MCP-exposure.
 
-- **MCP server.** A process exposing PNA capabilities as MCP tools (Anthropic's Model Context Protocol — JSON-RPC over stdio or socket). The spec defines four canonical MCP servers per PNA — Data operations (the Storage slot's read/write surface), Ingestion (drive imports + dedup + orphan preview), Communications (with workspace-mediated user consent), and Diagnostics (read-only access to the Debug contract). An AI client (Claude Desktop, Cursor, a local-Ollama-backed agent, etc.) consumes these servers to drive the PNA. MCP servers are the basis of the *runtime-MCP-RPC* composition pattern: a PNA exposing MCP becomes externally composable so an AI agent can wire multiple PNAs together at runtime even though each is its own bundle.
+- **Axis pick.** One value on one flavor axis. Written `axis:value` — for instance `storage:opfs-sqlite-wasm`, `distribution:web-bundle-with-magic-link`. The set of attested picks per axis is enumerated in `pna_toolkit/axes.md`.
 
-- **Axis pick.** One value on one flavor axis (e.g., `storage:opfs-sqlite-wasm`).
+- **Flavor.** The full constellation of axis picks for a specific PNA. fellows_local_db's flavor: `composition:build-time-bundle + distribution:web-bundle-with-magic-link + storage:opfs-sqlite-wasm + ingestion:single-source-static-mirror + workspace-shell:vanilla-js-spa + comms:mailto-only + mcp-exposure:none`. Two PNAs of the same use case can have different flavors (a TUI PRM vs. a Tauri-wrapped GUI PRM share the use case but differ on workspace shell and storage). A flavor + a use case together fully identify a PNA's shape.
 
-- **Flavor.** The full constellation of axis picks for a specific PNA. fellows_local_db's flavor: `composition:build-time-bundle + distribution:web-bundle-with-magic-link + storage:opfs-sqlite-wasm + ingestion:single-source-static-mirror + workspace-shell:vanilla-js-spa + comms:mailto-only + use-case:directory-archive`.
+- **Composition model.** One of the seven flavor axes, called out here because its picks shape several other axes. Two attested: `build-time-bundle` (browser PNAs; slots are JS modules; bundler is the seam) and `runtime-shell-pipeline` (CLI PNAs; slots are OS processes; shell pipeline is the seam). A third, `runtime-MCP-RPC`, applies *across* PNAs in the ecosystem composition pattern (see Composition section below). Browser distribution typically forces build-time-bundle; CLI distribution typically forces runtime-shell-pipeline.
 
-- **Composition model.** How slot implementations join. Two attested: `build-time-bundle` (browser PNAs; slots are JS modules; bundler is the seam) and `runtime-shell-pipeline` (CLI PNAs; slots are OS processes; shell pipeline is the seam). A foundational pick that constrains several other axis picks (browser distribution forces build-time; CLI distribution typically forces runtime).
+- **MCP server.** A process exposing PNA capabilities as MCP tools (Anthropic's Model Context Protocol — JSON-RPC over stdio or socket). The spec defines four canonical MCP servers per PNA — Data operations (the Storage slot's read/write surface), Ingestion (drive imports + dedup + orphan preview), Communications (with workspace-mediated user consent), and Diagnostics (read-only access to the Debug contract). An AI client (Claude Desktop, Cursor, a local-Ollama-backed agent, etc.) consumes these servers to drive the PNA. MCP servers are the basis of the `runtime-MCP-RPC` composition model: a PNA exposing MCP becomes externally composable so an AI agent can wire multiple PNAs together at runtime even though each is its own bundle.
 
 - **Universal AC vs flavor-derived AC.** Universal ACs derive from goals alone and apply to every PNA. Flavor-derived ACs are triggered by specific axis picks (e.g., `[storage:opfs-sqlite-wasm]`) and apply only when the flavor matches. The AC tables tag each entry.
 
@@ -153,7 +153,7 @@ This is the deep "why" behind defining slot contracts substrate-neutrally: when 
 
 ## Flavor axes
 
-Eight independent axes a PNA picks along. A PNA's *flavor* is the full constellation of picks. Each pick may trigger flavor-derived ACs (see Architectural commitments below for the trigger tags).
+Seven independent axes a PNA picks along. A PNA's *flavor* is the full constellation of picks. Each pick may trigger flavor-derived ACs (see Architectural commitments below for the trigger tags). Use case is *not* one of these axes — it's the parent category from which a flavor is instantiated; see the Use cases section above.
 
 | Axis | fellows_local_db pick | PRM (draft) pick | Other plausible picks |
 |---|---|---|---|
@@ -164,7 +164,6 @@ Eight independent axes a PNA picks along. A PNA's *flavor* is the full constella
 | Workspace shell | `vanilla-js-spa` | `tui-textual` or `cli-subcommands` | `framework-spa`, `native-shell-tauri`, `native-shell-native` |
 | Comms transport set | `mailto-only` (Signal planned) | `shell-out-to-cli-clients` | `mailto-plus-signal`, `mailto-plus-matrix` |
 | MCP-exposure | `none` (v1); `data-ops-only` planned | `full` (all four servers) | `none`, `data-ops-only`, `data-ops+comms`, `full` |
-| Use case | `directory-archive` | `personal-relationship-manager` | (extensible per use case attested) |
 
 Notes on axis independence:
 
