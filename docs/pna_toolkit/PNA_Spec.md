@@ -207,11 +207,13 @@ Cooperation across PNAs is not the same kind of thing as building one PNA. Build
 
 ## Universal architectural commitments
 
-Universal ACs are the architectural commitments derived from the goals alone — they apply to every PNA regardless of flavor. The wording here is substrate-neutral; specific *forms* (URL parameter vs CLI flag, OPFS vs native filesystem) are flavor-derived realizations of the universal contract.
+Universal ACs are the architectural commitments derived from the goals alone. They apply to every PNA regardless of flavor.
 
-Flavor-derived ACs are triggered by specific axis picks and apply only when the flavor matches. They live in [`axes.md`](axes.md), grouped under the axis-pick that triggers them.
+Recall that a *flavor* is the full set of axis picks a builder makes when shaping a PNA (see [§ Vocabulary](#vocabulary)). **Flavor-derived ACs** are architectural commitments triggered by specific axis picks — they apply only when the flavor includes those picks. Because they depend on specific axis-picks, they're catalogued near them in [`axes.md`](axes.md), grouped under the triggering pick.
 
-AC IDs are sparse on purpose. Gaps in the numbering below (no AC-2, AC-3, AC-5, AC-8, AC-12, AC-13, AC-14) signal flavor-derived ACs catalogued in `axes.md`. References across the spec use the same stable IDs whether the AC is universal or flavor-derived.
+Universal ACs (in this file) and flavor-derived ACs (in `axes.md`) share a single stable numbering sequence, so cross-references work regardless of which file the AC ended up in. The gaps you'll see in the table below (no AC-2, AC-3, AC-5, AC-8, AC-12, AC-13, AC-14) are the flavor-derived ACs catalogued in `axes.md`.
+
+The wording in the universal table below is substrate-neutral; specific *forms* (URL parameter vs CLI flag, OPFS vs native filesystem) are flavor-derived realizations of universal contracts.
 
 | ID | Commitment | Serves |
 |---|---|---|
@@ -238,6 +240,10 @@ AC IDs are sparse on purpose. Gaps in the numbering below (no AC-2, AC-3, AC-5, 
 
 The spec defines **five slots** (positions filled by code) and **three interfaces** (cross-cutting contracts spanning multiple slots). The Slot and Interface vocab terms are defined in [§ Vocabulary](#vocabulary).
 
+Each slot has a code-level contract. The typed contracts — JSON Schema for RPC + handshake, OpenAPI fragments for distribution, SQL DDL for schemas, TypeScript declaration for the Communications transport interface, JSON Schema for each canonical MCP server's tool surface — live in [`spec/contracts/`](spec/contracts/).
+
+Many Universal ACs (see [§ Universal architectural commitments](#universal-architectural-commitments)) cite specific slots in their wording. The slot map is the architectural skeleton; the ACs are the load-bearing constraints over it.
+
 ### Slots
 
 | Slot | Purpose |
@@ -255,10 +261,6 @@ The spec defines **five slots** (positions filled by code) and **three interface
 | **Shared schema** | Data contract for the Shared DB — tables, columns, optional FTS structure, optional per-record asset URL conventions. Produced by Ingestion; consumed by Storage and Workspace. |
 | **Private schema** | Data contract for the Private DB — `groups`, `group_members`, `record_tags`, `record_notes`, `settings`, opt-in `record_comms_history`. Owned by Storage; accessed by Workspace through Storage. Durability rules (survives app update + Clear App Cache; wiped only by Reset Everything) are part of the contract. |
 | **Debug contract** | Capabilities every slot must implement: build label substitution at build *and* serve time (AC-15), sanitized error capture (with sink endpoint when configured), diagnostic state-dump, bug-report flow, always-reachable escape hatch (AC-6), boot watchdog with named phase marks. |
-
-Each slot has a code-level contract. The typed contracts — JSON Schema for RPC + handshake, OpenAPI fragments for distribution, SQL DDL for schemas, TypeScript declaration for the Communications transport interface, JSON Schema for each canonical MCP server's tool surface — live in [`spec/contracts/`](spec/contracts/).
-
-Many Universal ACs (see [§ Universal architectural commitments](#universal-architectural-commitments)) cite specific slots in their wording. The slot map is the architectural skeleton; the ACs are the load-bearing constraints over it.
 
 ---
 
