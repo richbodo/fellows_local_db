@@ -362,15 +362,38 @@ async function _opfsRemoveEntry(name) {
   }
 }
 
+// Lists all backup files at OPFS root — both plaintext
+// `relationships.db.bak.<ISO>` AND encrypted siblings
+// `relationships.db.bak.<ISO>.locked`. Filename order is alphabetic,
+// which interleaves chronologically by ISO timestamp (plain sorts
+// before its .locked sibling for the same ts, but in steady state we
+// only ever have one of the two per timestamp). Excludes .locked.new
+// and .tmp orphans — those are residue from interrupted ops and are
+// init-cleaned, not user-visible.
+//
+// Used by _rotateRelationshipsBackups (newest-5-of-any-kind policy)
+// and the listRelationshipsBackups RPC.
 async function listRelationshipsBackups() {
   try {
     var root = await _opfsRoot();
     var out = [];
     for await (var entry of root.values()) {
-      if (entry.kind === 'file' && entry.name.indexOf(BACKUP_PREFIX) === 0) {
-        var f = await entry.getFile();
-        out.push({ name: entry.name, size: f.size, lastModified: f.lastModified });
-      }
+      if (entry.kind !== 'file') continue;
+      var nm = entry.name;
+      if (nm.indexOf(BACKUP_PREFIX) !== 0) continue;
+      if (nm.length > LOCKED_NEW_SUFFIX.length &&
+          nm.slice(-LOCKED_NEW_SUFFIX.length) === LOCKED_NEW_SUFFIX) continue;
+      if (nm.length > TMP_SUFFIX.length &&
+          nm.slice(-TMP_SUFFIX.length) === TMP_SUFFIX) continue;
+      var f = await entry.getFile();
+      var isLocked = nm.length > LOCKED_SUFFIX.length &&
+                     nm.slice(-LOCKED_SUFFIX.length) === LOCKED_SUFFIX;
+      out.push({
+        name: nm,
+        size: f.size,
+        lastModified: f.lastModified,
+        encrypted: isLocked
+      });
     }
     out.sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
     return out;
@@ -706,16 +729,7 @@ async function maybeBackupRelationshipsDb() {
   if (!bytes || !bytes.byteLength) {
     return { backedUp: false, reason: 'empty file' };
   }
-  var ts = new Date().toISOString().replace(/[:.]/g, '-');
-  var backupName = BACKUP_PREFIX + ts;
-  try { await _opfsWriteBinary(backupName, bytes); }
-  catch (e) {
-    trace('backup: write failed: ' + (e && e.message || e));
-    return { backedUp: false, reason: 'write failed' };
-  }
-  await _rotateRelationshipsBackups();
-  trace('backup: wrote ' + backupName + ' (' + bytes.byteLength + ' bytes)');
-  return { backedUp: true, name: backupName, size: bytes.byteLength };
+  return await _writeBackupBytesLockAware(bytes, 'backup');
 }
 
 async function snapshotRelationshipsDbToBackup() {
@@ -728,13 +742,55 @@ async function snapshotRelationshipsDbToBackup() {
   try { bytes = poolUtil.exportFile(RELATIONSHIPS_DB_SLOT); }
   catch (e) { return { backedUp: false, reason: 'export failed: ' + (e && e.message || e) }; }
   if (!bytes || !bytes.byteLength) return { backedUp: false, reason: 'empty file' };
+  return await _writeBackupBytesLockAware(bytes, 'snapshot');
+}
+
+// Common write-and-rotate logic shared by maybeBackupRelationshipsDb
+// (init/unlock-time, debounced) and snapshotRelationshipsDbToBackup
+// (pre-restore, forced). The lock-aware split is here so both call
+// sites pick up encryption automatically.
+//
+// Policy:
+//   - !lockEnabled                           → write plaintext .bak.<ISO>
+//   - lockEnabled && lockKey cached          → write .bak.<ISO>.locked
+//   - lockEnabled && lockKey NOT cached      → skip (can't encrypt and
+//                                                won't write plaintext;
+//                                                stale-unlocked state)
+async function _writeBackupBytesLockAware(plainBytes, opLabel) {
   var ts = new Date().toISOString().replace(/[:.]/g, '-');
-  var backupName = BACKUP_PREFIX + ts;
-  try { await _opfsWriteBinary(backupName, bytes); }
-  catch (e) { return { backedUp: false, reason: 'write failed: ' + (e && e.message || e) }; }
+  var plainName = BACKUP_PREFIX + ts;
+
+  if (lockEnabled) {
+    if (!lockKey) {
+      trace(opLabel + ': skipped (lock enabled, no cached key)');
+      return { backedUp: false, reason: 'lock-no-key' };
+    }
+    var envelope;
+    try {
+      envelope = await _lockBlobBytes(lockKey, plainBytes, lockSalt, lockIters);
+    } catch (e) {
+      trace(opLabel + ': encrypt failed: ' + ((e && e.message) || e));
+      return { backedUp: false, reason: 'encrypt failed' };
+    }
+    var lockedName = plainName + LOCKED_SUFFIX;
+    try { await _opfsWriteLockedFile(lockedName, envelope); }
+    catch (e) {
+      trace(opLabel + ': write failed: ' + ((e && e.message) || e));
+      return { backedUp: false, reason: 'write failed' };
+    }
+    await _rotateRelationshipsBackups();
+    trace(opLabel + ': wrote ' + lockedName + ' (encrypted, ' + envelope.byteLength + ' bytes)');
+    return { backedUp: true, name: lockedName, size: envelope.byteLength, encrypted: true };
+  }
+
+  try { await _opfsWriteBinary(plainName, plainBytes); }
+  catch (e) {
+    trace(opLabel + ': write failed: ' + ((e && e.message) || e));
+    return { backedUp: false, reason: 'write failed' };
+  }
   await _rotateRelationshipsBackups();
-  trace('snapshot: wrote ' + backupName + ' (' + bytes.byteLength + ' bytes)');
-  return { backedUp: true, name: backupName, size: bytes.byteLength };
+  trace(opLabel + ': wrote ' + plainName + ' (' + plainBytes.byteLength + ' bytes)');
+  return { backedUp: true, name: plainName, size: plainBytes.byteLength, encrypted: false };
 }
 
 // ===== fellows.db.meta.json (freshness sidecar) =============================
@@ -913,15 +969,16 @@ handlers.init = async function () {
   try { initialPoolFiles = poolUtil.getFileNames(); } catch (e) {}
   var plaintextInPool = initialPoolFiles.indexOf(RELATIONSHIPS_DB_SLOT) !== -1;
 
-  // Auto-backup: skip when locked (no key to encrypt with — Phase 3
-  // will lock-aware this) and also when stale-unlocked (a plaintext
-  // .bak.<ISO> would defeat the lock the user enabled). Leaves the
-  // backup chain untouched until lock() or disableLock() runs.
-  if (lockEnabled) {
-    trace('backup: skipped (lock enabled — Phase 3 will revisit)');
-  } else {
-    await maybeBackupRelationshipsDb();
-  }
+  // Auto-backup. maybeBackupRelationshipsDb itself is lock-aware (Phase 3):
+  //   - lock disabled                          → plaintext .bak.<ISO>
+  //   - lock enabled + cached key              → encrypted .bak.<ISO>.locked
+  //   - lock enabled + no cached key (init)    → skipped (no key yet);
+  //                                              the unlock RPC fires a
+  //                                              backup after caching the
+  //                                              key, so freshness is
+  //                                              preserved across the
+  //                                              locked/unlocked cycle.
+  await maybeBackupRelationshipsDb();
 
   var hasRelationshipsDb = false;
   if (lockEnabled && !plaintextInPool) {
@@ -1139,19 +1196,62 @@ handlers.listRelationshipsBackups = async function () {
   // Sequential — staging slot is shared across inspects.
   for (var i = 0; i < raw.length; i++) {
     var entry = raw[i];
+    var encrypted = !!entry.encrypted;
     try {
       var bytes = await _opfsReadBinary(entry.name);
+      // .locked: decrypt with cached lockKey if available, else mark
+      // encrypted-without-counts (Settings can still surface the entry
+      // — it just can't show row counts without unlocking first).
+      if (encrypted) {
+        if (!lockKey) {
+          out.push({
+            name: entry.name, size: entry.size, lastModified: entry.lastModified,
+            counts: null, encrypted: true,
+            invalid: false, error: null
+          });
+          continue;
+        }
+        var parsed;
+        try { parsed = _parseLockEnvelope(bytes); }
+        catch (pe) {
+          out.push({
+            name: entry.name, size: entry.size, lastModified: entry.lastModified,
+            counts: null, encrypted: true,
+            invalid: true, error: 'Corrupt lock envelope: ' + ((pe && pe.message) || pe)
+          });
+          continue;
+        }
+        var plainBuf;
+        try {
+          plainBuf = await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv: parsed.iv }, lockKey, parsed.ciphertext
+          );
+        } catch (de) {
+          // The cached key didn't decrypt this envelope — most likely a
+          // backup encrypted with a previous password that
+          // changePassphrase missed (shouldn't happen post-PR but defensive).
+          out.push({
+            name: entry.name, size: entry.size, lastModified: entry.lastModified,
+            counts: null, encrypted: true,
+            invalid: true, error: 'Could not decrypt with current password.'
+          });
+          continue;
+        }
+        bytes = new Uint8Array(plainBuf);
+      }
       var insp = await inspectBytes(bytes);
       out.push({
         name: entry.name, size: entry.size, lastModified: entry.lastModified,
         counts: insp.valid ? insp.counts : null,
+        encrypted: encrypted,
         invalid: !insp.valid,
         error: insp.valid ? null : insp.error
       });
     } catch (e) {
       out.push({
         name: entry.name, size: entry.size, lastModified: entry.lastModified,
-        counts: null, invalid: true, error: (e && e.message) || String(e)
+        counts: null, encrypted: encrypted,
+        invalid: true, error: (e && e.message) || String(e)
       });
     }
   }
@@ -1162,13 +1262,17 @@ handlers.restoreRelationshipsBackup = async function (args) {
   if (!poolUtil) throw new Error('pool util unavailable');
   _requireRelDb();
   var name = args && args.name;
-  // Phase 2: refuse .locked backups. Phase 3 will teach this handler to
-  // decrypt with the cached lockKey before importing.
-  if (name && name.length > LOCKED_SUFFIX.length &&
-      name.slice(-LOCKED_SUFFIX.length) === LOCKED_SUFFIX) {
+  var isLocked = name && name.length > LOCKED_SUFFIX.length &&
+                 name.slice(-LOCKED_SUFFIX.length) === LOCKED_SUFFIX;
+
+  // .locked restore needs the cached key. Stale-unlocked state (locked
+  // enabled, key not cached) gets LockStateError; page-side UI surfaces
+  // "unlock first to restore an encrypted backup."
+  if (isLocked && !lockKey) {
     throw _lockError('LockStateError',
-      'Restoring encrypted backups is not supported yet (Phase 3 follow-up).');
+      'Cannot restore an encrypted backup without an unlocked session. Unlock first.');
   }
+
   var backups = await listRelationshipsBackups();
   var match = null;
   for (var i = 0; i < backups.length; i++) {
@@ -1176,6 +1280,23 @@ handlers.restoreRelationshipsBackup = async function (args) {
   }
   if (!match) throw new Error('Backup not found: ' + name);
   var bytes = await _opfsReadBinary(name);
+
+  if (isLocked) {
+    var parsed;
+    try { parsed = _parseLockEnvelope(bytes); }
+    catch (pe) { throw _lockError('LockEnvelopeError', (pe && pe.message) || String(pe)); }
+    var plainBuf;
+    try {
+      plainBuf = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: parsed.iv }, lockKey, parsed.ciphertext
+      );
+    } catch (de) {
+      throw _lockError('LockEnvelopeError',
+        'Backup ' + name + ' could not be decrypted with the current password.');
+    }
+    bytes = new Uint8Array(plainBuf);
+  }
+
   return await handlers.importRelationshipsBytes({ bytes: bytes });
 };
 
@@ -1243,9 +1364,12 @@ handlers.enableLock = async function (args) {
     throw new Error('enableLock: live DB is empty');
   }
 
-  // Encrypt every plaintext backup before the live DB — oldest first
-  // (per the plan). Each envelope gets a fresh IV; salt/iters identical
-  // across all files written here.
+  // Encrypt EVERY plaintext backup before touching the live DB —
+  // oldest first. Even if a prior crash left >BACKUP_KEEP plaintext
+  // files lying around, we encrypt them all: the user's promise was
+  // "encrypt my data," not "encrypt some of my data." Rotation prunes
+  // afterwards. Each envelope gets a fresh IV; salt/iters are identical
+  // across all files so a single unlock derives one key for all.
   var backupSet = await _listAllRelationshipsBackups();
   var plaintextBackups = backupSet.plain;
   for (var i = 0; i < plaintextBackups.length; i++) {
@@ -1269,6 +1393,13 @@ handlers.enableLock = async function (args) {
   }
   try { poolUtil.unlink(RELATIONSHIPS_DB_SLOT); }
   catch (e) { trace('enableLock: poolUtil.unlink failed: ' + ((e && e.message) || e)); }
+
+  // Now prune to BACKUP_KEEP newest. Done AFTER encryption so we never
+  // delete a plaintext backup before its .locked sibling is committed
+  // — if rotation runs in the middle of encryption and the user is at
+  // >5 files, we'd lose data. Encrypt-everything-then-rotate keeps the
+  // invariant "encryption never loses a backup."
+  await _rotateRelationshipsBackups();
 
   // Per the plan, enableLock leaves the worker in the locked state.
   // The page reloads → unlock card → user re-enters the password they
@@ -1326,6 +1457,16 @@ handlers.unlock = async function (args) {
   lockSalt = parsed.salt;
   lockIters = parsed.iters;
   trace('unlock: success');
+
+  // Now that we have a key, run the same debounced auto-backup pass
+  // that init runs for unlocked-no-lock sessions. Without this, a
+  // locked-then-unlocked session would never get fresh backups —
+  // they'd freeze at whatever the user had when they enabled lock.
+  // Non-fatal: failures get logged via bootTrace and the unlock still
+  // succeeds.
+  try { await maybeBackupRelationshipsDb(); }
+  catch (e) { trace('unlock: post-unlock backup failed: ' + ((e && e.message) || e)); }
+
   return {
     ok: true,
     counts: {
