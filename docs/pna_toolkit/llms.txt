@@ -1,0 +1,23 @@
+# PNA Spec
+
+> Universal specification for personal network applications (PNAs). Defines vocabulary, goals, use cases, axes, composition models, architectural commitments, and slot contracts. Targeted at AI agents and humans building PNAs together. Currently lives inside the `fellows_local_db` repo as a working draft; will move to the `personal_network_toolkit` repo when that exists.
+
+## Spec
+
+- [PNA Spec](PNA_Spec.md) — universal spec; Spec-Version 0.1 (draft)
+- [Axes](axes.md) — the seven Axes a PNA varies along, attested picks per Axis, and the flavor-derived ACs each pick triggers
+- [Use cases](use_cases.md) — attested classes of PNA (Directory Archive, Personal Relationship Manager [draft], Multi-PNA ecosystem [target v0.2+])
+- [CHANGELOG](CHANGELOG.md) — spec version history
+
+## Typed contracts
+
+- [spec/contracts/](spec/contracts/) — JSON Schema, OpenAPI fragments, SQL DDL, and TypeScript declarations for the load-bearing interfaces (worker handshake, distribution auth, comms transport, shared/private DB schemas, four canonical MCP servers)
+
+## Reference designs
+
+- [fellows_local_db Architecture](../Architecture.md) — first reference design; Directory Archive use case; magic-link distributed PWA + static network DB archive + single shared directory
+
+## Working drafts
+
+- [`_pna_triage.md`](../_pna_triage.md) — working triage doc; authoritative until content migrates into the files above and the triage is retired
+- [`_pna_spec_format_landscape.md`](../_pna_spec_format_landscape.md) — format/structure rationale; retired alongside the triage

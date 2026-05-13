@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pna-spec.example/v0.1/mcp-comms.schema.json",
+  "title": "MCP server — Communications",
+  "description": "Tool surface for the canonical Communications MCP server. Stages outreach for workspace-mediated user confirmation (does NOT directly launch transports). Placeholder — to be drafted in step 5. See ../../../_pna_triage.md § Preamble (four canonical MCP servers), AC-MCP-B (comms tools stage; workspace launches), AC-18 (transport eligibility), AC-19 (user-visible payload before send).",
+  "type": "object"
+}

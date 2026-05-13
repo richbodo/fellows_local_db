@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pna-spec.example/v0.1/worker-init-handshake.schema.json",
+  "title": "Worker init handshake",
+  "description": "Storage slot: the blob returned by the dedicated worker's first 'init' RPC. Placeholder — to be drafted in step 5. See ../../../_pna_triage.md § Part 1 — Storage § Worker init contract.",
+  "type": "object"
+}

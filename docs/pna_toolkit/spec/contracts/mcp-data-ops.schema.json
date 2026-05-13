@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pna-spec.example/v0.1/mcp-data-ops.schema.json",
+  "title": "MCP server — Data operations",
+  "description": "Tool surface for the canonical Data operations MCP server. Exposes Storage slot's read/write API for Shared + Private DB to AI clients. Placeholder — to be drafted in step 5. See ../../../_pna_triage.md § Preamble (four canonical MCP servers) and AC-MCP-A (cloud client consent for Private DB access).",
+  "type": "object"
+}

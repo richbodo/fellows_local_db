@@ -909,7 +909,7 @@ The partition pass (this reorg) is now done. Working from the destination-tagged
 
 1. **Stub `docs/pna_toolkit/`** with skeleton files:
    - `PNA_Spec.md` with version header (`Spec-Version: 0.1`) and section skeleton (Vocabulary, Goals, Use cases, Axes, Composition, Universal ACs, Slot map, Scope/versioning)
-   - `axes.md` with one H2 per axis (Composition model, Distribution, Storage substrate, Ingestion shape, Workspace shell, Comms transport set, Use case)
+   - `axes.md` with one H2 per Axis (Composition model, Distribution, Storage substrate, Ingestion shape, Workspace shell, Comms transport set, MCP-exposure)
    - `use_cases.md` with one H2 per attested use case
    - `spec/contracts/` directory with placeholder files for each typed contract (worker-init-handshake.schema.json, worker-rpc-protocol.schema.json, distribution-auth.openapi.yaml, client-errors-payload.schema.json, transport-interface.d.ts, shared-db.schema.sql, private-db.schema.sql, plus MCP server tool surfaces: mcp-data-ops.schema.json, mcp-ingestion.schema.json, mcp-comms.schema.json, mcp-diagnostics.schema.json)
    - `CHANGELOG.md` with the v0.1 entry

@@ -1,0 +1,13 @@
+# Distribution slot's auth/install/error endpoints.
+# Placeholder — to be drafted in step 5.
+# See ../../../_pna_triage.md § Part 1 — Distribution § Auth contract.
+
+openapi: 3.1.0
+info:
+  title: PNA Distribution Auth API
+  version: 0.1.0
+  description: |
+    Placeholder. The full surface covers /api/auth/status, /api/send-unlock,
+    /api/verify-token, /api/logout, and /api/client-errors per
+    _pna_triage.md § Distribution and § Debug contract.
+paths: {}
