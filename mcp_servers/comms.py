@@ -9,7 +9,7 @@ Ollama agents):
                 list (URL-length issues, missing recipients, etc.).
 - get_staged    Echo a previously staged composition by id (in-memory).
 
-Architectural posture (AC-MCP-B — see ../docs/pna_toolkit/PNA_Spec.md § Universal architectural commitments):
+Architectural posture (AC-MCP-B — see https://github.com/richbodo/personal_network_toolkit/blob/main/PNA_Spec.md § Universal architectural commitments):
 **The MCP server proposes; the workspace disposes.** This server never
 launches a transport itself. It returns a mailto: URL that the user's
 mail client (acting as the workspace for this outreach) opens with the

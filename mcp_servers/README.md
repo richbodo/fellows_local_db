@@ -21,15 +21,15 @@ are scoped here so you know what's coming.
 
 | Server | Status | Spec contract | What it automates |
 |---|---|---|---|
-| **Shared Data Ops** (`shared_data_ops.py`) | v1 — ships now | [`mcp-shared-data-ops.schema.json`](../docs/pna_toolkit/spec/contracts/mcp-shared-data-ops.schema.json) | Read-only access to the **Shared DB** (`fellows.db`). Search, filter, look up fellows, read directory stats. |
-| **Private Data Ops** (`private_data_ops.py`) | v1 — ships now | [`mcp-private-data-ops.schema.json`](../docs/pna_toolkit/spec/contracts/mcp-private-data-ops.schema.json) | Read-only access to **groups** in the **Private DB** (`relationships.db`). List groups, find by name, fetch members joined to `fellows.db`. Tags/notes deferred — users aren't writing those at scale yet. |
-| **Communications** (`comms.py`) | v1 — ships now | [`mcp-comms.schema.json`](../docs/pna_toolkit/spec/contracts/mcp-comms.schema.json) | Stage outreach as a `mailto:` URL. **Server stages; mail client launches.** No transports fired from inside the MCP process (per AC-MCP-B). |
-| **Ingestion** | not yet built | [`mcp-ingestion.schema.json`](../docs/pna_toolkit/spec/contracts/mcp-ingestion.schema.json) *(placeholder)* | Drive source imports, dedup wizard, orphan preview (per AC-10). |
-| **Diagnostics** | not yet built | [`mcp-diagnostics.schema.json`](../docs/pna_toolkit/spec/contracts/mcp-diagnostics.schema.json) *(placeholder)* | Read-only access to build label, versions, boot timings, sanitized error events. Useful for AI-assisted bug triage. |
+| **Shared Data Ops** (`shared_data_ops.py`) | v1 — ships now | [`mcp-shared-data-ops.schema.json`](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/contracts/mcp-shared-data-ops.schema.json) | Read-only access to the **Shared DB** (`fellows.db`). Search, filter, look up fellows, read directory stats. |
+| **Private Data Ops** (`private_data_ops.py`) | v1 — ships now | [`mcp-private-data-ops.schema.json`](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/contracts/mcp-private-data-ops.schema.json) | Read-only access to **groups** in the **Private DB** (`relationships.db`). List groups, find by name, fetch members joined to `fellows.db`. Tags/notes deferred — users aren't writing those at scale yet. |
+| **Communications** (`comms.py`) | v1 — ships now | [`mcp-comms.schema.json`](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/contracts/mcp-comms.schema.json) | Stage outreach as a `mailto:` URL. **Server stages; mail client launches.** No transports fired from inside the MCP process (per AC-MCP-B). |
+| **Ingestion** | not yet built | [`mcp-ingestion.schema.json`](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/contracts/mcp-ingestion.schema.json) *(placeholder)* | Drive source imports, dedup wizard, orphan preview (per AC-10). |
+| **Diagnostics** | not yet built | [`mcp-diagnostics.schema.json`](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/contracts/mcp-diagnostics.schema.json) *(placeholder)* | Read-only access to build label, versions, boot timings, sanitized error events. Useful for AI-assisted bug triage. |
 
-The architectural definitions live in [`docs/pna_toolkit/PNA_Spec.md`](../docs/pna_toolkit/PNA_Spec.md)
+The architectural definitions live in [`PNA_Spec.md`](https://github.com/richbodo/personal_network_toolkit/blob/main/PNA_Spec.md)
 (Vocabulary § MCP server, Vision, AC-MCP-A, AC-MCP-B), and typed
-contracts for each server are in [`docs/pna_toolkit/spec/contracts/`](../docs/pna_toolkit/spec/contracts/).
+contracts for each server are in [`spec/contracts/`](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/contracts/).
 
 ## Privacy boundary in one paragraph
 
@@ -159,7 +159,7 @@ piping into a protocol test harness, not for interactive use.
 ## Cloud LLM caveat (read this if your MCP client is hosted)
 
 The five canonical servers' privacy posture is set by **architectural
-commitment AC-MCP-A** (see [`docs/pna_toolkit/PNA_Spec.md` § Universal architectural commitments](../docs/pna_toolkit/PNA_Spec.md#universal-architectural-commitments)):
+commitment AC-MCP-A** (see [`PNA_Spec.md` § Universal architectural commitments](https://github.com/richbodo/personal_network_toolkit/blob/main/PNA_Spec.md#universal-architectural-commitments)):
 MCP tools that return *Private DB* rows must require explicit per-call
 consent when the consuming AI client is a cloud-hosted LLM (Claude API
 direct, OpenAI API, etc.). Local clients (Claude Desktop running a
@@ -189,7 +189,7 @@ upstream model. Today's position is: **document the boundary,
 trust the user's choice**. Wire the servers up to a local model
 (Claude Desktop + a locally-served model, Cursor + Ollama) for the
 green-path posture. The typed contracts that pin each tool's input
-/ output surface now live in [`docs/pna_toolkit/spec/contracts/mcp-*.schema.json`](../docs/pna_toolkit/spec/contracts/);
+/ output surface now live in [`spec/contracts/mcp-*.schema.json`](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/contracts/);
 the consent-UX layer on top of them remains future work.
 
 ## Per-server configuration
