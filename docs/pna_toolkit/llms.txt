@@ -11,7 +11,7 @@
 
 ## Typed contracts
 
-- [spec/contracts/](spec/contracts/) — JSON Schema, OpenAPI fragments, SQL DDL, and TypeScript declarations for the load-bearing interfaces (worker handshake, distribution auth, comms transport, shared/private DB schemas, four canonical MCP servers)
+- [spec/contracts/](spec/contracts/) — JSON Schema, OpenAPI fragments, SQL DDL, and TypeScript declarations for the load-bearing interfaces (worker handshake, distribution auth, comms transport, shared/private DB schemas, five canonical MCP servers — Shared Data Ops, Private Data Ops, Ingestion, Communications, Diagnostics)
 
 ## Reference designs
 

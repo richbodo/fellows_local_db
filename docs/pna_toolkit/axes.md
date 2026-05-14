@@ -108,13 +108,16 @@ No flavor-derived ACs are triggered by picks on this axis in v0.1. The universal
 
 ## MCP-exposure
 
-Which canonical MCP servers (Data ops / Ingestion / Comms / Diagnostics) the PNA hosts — and therefore which capabilities an AI client can drive without modifying the PNA's core. The MCP-exposure pick determines whether the MCP-related universal ACs apply at all (they're universal, but vacuous when `mcp-exposure:none`).
+Which canonical MCP servers (Shared Data Ops / Private Data Ops / Ingestion / Comms / Diagnostics) the PNA hosts — and therefore which capabilities an AI client can drive without modifying the PNA's core. The MCP-exposure pick determines whether the MCP-related universal ACs apply at all (they're universal, but each is vacuous when no server that triggers it is exposed).
+
+The picks are structured as a progression: each adds one canonical server to the previous pick's set. The Shared / Private split is the load-bearing distinction — `shared-only` is cloud-safe (no Private DB rows flow); anything that includes `private` brings AC-MCP-A into force.
 
 ### Picks
 
-- **`none`** — No MCP servers exposed. The PNA is reachable only to humans. AC-MCP-A and AC-MCP-B are vacuous. Default for v0.1 fellows_local_db.
-- **`data-ops-only`** — The Data operations server is exposed; AI clients can read/write Shared and Private DB through it. AC-MCP-A applies (cloud-client consent for Private DB access). Planned next for fellows_local_db.
-- **`data-ops+comms`** — Both Data operations and Communications servers exposed. AC-MCP-A and AC-MCP-B both apply.
-- **`full`** — All four canonical servers exposed: Data ops, Ingestion, Communications, Diagnostics. Maximum AI-client reachability. All MCP ACs apply.
+- **`none`** — No MCP servers exposed. The PNA is reachable only to humans. AC-MCP-A and AC-MCP-B are vacuous.
+- **`shared-only`** — Only Shared Data Ops exposed. AI clients can read mirrored contact data but never see Private DB rows. AC-MCP-A is vacuous (no Private DB tools); AC-MCP-B is vacuous (no Comms). The cloud-safe pick — wire a hosted LLM to this without crossing the privacy boundary.
+- **`shared+private`** — Shared Data Ops + Private Data Ops; no outreach surface. AC-MCP-A applies; AC-MCP-B is vacuous. The "ask about my data but don't email anyone" posture.
+- **`shared+private+comms`** — Adds Communications. AC-MCP-A and AC-MCP-B both apply. **Attested in [fellows_local_db](../Architecture.md)** — its `mcp_servers/` ships shared-data-ops, private-data-ops, and comms as stdio servers wired into Claude Desktop.
+- **`full`** — All five canonical servers exposed: Shared Data Ops, Private Data Ops, Ingestion, Communications, Diagnostics. Maximum AI-client reachability. All MCP ACs apply.
 
-No axis-specific flavor-derived ACs are introduced here. The MCP-related ACs are universal — AC-MCP-A and AC-MCP-B in [`PNA_Spec.md` § Universal architectural commitments](PNA_Spec.md#universal-architectural-commitments) — and apply whenever this pick is non-`none`.
+No axis-specific flavor-derived ACs are introduced here. The MCP-related ACs are universal — AC-MCP-A and AC-MCP-B in [`PNA_Spec.md` § Universal architectural commitments](PNA_Spec.md#universal-architectural-commitments) — and apply whenever the pick includes a server that triggers them.

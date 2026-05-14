@@ -1,0 +1,243 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pna-spec.example/v0.1/mcp-shared-data-ops.schema.json",
+  "title": "MCP server — Shared Data Ops",
+  "description": "Tool surface for the canonical Shared Data Ops MCP server. Exposes read-only access to the Shared DB so an AI client (Claude Desktop, Cursor, a local-Ollama-backed agent) can answer 'what's in this directory' questions and look up specific records. Conforming implementations expose exactly these four tools with the input/output shapes defined below. Does NOT return Private DB rows; AC-MCP-A (cloud-client consent) is not triggered by this server. See PNA_Spec.md § Vision (canonical MCP servers) and AC-17 (mirrored data is sourced).",
+  "type": "object",
+  "required": ["server_name", "transport", "tools"],
+  "properties": {
+    "server_name": {
+      "const": "shared-data-ops",
+      "description": "Stable identifier the AI client wires up in its MCP config."
+    },
+    "transport": {
+      "const": "stdio",
+      "description": "JSON-RPC frames over stdin/stdout, per the MCP transport contract for desktop AI clients."
+    },
+    "tools": {
+      "type": "object",
+      "required": ["search_fellows", "get_fellow", "list_fellows", "get_directory_stats"],
+      "additionalProperties": false,
+      "properties": {
+        "search_fellows": { "$ref": "#/$defs/tool_search_fellows" },
+        "get_fellow": { "$ref": "#/$defs/tool_get_fellow" },
+        "list_fellows": { "$ref": "#/$defs/tool_list_fellows" },
+        "get_directory_stats": { "$ref": "#/$defs/tool_get_directory_stats" }
+      }
+    }
+  },
+  "$defs": {
+    "tool_search_fellows": {
+      "type": "object",
+      "description": "Full-text search across the Shared DB's name, bio, cohort, fellow_type, search_tags, and key_links fields. Backed by FTS5; accepts natural keywords plus FTS5 operators (e.g. 'climate OR healthcare', 'auck*').",
+      "required": ["input", "output"],
+      "properties": {
+        "input": {
+          "type": "object",
+          "required": ["query"],
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Search keywords. Trimmed; empty returns an empty result set."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25,
+              "description": "Maximum results to return. Capped at 100."
+            }
+          }
+        },
+        "output": {
+          "type": "object",
+          "required": ["query", "total", "results"],
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Echo of the trimmed query that ran."
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Total matching rows before limit was applied."
+            },
+            "results": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/SummaryFellow" }
+            }
+          }
+        }
+      }
+    },
+    "tool_get_fellow": {
+      "type": "object",
+      "description": "Fetch one fellow's full record by slug or record_id. Returns null when no such record exists.",
+      "required": ["input", "output"],
+      "properties": {
+        "input": {
+          "type": "object",
+          "required": ["id"],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Either a `slug` (e.g. 'jane-doe') or a `record_id`."
+            }
+          }
+        },
+        "output": {
+          "oneOf": [
+            { "$ref": "#/$defs/Fellow" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "tool_list_fellows": {
+      "type": "object",
+      "description": "List fellows by structured filters. Filters AND together. Use `search_fellows` for full-text. The `region` filter substring-matches against `global_regions_currently_based_in` (which is comma-separated, so a fellow in 'Asia Pacific, Americas' matches either value).",
+      "required": ["input", "output"],
+      "properties": {
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fellow_type": {
+              "type": ["string", "null"],
+              "description": "Exact match on `fellow_type`. Omit or null for no filter."
+            },
+            "cohort": {
+              "type": ["string", "null"],
+              "description": "Exact match on `cohort`."
+            },
+            "region": {
+              "type": ["string", "null"],
+              "description": "Substring match against `global_regions_currently_based_in`."
+            },
+            "primary_citizenship": {
+              "type": ["string", "null"],
+              "description": "Exact match on `primary_citizenship`."
+            },
+            "has_contact_email": {
+              "type": ["boolean", "null"],
+              "description": "true — fellows with a non-empty contact email; false — fellows without; null/omitted — no filter."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        },
+        "output": {
+          "type": "object",
+          "required": ["total", "offset", "limit", "filters_applied", "results"],
+          "additionalProperties": false,
+          "properties": {
+            "total": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Total matching the filters, pre-limit."
+            },
+            "offset": { "type": "integer", "minimum": 0 },
+            "limit":  { "type": "integer", "minimum": 1 },
+            "filters_applied": {
+              "type": "object",
+              "description": "Echo of the filters that were non-null/non-omitted on the request. Keys are a subset of the input filter names; values are the supplied values.",
+              "additionalProperties": true
+            },
+            "results": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/SummaryFellow" }
+            }
+          }
+        }
+      }
+    },
+    "tool_get_directory_stats": {
+      "type": "object",
+      "description": "Aggregate statistics for 'what's in this directory' questions. Same shape as the dev server's GET /api/stats response.",
+      "required": ["input", "output"],
+      "properties": {
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        },
+        "output": {
+          "type": "object",
+          "required": ["total", "by_fellow_type", "by_cohort", "by_region", "field_completeness"],
+          "additionalProperties": false,
+          "properties": {
+            "total": { "type": "integer", "minimum": 0 },
+            "by_fellow_type":     { "type": "array", "items": { "$ref": "#/$defs/LabelCount" } },
+            "by_cohort":          { "type": "array", "items": { "$ref": "#/$defs/LabelCount" } },
+            "by_region":          { "type": "array", "items": { "$ref": "#/$defs/LabelCount" } },
+            "field_completeness": { "type": "array", "items": { "$ref": "#/$defs/LabelCount" } }
+          }
+        }
+      }
+    },
+    "SummaryFellow": {
+      "type": "object",
+      "description": "Trimmed row shape used by list/search responses. Keeps responses small enough that a 50-row list stays well under typical LLM context-window pressure while still carrying enough context for the model to decide whether to drill in via get_fellow.",
+      "required": ["record_id", "slug", "name", "has_contact_email"],
+      "additionalProperties": false,
+      "properties": {
+        "record_id":          { "type": "string" },
+        "slug":               { "type": "string" },
+        "name":               { "type": ["string", "null"] },
+        "fellow_type":        { "type": ["string", "null"] },
+        "cohort":             { "type": ["string", "null"] },
+        "currently_based_in": { "type": ["string", "null"] },
+        "bio_tagline":        { "type": ["string", "null"] },
+        "has_contact_email":  { "type": "boolean" }
+      }
+    },
+    "Fellow": {
+      "type": "object",
+      "description": "Full fellow record. The 17 explicit columns are listed below; additional fields from the source row's `extra_json` (ventures, career_highlights, mobile_number, skills_to_give, …) are merged at the top level by the Storage layer and are permitted via additionalProperties. The exact set of merged keys depends on the imported source data.",
+      "required": ["record_id", "slug"],
+      "additionalProperties": true,
+      "properties": {
+        "record_id":                          { "type": "string" },
+        "slug":                               { "type": "string" },
+        "name":                               { "type": ["string", "null"] },
+        "bio_tagline":                        { "type": ["string", "null"] },
+        "fellow_type":                        { "type": ["string", "null"] },
+        "cohort":                             { "type": ["string", "null"] },
+        "contact_email":                      { "type": ["string", "null"] },
+        "key_links":                          { "type": ["string", "null"] },
+        "key_links_urls":                     { "type": ["string", "null"], "description": "JSON-encoded array of URLs, stored as TEXT in SQLite." },
+        "image_url":                          { "type": ["string", "null"] },
+        "currently_based_in":                 { "type": ["string", "null"] },
+        "search_tags":                        { "type": ["string", "null"] },
+        "fellow_status":                      { "type": ["string", "null"] },
+        "gender_pronouns":                    { "type": ["string", "null"] },
+        "ethnicity":                          { "type": ["string", "null"] },
+        "primary_citizenship":                { "type": ["string", "null"] },
+        "global_regions_currently_based_in":  { "type": ["string", "null"] }
+      }
+    },
+    "LabelCount": {
+      "type": "object",
+      "required": ["label", "count"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string" },
+        "count": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

@@ -57,9 +57,17 @@ The spec uses a small, deliberate set of terms. Worked examples below cite `fell
 
 - **Axis pick.** One value on one Axis. Written `axis:value` — for instance `storage:opfs-sqlite-wasm`, `distribution:web-bundle-with-magic-link`. The set of attested picks per Axis is enumerated in [`axes.md`](axes.md).
 
-- **Flavor.** The full constellation of axis picks for a specific PNA. fellows_local_db's flavor: `distribution:web-bundle-with-magic-link + storage:opfs-sqlite-wasm + ingestion:single-source-static-mirror + workspace-shell:vanilla-js-spa + comms:mailto-only + mcp-exposure:none`. Two PNAs of the same use case can have different flavors (a TUI PRM vs. a Tauri-wrapped GUI PRM share the use case but differ on workspace shell and storage). A flavor + a use case together fully identify a PNA's shape.
+- **Flavor.** The full constellation of axis picks for a specific PNA. fellows_local_db's flavor: `distribution:web-bundle-with-magic-link + storage:opfs-sqlite-wasm + ingestion:single-source-static-mirror + workspace-shell:vanilla-js-spa + comms:mailto-only + mcp-exposure:shared+private+comms`. Two PNAs of the same use case can have different flavors (a TUI PRM vs. a Tauri-wrapped GUI PRM share the use case but differ on workspace shell and storage). A flavor + a use case together fully identify a PNA's shape.
 
-- **MCP server.** A process exposing PNA capabilities as MCP tools (Anthropic's Model Context Protocol — JSON-RPC over stdio or socket). The spec defines four canonical MCP servers per PNA — Data operations (the Storage slot's read/write surface), Ingestion (drive imports + dedup + orphan preview), Communications (with workspace-mediated user consent), and Diagnostics (read-only access to the Debug contract). An AI client (Claude Desktop, Cursor, a local-Ollama-backed agent, etc.) consumes these servers to drive the PNA. MCP servers are how multiple PNAs cooperate at runtime: a PNA exposing MCP becomes externally reachable so an AI client can wire multiple PNAs together on the user's device even though each is its own bundle.
+- **MCP server.** A process exposing PNA capabilities as MCP tools (Anthropic's Model Context Protocol — JSON-RPC over stdio or socket). The spec defines five canonical MCP servers per PNA, structured around the Shared / Private privacy boundary so an AI client can be wired to one without the other:
+
+  - **Shared Data Ops** — read access over the Shared DB (mirrored contact data; AC-MCP-A is not triggered, because no Private DB rows flow through this surface).
+  - **Private Data Ops** — read access over the Private DB (user-owned relationship data; AC-MCP-A applies — cloud clients require per-call consent).
+  - **Ingestion** — drives imports, dedup, orphan preview.
+  - **Communications** — stages outreach for workspace-mediated user confirmation (AC-MCP-B; the MCP server proposes, the workspace disposes).
+  - **Diagnostics** — read-only access to the Debug contract.
+
+  Splitting Data ops along the Shared / Private boundary mirrors the storage split (AC-1) at the MCP surface: the privacy posture of each tool call is determined by which server it lands on, not by an in-server gate. An AI client (Claude Desktop, Cursor, a local-Ollama-backed agent, etc.) consumes these servers to drive the PNA. v1 reference implementations expose read-only surfaces only; future spec versions may add write-side tools (Private DB CRUD, Comms message-send confirmation) as separate contracts. MCP servers are how multiple PNAs cooperate at runtime: a PNA exposing MCP becomes externally reachable so an AI client can wire multiple PNAs together on the user's device even though each is its own bundle.
 
 - **Universal AC vs flavor-derived AC.** Universal ACs derive from goals alone and apply to every PNA. Flavor-derived ACs are triggered by specific axis picks (e.g., `[storage:opfs-sqlite-wasm]`) and apply only when the flavor matches. [§ Universal architectural commitments](#universal-architectural-commitments) lists the universal set; flavor-derived ACs live in [`axes.md`](axes.md), grouped under the axis-pick that triggers them.
 
@@ -99,14 +107,15 @@ One longer-arc target is an ecosystem of cooperating PNAs on a single user's dev
 
 The PRM acts as the meta-workspace: relationship data layered on top of a deduplicated read-only meta-view composed from the other apps' shared stores (Bob's cell from Google + work history from a fellowship directory + email from a Facebook export, resolved into one coherent contact view; the PRM's private overlay attached through stable IDs). The user can also work in clean per-app workspaces when they want a single context. Composing the meta-view requires per-source connectors, dedup with conflict resolution, and disciplined provenance — work for later spec versions. The eventual *ecosystem reference design* is the goal; v0.1 ships one PNA (fellows_local_db) and the spec it conforms to, along with MCP servers, with the architectural seams sized to let the ecosystem grow into place.
 
-PNAs that participate in such an ecosystem need to be reachable not just to humans but to AI agents acting on the user's behalf. The spec therefore defines MCP server interfaces at four canonical connection points:
+PNAs that participate in such an ecosystem need to be reachable not just to humans but to AI agents acting on the user's behalf. The spec therefore defines MCP server interfaces at five canonical connection points, split along the Shared / Private privacy boundary so an AI client can be wired to one without the other:
 
-- A **Data operations server** — the Storage slot's read/write surface.
+- A **Shared Data Ops server** — read access over the Shared DB (mirrored contact data).
+- A **Private Data Ops server** — read access over the Private DB (user-owned relationship data); AC-MCP-A applies.
 - An **Ingestion server** — drives imports, dedup, orphan preview.
-- A **Communications server** — with workspace-mediated user consent per AC-19.
+- A **Communications server** — stages outreach for workspace-mediated user confirmation per AC-19 (the workspace launches the transport, not the MCP server — AC-MCP-B).
 - A **Diagnostics server** — read-only access to the Debug contract.
 
-An AI client (Claude Desktop, Cursor, a local-Ollama-backed agent, or any MCP-capable runtime) can drive a PNA through these servers without modifying its core; canonical implementations will ship with the personal_network_toolkit. Cloud AI clients (anything that sends Private DB rows off-device) require explicit per-call consent — see AC-MCP-A in [§ Universal architectural commitments](#universal-architectural-commitments).
+An AI client (Claude Desktop, Cursor, a local-Ollama-backed agent, or any MCP-capable runtime) can drive a PNA through these servers without modifying its core; canonical implementations will ship with the personal_network_toolkit. Cloud AI clients (anything that sends Private DB rows off-device) require explicit per-call consent — see AC-MCP-A in [§ Universal architectural commitments](#universal-architectural-commitments). v1 surfaces are read-only on both data-ops servers; tool-side write contracts (Private DB CRUD, message-send confirmation on Comms) land in a later spec version.
 
 
 ### Goal 1 — Private data sovereignty
@@ -162,7 +171,7 @@ v0.1 names six independent Axes a PNA picks along. A PNA's *flavor* is the full 
 - **Ingestion shape** — how the Shared DB is filled and refreshed. Picks: `single-source-static-mirror`, `multi-source-merge-with-dedup`, `single-source-live-pull`, `federated-read` (deferred).
 - **Workspace shell** — what the user sees and clicks. Picks: `vanilla-js-spa`, `framework-spa`, `tui-textual`, `cli-subcommands`, `native-shell-tauri`, `native-shell-native`.
 - **Comms transport set** — which outreach mechanisms the workspace offers. Picks: `mailto-only`, `mailto-plus-signal`, `mailto-plus-matrix`, `shell-out-to-cli-clients`.
-- **MCP-exposure** — which canonical MCP servers (Data ops / Ingestion / Comms / Diagnostics) the PNA hosts. Picks: `none`, `data-ops-only`, `data-ops+comms`, `full`.
+- **MCP-exposure** — which canonical MCP servers (Shared Data Ops / Private Data Ops / Ingestion / Comms / Diagnostics) the PNA hosts. Picks: `none`, `shared-only`, `shared+private`, `shared+private+comms`, `full`.
 
 Notes on Axis independence:
 
@@ -199,7 +208,7 @@ The target environment shapes several axis picks (Distribution, Storage substrat
 
 At runtime, multiple PNAs on a user's device can cooperate through their canonical MCP servers. An AI client (Claude Desktop, Cursor, a custom agent) connects to each PNA's exposed MCP servers and orchestrates across them — pull a contact from a Directory Archive, attach a private note from a PRM, schedule a follow-up in a Calendar app. The AI client is the runtime composer here, just as the AI coding agent was the build-time composer above.
 
-This is the longer-arc *ecosystem reference design* described in [§ Goals § Vision](#vision). v0.1 doesn't yet have multiple cooperating PNAs to demonstrate the pattern, but the architectural seams that enable it — the four canonical MCP server interfaces, AC-MCP-A's cloud-client consent rule, AC-MCP-B's workspace-mediated outreach — are part of v0.1.
+This is the longer-arc *ecosystem reference design* described in [§ Goals § Vision](#vision). v0.1 doesn't yet have multiple cooperating PNAs to demonstrate the pattern, but the architectural seams that enable it — the five canonical MCP server interfaces (Shared Data Ops, Private Data Ops, Ingestion, Communications, Diagnostics), AC-MCP-A's cloud-client consent rule, AC-MCP-B's workspace-mediated outreach — are part of v0.1.
 
 Cooperation across PNAs is not the same kind of thing as building one PNA. Building is design-time + AI coding agent + writing code that fills slots. Cooperation is runtime + AI client + invoking MCP tools across already-built PNAs. The two kinds of composition are separate concerns.
 
@@ -231,7 +240,7 @@ The wording in the universal table below is substrate-neutral; specific *forms* 
 | AC-19 | **User-visible payload before send.** Any workspace-initiated communication shows the user the full payload — recipients, body, and any data merged in from the Shared or Private store — before the transport is launched. The user can edit or cancel. This applies even to bulk operations (e.g., "email this group of 50"). Workspaces never auto-blast data through transports without the user seeing the composition. | Goal 3 |
 | AC-PRM-A | **LLM calls over user data are transports.** Any LLM invocation over Private or Shared data is treated as a transport: local-model is default; cloud-model is opt-in per call; the user sees the prompt and merged data before send. Extension of AC-18 and AC-19 to a new transport class. | Goal 3 |
 | AC-PRM-D | **Re-ingestion is always user-initiated.** No background polling of source services (Google Contacts, IMAP, organizational directories). Strengthens AC-10: the user always knows when fresh data is being fetched. | Goal 1, Goal 4 |
-| AC-MCP-A | **Cloud AI clients require per-call consent for Private DB access via MCP.** Any MCP tool that returns Private DB rows must either refuse, or require explicit per-session opt-in, when the consuming MCP client is not locally hosted. Local clients (Claude Desktop with a local model, Cursor + local Ollama) are the default green path; cloud clients (Claude API direct, OpenAI API, etc.) are opt-in per call. Concrete realization of AC-PRM-A at the MCP surface. | Goal 1, Goal 3 |
+| AC-MCP-A | **Cloud AI clients require per-call consent for Private DB access via MCP.** Any MCP tool that returns Private DB rows must either refuse, or require explicit per-session opt-in, when the consuming MCP client is not locally hosted. Local clients (Claude Desktop with a local model, Cursor + local Ollama) are the default green path; cloud clients (Claude API direct, OpenAI API, etc.) are opt-in per call. In practice this targets the Private Data Ops server; the Shared / Private split at the MCP surface lets a user wire a cloud client to Shared Data Ops alone without triggering this AC. Concrete realization of AC-PRM-A at the MCP surface. | Goal 1, Goal 3 |
 | AC-MCP-B | **MCP Communications tools stage outreach; the workspace launches.** A Communications MCP tool call must not directly fire a transport. It returns a staging ID with the full payload preview; the user confirms via the workspace before the transport launches. The MCP server proposes; the workspace disposes. AC-19 is enforced at the workspace boundary and cannot be bypassed by AI clients. | Goal 3 |
 
 ---
