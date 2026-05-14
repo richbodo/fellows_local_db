@@ -57,7 +57,7 @@ The github tree is clean of PII.  Still, treat the contents of your app as confi
 
 ## Architecture
 
-See `[docs/Architecture.md](docs/Architecture.md)` for system design, data flow, and schema.
+See `[docs/Architecture.md](docs/Architecture.md)` for fellows_local_db's specialization-and-conformance layer (axis picks, schema, HTTP routes, debug placeholders). The universal PNA architecture it cross-links into lives in `[docs/pna_toolkit/](docs/pna_toolkit/)` — `PNA_Spec.md`, `axes.md`, `use_cases.md`, and the typed contracts under `spec/contracts/`.
 
 The origin of this app was [prt](https://github.com/richbodo/prt) and the next version of prt that will be able to build apps like this is [personal_network_toolkit](https://github.com/richbodo/personal_network_toolkit)
 
