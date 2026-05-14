@@ -2,33 +2,33 @@
 
 This document is fellows_local_db's **specialization-and-conformance layer**: it declares which version of the PNA Spec this repo conforms to, names the axis picks fellows has made, and catalogs the fellows-specific values that the spec leaves to each implementation (HTTP routes, schema, worker constants, debug placeholders, distribution tunables).
 
-Universal PNA architecture — vocabulary, goals, the two-store ownership split, the worker-owned-OPFS rule, the version-handshake contract, the universal ACs — lives in [`./pna_toolkit/PNA_Spec.md`](./pna_toolkit/PNA_Spec.md). This file does not restate it.
+Universal PNA architecture — vocabulary, goals, the two-store ownership split, the worker-owned-OPFS rule, the version-handshake contract, the universal ACs — lives in the [PNA Spec](https://github.com/richbodo/personal_network_toolkit/blob/main/PNA_Spec.md) at the [personal_network_toolkit](https://github.com/richbodo/personal_network_toolkit) repo. This file does not restate it.
 
 ---
 
 ## Spec conformance
 
-**Spec-Version:** [0.1 (draft)](./pna_toolkit/CHANGELOG.md)
-**Use case:** [Directory Archive](./pna_toolkit/use_cases.md#directory-archive)
+**Spec-Version:** [0.1 (draft)](https://github.com/richbodo/personal_network_toolkit/blob/main/CHANGELOG.md)
+**Use case:** [Directory Archive](https://github.com/richbodo/personal_network_toolkit/blob/main/use_cases.md#directory-archive)
 
 ### Flavor — fellows's six axis picks
 
 | Axis | Pick | Why |
 |---|---|---|
-| [Distribution](./pna_toolkit/axes.md#distribution) | `web-bundle-with-magic-link` | EHF-allowlisted PWA; multiple fellows install from one origin behind a magic-link gate. |
-| [Storage substrate](./pna_toolkit/axes.md#storage-substrate) | `opfs-sqlite-wasm` | Browser-only deployment; sqlite3.wasm in a dedicated worker with OPFS-SAH-Pool VFS. |
-| [Ingestion shape](./pna_toolkit/axes.md#ingestion-shape) | `single-source-static-mirror` | One source (Knack JSON dump); no dedup; opt-in user-driven re-import. |
-| [Workspace shell](./pna_toolkit/axes.md#workspace-shell) | `vanilla-js-spa` | Single-IIFE `app/static/app.js`; hash routing; no framework, no bundler. |
-| [Comms transport set](./pna_toolkit/axes.md#comms-transport-set) | `mailto-only` | `mailto:` (+ `tel:`) today; Signal planned. |
-| [MCP-exposure](./pna_toolkit/axes.md#mcp-exposure) | `shared+private+comms` | `mcp_servers/` ships three stdio MCP servers for Claude Desktop and similar clients. |
+| [Distribution](https://github.com/richbodo/personal_network_toolkit/blob/main/axes.md#distribution) | `web-bundle-with-magic-link` | EHF-allowlisted PWA; multiple fellows install from one origin behind a magic-link gate. |
+| [Storage substrate](https://github.com/richbodo/personal_network_toolkit/blob/main/axes.md#storage-substrate) | `opfs-sqlite-wasm` | Browser-only deployment; sqlite3.wasm in a dedicated worker with OPFS-SAH-Pool VFS. |
+| [Ingestion shape](https://github.com/richbodo/personal_network_toolkit/blob/main/axes.md#ingestion-shape) | `single-source-static-mirror` | One source (Knack JSON dump); no dedup; opt-in user-driven re-import. |
+| [Workspace shell](https://github.com/richbodo/personal_network_toolkit/blob/main/axes.md#workspace-shell) | `vanilla-js-spa` | Single-IIFE `app/static/app.js`; hash routing; no framework, no bundler. |
+| [Comms transport set](https://github.com/richbodo/personal_network_toolkit/blob/main/axes.md#comms-transport-set) | `mailto-only` | `mailto:` (+ `tel:`) today; Signal planned. |
+| [MCP-exposure](https://github.com/richbodo/personal_network_toolkit/blob/main/axes.md#mcp-exposure) | `shared+private+comms` | `mcp_servers/` ships three stdio MCP servers for Claude Desktop and similar clients. |
 
 ### Universal ACs
 
-All universal ACs from [`./pna_toolkit/PNA_Spec.md#universal-architectural-commitments`](./pna_toolkit/PNA_Spec.md#universal-architectural-commitments) apply — that's the definition of *universal*. The list (AC-1, AC-4, AC-6, AC-7, AC-9, AC-10, AC-11, AC-15, AC-16, AC-17, AC-18, AC-19, AC-PRM-A, AC-PRM-D, AC-MCP-A, AC-MCP-B) is the canonical reference.
+All universal ACs from [PNA Spec § Universal architectural commitments](https://github.com/richbodo/personal_network_toolkit/blob/main/PNA_Spec.md#universal-architectural-commitments) apply — that's the definition of *universal*. The list (AC-1, AC-4, AC-6, AC-7, AC-9, AC-10, AC-11, AC-15, AC-16, AC-17, AC-18, AC-19, AC-PRM-A, AC-PRM-D, AC-MCP-A, AC-MCP-B) is the canonical reference.
 
 ### Flavor-derived ACs triggered by fellows's picks
 
-Cross-referenced to [`./pna_toolkit/axes.md`](./pna_toolkit/axes.md):
+Cross-referenced to the toolkit's [axes.md](https://github.com/richbodo/personal_network_toolkit/blob/main/axes.md):
 
 | AC | Triggered by | Fellows's realization |
 |---|---|---|
@@ -47,7 +47,7 @@ Cross-referenced to [`./pna_toolkit/axes.md`](./pna_toolkit/axes.md):
 
 ### ACs that are vacuous in fellows's flavor
 
-For a reader auditing conformance: AC-PRM-B and AC-PRM-C don't apply (fellows is single-source and uses OPFS, not native SQLite). Picks fellows did not take on other axes (e.g. `ingestion:multi-source-merge-with-dedup`, `storage:native-sqlite-via-filesystem`) carry their own flavor-derived ACs in [`./pna_toolkit/axes.md`](./pna_toolkit/axes.md); none fire here.
+For a reader auditing conformance: AC-PRM-B and AC-PRM-C don't apply (fellows is single-source and uses OPFS, not native SQLite). Picks fellows did not take on other axes (e.g. `ingestion:multi-source-merge-with-dedup`, `storage:native-sqlite-via-filesystem`) carry their own flavor-derived ACs in [axes.md](https://github.com/richbodo/personal_network_toolkit/blob/main/axes.md); none fire here.
 
 ---
 
@@ -66,7 +66,7 @@ Read-only fellow data (served from `app/fellows.db`):
 | GET | `/images/<slug>.{jpg,png}` | Profile image; alphanumeric-fuzzy filename fallback. |
 | GET | `/` and other static paths | App shell from `app/static/`. |
 
-Production-only routes (added by `deploy/server.py`; conform to the Distribution slot's auth contract in [`./pna_toolkit/spec/contracts/distribution-auth.openapi.yaml`](./pna_toolkit/spec/contracts/distribution-auth.openapi.yaml)):
+Production-only routes (added by `deploy/server.py`; conform to the Distribution slot's auth contract [`distribution-auth.openapi.yaml`](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/contracts/distribution-auth.openapi.yaml)):
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -74,7 +74,7 @@ Production-only routes (added by `deploy/server.py`; conform to the Distribution
 | POST | `/api/send-unlock` | Anti-enum, always 200; rate-limited per email-hash. |
 | POST | `/api/verify-token` | 200 + Set-Cookie on success; 401 with distinct `expired`/`invalid` strings otherwise. |
 | POST | `/api/logout` | Idempotent, always 200. |
-| POST | `/api/client-errors` | Unauthenticated client-error sink. Always 204. Sanitized + rate-limited; logs `event=client_error` to journald. Dev stub mirrors prod for round-trip. Schema in [`./pna_toolkit/spec/contracts/client-errors-payload.schema.json`](./pna_toolkit/spec/contracts/client-errors-payload.schema.json); privacy boundary detailed in [`./email_gate.md` § Client error reporting](./email_gate.md#client-error-reporting). |
+| POST | `/api/client-errors` | Unauthenticated client-error sink. Always 204. Sanitized + rate-limited; logs `event=client_error` to journald. Dev stub mirrors prod for round-trip. Schema: [`client-errors-payload.schema.json`](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/contracts/client-errors-payload.schema.json); privacy boundary detailed in [`./email_gate.md` § Client error reporting](./email_gate.md#client-error-reporting). |
 | GET | `/healthz` | Liveness probe. |
 | GET | `/build-meta.json` | Build label + git SHA + `fellows_db_sha` for SW drift-check. |
 | GET | `/api/debug/diagnostics` | Operator diagnostics blob. |
@@ -102,7 +102,7 @@ HSTS is added by Caddy (`ansible/roles/caddy/templates/Caddyfile.j2`), not the P
 
 ## Shared DB schema (`fellows.db`)
 
-Specializes the [Shared schema](./pna_toolkit/spec/contracts/shared-db.schema.sql) — record_id / slug / name / extra_json plus app-defined display columns. fellows renames the spec's `records` table to `fellows` (spec-allowed; see the contract's naming note).
+Specializes the [Shared schema](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/contracts/shared-db.schema.sql) — record_id / slug / name / extra_json plus app-defined display columns. fellows renames the spec's `records` table to `fellows` (spec-allowed; see the contract's naming note).
 
 ```sql
 CREATE TABLE fellows (
@@ -144,7 +144,7 @@ CREATE VIRTUAL TABLE fellows_fts USING fts5(
 
 The 17 explicit columns are the fellows-specific app-defined display columns. Source-specific fields not in this list are serialized into `extra_json`, which `row_to_fellow()` in `app/fellows_queries.py` merges back into the API response. FTS5 also creates internal shadow tables (`fellows_fts_data`, `fellows_fts_idx`, etc.); those are SQLite-managed and not altered by hand.
 
-**Per-record asset URL convention:** `/images/<slug>.{jpg,png}` — alphanumeric-only fuzzy fallback in the server handler covers slug-vs-filename drift. Asset URLs are slug-keyed, immutable, and cacheable; they're separate from the database. See SH-3 in the [Shared schema contract](./pna_toolkit/spec/contracts/shared-db.schema.sql).
+**Per-record asset URL convention:** `/images/<slug>.{jpg,png}` — alphanumeric-only fuzzy fallback in the server handler covers slug-vs-filename drift. Asset URLs are slug-keyed, immutable, and cacheable; they're separate from the database. See SH-3 in the [Shared schema contract](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/contracts/shared-db.schema.sql).
 
 **Build pipeline:** `build/restore_from_knack_scrapefile.py` reads the Knack API detail dump (with a fallback read of the list-view `raw_dump` for a few fields), deduplicates slugs, detects grey-diamond placeholder avatars by MD5, and writes both tables. See [`./data_provenance.md`](./data_provenance.md) for the full data pipeline.
 
@@ -152,7 +152,7 @@ The 17 explicit columns are the fellows-specific app-defined display columns. So
 
 ## Private DB schema (`relationships.db`)
 
-Specializes the [Private schema](./pna_toolkit/spec/contracts/private-db.schema.sql). Created on first access by `app.relationships.open_db()`; the same DDL is mirrored in the PWA via `RELATIONSHIPS_SCHEMA_SQL` in `app/static/app.js` so the OPFS-backed sqlite3.wasm path matches the dev server.
+Specializes the [Private schema](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/contracts/private-db.schema.sql). Created on first access by `app.relationships.open_db()`; the same DDL is mirrored in the PWA via `RELATIONSHIPS_SCHEMA_SQL` in `app/static/app.js` so the OPFS-backed sqlite3.wasm path matches the dev server.
 
 ```sql
 CREATE TABLE groups (
@@ -207,13 +207,13 @@ CREATE TABLE settings (
 
 ## Worker constants (fellows's version-handshake values)
 
-The spec's [AC-4 versioned cross-boundary handshake](./pna_toolkit/PNA_Spec.md#universal-architectural-commitments) is parameterized; fellows pins:
+The spec's [AC-4 versioned cross-boundary handshake](https://github.com/richbodo/personal_network_toolkit/blob/main/PNA_Spec.md#universal-architectural-commitments) is parameterized; fellows pins:
 
 - `WORKER_RPC_VERSION = 2` (bumped only when the request/response shape of any RPC changes; gates mutating ops on mismatch)
 - `RELATIONSHIPS_SCHEMA_VERSION = 1` (mirrors `PRAGMA user_version`; bumped only on schema migrations)
 - Worker file path: `app/static/vendor/sqlite-worker.js`
 
-The page reads both during the worker `init` handshake (the handshake shape itself is specified in [`./pna_toolkit/spec/contracts/worker-init-handshake.schema.json`](./pna_toolkit/spec/contracts/worker-init-handshake.schema.json) and the RPC envelope in [`./pna_toolkit/spec/contracts/worker-rpc-protocol.schema.json`](./pna_toolkit/spec/contracts/worker-rpc-protocol.schema.json)) and refuses mutating RPCs on mismatch. Reads still work, so the user can browse cached data while the SW's "New version available — Reload" banner does its job. Build label is **not** consulted for this gate.
+The page reads both during the worker `init` handshake (the handshake shape itself is specified in [`worker-init-handshake.schema.json`](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/contracts/worker-init-handshake.schema.json) and the RPC envelope in [`worker-rpc-protocol.schema.json`](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/contracts/worker-rpc-protocol.schema.json)) and refuses mutating RPCs on mismatch. Reads still work, so the user can browse cached data while the SW's "New version available — Reload" banner does its job. Build label is **not** consulted for this gate.
 
 ---
 
@@ -276,7 +276,7 @@ Specializes the Debug contract. fellows pins:
 
 ## Distribution flavor specifics (magic-link PWA)
 
-Specializes the Distribution slot. Auth-endpoint shapes are in [`./pna_toolkit/spec/contracts/distribution-auth.openapi.yaml`](./pna_toolkit/spec/contracts/distribution-auth.openapi.yaml); the behavioral decision tree and the operator runbook live in the annexes.
+Specializes the Distribution slot. Auth-endpoint shapes are in [`distribution-auth.openapi.yaml`](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/contracts/distribution-auth.openapi.yaml); the behavioral decision tree and the operator runbook live in the annexes.
 
 Fellows pins:
 
@@ -298,13 +298,13 @@ Fellows pins:
 
 ## MCP servers
 
-Fellows attests `mcp-exposure:shared+private+comms`. Three stdio MCP servers ship today, all read-only or stage-only (no writes, no transports fired from inside the MCP process); their typed tool surfaces live in `./pna_toolkit/spec/contracts/`.
+Fellows attests `mcp-exposure:shared+private+comms`. Three stdio MCP servers ship today, all read-only or stage-only (no writes, no transports fired from inside the MCP process); their typed tool surfaces live in `https://github.com/richbodo/personal_network_toolkit/blob/main/spec/contracts/`.
 
 | Server | Source | Contract | Tools |
 |---|---|---|---|
-| Shared Data Ops | `mcp_servers/shared_data_ops.py` | [`mcp-shared-data-ops.schema.json`](./pna_toolkit/spec/contracts/mcp-shared-data-ops.schema.json) | `search_fellows`, `get_fellow`, `list_fellows`, `get_directory_stats` |
-| Private Data Ops | `mcp_servers/private_data_ops.py` | [`mcp-private-data-ops.schema.json`](./pna_toolkit/spec/contracts/mcp-private-data-ops.schema.json) | `list_groups`, `find_group`, `get_group_members` |
-| Communications | `mcp_servers/comms.py` | [`mcp-comms.schema.json`](./pna_toolkit/spec/contracts/mcp-comms.schema.json) | `stage_email`, `get_staged` |
+| Shared Data Ops | `mcp_servers/shared_data_ops.py` | [`mcp-shared-data-ops.schema.json`](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/contracts/mcp-shared-data-ops.schema.json) | `search_fellows`, `get_fellow`, `list_fellows`, `get_directory_stats` |
+| Private Data Ops | `mcp_servers/private_data_ops.py` | [`mcp-private-data-ops.schema.json`](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/contracts/mcp-private-data-ops.schema.json) | `list_groups`, `find_group`, `get_group_members` |
+| Communications | `mcp_servers/comms.py` | [`mcp-comms.schema.json`](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/contracts/mcp-comms.schema.json) | `stage_email`, `get_staged` |
 
 Per AC-MCP-B, `stage_email` returns a `mailto:` URL with a staging ID; the user's mail client launches the transport when the user clicks. The server never invokes a transport. Per AC-MCP-A, the Private Data Ops server returns Private DB rows and so requires per-call consent when wired to a cloud AI client; see [`../mcp_servers/README.md`](../mcp_servers/README.md) § Cloud LLM caveat.
 
@@ -341,11 +341,3 @@ Architecture-adjacent docs that specialize one part of the spec or operator surf
 ## Roadmap
 
 See [`../ROADMAP.md`](../ROADMAP.md).
-
-<!--
-Cross-link migration: when the PNA toolkit `git mv`s out of this repo to its
-own `personal_network_toolkit` repository (planned for the eventual toolkit
-lift), do a single replace in this file: `./pna_toolkit/` → the toolkit
-repo's URL prefix. All other relative links (`./email_gate.md`, etc.) stay
-fellows-repo-local.
--->

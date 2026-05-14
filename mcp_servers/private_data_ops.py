@@ -18,7 +18,7 @@ Transport: stdio (the MCP standard for desktop AI clients).
 DB access: read-only SQLite URI (mode=ro) on both relationships.db and the
 ATTACHed fellows.db. Even a buggy tool can't mutate either store.
 
-Privacy posture (AC-MCP-A — see ../docs/pna_toolkit/PNA_Spec.md § Universal architectural commitments):
+Privacy posture (AC-MCP-A — see https://github.com/richbodo/personal_network_toolkit/blob/main/PNA_Spec.md § Universal architectural commitments):
 This server *does* return Private DB rows (your groups and the fellows in them).
 Per AC-MCP-A, cloud AI clients should require explicit per-call consent before
 seeing this data. v1 does not implement that gate — it documents the boundary

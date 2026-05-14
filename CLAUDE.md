@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Read README.md for project setup, API docs, and test commands. Read docs/Architecture.md for fellows_local_db's specialization and PNA-spec conformance (axis picks, fellows-specific schema, HTTP routes, debug placeholders); docs/Architecture.md cross-links into docs/pna_toolkit/ for the universal PNA architecture.
+Read README.md for project setup, API docs, and test commands. Read docs/Architecture.md for fellows_local_db's specialization and PNA-spec conformance (axis picks, fellows-specific schema, HTTP routes, debug placeholders); docs/Architecture.md cross-links into the [personal_network_toolkit](https://github.com/richbodo/personal_network_toolkit) repo for the universal PNA architecture.
 
 ## Constraints
 

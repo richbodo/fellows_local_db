@@ -1,6 +1,6 @@
 # EHF Fellows Local Directory (fellows_local_db)
 
-> Local-only web app for browsing Edmund Hillary Fellowship fellow profiles, organizing fellows into saved groups, and exporting sub-directories. Single-user; never-SaaS; distributed as a magic-link-gated PWA to EHF fellows. Reference design for [PNA Spec v0.1](docs/pna_toolkit/PNA_Spec.md), Directory Archive use case.
+> Local-only web app for browsing Edmund Hillary Fellowship fellow profiles, organizing fellows into saved groups, and exporting sub-directories. Single-user; never-SaaS; distributed as a magic-link-gated PWA to EHF fellows. Reference design for [PNA Spec v0.1](https://github.com/richbodo/personal_network_toolkit/blob/main/PNA_Spec.md), Directory Archive use case.
 >
 > Two SQLite databases on the device — `fellows.db` (read-only mirrored contact data) and `relationships.db` (read-write user-authored groups / notes / settings). All user-authored data lives in OPFS, owned by a single dedicated worker. Production exists only to (1) gate downloads via magic-link and (2) ship fresh bundle/DB bytes on opt-in update.
 
@@ -17,13 +17,13 @@
 
 ## Universal PNA architecture
 
-The universal Personal Network Application (PNA) specification this app conforms to. Will lift to a separate `personal_network_toolkit` repository when that exists; until then it lives in-repo.
+The universal Personal Network Application (PNA) specification this app conforms to lives in its own repo: [personal_network_toolkit](https://github.com/richbodo/personal_network_toolkit).
 
-- [docs/pna_toolkit/llms.txt](docs/pna_toolkit/llms.txt) — discovery file for the PNA spec.
-- [docs/pna_toolkit/PNA_Spec.md](docs/pna_toolkit/PNA_Spec.md) — universal spec (vocabulary, goals, use cases, axes, composition, universal ACs, slot map with sub-contract numbering).
-- [docs/pna_toolkit/axes.md](docs/pna_toolkit/axes.md) — the six Axes a PNA varies along plus the flavor-derived ACs each pick triggers.
-- [docs/pna_toolkit/use_cases.md](docs/pna_toolkit/use_cases.md) — attested use cases (Directory Archive realized here; Personal Relationship Manager draft; multi-PNA ecosystem target).
-- [docs/pna_toolkit/spec/contracts/](docs/pna_toolkit/spec/contracts/) — typed contracts (JSON Schema for RPC + handshake + MCP servers, OpenAPI for distribution auth, SQL DDL for Shared + Private schemas, TypeScript declaration for the Communications transport interface).
+- [PNA Spec llms.txt](https://github.com/richbodo/personal_network_toolkit/blob/main/llms.txt) — discovery file for the PNA spec.
+- [PNA Spec](https://github.com/richbodo/personal_network_toolkit/blob/main/PNA_Spec.md) — universal spec (vocabulary, goals, use cases, axes, composition, universal ACs, slot map with sub-contract numbering).
+- [Axes](https://github.com/richbodo/personal_network_toolkit/blob/main/axes.md) — the six Axes a PNA varies along plus the flavor-derived ACs each pick triggers.
+- [Use cases](https://github.com/richbodo/personal_network_toolkit/blob/main/use_cases.md) — attested use cases (Directory Archive realized here; Personal Relationship Manager draft; multi-PNA ecosystem target).
+- [Typed contracts](https://github.com/richbodo/personal_network_toolkit/tree/main/spec/contracts) — JSON Schema for RPC + handshake + MCP servers, OpenAPI for distribution auth, SQL DDL for Shared + Private schemas, TypeScript declaration for the Communications transport interface.
 
 ## MCP servers
 

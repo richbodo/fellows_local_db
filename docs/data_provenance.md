@@ -1,6 +1,6 @@
 # Data Provenance
 
-> **Annex to [`Architecture.md`](Architecture.md).** Specializes the **Ingestion** slot of [PNA Spec v0.1](pna_toolkit/PNA_Spec.md#slot-map) for fellows_local_db's `single-source-static-mirror` flavor — column-by-column Knack source mapping (sub-contract IN-1), the backup workflow, and the three recovery paths. Read [`Architecture.md`](Architecture.md) first for the spec-conformance overview; this file is the depth-doc for the build/data pipeline.
+> **Annex to [`Architecture.md`](Architecture.md).** Specializes the **Ingestion** slot of [PNA Spec v0.1](https://github.com/richbodo/personal_network_toolkit/blob/main/PNA_Spec.md#slot-map) for fellows_local_db's `single-source-static-mirror` flavor — column-by-column Knack source mapping (sub-contract IN-1), the backup workflow, and the three recovery paths. Read [`Architecture.md`](Architecture.md) first for the spec-conformance overview; this file is the depth-doc for the build/data pipeline.
 
 How `app/fellows.db` is built, where every field comes from, and how to
 recover if anything goes wrong.

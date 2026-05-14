@@ -1,6 +1,6 @@
 # Email Gate
 
-> **Annex to [`Architecture.md`](Architecture.md).** Specializes the **Distribution** slot of [PNA Spec v0.1](pna_toolkit/PNA_Spec.md#slot-map) for fellows_local_db's `web-bundle-with-magic-link` flavor — the authoritative behavioral spec for the magic-link gate, install landing, browser-mode decision tree, and the unauthenticated client-error sink (DB-4). Read [`Architecture.md` § Distribution flavor specifics](Architecture.md#distribution-flavor-specifics-magic-link-pwa) first for the spec-conformance overview; this file is the depth-doc.
+> **Annex to [`Architecture.md`](Architecture.md).** Specializes the **Distribution** slot of [PNA Spec v0.1](https://github.com/richbodo/personal_network_toolkit/blob/main/PNA_Spec.md#slot-map) for fellows_local_db's `web-bundle-with-magic-link` flavor — the authoritative behavioral spec for the magic-link gate, install landing, browser-mode decision tree, and the unauthenticated client-error sink (DB-4). Read [`Architecture.md` § Distribution flavor specifics](Architecture.md#distribution-flavor-specifics-magic-link-pwa) first for the spec-conformance overview; this file is the depth-doc.
 
 Authoritative specification of the email-gate / install-landing algorithm. The runtime (`app/static/app.js`, `deploy/server.py`, `deploy/magic_link_auth.py`) must match this document; if they drift, this document is what's right and the runtime is a bug.
 
