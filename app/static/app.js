@@ -9095,6 +9095,10 @@
           '<p class="placeholder">No fellows match that search with the current filter.</p>';
       }
       setSearchStatus('');
+      // Without this, the bar keeps the stale "select all N results" text
+      // from the previous non-empty render — user sees "No fellows match"
+      // in the body while the bar above still offers a 2-result selection.
+      updateBulkBar();
       return;
     }
     renderDirectoryList(filtered);
