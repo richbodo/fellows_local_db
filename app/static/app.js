@@ -229,6 +229,8 @@
     finishedAt: null,
     reason: null
   };
+  // Exposed for tests + the About-page completeness row.
+  window.__imagePrewarmState = imagePrewarmState;
   /** Bump on every meaningful UI / diagnostics change. Rendered in the
    *  always-visible build badge so a dev can tell at a glance which app.js
    *  is actually running vs what the server was deployed with.
@@ -776,6 +778,18 @@
   function prewarmProfileImages(fellows) {
     if (!Array.isArray(fellows) || !fellows.length) {
       imagePrewarmState.status = 'skipped-empty';
+      return Promise.resolve();
+    }
+    // Don't hammer the server with ~500 fetches that we know will 403
+    // when the page is on the api+idb fallback path (expired session
+    // or anti-enum 403 during boot). The user already has whatever
+    // images a prior authenticated boot cached; the About page's
+    // completeness counter is where we'll tell them how to fill in
+    // the rest. See `plans/user_folder_storage.md` § Refreshable
+    // assets, Option A.
+    if (offlineOnlyMode) {
+      imagePrewarmState.status = 'skipped-unauthenticated';
+      imagePrewarmState.reason = 'offline-only mode (no live session)';
       return Promise.resolve();
     }
     try {
