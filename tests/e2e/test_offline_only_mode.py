@@ -129,9 +129,15 @@ class TestOfflineOnlyMode:
             directory.wait_for(state="visible", timeout=5000)
             expect(page.get_by_role("link", name="Ada Cached")).to_be_visible()
 
-            # Build badge signals offline-only mode.
-            badge_server = page.locator("#build-badge-server")
-            expect(badge_server).to_contain_text("offline", timeout=3000)
+            # We're on the api+idb fallback provider (the never-SaaS
+            # cleanup retired the "server: offline · using cache" badge
+            # suffix; dataProvider.kind is the structural signal now).
+            provider_kind = page.evaluate(
+                "() => (window.__dataProvider && window.__dataProvider.kind) || null"
+            )
+            assert provider_kind == "api+idb", (
+                f"expected api+idb fallback, got {provider_kind!r}"
+            )
 
             # Email-gate / install-landing / auth-error panels all stay hidden.
             expect(page.locator("#install-gate-private")).to_be_hidden()
