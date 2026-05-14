@@ -180,13 +180,15 @@ class TestCheckForUpdatesCopy:
             page.locator("#about-check-updates").wait_for(state="visible", timeout=5000)
             page.locator("#about-check-updates").click()
             data_row = page.locator("#about-data-status")
-            expect(data_row).not_to_contain_text(
-                "isn", timeout=5000
-            )  # "isn't available in this browser" — the wrong attribution
-            # Post-fix copy should mention sign-in (case-insensitive).
+            # Wait for the FINAL post-click state, not just the absence
+            # of the wrong-attribution copy. The in-progress "Checking…"
+            # text passes `not_to_contain_text('isn')` but isn't the
+            # final state; polling on the absence creates a race that
+            # async work on the About page render can re-tickle.
+            expect(data_row).to_contain_text("Sign in", timeout=5000)
             row_text = data_row.text_content() or ""
-            assert "sign in" in row_text.lower() or "magic link" in row_text.lower(), (
-                f"data row should suggest re-authentication, got: {row_text!r}"
+            assert "isn’t available" not in row_text and "isn't available" not in row_text, (
+                f"data row must not blame the browser; got: {row_text!r}"
             )
         finally:
             context.unroute(FELLOWS_DB)
