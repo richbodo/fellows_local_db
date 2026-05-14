@@ -9049,7 +9049,12 @@
     var url = '/api/search?q=' + encodeURIComponent(ftsQ);
     fetch(url)
       .then(function (r) {
-        if (!r.ok) return [];
+        // Non-2xx (commonly 401/403 when the session expired, sometimes
+        // 5xx) is treated the same as a network failure: route through
+        // runLocalSearch so the cached directory still answers. Per
+        // docs/email_gate.md invariant 10, a stale session must not lock
+        // the user out of searching data they already downloaded.
+        if (!r.ok) throw new Error('search ' + r.status);
         return r.json();
       })
       .then(function (results) {

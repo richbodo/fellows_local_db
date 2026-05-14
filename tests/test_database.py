@@ -32,6 +32,62 @@ def test_fts5_exists_and_matches(db):
     assert "Aaron Bird" in names or "Aaron McDonald" in names
 
 
+def test_fts5_matches_first_name_richard(db):
+    """Whole-token first-name match for 'Richard' returns the expected fellows."""
+    cur = db.execute(
+        "SELECT name FROM fellows_fts WHERE fellows_fts MATCH 'Richard'"
+    )
+    names = [r[0] for r in cur.fetchall()]
+    assert "Richard Bodo" in names
+    assert "Richard Graves" in names
+
+
+def test_fts5_matches_last_name_bodo(db):
+    """Whole-token last-name match for 'Bodo' returns Richard Bodo."""
+    cur = db.execute(
+        "SELECT name FROM fellows_fts WHERE fellows_fts MATCH 'Bodo'"
+    )
+    names = [r[0] for r in cur.fetchall()]
+    assert "Richard Bodo" in names
+
+
+def test_fts5_matches_full_name_two_tokens(db):
+    """Multi-token MATCH 'Richard Bodo' is an implicit AND and pinpoints one row."""
+    cur = db.execute(
+        "SELECT name FROM fellows_fts WHERE fellows_fts MATCH 'Richard Bodo'"
+    )
+    names = [r[0] for r in cur.fetchall()]
+    assert names == ["Richard Bodo"]
+
+
+def test_fts5_partial_token_without_prefix_glob_returns_nothing(db):
+    """As-you-type behavior: a partial token like 'Ric' returns 0 rows.
+
+    Documents the load-bearing reason real-time search appears broken:
+    FTS5 MATCH is whole-token. Without a trailing '*' the partial prefix
+    'Ric' / 'Bod' matches nothing, so every keystroke before a token is
+    complete shows 'no results'. The fix is to append '*' to the last
+    (or every) token on the client side before issuing MATCH.
+    """
+    assert (
+        db.execute(
+            "SELECT COUNT(*) FROM fellows_fts WHERE fellows_fts MATCH 'Ric'"
+        ).fetchone()[0]
+        == 0
+    )
+    assert (
+        db.execute(
+            "SELECT COUNT(*) FROM fellows_fts WHERE fellows_fts MATCH 'Bod'"
+        ).fetchone()[0]
+        == 0
+    )
+    cur = db.execute(
+        "SELECT name FROM fellows_fts WHERE fellows_fts MATCH 'Ric*'"
+    )
+    names = [r[0] for r in cur.fetchall()]
+    assert "Richard Bodo" in names
+
+
 def test_lookup_by_slug(db):
     """Lookup by slug aaron_bird returns Aaron Bird."""
     cur = db.execute("SELECT name FROM fellows WHERE slug = 'aaron_bird'")
