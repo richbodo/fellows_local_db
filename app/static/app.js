@@ -307,6 +307,24 @@
     if (clientEl) clientEl.textContent = 'app: ' + FELLOWS_UI_DIAG;
   }
 
+  // True when the dedicated worker spawned successfully and reports OPFS
+  // is fully functional (init.opfsCapable), but the page-level dataProvider
+  // ended up on the api+idb fallback — meaning the only thing wrong is the
+  // session-gated /fellows.db fetch returned 401/403, not the browser's
+  // local-storage capability. Distinguishing this from a real OPFS failure
+  // matters for user-facing copy: "sign in to refresh" is the honest fix;
+  // "your browser doesn't support OPFS" is a misattribution.
+  //
+  // Reads warmWorker (assigned later in the IIFE) via closure. Until the
+  // worker init resolves, returns false — which is safe: the surfaces that
+  // call this only fire after the boot path has settled.
+  function isWorkerOpfsCapableButInactive() {
+    if (!warmWorker || !warmWorker.init) return false;
+    if (!warmWorker.init.opfsCapable) return false;
+    if (!dataProvider) return false;
+    return dataProvider.kind !== 'worker';
+  }
+
   function setBuildBadgeServer(gitSha, builtAt) {
     var serverEl = document.getElementById('build-badge-server');
     var badgeEl = document.getElementById('build-badge');
@@ -323,26 +341,17 @@
     }
   }
 
-  function setBuildBadgeServerUnreachable() {
-    // Called from the auth-status fallback path when the server is 5xx or
-    // network-unreachable. Low-drama label: non-technical users should not
-    // read this as "something is broken" — the app continues to work from
-    // cached state.
-    var serverEl = document.getElementById('build-badge-server');
-    if (serverEl) serverEl.textContent = 'server: unreachable';
-  }
-
-  // True once the app has fallen back to cached local data because the
-  // server refused us (401 / expired session) or was otherwise unreachable
-  // during boot. Surface-only flag; the UI uses it to label the badge and
-  // show a gentle "using cached data" hint. The user stays in the app.
+  // Internal flag tracking that the boot path fell back to cached local
+  // data because the server refused us (401 / expired session) or was
+  // unreachable. Read by the boot trace and the "from cache" suffix on
+  // log lines. Deliberately NOT user-facing: this app is never-SaaS, so
+  // server connectivity is irrelevant outside the explicit "Check for
+  // updates" flow on the About page. The build badge stays informational
+  // (it shows the build label, full stop) — it does not double as a
+  // connectivity indicator.
   var offlineOnlyMode = false;
 
-  function setBuildBadgeOfflineOnly(reason) {
-    var serverEl = document.getElementById('build-badge-server');
-    if (serverEl) {
-      serverEl.textContent = 'server: offline · using cache';
-    }
+  function enterOfflineOnlyMode(reason) {
     offlineOnlyMode = true;
     bootDebugPush('entered offline-only mode: ' + (reason || 'unknown'));
   }
@@ -483,13 +492,19 @@
   //   'up-to-date'       — SHAs match
   //   'no-local-data'    — worker has no fellows.db (cold-start case)
   //   'unsupported'      — running on a provider that can't compare
-  //                        (api+idb fallback, no-OPFS browser)
+  //                        AND the browser genuinely lacks OPFS
+  //   'sign-in-required' — worker has OPFS but the page-level provider
+  //                        is api+idb because the session expired during
+  //                        boot. User can fix this by re-authenticating.
   //   'worker-stale'     — page is on a newer build than the worker
   //                        (transient SW upgrade race; worker doesn't
   //                        know the new RPC). Resolves on reload.
   //   'error'            — server unreachable or worker errored
   function checkForDirectoryDataUpdate() {
     if (!dataProvider || typeof dataProvider._compareFellowsDbSha !== 'function') {
+      if (isWorkerOpfsCapableButInactive()) {
+        return Promise.resolve({ status: 'sign-in-required' });
+      }
       return Promise.resolve({ status: 'unsupported' });
     }
     return fetch('/build-meta.json', { cache: 'no-store', credentials: 'same-origin' })
@@ -1056,6 +1071,27 @@
   // don't need to thread it through. Renders a specific "directory is
   // open in another window" panel — see plans/multi_tab_ownership_takeover.md
   // for the coordinated-takeover follow-up that supersedes this copy.
+  function renderSessionGatePanel(feature) {
+    // Render when the worker reports OPFS-capable but the page-level
+    // dataProvider fell back to api+idb — i.e. the local-data feature
+    // *is* available on this device, the session just expired during
+    // the directory-data fetch. Honest copy that doesn't blame the
+    // browser. Matches the "never-SaaS" framing: the server only
+    // matters when the user is doing an update or sign-in.
+    var label = feature || 'this feature';
+    var html = '<div class="local-data-unavailable-panel">';
+    html += '<h2>Sign in to refresh updates</h2>';
+    html += '<p>Your saved groups, notes, tags, and per-device settings ' +
+            'are intact on this device — local storage is working fine. ' +
+            'The session that authorizes update and backup checks has ' +
+            'expired, so ' + escapeHtml(label) + ' is paused until you ' +
+            'sign in again.</p>';
+    html += '<p><a class="local-data-unavailable-action" href="/?gate=1">' +
+            'Open the magic-link sign-in page</a></p>';
+    html += '</div>';
+    return html;
+  }
+
   function renderLocalDataUnavailablePanel(feature, opts) {
     opts = opts || {};
     if (opts.ownershipConflict == null) {
@@ -1063,6 +1099,13 @@
     }
     if (opts.ownershipConflict) {
       return renderOwnershipConflictPanel(feature);
+    }
+    // If OPFS is actually working, this panel's premise is wrong — the
+    // local-data feature *is* available; the page is just on the api+idb
+    // fallback because the directory-data fetch was session-gated. Send
+    // the user to the sign-in flow with copy that says so.
+    if (isWorkerOpfsCapableButInactive()) {
+      return renderSessionGatePanel(feature);
     }
     var b = detectBrowserSupport();
     var label = feature || 'this feature';
@@ -4823,7 +4866,6 @@
         // will just reload when the server is back.
         if (hasAuthenticatedOnce()) {
           authDebugPush('fallback: marker set → quiet email-gate (no auth-failure panel)');
-          setBuildBadgeServerUnreachable();
           initEmailGate(
             { authEnabled: true, authenticated: false, _offline: true },
             0,
@@ -6447,7 +6489,10 @@
       function paintDataRow(res) {
         if (!dataStatusEl) return;
         var statusText = '', actionHtml = '';
-        if (res.status === 'unsupported') {
+        if (res.status === 'sign-in-required') {
+          statusText = 'Sign in via the magic-link gate to enable update checks.';
+          actionHtml = '<a class="about-update-action-btn" href="/?gate=1">Sign in</a>';
+        } else if (res.status === 'unsupported') {
           statusText = 'Directory data updates aren\u2019t available in this browser.';
         } else if (res.status === 'no-local-data') {
           statusText = 'No local directory data \u2014 reload to download.';
@@ -9413,7 +9458,7 @@
     function tryListFromCache(originalErr) {
       return loadFullFellows().then(function (cached) {
         if (cached && cached.length) {
-          setBuildBadgeOfflineOnly('getList ' + (originalErr && originalErr.status));
+          enterOfflineOnlyMode('getList ' + (originalErr && originalErr.status));
           return cached;
         }
         throw originalErr;
@@ -9422,7 +9467,7 @@
     function tryFullFromCache(originalErr) {
       return loadFullFellows().then(function (cached) {
         if (cached && cached.length) {
-          setBuildBadgeOfflineOnly('getFull ' + (originalErr && originalErr.status));
+          enterOfflineOnlyMode('getFull ' + (originalErr && originalErr.status));
           return cached;
         }
         throw originalErr;

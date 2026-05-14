@@ -128,9 +128,9 @@ def _force_api_idb_fallback_with_cache(context, page, base_url):
     # If a future change makes the worker resilient to 401 on the bytes
     # fetch this assertion will start failing and we'll need a different
     # repro — better to fail loudly than to test the wrong code path.
-    expect(page.locator("#build-badge-server")).to_contain_text(
-        "offline", timeout=3000
-    )
+    # (The former "server: offline" badge text was retired in the
+    # never-SaaS copy cleanup; dataProvider.kind is the structural
+    # signal now.)
     provider_kind = page.evaluate(
         "() => (window.__dataProvider && window.__dataProvider.kind) || null"
     )
