@@ -6452,6 +6452,18 @@
     aboutHtml += '<div class="about-update-row-status" id="about-data-status" role="status" aria-live="polite">Click "Check for updates" to compare with the server.</div>';
     aboutHtml += '<div class="about-update-row-action" id="about-data-action"></div>';
     aboutHtml += '</div>';
+    // Profile photos completeness row. Distinct from data durability
+    // (the relationships.db status); this tells the user whether
+    // their install fetched all the assets it depends on. When the
+    // user landed in api+idb fallback the cache is typically empty
+    // (the prewarm was skipped to avoid 500 doomed fetches — see
+    // fix(prewarm) PR) and we offer a one-click path to fix it.
+    // Plan: plans/user_folder_storage.md § Refreshable assets, Option A.
+    aboutHtml += '<div class="about-update-row" id="about-images-row">';
+    aboutHtml += '<div class="about-update-row-label">Profile photos</div>';
+    aboutHtml += '<div class="about-update-row-status" id="about-images-status" role="status" aria-live="polite">Counting…</div>';
+    aboutHtml += '<div class="about-update-row-action" id="about-images-action"></div>';
+    aboutHtml += '</div>';
     // Signing-key row. The fingerprint here should match the value
     // printed in the magic-link email; mismatch means the bundle did
     // not come from the maintainer (or the email did not). See
@@ -6635,6 +6647,45 @@
           ' (fellows who uploaded a photo). Reload this page to update the count.';
       }).catch(function () {
         el.textContent = 'Profile photos cached locally: unknown.';
+      });
+    })();
+
+    // Render the completeness row in the update-check block. Same
+    // count as `stats-images-cached` below, but in the upper rows
+    // where the user looks for "is everything okay with this
+    // install?" — and with a sign-in CTA when the cache is partial
+    // because we're on the api+idb fallback (the case where the
+    // prewarm was skipped — see fix(prewarm) PR).
+    (function renderImagesCompletenessRow() {
+      var statusEl = document.getElementById('about-images-status');
+      var actionEl = document.getElementById('about-images-action');
+      if (!statusEl) return;
+      var withImageTotal = 0;
+      var source = Array.isArray(fullFellowsCache) ? fullFellowsCache : list;
+      source.forEach(function (f) {
+        if (f && (f.has_image === 1 || f.has_image === true)) withImageTotal++;
+      });
+      countCachedImages().then(function (result) {
+        if (!result) {
+          statusEl.textContent = 'Image cache unavailable in this browser.';
+          return;
+        }
+        var cached = result.count;
+        statusEl.textContent = cached + ' of ' + withImageTotal + ' cached';
+        // CTA fires when (a) we're on the api+idb fallback (no live
+        // session, prewarm couldn't fetch) AND (b) cache is partial.
+        // Re-authentication is the load-bearing fix: a subsequent
+        // boot will repopulate. Worker-mode users with a partial
+        // cache (rare — prewarm errored mid-flight, perhaps) are
+        // already authenticated; a sign-in CTA would log them out
+        // and isn't the right affordance.
+        if (offlineOnlyMode && cached < withImageTotal && actionEl) {
+          actionEl.innerHTML =
+            '<a class="about-update-action-btn" href="/?gate=1">' +
+            'Sign in to fetch the rest</a>';
+        }
+      }).catch(function () {
+        statusEl.textContent = 'Image cache state unknown.';
       });
     })();
 
