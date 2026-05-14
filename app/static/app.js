@@ -3738,6 +3738,26 @@
   // that backs `email_gate.md` invariant 10 on no-OPFS browsers.
   function createApiPlusIdbDataProvider() {
     var apiProvider = createApiDataProvider();
+    // Phase 0 of plans/user_folder_storage.md: when the worker spawned
+    // successfully and has relationships.db open, the local-data
+    // settings + backup ops are reachable directly via warmWorker.rpc
+    // even though the page-level provider fell back to api+idb because
+    // /fellows.db 401'd. Wire those through the warm worker so a user
+    // with an expired session can still read/write their settings and
+    // download a backup of their data before reinstalling or switching
+    // browsers. Directory reads (getList/getFull/getOne/search/getStats)
+    // and groups RPCs stay on the api provider — those are out of
+    // scope for Phase 0 (groups are a follow-up; directory data
+    // genuinely needs the session-gated fellows.db bytes).
+    function viaWarmWorker(rpcName, argsMap) {
+      return function () {
+        if (isWorkerOpfsCapableButInactive() && warmWorker && warmWorker.rpc) {
+          var args = argsMap ? argsMap.apply(null, arguments) : undefined;
+          return warmWorker.rpc.call(rpcName, args);
+        }
+        return apiProvider[rpcName].apply(apiProvider, arguments);
+      };
+    }
     return {
       kind: 'api+idb',
       // Directory: API only (IDB write/read mirroring is wired into bootDirectoryAsApp).
@@ -3746,22 +3766,36 @@
       getOne: apiProvider.getOne.bind(apiProvider),
       search: apiProvider.search.bind(apiProvider),
       getStats: apiProvider.getStats.bind(apiProvider),
-      // Everything relationships-shaped rejects with localDataUnavailable
-      // so the unsupported-browser panel renders.
+      // Groups stay on the api provider until a follow-up PR extends
+      // the warm-worker fallback to listGroups / getGroup / etc.
+      // (those need a member-name-resolution helper hoisted out of
+      // createWorkerDataProvider's scope before they can route here).
       listGroups: apiProvider.listGroups.bind(apiProvider),
       getGroup: apiProvider.getGroup.bind(apiProvider),
       createGroup: apiProvider.createGroup.bind(apiProvider),
       updateGroup: apiProvider.updateGroup.bind(apiProvider),
       deleteGroup: apiProvider.deleteGroup.bind(apiProvider),
-      getSetting: apiProvider.getSetting.bind(apiProvider),
-      getSettings: apiProvider.getSettings.bind(apiProvider),
-      setSetting: apiProvider.setSetting.bind(apiProvider),
-      exportRelationshipsBytes: apiProvider.exportRelationshipsBytes.bind(apiProvider),
-      inspectRelationshipsBytes: apiProvider.inspectRelationshipsBytes.bind(apiProvider),
-      countRelationships: apiProvider.countRelationships.bind(apiProvider),
-      importRelationshipsBytes: apiProvider.importRelationshipsBytes.bind(apiProvider),
-      listRelationshipsBackups: apiProvider.listRelationshipsBackups.bind(apiProvider),
-      restoreRelationshipsBackup: apiProvider.restoreRelationshipsBackup.bind(apiProvider)
+      // Settings + backup / restore route through the warm worker when
+      // it's alive with OPFS — Phase 0 scope.
+      getSetting: viaWarmWorker('getSetting', function (key) {
+        return { key: key };
+      }),
+      getSettings: viaWarmWorker('getSettings'),
+      setSetting: viaWarmWorker('setSetting', function (key, value) {
+        return { key: key, value: value };
+      }),
+      exportRelationshipsBytes: viaWarmWorker('exportRelationshipsBytes'),
+      inspectRelationshipsBytes: viaWarmWorker('inspectRelationshipsBytes', function (bytes) {
+        return { bytes: bytes };
+      }),
+      countRelationships: viaWarmWorker('countRelationships'),
+      importRelationshipsBytes: viaWarmWorker('importRelationshipsBytes', function (bytes) {
+        return { bytes: bytes };
+      }),
+      listRelationshipsBackups: viaWarmWorker('listRelationshipsBackups'),
+      restoreRelationshipsBackup: viaWarmWorker('restoreRelationshipsBackup', function (name) {
+        return { name: name };
+      })
     };
   }
 
@@ -8116,10 +8150,18 @@
     // The late `localDataUnavailable` click-handler paths below remain
     // for paranoia / late provider downgrades.
     // 'worker' = the dedicated sqlite-worker.js owns OPFS; backup/restore
-    // both go through worker RPC. 'api+idb' = worker init failed (no OPFS-
-    // capable browser); the unavailable-panel covers groups/settings.
+    // both go through worker RPC. 'api+idb' WITH an OPFS-capable warm
+    // worker = the page fell back because /fellows.db 401'd at boot, but
+    // the worker is still alive with relationships.db open — backup and
+    // restore are reachable via the warm-worker fallback the api+idb
+    // provider installs (Phase 0 of plans/user_folder_storage.md).
+    // The remaining "no warm worker / OPFS truly broken" case still
+    // surfaces the unavailable-panel.
     var localPersistenceAvailable = !!(
-      dataProvider && dataProvider.kind === 'worker'
+      dataProvider && (
+        dataProvider.kind === 'worker' ||
+        isWorkerOpfsCapableButInactive()
+      )
     );
     if (!localPersistenceAvailable) {
       var preExport = document.getElementById('settings-export-section');
