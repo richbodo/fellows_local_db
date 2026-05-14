@@ -299,9 +299,12 @@ action as the detail page.
   other place the app addresses something *to you*. Auto-captured from
   your magic link, so most people never need to touch this.
 - **Your saved data → Download my user data** — saves all your groups,
-  notes, tags, and settings to a single `.db` file. The app also
-  auto-snapshots the same file before every upgrade and keeps the
-  newest 3.
+  notes, tags, and settings to a single `.db` file. Your browser
+  opens its native save dialog (Chrome / Edge / Brave on desktop) or
+  share sheet (iOS / Android) so **you choose where the file goes**;
+  on Safari and Firefox the file lands in your Downloads folder. The
+  app also auto-snapshots the same file before every upgrade and
+  keeps the newest 3.
 - **Restore from backup → Restore from a file** — replace your current
   saved data with a previously downloaded `.db`. The app shows a
   confirmation summary ("4 groups, 12 notes → 7 groups, 23 notes —
