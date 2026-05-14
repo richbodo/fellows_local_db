@@ -2134,8 +2134,12 @@
       var ts = new Date().toISOString().replace(/[:.]/g, '-');
       var filename = 'relationships-' + ts + '.db';
       var blob = new Blob([bytes], { type: 'application/octet-stream' });
-      return downloadBlob(blob, filename).then(function () {
-        return { filename: filename, byteLength: bytes.byteLength };
+      return downloadBlob(blob, filename).then(function (result) {
+        return {
+          outcome: (result && result.outcome) || 'fallback',
+          filename: (result && result.filename) || filename,
+          byteLength: bytes.byteLength
+        };
       });
     });
   }
@@ -2200,9 +2204,33 @@
                 promptStatus.textContent =
                   'No saved data on this device — nothing to back up. Continuing.';
               }
-            } else if (promptStatus) {
-              promptStatus.textContent =
-                'Saved ' + result.filename + ' (' + result.byteLength + ' bytes). Continuing.';
+              closePrompt();
+              destructiveConfirmAndReset();
+              return;
+            }
+            if (result.outcome === 'cancelled') {
+              // User dismissed the save dialog — treat as backing out.
+              // Don't proceed to the destructive confirm; let them
+              // pick again or hit Skip explicitly.
+              downloadBtn.disabled = false;
+              downloadBtn.textContent = '⬇ Download backup & continue';
+              if (promptStatus) {
+                promptStatus.textContent =
+                  'Save cancelled — pick again, or use Skip to reset without saving.';
+              }
+              return;
+            }
+            if (promptStatus) {
+              if (result.outcome === 'picker') {
+                promptStatus.textContent =
+                  'Saved as ' + result.filename + ' (' + result.byteLength + ' bytes). Continuing.';
+              } else if (result.outcome === 'share') {
+                promptStatus.textContent =
+                  'Saved via the share sheet (' + result.byteLength + ' bytes). Continuing.';
+              } else {
+                promptStatus.textContent =
+                  'Saved ' + result.filename + ' to your Downloads folder (' + result.byteLength + ' bytes). Continuing.';
+              }
             }
             closePrompt();
             destructiveConfirmAndReset();
@@ -7306,15 +7334,48 @@
       "</svg>"
     );
 
-  /** Trigger a Blob download. On mobile (iOS 16.4+, modern Android),
-   *  prefer the share sheet — gives the user Save to Files / AirDrop /
-   *  Mail. Desktop always uses <a download>: on macOS Chrome PWA the
-   *  share sheet has no Save-to-Downloads entry, just AirDrop/Messages.
-   *  If share() rejects (Chromium's file-share allowlist excludes
-   *  text/html, which surfaced as "permission denied" on Android too),
-   *  fall back to <a download> — but skip the fallback on AbortError,
-   *  which is the user dismissing the sheet. */
+  /** Trigger a Blob download. Returns a Promise that resolves to an
+   *  outcome object so callers can render a status message tied to
+   *  *how* the file got saved:
+   *
+   *    {outcome: 'picker',    filename: <chosen name>}    — user picked
+   *                                                         via the
+   *                                                         showSaveFilePicker
+   *                                                         native dialog
+   *    {outcome: 'share',     filename: <suggested name>} — mobile share
+   *                                                         sheet save
+   *    {outcome: 'fallback',  filename: <suggested name>} — <a download>
+   *                                                         (goes to the
+   *                                                         browser's
+   *                                                         Downloads folder)
+   *    {outcome: 'cancelled', filename: <suggested name>} — user dismissed
+   *                                                         the picker /
+   *                                                         share sheet
+   *
+   *  Decision tree:
+   *    - **Desktop** (any non-mobile UA) with `showSaveFilePicker` →
+   *      native Save As dialog. User picks name + location explicitly.
+   *      The old behavior (invisible `<a download>` click) silently lost
+   *      files inside installed PWAs on Chrome — the file lands in a
+   *      PWA-context path that's not the user's Downloads folder, with
+   *      no save dialog and no recoverable feedback. This is the fix.
+   *    - **Mobile** (iOS 16.4+, modern Android) with `navigator.canShare`
+   *      for files → OS share sheet. Includes Save to Files / Save to
+   *      Drive destinations; the mobile-native way to choose a location.
+   *      iOS / Android PWAs have no Downloads folder concept, so an
+   *      `<a download>` fallback there is even less reliable than on
+   *      desktop.
+   *    - **Everything else** (Safari, Firefox, older browsers,
+   *      capability rejections) → `<a download>`. Both Safari and
+   *      Firefox handle this correctly, landing the file in the user's
+   *      Downloads folder with a visible banner.
+   */
   function downloadBlob(blob, filename) {
+    function isMobileUA() {
+      var ua = navigator.userAgent || '';
+      return /iPad|iPhone|iPod|Android/.test(ua) ||
+             (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    }
     function triggerAnchorDownload() {
       return new Promise(function (resolve) {
         var url = URL.createObjectURL(blob);
@@ -7327,25 +7388,60 @@
         setTimeout(function () {
           try { document.body.removeChild(a); } catch (e) {}
           try { URL.revokeObjectURL(url); } catch (e) {}
-          resolve();
+          resolve({ outcome: 'fallback', filename: filename });
         }, 100);
       });
     }
+
+    // Desktop with the File System Access API → native Save As dialog.
+    if (!isMobileUA() && typeof window.showSaveFilePicker === 'function') {
+      return Promise.resolve().then(function () {
+        return window.showSaveFilePicker({
+          suggestedName: filename,
+          types: [{
+            description: 'SQLite database',
+            accept: { 'application/octet-stream': ['.db'] }
+          }]
+        });
+      }).then(function (handle) {
+        return handle.createWritable().then(function (writable) {
+          return writable.write(blob).then(function () {
+            return writable.close();
+          });
+        }).then(function () {
+          return { outcome: 'picker', filename: handle.name };
+        });
+      }).catch(function (err) {
+        if (err && err.name === 'AbortError') {
+          return { outcome: 'cancelled', filename: filename };
+        }
+        // Real failure (permission denied, write error, etc.) — fall
+        // back to the anchor path so the user still gets the file.
+        try { console.warn('[Fellows] showSaveFilePicker failed; falling back:', err); } catch (e) {}
+        return triggerAnchorDownload();
+      });
+    }
+
+    // Mobile share sheet — only when the OS supports file shares
+    // and accepts this MIME. canShare guards both.
     try {
-      var ua = navigator.userAgent || '';
-      var isMobile = /iPad|iPhone|iPod|Android/.test(ua) ||
-                     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-      if (isMobile && navigator.canShare && typeof File === 'function') {
+      if (isMobileUA() && navigator.canShare && typeof File === 'function') {
         var file = new File([blob], filename, { type: blob.type || 'application/octet-stream' });
         if (navigator.canShare({ files: [file] })) {
           return navigator.share({ files: [file], title: filename })
+            .then(function () {
+              return { outcome: 'share', filename: filename };
+            })
             .catch(function (err) {
-              if (err && err.name === 'AbortError') return;
+              if (err && err.name === 'AbortError') {
+                return { outcome: 'cancelled', filename: filename };
+              }
               return triggerAnchorDownload();
             });
         }
       }
     } catch (e) { /* fall through to <a download> */ }
+
     return triggerAnchorDownload();
   }
 
@@ -8009,10 +8105,21 @@
             var ts = new Date().toISOString().replace(/[:.]/g, '-');
             var filename = 'relationships-' + ts + '.db';
             var blob = new Blob([bytes], { type: 'application/octet-stream' });
-            return downloadBlob(blob, filename).then(function () {
-              if (downloadStatus) {
+            return downloadBlob(blob, filename).then(function (result) {
+              if (!downloadStatus) return;
+              var savedName = (result && result.filename) || filename;
+              var size = bytes.byteLength;
+              if (result && result.outcome === 'cancelled') {
+                downloadStatus.textContent = 'Cancelled — no file saved.';
+              } else if (result && result.outcome === 'picker') {
                 downloadStatus.textContent =
-                  'Downloaded ' + filename + ' (' + bytes.byteLength + ' bytes).';
+                  'Saved as ' + savedName + ' (' + size + ' bytes).';
+              } else if (result && result.outcome === 'share') {
+                downloadStatus.textContent =
+                  'Saved via the share sheet (' + size + ' bytes).';
+              } else {
+                downloadStatus.textContent =
+                  'Saved ' + savedName + ' to your browser\'s Downloads folder (' + size + ' bytes).';
               }
             });
           })
