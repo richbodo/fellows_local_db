@@ -14,18 +14,25 @@ pre-populated. You review and click send.
 
 ## What's here
 
-The PNA architecture defines four canonical MCP servers. Three ship
-today; Diagnostics is scoped here so you know what's coming.
+The PNA architecture defines five canonical MCP servers, split along
+the Shared / Private privacy boundary so an AI client can be wired to
+one without the other. Three ship today; Ingestion and Diagnostics
+are scoped here so you know what's coming.
 
-| Server | Status | What it automates |
-|---|---|---|
-| **Shared Data Ops** (`shared_data_ops.py`) | v1 — ships now | Read-only access to the **Shared DB** (`fellows.db`). Search, filter, look up fellows, read directory stats. |
-| **Private Data Ops** (`private_data_ops.py`) | v1 — ships now | Read-only access to **groups** in the **Private DB** (`relationships.db`). List groups, find by name, fetch members joined to `fellows.db`. Tags/notes deferred — users aren't writing those at scale yet. |
-| **Communications** (`comms.py`) | v1 — ships now | Stage outreach as a `mailto:` URL. **Server stages; mail client launches.** No transports fired from inside the MCP process (per AC-MCP-B). |
-| **Diagnostics** | not yet built | Read-only access to build label, versions, boot timings, sanitized error events. Useful for AI-assisted bug triage. |
+| Server | Status | Spec contract | What it automates |
+|---|---|---|---|
+| **Shared Data Ops** (`shared_data_ops.py`) | v1 — ships now | [`mcp-shared-data-ops.schema.json`](../docs/pna_toolkit/spec/contracts/mcp-shared-data-ops.schema.json) | Read-only access to the **Shared DB** (`fellows.db`). Search, filter, look up fellows, read directory stats. |
+| **Private Data Ops** (`private_data_ops.py`) | v1 — ships now | [`mcp-private-data-ops.schema.json`](../docs/pna_toolkit/spec/contracts/mcp-private-data-ops.schema.json) | Read-only access to **groups** in the **Private DB** (`relationships.db`). List groups, find by name, fetch members joined to `fellows.db`. Tags/notes deferred — users aren't writing those at scale yet. |
+| **Communications** (`comms.py`) | v1 — ships now | [`mcp-comms.schema.json`](../docs/pna_toolkit/spec/contracts/mcp-comms.schema.json) | Stage outreach as a `mailto:` URL. **Server stages; mail client launches.** No transports fired from inside the MCP process (per AC-MCP-B). |
+| **Ingestion** | not yet built | [`mcp-ingestion.schema.json`](../docs/pna_toolkit/spec/contracts/mcp-ingestion.schema.json) *(placeholder)* | Drive source imports, dedup wizard, orphan preview (per AC-10). |
+| **Diagnostics** | not yet built | [`mcp-diagnostics.schema.json`](../docs/pna_toolkit/spec/contracts/mcp-diagnostics.schema.json) *(placeholder)* | Read-only access to build label, versions, boot timings, sanitized error events. Useful for AI-assisted bug triage. |
 
-The architectural plan for all four is in `docs/_pna_triage.md` (search
-for "four canonical MCP servers" and `AC-MCP-A` / `AC-MCP-B`).
+The architectural definitions live in [`docs/pna_toolkit/PNA_Spec.md`](../docs/pna_toolkit/PNA_Spec.md)
+(Vocabulary § MCP server, Vision, AC-MCP-A, AC-MCP-B), and typed
+contracts for each server are in [`docs/pna_toolkit/spec/contracts/`](../docs/pna_toolkit/spec/contracts/).
+The working triage notes that pre-dated the spec scaffold are still in
+`docs/_pna_triage.md` and will retire as their content fully migrates
+into the toolkit dir.
 
 ## Privacy boundary in one paragraph
 
@@ -154,12 +161,14 @@ piping into a protocol test harness, not for interactive use.
 
 ## Cloud LLM caveat (read this if your MCP client is hosted)
 
-The four canonical servers' privacy posture is set by **architectural
-commitment AC-MCP-A** (see `docs/_pna_triage.md`): MCP tools that
-return *Private DB* rows must require explicit per-call consent when
-the consuming AI client is a cloud-hosted LLM (Claude API direct,
-OpenAI API, etc.). Local clients (Claude Desktop running a local
-model, Cursor + Ollama) are the default green path.
+The five canonical servers' privacy posture is set by **architectural
+commitment AC-MCP-A** (see [`docs/pna_toolkit/PNA_Spec.md` § Universal architectural commitments](../docs/pna_toolkit/PNA_Spec.md#universal-architectural-commitments)):
+MCP tools that return *Private DB* rows must require explicit per-call
+consent when the consuming AI client is a cloud-hosted LLM (Claude API
+direct, OpenAI API, etc.). Local clients (Claude Desktop running a
+local model, Cursor + Ollama) are the default green path. The Shared
+/ Private split at the MCP surface lets a user wire a cloud client to
+Shared Data Ops alone without triggering this AC.
 
 **Private Data Ops returns Private DB rows.** Anytime an MCP client
 calls `list_groups`, `find_group`, or `get_group_members`, the
@@ -182,8 +191,9 @@ its default config) still sends extracted tool output to its
 upstream model. Today's position is: **document the boundary,
 trust the user's choice**. Wire the servers up to a local model
 (Claude Desktop + a locally-served model, Cursor + Ollama) for the
-green-path posture. The proper consent UX lands when the spec's
-typed contracts land (`docs/pna_toolkit/spec/contracts/mcp-*.schema.json`).
+green-path posture. The typed contracts that pin each tool's input
+/ output surface now live in [`docs/pna_toolkit/spec/contracts/mcp-*.schema.json`](../docs/pna_toolkit/spec/contracts/);
+the consent-UX layer on top of them remains future work.
 
 ## Per-server configuration
 
