@@ -1,0 +1,50 @@
+# EHF Fellows Local Directory (fellows_local_db)
+
+> Local-only web app for browsing Edmund Hillary Fellowship fellow profiles, organizing fellows into saved groups, and exporting sub-directories. Single-user; never-SaaS; distributed as a magic-link-gated PWA to EHF fellows. Reference design for [PNA Spec v0.1](docs/pna_toolkit/PNA_Spec.md), Directory Archive use case.
+>
+> Two SQLite databases on the device — `fellows.db` (read-only mirrored contact data) and `relationships.db` (read-write user-authored groups / notes / settings). All user-authored data lives in OPFS, owned by a single dedicated worker. Production exists only to (1) gate downloads via magic-link and (2) ship fresh bundle/DB bytes on opt-in update.
+
+## Project overview
+
+- [README.md](README.md) — setup, run, test, deploy, build commands. The starting point for developers.
+- [docs/Architecture.md](docs/Architecture.md) — fellows's PNA-spec specialization and conformance layer: declared axis picks, fellows-specific schema, HTTP routes, debug placeholders, distribution tunables.
+- [ROADMAP.md](ROADMAP.md) — what's coming next.
+- [SECURITY.md](SECURITY.md) — security posture and disclosure process.
+
+## For end-users (EHF fellows)
+
+- [docs/users_manual.md](docs/users_manual.md) — the user guide. UI/UX is documented here; treat it as the source of truth from a user's perspective.
+
+## Universal PNA architecture
+
+The universal Personal Network Application (PNA) specification this app conforms to. Will lift to a separate `personal_network_toolkit` repository when that exists; until then it lives in-repo.
+
+- [docs/pna_toolkit/llms.txt](docs/pna_toolkit/llms.txt) — discovery file for the PNA spec.
+- [docs/pna_toolkit/PNA_Spec.md](docs/pna_toolkit/PNA_Spec.md) — universal spec (vocabulary, goals, use cases, axes, composition, universal ACs, slot map with sub-contract numbering).
+- [docs/pna_toolkit/axes.md](docs/pna_toolkit/axes.md) — the six Axes a PNA varies along plus the flavor-derived ACs each pick triggers.
+- [docs/pna_toolkit/use_cases.md](docs/pna_toolkit/use_cases.md) — attested use cases (Directory Archive realized here; Personal Relationship Manager draft; multi-PNA ecosystem target).
+- [docs/pna_toolkit/spec/contracts/](docs/pna_toolkit/spec/contracts/) — typed contracts (JSON Schema for RPC + handshake + MCP servers, OpenAPI for distribution auth, SQL DDL for Shared + Private schemas, TypeScript declaration for the Communications transport interface).
+
+## MCP servers
+
+Fellows attests `mcp-exposure:shared+private+comms` — three stdio MCP servers ship for use with Claude Desktop and similar clients.
+
+- [mcp_servers/README.md](mcp_servers/README.md) — what each server does, install + wiring for Claude Desktop, the cloud-LLM caveat (per AC-MCP-A).
+
+## Annexes (architecture-adjacent)
+
+- [docs/email_gate.md](docs/email_gate.md) — Distribution slot specialization: magic-link auth flow, decision tree, client-error sanitization invariants.
+- [docs/persistence_and_upgrades.md](docs/persistence_and_upgrades.md) — Storage slot specialization: state-survival matrix across Clear App Cache / Reset Everything / app update.
+- [docs/browser_support.md](docs/browser_support.md) — Storage slot specialization: capability detection inside the worker, required browser versions, unsupported-browser surfacing.
+- [docs/data_provenance.md](docs/data_provenance.md) — Ingestion slot specialization: column-by-column source mapping, backup/restore workflow, recovery paths.
+
+## Operations
+
+- [docs/DevOps.md](docs/DevOps.md) — production deployment, systemd hardening, droplet topology.
+- [docs/email_system_management.md](docs/email_system_management.md) — magic-link operator runbook (Postmark, env file, journald event schema).
+- [docs/justfile.md](docs/justfile.md) — the project's `just` command runner reference.
+- [ansible/README.md](ansible/README.md) — Ansible specifics (tags, galaxy install, troubleshooting).
+
+## For AI agents working in this repo
+
+- [CLAUDE.md](CLAUDE.md) — load-bearing constraints (stdlib-only, no frontend build tools, port 8765, escapeHtml discipline, two-DB architecture, OPFS-via-worker rule).
