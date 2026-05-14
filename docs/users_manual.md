@@ -114,9 +114,10 @@ the data file lives in a private storage area your browser manages.
 What you *can* do is download and restore your data file
 (`relationships.db`) from inside the app. Here's how:
 
-- **Download a backup.** Settings → *Download a copy of
-  relationships.db*. Save the file somewhere you'll remember
-  (Downloads is a good default).
+- **Download a backup.** Settings → *⬇ Download my user data*. Your
+  browser asks you where to save it (Chrome / Edge / Brave on desktop,
+  share sheet on iOS / Android) or drops it into your Downloads folder
+  (Safari / Firefox).
 - **Restore from a backup.** Settings → *Restore from backup →
   Restore from a file* → pick the `.db` file you downloaded earlier.
   The current data is captured into the auto-backup list first, so
