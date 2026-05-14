@@ -9,7 +9,7 @@ recover if anything goes wrong.
 
 The canonical source is the **Knack REST-API extraction of 2026-04-08**,
 performed via the API before EHF's Knack SaaS instance was shut down. All
-data in the repo derives from that extraction.
+data in the repo derives from that extraction.  None of this data is in the git repo, though, this is all private deliverables.
 
 | File                                                    | Kind    | Row count | Purpose |
 |---------------------------------------------------------|---------|----------:|---------|
