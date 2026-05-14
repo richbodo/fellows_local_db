@@ -251,7 +251,7 @@ The spec defines **five slots** (positions filled by code) and **three interface
 
 Each slot has a code-level contract. The typed contracts — JSON Schema for RPC + handshake, OpenAPI fragments for distribution, SQL DDL for schemas, TypeScript declaration for the Communications transport interface, JSON Schema for each canonical MCP server's tool surface — live in [`spec/contracts/`](spec/contracts/).
 
-Many Universal ACs (see [§ Universal architectural commitments](#universal-architectural-commitments)) cite specific slots in their wording. The slot map is the architectural skeleton; the ACs are the load-bearing constraints over it.
+Many Universal ACs (see [§ Universal architectural commitments](#universal-architectural-commitments)) cite specific slots in their wording. The slot map is the architectural skeleton; the ACs are the load-bearing constraints over it. Each slot decomposes further into named sub-contracts — see [§ Sub-contracts per slot](#sub-contracts-per-slot) below — so a builder can target each piece individually.
 
 ### Slots
 
@@ -270,6 +270,130 @@ Many Universal ACs (see [§ Universal architectural commitments](#universal-arch
 | **Shared schema** | Data contract for the Shared DB — tables, columns, optional FTS structure, optional per-record asset URL conventions. Produced by Ingestion; consumed by Storage and Workspace. |
 | **Private schema** | Data contract for the Private DB — `groups`, `group_members`, `record_tags`, `record_notes`, `settings`, opt-in `record_comms_history`. Owned by Storage; accessed by Workspace through Storage. Durability rules (survives app update + Clear App Cache; wiped only by Reset Everything) are part of the contract. |
 | **Debug contract** | Capabilities every slot must implement: build label substitution at build *and* serve time (AC-15), sanitized error capture (with sink endpoint when configured), diagnostic state-dump, bug-report flow, always-reachable escape hatch (AC-6), boot watchdog with named phase marks. |
+
+### Sub-contracts per slot
+
+Each slot's contract decomposes into named sub-contracts so an AI building or rewriting a PNA can target each piece individually. Naming convention: two-letter prefix per slot (`WS-`, `ST-`, `IN-`, `CO-`, `DI-`) and per interface (`SH-`, `PR-`, `DB-`), then dash, then monotonic integer. New sub-contracts get the next integer; numbers don't get reused.
+
+Sub-contracts cite the universal ACs they realize where appropriate; the AC table above remains the single source of truth for the architectural commitments themselves.
+
+#### Workspace (`WS-`)
+
+- **WS-1: Boot persona.** Function that decides "directory mode" vs "distribution gate" given standalone-display, persistence marker, and force-gate URL. Drives the entire boot flow.
+- **WS-2: Routing.** Hash-based or equivalent; per-route focus modes; URL-shareable filter state where applicable.
+- **WS-3: Render contracts.** Per-route contracts on what each view shows. Includes orphan-row rendering after Shared DB updates.
+- **WS-4: Data provider abstraction.** Three-tier provider (worker / api+idb / api) with mid-boot hot-swap on auth failure (per AC-5). Single source of truth at `window.__dataProvider` (the JS-specific realization; non-browser PNAs realize it differently).
+- **WS-5: Boot orchestration.** Named `bootMarks` at meaningful transitions; watchdog timeout surfaces a recovery panel naming the last-completed mark; slow-boot persistence to localStorage across sessions.
+- **WS-6: Capability-failure panel.** `renderLocalDataUnavailablePanel(feature)`-style for OPFS / version-skew / multi-tab-conflict failures.
+- **WS-7: Persistence-marker.** Exactly one localStorage key preserved across Clear App Cache (the "this origin authenticated once" marker; spelled `fellows_authenticated_once` in fellows_local_db).
+- **WS-8: Local-search fallback.** Search over cached Shared DB when network is offline.
+- **WS-9: Sanitization discipline.** `escapeHtml` for all user-supplied data; parameterized `?` placeholders for all SQL; image path traversal validation.
+- **WS-10: User-visible payload before send (AC-19).** Workspace shows full composition before any communication launches.
+
+Cross-slot: WS-4 sits at the boundary with Storage (the `worker` tier is RPC into ST-3); WS-5 implements the boot side of DB-3.
+
+#### Storage (`ST-`)
+
+- **ST-1: Substrate.** Single dedicated worker; OPFS-SAH-Pool VFS; sqlite-wasm runtime (or the substrate-equivalent for non-browser flavors). Only context that calls `navigator.storage.getDirectory` or opens a `FileSystemSyncAccessHandle` (per AC-3).
+- **ST-2: Init handshake.** First RPC must be `op='init'`. Returns `{workerRpcVersion, schemaVersion, buildLabel, opfsCapable, hasSharedDb, hasPrivateDb, poolFiles, trace}`. Capability detection happens here (per AC-12). Typed contract: [`spec/contracts/worker-init-handshake.schema.json`](spec/contracts/worker-init-handshake.schema.json).
+- **ST-3: RPC protocol.** `{id, op, args}` ↔ `{id, ok, result|error}`. Fan-in dispatch via sequence-numbered pending Map. `worker.onerror` rejects all pending RPCs so callers can fall back instead of hanging. Typed contract: [`spec/contracts/worker-rpc-protocol.schema.json`](spec/contracts/worker-rpc-protocol.schema.json).
+- **ST-4: Two-database management.** Private DB (RW), Shared DB (RO). Cross-DB joins via `ATTACH ?mode=ro`, attached once per init in the worker.
+- **ST-5: Schema bootstrap.** `CREATE IF NOT EXISTS` for both schemas. `PRAGMA foreign_keys=ON` per connection. `PRAGMA user_version` set to schema version. Idempotent so older backups gain newer tables on restore.
+- **ST-6: Auto-backup.** Per-boot debounced snapshots of Private DB to OPFS root (outside SAH-pool dir, so survives sqlite-wasm operations). Rotation by sorted ISO filename. Per AC-9.
+- **ST-7: Restore.** From a user-supplied file or a recent auto-backup. Validates via `PRAGMA quick_check` + schema check. Snapshots pre-restore state to the same rotation. Atomic swap.
+- **ST-8: Opt-in update flow.** `compareSha → previewSwap → applySwap | cancelSwap`. Opaque per-session `stagingId` so a stale page can't accidentally commit. Affected-member preview computed from joined Private DB references. Per AC-10.
+- **ST-9: Multi-tab detection.** `OWNERSHIP_CONFLICT` tagged on `installOpfsSAHPoolVfs()` failure so WS-6 can render a specific multi-tab panel (per AC-11). Non-browser flavors realize the equivalent file-lock detection via AC-PRM-C.
+- **ST-10: Reset Everything.** `wipeAll` RPC: close both DBs, `removeVfs()`, iterate OPFS root and remove every entry. Caller reloads after.
+- **ST-11: Diagnostics.** `getOpfsInventory`, `getTrace`, `getVersions`, `getSharedDbMeta`. Read-only; pure reads, no fetches.
+
+Cross-slot: ST-2/3 are the contract WS-4 calls; ST-7's schema re-bootstrap respects PR-3.
+
+#### Ingestion (`IN-`)
+
+- **IN-1: Source adapter.** Produces bytes conforming to the Shared schema (SH-1 through SH-3). App-specific.
+- **IN-2: Output validation.** `PRAGMA quick_check` passes; primary record table has ≥1 row (zero-row guard prevents catastrophic orphaning of every Private DB reference).
+- **IN-3: Sourced provenance (AC-17).** Every record traces to a specific external source the user has configured.
+- **IN-4: Re-ingestion mechanics.** Atomic stage → validate → swap. Non-destructive of Private DB references; orphan preview required (per AC-10, surfaced via ST-8 + WS-3).
+
+Cross-slot: IN-4 hands off to ST-8 for the actual stage/swap; SH-5 is the Shared-side view of the same transition.
+
+#### Communications (`CO-`)
+
+- **CO-1: Transport interface.** `canHandle(action) → bool`, `launch(action, payload) → Promise<launchResult>`, `descriptor() → {id, name, secureLevel?, …}`. Typed contract: [`spec/contracts/transport-interface.d.ts`](spec/contracts/transport-interface.d.ts).
+- **CO-2: Action set.** Fixed enum: `email_one`, `email_group_cc`, `email_group_bcc`, `direct_message_one`, `share_link_one`, `share_link_group`. Extensible — new actions can be added with toolkit version bumps.
+- **CO-3: Transport eligibility (AC-18).** Mechanism cannot read message contents.
+- **CO-4: User-driven selection (AC-16).** Workspace surfaces multiple transports; user picks per outreach.
+- **CO-5: User-visible payload (AC-19).** Workspace shows full payload (recipients, body, merged data) before launch.
+- **CO-6: Distinction from distribution-mechanism transports.** A distribution flavor's auth-link transport (e.g., Postmark in fellows_local_db's magic-link distribution) is governed by Distribution slot contracts, not CO-3.
+
+Cross-slot: CO-4 is observable from WS (the shell renders the picker); CO-5 is the same contract as WS-10, dual-listed because both slots co-implement.
+
+#### Distribution (`DI-`) — optional
+
+- **DI-1: Install path.** Bundle delivery + verified initial Shared DB + session bootstrap.
+- **DI-2: Update path.** Shell + worker file via SW + cache versioning. Shared DB updates user-driven (per AC-10), not automatic.
+- **DI-3: Auth contract.** `GET /api/auth/status`, `POST /api/send-unlock`, `POST /api/verify-token`, `POST /api/logout`. Session cookie HMAC-signed, version-prefixed (so prior versions reject cleanly post-deploy). Typed contract: [`spec/contracts/distribution-auth.openapi.yaml`](spec/contracts/distribution-auth.openapi.yaml).
+- **DI-4: Anti-enum + rate limit (AC-8).** Always-200 / 204 on send-unlock and client-errors. Per-IP and per-email-hash rate limits. Distinct expired/invalid error strings on verify-token.
+- **DI-5: Server hardening.** TLS terminator on :443 → 127.0.0.1 origin. COOP/COEP (AC-13). 16KB POST cap. No per-user RW endpoints (AC-2). Status-aware caching (4xx/5xx never long-cached).
+- **DI-6: PWA-specific gotchas (when distribution medium is a PWA).** Minimal manifest, no `related_applications`, no `share_target` POST. SW network-first for HTML/JS/CSS/SW + worker file; cache-first for vendored runtime. Separate asset cache. Shared DB URL bypassed in SW fetch (AC-14).
+
+Cross-slot: DI-2's update path triggers WS's "New version available — Reload" banner; DI-3 outcomes feed WS-1's persona decision.
+
+#### Shared schema (`SH-`)
+
+- **SH-1: Primary record table.** `record_id` PK, `slug` UNIQUE, `name`, app-defined display columns, `extra_json TEXT` overflow. Typed contract: [`spec/contracts/shared-db.schema.sql`](spec/contracts/shared-db.schema.sql).
+- **SH-2: Optional FTS5 virtual table.** Indexes whichever columns the workspace wants searchable.
+- **SH-3: Optional per-record asset URL convention.** `/images/<slug>.{jpg,png}` style; cacheable, immutable, slug-keyed.
+- **SH-4: Read-only enforcement.** ATTACH `?mode=ro` for cross-DB joins; stray writes raise `OperationalError`.
+- **SH-5: Atomic re-import semantics with orphan preview (AC-10).** Stage → validate → swap; pre-swap impact preview lists Private DB references that would be orphaned.
+- **SH-6: Sourced-provenance per record (AC-17).** Multi-source PNAs add a `source` column; single-source may omit.
+
+Cross-slot: SH-5 is implemented by ST-8.
+
+#### Private schema (`PR-`)
+
+- **PR-1: Core tables.** `groups`, `group_members`, `record_tags`, `record_notes`, `settings(workspace_id, key, value)` with composite PK. Typed contract: [`spec/contracts/private-db.schema.sql`](spec/contracts/private-db.schema.sql).
+- **PR-2: Opt-in tables.** `record_comms_history`. **Disabled by default** (`settings['comms_history_enabled']='1'` to enable). User has full read/edit/delete control.
+- **PR-3: Schema metadata.** `PRAGMA user_version`; `PRAGMA foreign_keys=ON` per connection.
+- **PR-4: Durability.** Never replaced on app update; survives Clear App Cache; only Reset Everything wipes.
+- **PR-5: Backup/restore conformance.** Idempotent CREATE IF NOT EXISTS lets older backups gain newer tables on restore.
+
+Cross-slot: PR-4 is enforced by ST-1 (separate file from Shared DB) and ST-10 (Reset Everything is the only wipe path); PR-5 is exercised by ST-7.
+
+#### Debug contract (`DB-`)
+
+- **DB-1: Build label substitution.** Placeholder substitution at build *and* serve time (AC-15). Format `<YYYY-MM-DD>-<short-sha>` is the recommended default; implementations may pick another stable format.
+- **DB-2: Build badge.** Always-visible runtime display showing local + server labels.
+- **DB-3: Boot phase marks + watchdog.** Named `bootMarks`; watchdog timeout surfaces a recovery panel; slow-boot persistence across sessions.
+- **DB-4: Sanitized error sink.** POST endpoint; 16KB cap; rate limit; always 204; allowlisted `kind=` enum; server-side free-text sanitization. Typed contract: [`spec/contracts/client-errors-payload.schema.json`](spec/contracts/client-errors-payload.schema.json).
+- **DB-5: Sink-as-analytics.** Adding a new `kind=` enum is the only widening lever. No separate analytics endpoint, no separate identifier scheme.
+- **DB-6: Bug-report dialog.** Collects DB-2 + DB-3 + DB-4 ring; opens mailto to configured maintainer.
+- **DB-7: Force-gate / force-reset escape hatch.** Reachable from `?diag` (or the substrate-equivalent diagnostics affordance) and a hardcoded URL parameter regardless of cookie / localStorage state (per AC-6).
+- **DB-8: Configurability.** Every part is configurable. Purely-personal PNAs may have an empty sink and no maintainer mailbox; the substrate still works.
+- **DB-9: Test affordance.** Workspace exposes the active data provider on a stable global (`window.__dataProvider` in fellows_local_db) so test suites can drive the contracts the same way the workspace does, without a separate test-only seam.
+
+Cross-slot: every component implements DB-1; WS instantiates DB-2, DB-3, DB-6, DB-7, DB-9; DI hosts DB-4 (when present).
+
+### Cross-slot sub-contract threads
+
+Sub-contracts that span slots, formalized:
+
+- **Build-label discipline (AC-15):** every component implements DB-1.
+- **Update notification:** DI-2 → SW banner → WS-3 reload affordance.
+- **Opt-in directory update (AC-10):** IN-4 → ST-8 → SH-5 → WS-3 (orphan render).
+- **Storage RPC boundary:** WS-4 calls ST-3 / ST-4 / etc.; ST-2's handshake gates whether mutations are allowed (AC-4).
+- **Restore data flow:** WS (file picker / backup picker UI) → ST-7 → PR-5 (re-bootstrap).
+- **User-aware payload (AC-19):** WS-10 ↔ CO-5 — dual-listed because both slots co-implement.
+- **Capability-failure surfacing:** ST-2 (`opfsCapable=false`) → WS-6 (panel render); ST-9 (`OWNERSHIP_CONFLICT`) → WS-6 (multi-tab variant).
+- **Diagnostic substrate (DB-\*):** every slot logs to DB-4; WS surfaces DB-2/3/6/7/9.
+
+These cross-slot threads are what make the spec describe a *system* rather than a bag of slots.
+
+### Decomposition decisions
+
+- **No slots split.** Each top-level slot keeps a single contract surface; sub-contracts give it texture without fragmenting the toolkit's mental model. The toolkit may internally factor slots further (Storage in particular has eleven internal contracts already), but the spec exposes one slot per concern.
+- **Cross-slot ACs land in both slots' sub-contracts.** AC-19 is both WS-10 and CO-5; AC-10 fans out into IN-4 + ST-8 + SH-5 + WS-3; etc. The AC table remains the single source of truth; sub-contracts cite ACs where they land.
+- **One naming convention.** `<slot prefix>-<integer>`, monotonic per slot. No renumbering as items are added; new sub-contracts get the next integer.
 
 ---
 
