@@ -3581,6 +3581,32 @@
     };
   }
 
+  // Member-name resolution helpers. Worker RPCs that return a group
+  // (getGroup / createGroup / updateGroup) hand back members as bare
+  // record_id strings; the page-side cache `fellowsBySlug` carries the
+  // names and these helpers attach them + sort. Hoisted to module scope
+  // (out of createWorkerDataProvider) so the api+idb fallback provider's
+  // warm-worker variants can use the same post-process step. Both
+  // helpers only read `fellowsBySlug` — no provider-instance state.
+  function attachMemberNamesFromCache(members) {
+    if (!Array.isArray(members)) return [];
+    var out = members.map(function (m) {
+      var rid = m && m.record_id;
+      var fellow = fellowsBySlug.get(rid);
+      return { record_id: rid, name: fellow ? fellow.name : rid };
+    });
+    out.sort(function (a, b) {
+      var an = (a.name || '').toLowerCase(), bn = (b.name || '').toLowerCase();
+      return an < bn ? -1 : (an > bn ? 1 : 0);
+    });
+    return out;
+  }
+  function withResolvedMembers(group) {
+    if (!group) return null;
+    group.members = attachMemberNamesFromCache(group.members || []);
+    return group;
+  }
+
   // Wrap the worker RPC in a data-provider whose method shapes match the
   // legacy main-thread provider's callsite contract (so consumers in the
   // rest of app.js don't need to learn a new shape). `init` already ran
@@ -3599,24 +3625,6 @@
         ' but worker reports rpc=' + init.workerRpcVersion +
         ' schema=' + init.schemaVersion + ' — ' + opLabel + ' refused, reload to update';
       return Promise.reject(VersionMismatchError(msg));
-    }
-    function attachMemberNamesFromCache(members) {
-      if (!Array.isArray(members)) return [];
-      var out = members.map(function (m) {
-        var rid = m && m.record_id;
-        var fellow = fellowsBySlug.get(rid);
-        return { record_id: rid, name: fellow ? fellow.name : rid };
-      });
-      out.sort(function (a, b) {
-        var an = (a.name || '').toLowerCase(), bn = (b.name || '').toLowerCase();
-        return an < bn ? -1 : (an > bn ? 1 : 0);
-      });
-      return out;
-    }
-    function withResolvedMembers(group) {
-      if (!group) return null;
-      group.members = attachMemberNamesFromCache(group.members || []);
-      return group;
     }
     return {
       kind: 'worker',
@@ -3749,13 +3757,16 @@
     // and groups RPCs stay on the api provider — those are out of
     // scope for Phase 0 (groups are a follow-up; directory data
     // genuinely needs the session-gated fellows.db bytes).
-    function viaWarmWorker(rpcName, argsMap) {
+    function viaWarmWorker(rpcName, argsMap, postProcess) {
       return function () {
+        var args = argsMap ? argsMap.apply(null, arguments) : undefined;
+        var promise;
         if (isWorkerOpfsCapableButInactive() && warmWorker && warmWorker.rpc) {
-          var args = argsMap ? argsMap.apply(null, arguments) : undefined;
-          return warmWorker.rpc.call(rpcName, args);
+          promise = warmWorker.rpc.call(rpcName, args);
+        } else {
+          promise = apiProvider[rpcName].apply(apiProvider, arguments);
         }
-        return apiProvider[rpcName].apply(apiProvider, arguments);
+        return postProcess ? promise.then(postProcess) : promise;
       };
     }
     return {
@@ -3766,15 +3777,29 @@
       getOne: apiProvider.getOne.bind(apiProvider),
       search: apiProvider.search.bind(apiProvider),
       getStats: apiProvider.getStats.bind(apiProvider),
-      // Groups stay on the api provider until a follow-up PR extends
-      // the warm-worker fallback to listGroups / getGroup / etc.
-      // (those need a member-name-resolution helper hoisted out of
-      // createWorkerDataProvider's scope before they can route here).
-      listGroups: apiProvider.listGroups.bind(apiProvider),
-      getGroup: apiProvider.getGroup.bind(apiProvider),
-      createGroup: apiProvider.createGroup.bind(apiProvider),
-      updateGroup: apiProvider.updateGroup.bind(apiProvider),
-      deleteGroup: apiProvider.deleteGroup.bind(apiProvider),
+      // Groups route through the warm worker too (Phase 0b — the
+      // member-name-resolution helper is hoisted out of
+      // createWorkerDataProvider so we can apply it here on the same
+      // bare-record_id response shape the worker returns).
+      listGroups: viaWarmWorker('listGroups'),
+      getGroup: viaWarmWorker(
+        'getGroup',
+        function (id) { return { id: id }; },
+        withResolvedMembers
+      ),
+      createGroup: viaWarmWorker(
+        'createGroup',
+        function (data) { return data; },
+        withResolvedMembers
+      ),
+      updateGroup: viaWarmWorker(
+        'updateGroup',
+        function (id, patch) { return { id: id, patch: patch }; },
+        withResolvedMembers
+      ),
+      deleteGroup: viaWarmWorker('deleteGroup', function (id) {
+        return { id: id };
+      }),
       // Settings + backup / restore route through the warm worker when
       // it's alive with OPFS — Phase 0 scope.
       getSetting: viaWarmWorker('getSetting', function (key) {
