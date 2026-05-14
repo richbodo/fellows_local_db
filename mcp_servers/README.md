@@ -5,22 +5,23 @@ fellows_local_db**, so an AI client — Claude Desktop, Cursor, an
 Ollama-backed local agent — can act on the directory and on your saved
 relationships on your behalf.
 
-Concretely: ask Claude *"who in my fellowship works on climate in
-Auckland?"* and get a grounded answer drawn from real records. Or, when
-the other servers ship, *"draft a follow-up email to my Brisbane
-meetup group"* and have Claude stage the outreach for you to confirm.
+Flagship demo: ask Claude Desktop *"compose an email to the climate
+group in my fellows database, invite them to meet Thursday NZ time at
+1pm — don't send, just stage it for review"* and have it find the
+group, look up everyone's email, draft the body, and hand you back a
+`mailto:` URL that opens in your mail client with the composition
+pre-populated. You review and click send.
 
 ## What's here
 
-The PNA architecture defines four canonical MCP servers, each
-automating a different part of the app. Only Shared Data Ops ships
-today; the other three are scoped here so you know what's coming.
+The PNA architecture defines four canonical MCP servers. Three ship
+today; Diagnostics is scoped here so you know what's coming.
 
 | Server | Status | What it automates |
 |---|---|---|
 | **Shared Data Ops** (`shared_data_ops.py`) | v1 — ships now | Read-only access to the **Shared DB** (`fellows.db`). Search, filter, look up fellows, read directory stats. |
-| **Private Data Ops** | not yet built | Access to the **Private DB** (`relationships.db`): your groups, tags, notes, settings. Reads + writes. Requires a workspace bridge because the Private DB lives in OPFS, owned by the browser tab. |
-| **Communications** | not yet built | Drafts outreach (mailto, exports, etc.) and *stages* it. The MCP server never actually sends — the workspace launches transports only after you confirm. |
+| **Private Data Ops** (`private_data_ops.py`) | v1 — ships now | Read-only access to **groups** in the **Private DB** (`relationships.db`). List groups, find by name, fetch members joined to `fellows.db`. Tags/notes deferred — users aren't writing those at scale yet. |
+| **Communications** (`comms.py`) | v1 — ships now | Stage outreach as a `mailto:` URL. **Server stages; mail client launches.** No transports fired from inside the MCP process (per AC-MCP-B). |
 | **Diagnostics** | not yet built | Read-only access to build label, versions, boot timings, sanitized error events. Useful for AI-assisted bug triage. |
 
 The architectural plan for all four is in `docs/_pna_triage.md` (search
@@ -31,21 +32,30 @@ for "four canonical MCP servers" and `AC-MCP-A` / `AC-MCP-B`).
 The app distinguishes **Shared data** (the fellows directory — name,
 bio, region, contact email, mobile number) from **Private data**
 (your groups, tags, notes — never on any server, never shared).
-**Shared Data Ops returns Shared data.** It does not touch your
-Private data; that's the future Private Data Ops server, which will
-carry stronger consent gates (see *Cloud LLM caveat* below). Within
-those bounds, any MCP client you wire up will see the same fellow
-records you can see by opening the app.
+**Shared Data Ops returns Shared data.** **Private Data Ops returns
+Private data.** **Communications returns neither — it operates on
+recipients/text you (or the AI) hand it.** All three are read-only or
+stage-only — no MCP tool in this directory writes to the Private DB
+or fires a transport. Any MCP client you wire up will see the same
+fellow records and the same groups you can see by opening the app.
 
-## Shared Data Ops — install and run
+Important — Cloud LLMs touching Private data: see *Cloud LLM caveat*
+below. The short version is **wire these up to a local model** when
+possible.
 
-### Prerequisites
+## Prerequisites
 
 - `fellows.db` built locally (`just db-rebuild` from the repo root, or
   `python build/restore_from_knack_scrapefile.py`).
+- `relationships.db` — automatically created on first dev-server boot,
+  but for the demo to be interesting you want **fresh data from your
+  installed PWA**: open the app → Settings → *Download a backup* →
+  save the file as `app/relationships.db` (overwrite any existing
+  one). The dev-server's on-disk DB diverges from your PWA's OPFS DB
+  over time; the backup is the bridge.
 - Python 3.10+.
 
-### Install
+## Install (one venv covers all three servers)
 
 From the repo root:
 
@@ -61,7 +71,7 @@ python3 -m venv mcp_servers/.venv
 mcp_servers/.venv/bin/pip install -r mcp_servers/requirements.txt
 ```
 
-### Wire up Claude Desktop
+## Wire up Claude Desktop
 
 Edit `~/Library/Application Support/Claude/claude_desktop_config.json`
 (macOS). Easiest path: open Claude Desktop → Settings → Developer →
@@ -70,6 +80,9 @@ doesn't exist; if it does already exist (Claude Desktop writes
 `preferences` here in normal use), add the `mcpServers` block at the
 top level alongside whatever's already there — don't nest it inside
 `preferences`.
+
+Paste **all three entries together** — same venv, same install
+ceremony, three independent stdio servers:
 
 ```json
 {
@@ -81,6 +94,22 @@ top level alongside whatever's already there — don't nest it inside
         "--db",
         "/absolute/path/to/fellows_local_db/app/fellows.db"
       ]
+    },
+    "private-data-ops": {
+      "command": "/absolute/path/to/fellows_local_db/mcp_servers/.venv/bin/python",
+      "args": [
+        "/absolute/path/to/fellows_local_db/mcp_servers/private_data_ops.py",
+        "--db",
+        "/absolute/path/to/fellows_local_db/app/relationships.db",
+        "--fellows-db",
+        "/absolute/path/to/fellows_local_db/app/fellows.db"
+      ]
+    },
+    "comms": {
+      "command": "/absolute/path/to/fellows_local_db/mcp_servers/.venv/bin/python",
+      "args": [
+        "/absolute/path/to/fellows_local_db/mcp_servers/comms.py"
+      ]
     }
   }
 }
@@ -89,15 +118,16 @@ top level alongside whatever's already there — don't nest it inside
 **Fully quit Claude Desktop** (⌘Q — closing the window isn't enough;
 the menu bar entry must disappear) and relaunch. Then:
 
-1. Open Settings → Developer → *Local MCP servers*. `shared-data-ops`
-   should appear there. If the panel still says "No servers added,"
-   the config didn't parse — most likely a JSON syntax error or
-   `mcpServers` was nested under `preferences`.
-2. Start a new chat and try a sanity prompt:
-   - *"How many fellows are in the directory?"* → fires `get_directory_stats`.
-   - *"Find fellows working on climate."* → fires `search_fellows`.
-   - *"Who is `<known name>`?"* → fires `get_fellow`.
-   - *"List NZ Investor fellows."* → fires `list_fellows` with a `fellow_type` filter.
+1. Open Settings → Developer → *Local MCP servers*. All three should
+   appear. If the panel still says "No servers added," the config
+   didn't parse — most likely a JSON syntax error or `mcpServers` was
+   nested under `preferences`.
+2. Start a new chat and try sanity prompts:
+   - *"How many fellows are in the directory?"* → fires `shared-data-ops` `get_directory_stats`.
+   - *"List my groups."* → fires `private-data-ops` `list_groups`.
+   - *"Find the climate group."* → fires `private-data-ops` `find_group`.
+   - *"Who's in the climate action group?"* → fires `private-data-ops` `get_group_members`, which joins to `fellows.db` for names + emails in one round-trip.
+   - **Flagship**: *"Compose an email to the climate action group inviting them to meet Thursday NZ time at 1pm. Don't send — stage it."* → fires all three servers in turn (find_group → get_group_members → stage_email).
 
 First-run UX: Claude Desktop prompts for approval the first time the
 model invokes each tool, and the model may try a couple of generic
@@ -107,21 +137,22 @@ re-prompt.
 
 To verify a tool actually fired (vs. the model answering from
 training), tail `~/Library/Logs/Claude/mcp*.log` — each invocation
-writes a JSON-RPC frame. The clearest A/B test is to disable the
+writes a JSON-RPC frame. The clearest A/B test is to disable a
 server in Settings → Developer, ask the same question, and compare
 the answer.
 
-### Run it standalone (without an MCP client)
+### Run a server standalone (without an MCP client)
 
 ```bash
-just shared-data-ops
+just shared-data-ops      # against app/fellows.db
+just private-data-ops     # against app/relationships.db + app/fellows.db
+just comms                # no DB; pure stdio staging server
 ```
 
-That runs `mcp_servers/shared_data_ops.py` against `app/fellows.db` over
-stdio. On its own this just waits for JSON-RPC frames on stdin — useful
-for piping into a protocol test harness, not for interactive use.
+Each just blocks waiting for JSON-RPC frames on stdin — useful for
+piping into a protocol test harness, not for interactive use.
 
-## Cloud LLM caveat
+## Cloud LLM caveat (read this if your MCP client is hosted)
 
 The four canonical servers' privacy posture is set by **architectural
 commitment AC-MCP-A** (see `docs/_pna_triage.md`): MCP tools that
@@ -130,51 +161,82 @@ the consuming AI client is a cloud-hosted LLM (Claude API direct,
 OpenAI API, etc.). Local clients (Claude Desktop running a local
 model, Cursor + Ollama) are the default green path.
 
-**Shared Data Ops does not return Private DB rows, so AC-MCP-A doesn't
-strictly apply.** But the practical concern remains: if you wire this
-server up to a cloud-hosted AI client, fellow contact data (emails,
-mobile numbers, bios) crosses the network to that provider when you
-run queries. The data is data you already have access to as a fellow,
-but you'd be choosing to disclose it to a third party.
+**Private Data Ops returns Private DB rows.** Anytime an MCP client
+calls `list_groups`, `find_group`, or `get_group_members`, the
+contents of your `relationships.db` (group names, member record_ids,
+and joined fellow details) flow to that client. If the client is
+hosted (Claude Desktop with the Anthropic-hosted model, ChatGPT
+desktop, etc.), the data crosses the network to the provider.
 
-For v1 the server does not detect or gate cloud clients. The MCP
-transport is stdio-only, which usually means a local process is the
-client — but Claude Desktop's stdio MCP server can still send
-extracted text to Anthropic's API for the model to consume. Today's
-position is: **document the boundary, trust the user's choice**,
-revisit if the future Private Data Ops server lands. There's an open
-issue tracking the proper consent UX once it's needed
-(see `docs/_pna_triage.md` § AC-MCP-A and the issue tracker).
+**Shared Data Ops** and **Communications** don't return Private DB
+rows, so AC-MCP-A doesn't strictly apply to them — but Shared Data
+Ops still exposes fellow contact info, and Communications stages
+text the AI client composed (which already saw the underlying data
+to compose it). The full data flow matters more than the per-server
+posture.
 
-## Configuration
+For v1, none of the three servers detects or gates cloud clients.
+The MCP transport is stdio-only, which usually means a *local
+process* is the client — but a stdio MCP client (Claude Desktop in
+its default config) still sends extracted tool output to its
+upstream model. Today's position is: **document the boundary,
+trust the user's choice**. Wire the servers up to a local model
+(Claude Desktop + a locally-served model, Cursor + Ollama) for the
+green-path posture. The proper consent UX lands when the spec's
+typed contracts land (`docs/pna_toolkit/spec/contracts/mcp-*.schema.json`).
 
-`shared_data_ops.py` resolves the DB path in this order:
+## Per-server configuration
+
+### Shared Data Ops
+
+Path resolution:
 
 1. `--db /path/to/fellows.db` CLI flag.
 2. `FELLOWS_DB_PATH` environment variable.
 3. `<repo>/app/fellows.db` relative to the script (works in-repo).
 
-The DB is always opened with SQLite's `mode=ro` URI flag — even a
-buggy tool can't mutate the snapshot.
+DB opened with `mode=ro` — even a buggy tool can't mutate the snapshot.
 
-Logs go to stderr (stdio is reserved for JSON-RPC frames). Use
-`--verbose` for noisier output when debugging tool routing.
+### Private Data Ops
+
+Path resolution (two DBs, both opened RO):
+
+| Source | Relationships DB | Fellows DB |
+|---|---|---|
+| CLI flag | `--db` | `--fellows-db` |
+| Env var | `FELLOWS_RELATIONSHIPS_DB_PATH` | `FELLOWS_DB_PATH` |
+| Default | `<repo>/app/relationships.db` | `<repo>/app/fellows.db` |
+
+Both DBs opened with `mode=ro`. `fellows.db` is `ATTACH`ed as `f` once
+per connection so a single SQL query gets group_members + fellow
+display fields in one round-trip.
+
+### Communications
+
+No DB, no config beyond `--verbose`. Staged compositions live in
+process memory only; nothing on disk. Process restart clears them.
+
+All three servers log to stderr (stdio is reserved for JSON-RPC
+frames). Use `--verbose` for noisier output when debugging tool
+routing.
 
 ## Why a separate venv
 
 `mcp_servers/` is the only Python code in this repo allowed
 non-stdlib runtime dependencies. The main app (`app/server.py`,
 `deploy/server.py`) is strictly stdlib-only per `CLAUDE.md`. Keeping
-the MCP server's deps in `mcp_servers/.venv` preserves that
-boundary.
+the MCP server deps in `mcp_servers/.venv` preserves that boundary —
+and one venv covers all three servers.
 
 ## Tests
 
 ```bash
-just test-shared-data-ops
+just test-mcp                 # all three servers
+just test-shared-data-ops     # individually
+just test-private-data-ops
+just test-comms
 ```
 
-Runs `tests/test_shared_data_ops.py` against the live `fellows.db`
-using `mcp_servers/.venv/bin/pytest`. The same file lives in
+Each runs via `mcp_servers/.venv/bin/pytest`. The same files live in
 `tests/`; when run via the project `.venv` (which doesn't have the
-`mcp` SDK), it skips cleanly.
+`mcp` SDK), they skip cleanly.

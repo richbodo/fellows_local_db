@@ -285,6 +285,35 @@ shared-data-ops:
 test-shared-data-ops:
     {{mcp_pytest}} tests/test_shared_data_ops.py -v
 
+rel_db     := "app/relationships.db"
+
+# Run the Private Data Ops MCP server over stdio against relationships.db
+# (RO) with fellows.db ATTACHed (RO). See `shared-data-ops` recipe header
+# for the same note about test harnesses vs. real Claude Desktop use.
+[group('mcp')]
+private-data-ops:
+    {{mcp_python}} mcp_servers/private_data_ops.py --db {{rel_db}} --fellows-db {{db}}
+
+# Run the Communications MCP server (stage-only, in-memory). Pure stdio
+# server; no DB. See mcp_servers/README.md for Claude Desktop wiring.
+[group('mcp')]
+comms:
+    {{mcp_python}} mcp_servers/comms.py
+
+# Run the Private Data Ops MCP server's unit tests.
+[group('mcp')]
+test-private-data-ops:
+    {{mcp_pytest}} tests/test_private_data_ops.py -v
+
+# Run the Communications MCP server's unit tests.
+[group('mcp')]
+test-comms:
+    {{mcp_pytest}} tests/test_comms.py -v
+
+# Run every MCP server's tests at once.
+[group('mcp')]
+test-mcp: test-shared-data-ops test-private-data-ops test-comms
+
 
 # ---- build / deploy ------------------------------------------------------
 

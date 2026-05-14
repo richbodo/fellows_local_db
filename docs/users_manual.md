@@ -103,6 +103,48 @@ directory.
 
 ---
 
+## Where your data is stored
+
+Your groups, notes, and settings live **inside your browser**. They
+stay there — never sent to any server, never visible to other apps
+or websites on your device.
+
+There's no folder on your disk you can browse to or back up by hand;
+the data file lives in a private storage area your browser manages.
+What you *can* do is download and restore your data file
+(`relationships.db`) from inside the app. Here's how:
+
+- **Download a backup.** Settings → *Download a copy of
+  relationships.db*. Save the file somewhere you'll remember
+  (Downloads is a good default).
+- **Restore from a backup.** Settings → *Restore from backup →
+  Restore from a file* → pick the `.db` file you downloaded earlier.
+  The current data is captured into the auto-backup list first, so
+  a wrong restore is one click away from being undone.
+- **Auto-backups happen on their own.** While you work, the app
+  periodically snapshots your data. Pick one with Settings →
+  *Restore from backup → Recent auto-backups*.
+
+**What clearing does** (see *Clearing app data* below for the full
+breakdown): **Clear App Cache** keeps your data and auto-backups.
+**Reset Everything** wipes both — that's why it pops up a *Save a
+backup first?* dialog. Download a backup yourself first if you want
+a copy you control.
+
+**Phone gotchas.** On **Android**, *Clear Storage* for the browser
+in Android Settings wipes everything this app has saved, including
+the auto-backups. On **iOS**, *Settings → Safari → Clear History and
+Website Data* does the same. Both bypass the app's own confirm
+dialogs — download a backup yourself before doing either.
+
+**Switching browsers or devices.** Your data doesn't follow the
+browser — the new browser starts empty. Download a backup in the
+source browser, move the file across (AirDrop, email-to-yourself,
+USB, cloud drive), then use *Restore from a file* in the new
+browser to carry your groups, notes, and settings over.
+
+---
+
 ## The directory
 
 ![Directory page during a search; the visible-count line tracks how many
