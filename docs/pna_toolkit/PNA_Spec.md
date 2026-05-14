@@ -1,7 +1,6 @@
 # PNA Spec
 
 > **Spec-Version:** 0.1 (draft)
-> **Status:** Skeleton — substantive content to be migrated from `../_pna_triage.md` per the triage doc's Next Steps.
 >
 > This document is the universal specification for personal network applications. Reference designs (e.g. `fellows_local_db`) declare conformance to a specific spec version and to a specific flavor (constellation of axis picks).
 >

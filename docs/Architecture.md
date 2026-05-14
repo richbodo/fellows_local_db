@@ -344,8 +344,8 @@ See [`../ROADMAP.md`](../ROADMAP.md).
 
 <!--
 Cross-link migration: when the PNA toolkit `git mv`s out of this repo to its
-own `personal_network_toolkit` repository (per `_pna_triage.md` § Next steps
-item 9), do a single replace in this file: `./pna_toolkit/` → the toolkit
+own `personal_network_toolkit` repository (planned for the eventual toolkit
+lift), do a single replace in this file: `./pna_toolkit/` → the toolkit
 repo's URL prefix. All other relative links (`./email_gate.md`, etc.) stay
 fellows-repo-local.
 -->

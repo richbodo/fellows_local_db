@@ -1,6 +1,6 @@
 -- Private schema interface — canonical SQL DDL for a conforming Private DB.
 --
--- Sub-contracts PR-1 through PR-5 from `_pna_triage.md` Part 4. The Private DB
+-- Sub-contracts PR-1 through PR-5 from PNA_Spec.md § Slot map. The Private DB
 -- holds user-authored relationship data (groups, tags, notes, settings,
 -- optional comms history); it is read-write from the workspace and is the
 -- store that AC-1 promises to keep local-only.
@@ -65,8 +65,8 @@ CREATE TABLE IF NOT EXISTS record_notes (
 -- PR-1: settings — key/value bag partitioned by workspace_id.
 --
 -- Single-workspace PNAs use the empty string as workspace_id (default).
--- Multi-workspace PNAs (per the "one origin, many workspaces" decision in
--- _pna_triage.md Part 3) use their workspace's id so each workspace has
+-- Multi-workspace PNAs (per the "one origin, many workspaces" decision)
+-- use their workspace's id so each workspace has
 -- its own settings namespace.
 --
 -- fellows_local_db is single-workspace today and uses a simpler

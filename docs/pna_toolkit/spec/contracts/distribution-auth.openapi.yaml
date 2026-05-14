@@ -1,7 +1,7 @@
 # Distribution slot — auth, install, and sanitized-error endpoints.
 #
 # Sub-contracts DI-3 (auth) and DI-4 (anti-enum + rate limit) from
-# `_pna_triage.md` Part 4, plus the DB-4 sanitized error sink that
+# PNA_Spec.md § Slot map, plus the DB-4 sanitized error sink that
 # Distribution hosts (the sink lives at the Distribution boundary
 # because it must be reachable by users who failed the auth gate).
 #

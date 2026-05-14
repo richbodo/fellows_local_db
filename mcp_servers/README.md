@@ -30,9 +30,6 @@ are scoped here so you know what's coming.
 The architectural definitions live in [`docs/pna_toolkit/PNA_Spec.md`](../docs/pna_toolkit/PNA_Spec.md)
 (Vocabulary § MCP server, Vision, AC-MCP-A, AC-MCP-B), and typed
 contracts for each server are in [`docs/pna_toolkit/spec/contracts/`](../docs/pna_toolkit/spec/contracts/).
-The working triage notes that pre-dated the spec scaffold are still in
-`docs/_pna_triage.md` and will retire as their content fully migrates
-into the toolkit dir.
 
 ## Privacy boundary in one paragraph
 

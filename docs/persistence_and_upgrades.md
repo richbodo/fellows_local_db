@@ -1,5 +1,7 @@
 # Persistence and Upgrades
 
+> **Annex to [`Architecture.md`](Architecture.md).** Specializes the **Storage** slot of [PNA Spec v0.1](pna_toolkit/PNA_Spec.md#slot-map) for fellows_local_db's `opfs-sqlite-wasm` flavor — the authoritative state-survival matrix across Clear App Cache / Reset Everything / app update, plus the auto-backup and restore flows (sub-contracts ST-6 / ST-7 / ST-10). Read [`Architecture.md`](Architecture.md) first for the spec-conformance overview; this file is the depth-doc for "what survives what."
+
 The PWA stores user state across several layers, each with different
 survival semantics. This doc captures what survives what — so future
 features can land without surprising existing users, and so we have a
