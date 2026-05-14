@@ -1,5 +1,7 @@
 # Browser Support
 
+> **Annex to [`Architecture.md`](Architecture.md).** Specializes the **Storage** slot's capability-detection sub-contract (ST-2 + AC-12) and the Workspace's unsupported-browser surfacing (WS-6) for fellows_local_db's `opfs-sqlite-wasm` flavor — required browser versions, the worker-internal capability check, the policy stance on UA-sniffing vs. capability detection. Read [`Architecture.md`](Architecture.md) first; this file is the depth-doc for browser-compatibility triage.
+
 How we triage long-tail browser-compatibility issues for this app. The
 audience is small (~hundreds of fellows) and the distribution model is
 "by emailed magic link, install once" — but each one of those users

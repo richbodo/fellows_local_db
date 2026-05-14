@@ -17,7 +17,3 @@
 
 - [fellows_local_db Architecture](../Architecture.md) — first reference design; Directory Archive use case; magic-link distributed PWA + static network DB archive + single shared directory
 
-## Working drafts
-
-- [`_pna_triage.md`](../_pna_triage.md) — working triage doc; authoritative until content migrates into the files above and the triage is retired
-- [`_pna_spec_format_landscape.md`](../_pna_spec_format_landscape.md) — format/structure rationale; retired alongside the triage

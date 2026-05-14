@@ -2,6 +2,6 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://pna-spec.example/v0.1/mcp-diagnostics.schema.json",
   "title": "MCP server — Diagnostics",
-  "description": "Tool surface for the canonical Diagnostics MCP server. Read-only access to the Debug contract: build label, OPFS inventory (or substrate-equivalent), recent error events, boot marks, version handshake. Placeholder — no reference implementation yet; tool surface to be drafted alongside the first Diagnostics-exposing PNA. See ../../../pna_toolkit/PNA_Spec.md § Vocabulary (five canonical MCP servers) and ../../../_pna_triage.md § Part 1 — Debug contract.",
+  "description": "Tool surface for the canonical Diagnostics MCP server. Read-only access to the Debug contract: build label, OPFS inventory (or substrate-equivalent), recent error events, boot marks, version handshake. Placeholder — no reference implementation yet; tool surface to be drafted alongside the first Diagnostics-exposing PNA. See ../../../pna_toolkit/PNA_Spec.md § Vocabulary (five canonical MCP servers) and § Slot map (DB-1 through DB-9 for the Debug contract sub-contracts).",
   "type": "object"
 }

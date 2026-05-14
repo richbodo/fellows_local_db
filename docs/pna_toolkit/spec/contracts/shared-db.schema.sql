@@ -1,6 +1,6 @@
 -- Shared schema interface — canonical SQL DDL for a conforming Shared DB.
 --
--- Sub-contracts SH-1 through SH-6 from `_pna_triage.md` Part 4. The Shared
+-- Sub-contracts SH-1 through SH-6 from PNA_Spec.md § Slot map. The Shared
 -- DB holds mirrored contact data — read-only inside the PNA, written only
 -- by the Ingestion slot. AC-17 (mirrored data is sourced) and AC-10
 -- (opt-in non-destructive re-imports with orphan preview) apply.
