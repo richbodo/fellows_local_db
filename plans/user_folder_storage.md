@@ -34,6 +34,24 @@ G7. **Migration without data loss.** Existing users with OPFS-only data are walk
 - **Folder-first as the only mode.** Even on Chromium, "Browser-only" remains a valid (unsafe-flagged) state for users who decline to pick a folder. We surface the warning; we don't force the choice.
 - **Replacing OPFS as the working store.** sqlite-wasm performs best against OPFS-resident `FileSystemSyncAccessHandle`s. The working DB stays in OPFS; the user's folder is the durable mirror. See § Architecture.
 
+## Refreshable assets (images, fellows.db, etc.)
+
+The plan above is about `relationships.db` — *user-authored* data we cannot regenerate from any other source. A separate class of assets is *refreshable*: bytes the server can hand back any time, that lose nothing if locally destroyed. Today that's `fellows.db` (regenerated from the Knack source on every build) and the ~250 profile images served from `/images/<slug>`.
+
+The plan keeps `fellows.db` in OPFS by design — the per-build SHA in `/build-meta.json` already handles "is my local copy stale?" — but it does not yet address **images**. The gap matters: images are session-gated on prod, so a user who installs while their session is expired (or whose first boot lands in api+idb fallback for any other reason) gets *zero* profile photos and no mechanism to fill them in until they re-authenticate. We have a real user-report of this in the wild.
+
+Three options, listed in increasing scope:
+
+**Option A — Skip prewarm on unauthenticated boot + completeness counter.** The current image prewarm fires ~500 doomed requests every cold boot in api+idb fallback. Gate it on `authStatus.authenticated`. Add an About-page row: `Images: 230 / 251 cached — Sign in to fetch the rest` (linking to `/?gate=1`). Smallest possible fix; doesn't make images durable across browser-data wipes. Shippable independently of any folder work.
+
+**Option B — Bundle images in the static bundle.** ~250 × ~30 KB ≈ 7-10 MB added to `deploy/dist/`. Images become as durable as `app.js` and signed by the same manifest. Trade-off: every directory-data update re-downloads all images even if only one changed. Could be mitigated by per-image hashes in `build-meta.json`, but that's its own work.
+
+**Option C — Sync images into the user's folder once folder-mode is active (Phase 1+).** Folder-mode users get full durability — images survive Clear Site Data, browser switches, even hardware moves through a synced folder. OPFS-only users (mobile, Safari, Firefox) still need Option A as the floor since folder-mode never lands for them.
+
+**Recommendation:** Option A now (it's a current production bug). Option C with Phase 2 (along with auto-sync). Option B held in reserve in case the bundle-weight conversation tips that way later.
+
+Out of scope either way: a sync strategy for `fellows.db` itself. That's an existing concern handled by Check for updates → Update directory data and is unchanged by this plan.
+
 ## Browser compatibility matrix
 
 | Browser / mode | `showDirectoryPicker` | Persistent handle re-grant | Behavior in this plan |
@@ -98,6 +116,14 @@ Bright line: **the user-folder feature is opt-in and additive.** Today's OPFS-on
 A new mutation always lands in OPFS first, then syncs out. So a stale-permission session is still safe: the data is preserved in OPFS even if the folder write keeps failing.
 
 ## UI / UX
+
+### Status surfaces: durability vs completeness
+
+The status badge below tracks **where your data is saved** — Browser-only / Pending / Saved / Folder inaccessible. That is "data durability."
+
+A separate concern, surfaced elsewhere, is **install completeness** — has the app downloaded every refreshable asset it depends on, so subsequent server-less use is fully functional? On a normal authenticated install, prewarm fills the image cache and the answer is yes. On an install whose first boot landed in api+idb fallback (expired session, anti-enum 403, etc.), the answer is no — *and the durability badge has no way to express that.* The user's data is durable; the install itself is partial.
+
+Don't conflate the two in the same badge. Surface completeness on the About page (where the user already goes to ask "is everything okay with this install?") as a separate row, with a link to sign-in when items are missing. The signal evolves as Phase 1 / 2 land — once images sync into the user's folder, the same "X of N images present" check applies, just against a different storage substrate.
 
 ### Status badge (the load-bearing UI element)
 
@@ -272,6 +298,20 @@ Settings UI calls it: data folder? backup folder? sync folder? save folder? Wort
   - Safari desktop: confirms unsupported-browser badge appears without spamming errors.
   - Firefox: same.
   - iOS Safari PWA: same.
+
+### Mobile verification
+
+The plan calls mobile "unsupported in v1" for folder-mode itself — neither iOS nor Android Chrome will see the folder picker until / unless we revisit. But **the OPFS-only fallback path IS the mobile experience** and that path absolutely needs verification: the image-prewarm-on-fallback bug bit a real mobile user before we noticed it, and "we tested on desktop Chrome" did not catch it. We're shipping a PWA primarily consumed on phones; not having a mobile test loop is the gap that lets bugs like that ship to the user before we notice.
+
+Options for adding a mobile test loop, listed in increasing fidelity / cost:
+
+- **Playwright mobile emulation** (we use it today in `tests/e2e/mobile/`). UA + viewport spoofing. Catches CSS / layout regressions; does *not* replicate WebKit-on-iOS (Playwright Chromium is still Chromium under the hood) or Android Chrome's storage-eviction behavior. Better than nothing; insufficient on its own.
+- **BrowserStack / Sauce Labs / similar.** Real iOS Safari and Android Chrome, scriptable from CI. Costs money; replicates engine + storage quirks. Worth it for security and privacy-sensitive features once we have the appetite.
+- **Manual ship checklist on a personal phone.** Per-deploy smoke (≈ a quarter-hour). Catches the worst bugs; can't be automated. Belongs in `docs/users_manual.md` or a sibling so any maintainer can run it.
+
+**Recommendation for #165:** before Phase 1 ships, formalize the manual mobile checklist as the floor; revisit cloud-device testing in Phase 4 alongside other polish. Even on desktop-only features, run the manual mobile pass once to confirm the OPFS-only fallback didn't degrade.
+
+This is also a good time to remember the AC-12 commitment in `docs/Architecture.md` (capability detection inside the worker): mobile is where AC-12 gets stressed the most, since iOS WebKit constraints differ from desktop Safari's in ways that don't always surface in Playwright.
 
 ## Risks
 
