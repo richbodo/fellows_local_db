@@ -114,6 +114,36 @@ class TestAPI:
         names = [f.get("name") for f in data]
         assert "Aaron Bird" in names or "Aaron McDonald" in names
 
+    def test_api_search_first_name_richard(self):
+        """Whole-token first-name search hits both Richards."""
+        status, _, body = get("/api/search", query={"q": "Richard"})
+        assert status == 200
+        names = [f.get("name") for f in json.loads(body)]
+        assert "Richard Bodo" in names
+        assert "Richard Graves" in names
+
+    def test_api_search_last_name_bodo(self):
+        """Whole-token last-name search hits Richard Bodo."""
+        status, _, body = get("/api/search", query={"q": "Bodo"})
+        assert status == 200
+        names = [f.get("name") for f in json.loads(body)]
+        assert "Richard Bodo" in names
+
+    def test_api_search_partial_token_returns_empty(self):
+        """As-you-type 'Ric' / 'Bod' return [] under raw FTS5 MATCH.
+
+        Documents the real-time-search regression: the client sends the
+        in-progress input straight to fellows_fts MATCH, which requires
+        whole tokens. Until the client appends '*' for prefix matching,
+        every keystroke before a complete token shows 'no results'.
+        Pair with test_fts5_partial_token_without_prefix_glob_returns_nothing
+        in tests/test_database.py.
+        """
+        for partial in ("Ric", "Bod"):
+            status, _, body = get("/api/search", query={"q": partial})
+            assert status == 200, f"q={partial!r}"
+            assert json.loads(body) == [], f"q={partial!r}"
+
     def test_images_endpoint(self):
         status, ctype, body = get("/images/aaron_bird.jpg")
         assert status in (200, 404)
