@@ -154,6 +154,24 @@ If the user explicitly clicks "Disconnect folder," we delete the IDB entry and r
 
 ## Phases
 
+### Phase 0 — Worker-direct export / import (pre-cursor, shippable now)
+
+**Independent of all the user-folder work below.** Decouples the page-side `dataProvider` from the worker's relationship-DB byte operations, which Phase 2's auto-sync needs anyway and which fixes a current production bug for free.
+
+The page-level `dataProvider` today exposes `exportRelationshipsBytes` / `importRelationshipsBytes` only when its `kind === 'worker'`. When the page falls back to `api+idb` (most commonly because the session-gated `/fellows.db` fetch returned 401/403 during boot), the warm worker is still alive with `relationships.db` open, but the Settings backup and restore controls can't reach it — so users on an expired session can't back up their data before reinstalling or switching browsers.
+
+Phase 2's debounced sync ("worker enqueues a sync after every committed mutation") is written from the worker's perspective and similarly cannot depend on the active page-level provider. The plumbing is the same: a worker-direct path to the bytes, addressable regardless of which provider the page picked at boot. Landing it here shortens Phase 2.
+
+- New page-side helpers that reach `warmWorker.rpc` directly:
+  - `warmWorkerExportRelationshipsBytes()`
+  - `warmWorkerImportRelationshipsBytes(bytes)`
+  - `warmWorkerListRelationshipsBackups()` (for the auto-backup list in Settings)
+- Settings page wires the download / restore buttons through the warm-worker helpers when `dataProvider.kind !== 'worker'` AND `isWorkerOpfsCapableButInactive()` (the helper added in the never-SaaS copy cleanup, PR #173).
+- When the warm worker is genuinely absent (no OPFS, no worker init), keep today's "this feature isn't available" panel — that's the honest case.
+- E2E: extend `tests/e2e/test_never_saas_copy.py` (or sibling) to seed the api+idb-fallback scenario, click Download, assert a real `relationships.db` blob comes back; click Restore on a known-good blob, assert the worker accepted it.
+
+Out of scope for P0: anything about user-picked folders, the status badge state machine, IDB handle persistence, the migration wizard. Those all stay below.
+
 ### Phase 1 — Folder picker + status UI + manual save/restore
 
 **Shippable on its own.** No automatic sync; the user explicitly hits "Save to folder" or "Refresh from folder" buttons in Settings. Validates the API surface, the handle-storage model, and the status UI before adding cadence logic.
@@ -186,6 +204,14 @@ Out of scope for P1: auto-sync, migration wizard, fellow.db.
 - "Open data folder" deep link if any platform exposes it without re-picking.
 - Diagnostic panel additions (folder path, last sync time, sync-failure count, current permission state).
 - Maybe-eventual: `FileSystemObserver` watch on the folder so external edits surface as conflicts.
+
+## Plan-polish items (not blocking, worth resolving before code lands)
+
+Two gaps surfaced during a plan review. Neither blocks ship; both are worth a sentence each in the relevant phase before that phase starts.
+
+**G1 — Post-commit hook on relationships.db RPCs (Phase 2 dependency).** Phase 2's spec says "Worker enqueues a sync after every committed mutation to `relationships.db`." The worker's current RPC shape doesn't have a notion of "this RPC just committed a mutation" — most handlers read and write synchronously inside one function with no after-hook. P2 needs a small "post-commit" concept: each RPC that mutates `relationships.db` (createGroup, updateGroup, deleteGroup, setSetting, importRelationshipsBytes, …) flags the worker to schedule a debounced sync after the response is sent. Cleanest implementation is probably a small `markRelationshipsDirty()` helper called at the end of each mutating RPC, with the debounce timer living at module scope. Worth wiring in P2 the day P2 code starts.
+
+**G2 — `fellows.db.meta.json` sidecar location and migration.** Today the SHA-keyed sidecar that drives the About → Check for updates flow lives in OPFS at `fellows.db.meta.json` (sibling of the SAH pool). The plan moves `relationships.db` to the user's folder but is silent on the sidecar. Decision needed: stays in OPFS (sidecar tracks the OPFS-resident `fellows.db`, which never moves under this plan), or moves to the folder alongside `relationships.db` (so a user copying their folder to a new machine sees the same update-state). Reco: **stays in OPFS** — it tracks `fellows.db` freshness on this device, which is per-device by definition. A new device starts with an empty sidecar and re-fetches naturally. Worth one sentence in § Architecture once decided, and a note in the migration wizard (Phase 3) confirming the wizard does NOT copy the sidecar.
 
 ## Open questions for @richbodo
 
