@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pna-spec.example/v0.1/mcp-ingestion.schema.json",
+  "title": "MCP server — Ingestion",
+  "description": "Tool surface for the canonical Ingestion MCP server. Drives source imports, dedup wizard interaction, orphan preview, conflict resolution. Placeholder — no reference implementation yet; tool surface to be drafted alongside the first Ingestion-exposing PNA. See ../../../pna_toolkit/PNA_Spec.md § Vocabulary (five canonical MCP servers), AC-10 (opt-in non-destructive re-import), AC-PRM-B (multi-source dedup contract).",
+  "type": "object"
+}

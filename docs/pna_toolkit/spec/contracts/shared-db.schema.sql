@@ -1,0 +1,7 @@
+-- Shared schema interface: canonical SQL DDL for a conforming Shared DB.
+-- Placeholder — to be drafted in step 5.
+-- See ../../../_pna_triage.md § Part 1 — Shared schema and § Part 4 — SH-1 through SH-6.
+--
+-- Will define: primary record table (record_id, slug, name, app-defined display
+-- columns, extra_json), optional FTS5 virtual table, optional per-record asset
+-- URL convention, sourced-provenance column for multi-source PNAs.

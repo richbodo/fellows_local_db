@@ -1,0 +1,7 @@
+-- Private schema interface: canonical SQL DDL for a conforming Private DB.
+-- Placeholder — to be drafted in step 5.
+-- See ../../../_pna_triage.md § Part 1 — Private schema and § Part 4 — PR-1 through PR-5.
+--
+-- Will define: groups, group_members, record_tags, record_notes, settings
+-- (workspace_id, key, value) composite PK, opt-in record_comms_history.
+-- PRAGMA foreign_keys=ON per connection; PRAGMA user_version for migrations.
