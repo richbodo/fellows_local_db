@@ -172,6 +172,16 @@ Phase 2's debounced sync ("worker enqueues a sync after every committed mutation
 
 Out of scope for P0: anything about user-picked folders, the status badge state machine, IDB handle persistence, the migration wizard. Those all stay below.
 
+### Phase 0b — Worker-direct groups RPCs (small follow-on)
+
+Same shape as Phase 0, extended to the five groups RPCs (`listGroups`, `getGroup`, `createGroup`, `updateGroup`, `deleteGroup`) so the entire `relationships.db` read/write surface — settings, backups, AND groups — stays reachable when the page falls back to api+idb. Without this, a user with an expired session could back up their data (P0) but couldn't browse the groups they were trying to back up.
+
+- Prereq: hoist `attachMemberNamesFromCache` and `withResolvedMembers` out of `createWorkerDataProvider`'s scope to module scope. Both read only the module-level `fellowsBySlug` cache; the hoist is mechanical.
+- Extend `viaWarmWorker` (added in P0) to accept an optional post-process function so `getGroup` / `createGroup` / `updateGroup` can chain `withResolvedMembers`.
+- Five new methods on `createApiPlusIdbDataProvider`, same dispatcher pattern as P0.
+
+Out of scope for P0b: version-skew gating on mutating group ops in the api+idb path. The worker provider gates create/update/delete with `refuseIfVersionSkew`; the api+idb fallback doesn't, on the rationale that the fallback path is already exceptional and worker-vs-page version skew is a separate SW-upgrade-race concern surfaced by the existing reload banner. Worth revisiting if real-user telemetry shows skew-related failures.
+
 ### Phase 1 — Folder picker + status UI + manual save/restore
 
 **Shippable on its own.** No automatic sync; the user explicitly hits "Save to folder" or "Refresh from folder" buttons in Settings. Validates the API surface, the handle-storage model, and the status UI before adding cadence logic.
