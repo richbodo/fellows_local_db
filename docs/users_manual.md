@@ -105,14 +105,82 @@ directory.
 
 ## Where your data is stored
 
-Your groups, notes, and settings live **inside your browser**. They
-stay there — never sent to any server, never visible to other apps
-or websites on your device.
+Your groups, notes, and settings live **on your device only** —
+never sent to any server, never visible to other apps or websites.
 
-There's no folder on your disk you can browse to or back up by hand;
-the data file lives in a private storage area your browser manages.
-What you *can* do is download and restore your data file
-(`relationships.db`) from inside the app. Here's how:
+There are two places they can sit, and you choose which:
+
+1. **In your browser** (default). The data file (`relationships.db`)
+   lives in a private storage area your browser manages. Survives
+   updates and **Clear App Cache**, but you can't see the file from
+   Finder/Explorer, and clearing site data or switching browsers
+   wipes it.
+2. **In a folder on your disk** (Settings → *Data folder*). A real
+   file at a path you pick — visible in Finder/Explorer, copyable,
+   syncable through Dropbox / iCloud Drive / Syncthing if you put it
+   there, durable across clearing site data or switching browsers.
+   Available in Chrome / Edge / Brave / Arc on desktop today.
+
+The browser is always your **working store** either way — that's
+where the app reads and writes during use. When you pick a data
+folder, the app keeps a copy of your data there too and updates it
+when you click *Save now*.
+
+### Setting up a data folder (Chrome / Edge / Brave on desktop)
+
+1. Go to **Settings → Data folder**.
+2. Click **Choose data folder…**.
+3. Your OS pops a folder picker. Pick any folder you like —
+   `Documents`, a Dropbox / iCloud / Syncthing folder, anywhere.
+4. The app creates a `Fellows/` subfolder inside it and saves
+   `relationships.db` there.
+
+The badge at the top of the section flips to **Saved** with the
+path and a timestamp, and your data is now a real file you can
+browse to.
+
+**If `Fellows/` already exists in the folder you picked**, the app
+asks before doing anything: open the existing data (the typical
+case — reinstalling, or pointing a second browser at a synced
+folder), or save your current data into a new `Fellows 2/`
+subfolder (the safe choice when you don't recognize what's there).
+Cancel leaves both untouched.
+
+After setup, every time you make changes you'll see the *Save now*
+button. (Phase 1 is manual save; automatic background sync ships
+in Phase 2.) **Refresh from folder** does the reverse: replace the
+browser's copy with whatever's currently in the folder — useful
+after editing in another browser or restoring a synced file.
+
+### Badge states
+
+The badge at the top of *Data folder* always tells you the current
+state of your data:
+
+- **Saved** (green) — your data is in the folder and the last save
+  succeeded.
+- **Folder selected — no save yet** (blue) — you've picked a folder
+  but haven't saved into it yet. Click *Save now*.
+- **Browser-only — your data is not yet saved to a folder** (yellow)
+  — default state on a fresh install. Working fine, but not yet
+  durable across browser-data clears.
+- **Folder set but unreachable — reconnect to keep saving** (yellow)
+  — the OS revoked permission to the folder (you moved it, denied
+  on session start, or the browser idle-revoked). Your data is fine
+  in the browser; click *Reconnect folder…* to grant access again.
+- **Last save failed — Retry to save again** (yellow) — the most
+  recent write threw an error (disk full, permissions changed
+  mid-write). The change is still safe in the browser; click
+  *Save now* to retry.
+- **Browser-only — this browser doesn't support saving to a folder**
+  (yellow) — Safari, Firefox, iOS, and Android Chrome don't ship the
+  File System Access API. Use *Download my user data* (below) for
+  manual backup instead.
+
+### Backup and restore (works in every browser)
+
+Even when you haven't picked a data folder, you can still grab a
+file copy by hand:
 
 - **Download a backup.** Settings → *⬇ Download my user data*. Your
   browser asks you where to save it (Chrome / Edge / Brave on desktop,
@@ -128,21 +196,29 @@ What you *can* do is download and restore your data file
 
 **What clearing does** (see *Clearing app data* below for the full
 breakdown): **Clear App Cache** keeps your data and auto-backups.
-**Reset Everything** wipes both — that's why it pops up a *Save a
-backup first?* dialog. Download a backup yourself first if you want
-a copy you control.
+**Reset Everything** wipes the in-browser data and auto-backups —
+that's why it pops up a *Save a backup first?* dialog. **Reset
+Everything does NOT delete the data folder file** — that file lives
+on your disk and is yours to keep or remove.
+
+**If you cleared site data and re-installed, but your data folder
+is still on disk**, choose the same folder again — the dialog will
+offer to *Open existing*, and your groups / notes / tags come back.
 
 **Phone gotchas.** On **Android**, *Clear Storage* for the browser
 in Android Settings wipes everything this app has saved, including
 the auto-backups. On **iOS**, *Settings → Safari → Clear History and
 Website Data* does the same. Both bypass the app's own confirm
-dialogs — download a backup yourself before doing either.
+dialogs — download a backup yourself before doing either. (Phones
+don't yet support the data-folder feature.)
 
-**Switching browsers or devices.** Your data doesn't follow the
-browser — the new browser starts empty. Download a backup in the
-source browser, move the file across (AirDrop, email-to-yourself,
-USB, cloud drive), then use *Restore from a file* in the new
-browser to carry your groups, notes, and settings over.
+**Switching browsers or devices.** If you set up a data folder
+inside a cloud-sync folder (Dropbox / iCloud Drive / Syncthing /
+OneDrive), point the new browser at the same folder and pick
+*Open existing* — your groups / notes / tags carry over.
+Otherwise, download a backup in the source browser, move the file
+across (AirDrop, email-to-yourself, USB, cloud drive), then use
+*Restore from a file* in the new browser.
 
 ---
 
