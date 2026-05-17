@@ -3247,6 +3247,125 @@ a.group-action-btn--primary {
   color: #fff;
 }
 
+/* Data folder section (issue #165 Phase 1) — durable storage badge +
+   actions. The badge is the load-bearing element; its color signals
+   whether the user's data is saved-to-disk, only-in-browser, or in a
+   warning state requiring attention. */
+.settings-folder-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-top: 0.5rem;
+  border: 1px solid transparent;
+  line-height: 1.2;
+}
+
+.settings-folder-badge-dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: #94a3b8;
+  flex-shrink: 0;
+}
+
+.settings-folder-badge--saved {
+  background: #dcfce7;
+  color: #14532d;
+  border-color: #86efac;
+}
+.settings-folder-badge--saved .settings-folder-badge-dot { background: #16a34a; }
+
+.settings-folder-badge--pending {
+  background: #e0e7ff;
+  color: #312e81;
+  border-color: #c7d2fe;
+}
+.settings-folder-badge--pending .settings-folder-badge-dot { background: #6366f1; }
+
+.settings-folder-badge--warning {
+  background: #fef3c7;
+  color: #78350f;
+  border-color: #fcd34d;
+}
+.settings-folder-badge--warning .settings-folder-badge-dot { background: #d97706; }
+
+.settings-folder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.settings-folder-detail {
+  margin-top: 0.5rem;
+  font-style: italic;
+}
+
+.settings-folder-disconnect {
+  border-color: #fca5a5;
+  color: #991b1b;
+}
+.settings-folder-disconnect:hover:not(:disabled) { background: #fef2f2; }
+
+/* Collision dialog — confirm "Open existing" vs "Create Fellows 2".
+   <dialog> ships its own default styling on Chromium/Firefox/Safari;
+   we just tighten typography and reset the action-row layout. */
+.settings-folder-dialog {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 1.25rem;
+  max-width: 28rem;
+  font: inherit;
+}
+.settings-folder-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.45);
+}
+.settings-folder-dialog h4 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+  color: var(--text-strong, #0f172a);
+}
+.settings-folder-dialog p {
+  margin: 0 0 1rem;
+  font-size: 0.92rem;
+  color: #334155;
+  line-height: 1.45;
+}
+.settings-folder-dialog-actions {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+.settings-folder-dialog-actions button {
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0.4rem 0.9rem;
+  border-radius: 3px;
+  border: 1px solid #94a3b8;
+  background: #fff;
+  color: var(--text-strong, #0f172a);
+  cursor: pointer;
+  font-weight: 600;
+}
+.settings-folder-dialog-actions button:hover { background: #f1f5f9; }
+.settings-folder-dialog-primary {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: #fff !important;
+}
+.settings-folder-dialog-primary:hover { filter: brightness(0.95); }
+.settings-folder-dialog-cancel {
+  margin-right: auto;
+  color: #64748b !important;
+}
+
 .settings-backup-restore:disabled {
   opacity: 0.5;
   cursor: not-allowed;

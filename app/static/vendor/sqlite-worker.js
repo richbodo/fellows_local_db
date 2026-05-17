@@ -43,7 +43,14 @@ importScripts('./sqlite3.js');
 // arg and SHA-keyed refresh semantics. Page bumps its expected value in
 // lockstep; a stale page paired with this worker (or vice versa) refuses
 // mutations and waits for the SW's "New version available" reload banner.
-var WORKER_RPC_VERSION = 2;
+// v3 (issue #165 P1): user-folder durable storage RPCs added —
+// setFolderHandle / getFolderState / clearFolderHandle / checkFolderPermission /
+// getFolderHandleForReconnect / writeRelationshipsToFolder /
+// readRelationshipsFromFolder. Reads (getFolderState, checkFolderPermission)
+// are version-tolerant — the page is allowed to read folder state even
+// against a stale worker — but the mutating ops are version-gated alongside
+// the existing relationships.db writes.
+var WORKER_RPC_VERSION = 3;
 
 // Same value as relationships.db's PRAGMA user_version. Bumped only on
 // schema migrations. Mirrored from app/relationships.py:SCHEMA_VERSION.
@@ -599,6 +606,12 @@ handlers.init = async function () {
   // (per L4a). Init is network-free.
   var hasFellowsDb = _openFellowsDbIfPresent();
 
+  // Hydrate the user-folder handle from IDB so getFolderState reflects
+  // reality on the first page query. Permission lookup is deferred to
+  // the page-driven checkFolderPermission (queryPermission is cheap but
+  // there's no reason to block init on it).
+  await _hydrateFolderRecord();
+
   return {
     ok: true,
     workerRpcVersion: WORKER_RPC_VERSION,
@@ -608,6 +621,10 @@ handlers.init = async function () {
     hasRelationshipsDb: hasRelationshipsDb,
     relDbOpen: hasRelationshipsDb,
     hasFellowsDb: hasFellowsDb,
+    hasFolderHandle: !!folderRecord.parentHandle,
+    folderParentName: folderRecord.parentName,
+    folderSubfolderName: folderRecord.subfolderName,
+    folderLastSavedAt: folderRecord.lastSavedAt,
     poolFiles: (function () { try { return poolUtil.getFileNames(); } catch (e) { return []; } })(),
     trace: bootTrace.slice()
   };
@@ -1499,6 +1516,521 @@ handlers.getOpfsInventory = async function () {
   var poolFiles = [];
   try { poolFiles = poolUtil.getFileNames(); } catch (e2) {}
   return { root: rootEntries, poolFiles: poolFiles };
+};
+
+// ===== User-folder durable storage (issue #165 Phase 1) =====================
+// The worker is the owner of the user-picked FileSystemDirectoryHandle: it
+// persists the handle in its own IndexedDB and performs every read/write
+// against the folder. The page is the user-gesture gateway — it calls
+// showDirectoryPicker / requestPermission on its own (those APIs require
+// transient user activation) and either ships the handle in or borrows
+// the worker's copy back for a one-shot permission request.
+//
+// Subfolder layout: user picks a *parent* folder; we own a "Fellows/"
+// subfolder inside it. On collision (Fellows/ already has a
+// relationships.db) the page shows the open-existing vs create-Fellows-N
+// dialog; the page then re-invokes setFolderHandle with the explicit mode.
+// One file lives in the subfolder for Phase 1: relationships.db. (Backups
+// migrate in Phase 2.)
+//
+// "Saved" semantics: the badge flips to Saved only after a successful
+// createWritable → write → close round-trip — that's atomic per the
+// FileSystem Access spec (the browser writes through a temp file and
+// renames on close).
+
+var FOLDER_IDB_NAME = 'fellows-fs-handles';
+var FOLDER_IDB_STORE = 'handles';
+var FOLDER_IDB_KEY = 'relationships-folder';
+var FOLDER_SUBFOLDER_DEFAULT = 'Fellows';
+var FOLDER_RELATIONSHIPS_FILE = 'relationships.db';
+
+// In-memory mirror of what's persisted in IDB. Reloaded on init, mutated
+// alongside every IDB write. Shape: see _emptyFolderRecord().
+var folderRecord = _emptyFolderRecord();
+
+function _emptyFolderRecord() {
+  return {
+    parentHandle: null,    // FileSystemDirectoryHandle (the parent the user picked)
+    parentName: null,      // string — handle.name (for diag / UI)
+    subfolderName: null,   // string — e.g. "Fellows" or "Fellows 2"
+    lastSavedAt: null,     // ISO string of most recent successful write
+    lastError: null,       // { at, reason } of most recent failed read/write
+    lastPermission: null   // 'granted' | 'prompt' | 'denied' — most recent queryPermission result
+  };
+}
+
+// ----- IDB plumbing ---------------------------------------------------------
+
+function _folderIdbOpen() {
+  return new Promise(function (resolve, reject) {
+    if (!self.indexedDB) {
+      reject(new Error('indexedDB unavailable in worker'));
+      return;
+    }
+    var req = self.indexedDB.open(FOLDER_IDB_NAME, 1);
+    req.onupgradeneeded = function () {
+      var db = req.result;
+      if (!db.objectStoreNames.contains(FOLDER_IDB_STORE)) {
+        db.createObjectStore(FOLDER_IDB_STORE);
+      }
+    };
+    req.onsuccess = function () { resolve(req.result); };
+    req.onerror = function () { reject(req.error || new Error('IDB open failed')); };
+  });
+}
+
+function _folderIdbGet() {
+  return _folderIdbOpen().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      var tx = db.transaction(FOLDER_IDB_STORE, 'readonly');
+      var store = tx.objectStore(FOLDER_IDB_STORE);
+      var req = store.get(FOLDER_IDB_KEY);
+      req.onsuccess = function () { resolve(req.result || null); };
+      req.onerror = function () { reject(req.error || new Error('IDB get failed')); };
+      tx.oncomplete = function () { try { db.close(); } catch (e) {} };
+    });
+  });
+}
+
+function _folderIdbPut(value) {
+  return _folderIdbOpen().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      var tx = db.transaction(FOLDER_IDB_STORE, 'readwrite');
+      var store = tx.objectStore(FOLDER_IDB_STORE);
+      var req = store.put(value, FOLDER_IDB_KEY);
+      req.onsuccess = function () { resolve(true); };
+      req.onerror = function () { reject(req.error || new Error('IDB put failed')); };
+      tx.oncomplete = function () { try { db.close(); } catch (e) {} };
+    });
+  });
+}
+
+function _folderIdbDelete() {
+  return _folderIdbOpen().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      var tx = db.transaction(FOLDER_IDB_STORE, 'readwrite');
+      var store = tx.objectStore(FOLDER_IDB_STORE);
+      var req = store.delete(FOLDER_IDB_KEY);
+      req.onsuccess = function () { resolve(true); };
+      req.onerror = function () { reject(req.error || new Error('IDB delete failed')); };
+      tx.oncomplete = function () { try { db.close(); } catch (e) {} };
+    });
+  });
+}
+
+// Re-persist `folderRecord` to IDB. Stores only the fields IDB cares
+// about; everything else is derived.
+function _folderRecordPersist() {
+  if (!folderRecord.parentHandle || !folderRecord.subfolderName) {
+    // Nothing to persist — defensive guard. Caller should _folderIdbDelete()
+    // explicitly when disconnecting.
+    return Promise.resolve(false);
+  }
+  return _folderIdbPut({
+    parentHandle: folderRecord.parentHandle,
+    parentName: folderRecord.parentName || null,
+    subfolderName: folderRecord.subfolderName,
+    lastSavedAt: folderRecord.lastSavedAt || null,
+    lastError: folderRecord.lastError || null
+  });
+}
+
+// Hydrate `folderRecord` from IDB on init. Non-fatal on any failure — the
+// app continues in OPFS-only mode and the page renders the
+// "Browser-only" badge.
+async function _hydrateFolderRecord() {
+  try {
+    var rec = await _folderIdbGet();
+    if (rec && rec.parentHandle && rec.subfolderName) {
+      folderRecord.parentHandle = rec.parentHandle;
+      folderRecord.parentName = rec.parentName || (rec.parentHandle && rec.parentHandle.name) || null;
+      folderRecord.subfolderName = rec.subfolderName;
+      folderRecord.lastSavedAt = rec.lastSavedAt || null;
+      folderRecord.lastError = rec.lastError || null;
+      trace('folder: hydrated handle parent=' + folderRecord.parentName +
+        ' subfolder=' + folderRecord.subfolderName +
+        ' lastSavedAt=' + (folderRecord.lastSavedAt || '(never)'));
+    } else {
+      trace('folder: no persisted handle (browser-only mode)');
+    }
+  } catch (e) {
+    trace('folder: IDB hydrate failed: ' + (e && e.message || e));
+  }
+}
+
+// ----- Subfolder helpers ----------------------------------------------------
+
+async function _findOrCreateSubfolder(parentHandle, mode) {
+  // mode: 'open-existing' → must use the existing default name; throws if
+  //   it doesn't exist or doesn't contain relationships.db.
+  // 'create-new' → pick the lowest-numbered unused name from "Fellows",
+  //   "Fellows 2", "Fellows 3", ...
+  // 'auto' (or null) → if "Fellows" exists with a relationships.db,
+  //   return { requiresChoice: true, ... }; otherwise behave like
+  //   'create-new' picking "Fellows".
+  var name = FOLDER_SUBFOLDER_DEFAULT;
+  if (mode === 'open-existing') {
+    var existing;
+    try {
+      existing = await parentHandle.getDirectoryHandle(name);
+    } catch (e) {
+      var nfErr = new Error('"' + name + '" subfolder not found in this folder');
+      nfErr.code = 'subfolder_missing';
+      throw nfErr;
+    }
+    return { handle: existing, subfolderName: name };
+  }
+  if (mode === 'create-new') {
+    var n = 1;
+    while (true) {
+      var candidate = (n === 1) ? FOLDER_SUBFOLDER_DEFAULT : (FOLDER_SUBFOLDER_DEFAULT + ' ' + n);
+      var exists = await _subfolderExists(parentHandle, candidate);
+      if (!exists) {
+        var created = await parentHandle.getDirectoryHandle(candidate, { create: true });
+        return { handle: created, subfolderName: candidate };
+      }
+      n++;
+      if (n > 999) {
+        throw new Error('could not find unused subfolder name after 999 tries');
+      }
+    }
+  }
+  // 'auto': probe "Fellows" — if it already exists with a relationships.db
+  // we need the page to confirm.
+  var probed = await _probeSubfolder(parentHandle, FOLDER_SUBFOLDER_DEFAULT);
+  if (probed.exists && probed.hasFile) {
+    var suggestion = await _suggestNextName(parentHandle);
+    return {
+      requiresChoice: true,
+      existing: {
+        subfolderName: FOLDER_SUBFOLDER_DEFAULT,
+        counts: probed.counts,
+        invalid: probed.invalid,
+        invalidReason: probed.invalidReason,
+        size: probed.size,
+        lastModified: probed.lastModified
+      },
+      suggestion: suggestion
+    };
+  }
+  // Empty default subfolder (or no subfolder at all) — happy path.
+  var fresh = await parentHandle.getDirectoryHandle(FOLDER_SUBFOLDER_DEFAULT, { create: true });
+  return { handle: fresh, subfolderName: FOLDER_SUBFOLDER_DEFAULT };
+}
+
+async function _subfolderExists(parentHandle, name) {
+  try {
+    await parentHandle.getDirectoryHandle(name);
+    return true;
+  } catch (e) { return false; }
+}
+
+async function _suggestNextName(parentHandle) {
+  var n = 2;
+  while (n < 999) {
+    var candidate = FOLDER_SUBFOLDER_DEFAULT + ' ' + n;
+    var exists = await _subfolderExists(parentHandle, candidate);
+    if (!exists) return candidate;
+    n++;
+  }
+  return FOLDER_SUBFOLDER_DEFAULT + ' ' + n;
+}
+
+// Read relationships.db out of a candidate subfolder and run inspectBytes
+// over it (without touching the live OPFS pool slot). Used both by the
+// collision probe and by readRelationshipsFromFolder.
+async function _probeSubfolder(parentHandle, subfolderName) {
+  var out = { exists: false, hasFile: false, counts: null, invalid: false, invalidReason: null, size: 0, lastModified: null };
+  var sub;
+  try {
+    sub = await parentHandle.getDirectoryHandle(subfolderName);
+  } catch (e) {
+    return out; // subfolder doesn't exist
+  }
+  out.exists = true;
+  var fh;
+  try {
+    fh = await sub.getFileHandle(FOLDER_RELATIONSHIPS_FILE);
+  } catch (e) {
+    return out; // subfolder exists but no relationships.db
+  }
+  out.hasFile = true;
+  try {
+    var f = await fh.getFile();
+    out.size = f.size;
+    out.lastModified = f.lastModified;
+    var bytes = new Uint8Array(await f.arrayBuffer());
+    var inspection = await inspectBytes(bytes);
+    if (inspection.valid) {
+      out.counts = inspection.counts;
+    } else {
+      out.invalid = true;
+      out.invalidReason = inspection.error || 'unreadable';
+    }
+  } catch (e) {
+    out.invalid = true;
+    out.invalidReason = (e && e.message) || String(e);
+  }
+  return out;
+}
+
+// ----- queryPermission wrapper ---------------------------------------------
+async function _folderQueryPermission() {
+  if (!folderRecord.parentHandle) return 'no-handle';
+  if (typeof folderRecord.parentHandle.queryPermission !== 'function') {
+    // Older browsers / non-FSA shims — treat as granted since the only way
+    // we got here is via showDirectoryPicker on a browser that supports it.
+    return 'granted';
+  }
+  try {
+    var state = await folderRecord.parentHandle.queryPermission({ mode: 'readwrite' });
+    folderRecord.lastPermission = state;
+    return state;
+  } catch (e) {
+    folderRecord.lastPermission = 'denied';
+    return 'denied';
+  }
+}
+
+// ----- State snapshot for the page -----------------------------------------
+
+async function _folderStateSnapshot() {
+  var state = {
+    hasHandle: !!folderRecord.parentHandle,
+    parentName: folderRecord.parentName,
+    subfolderName: folderRecord.subfolderName,
+    permission: 'no-handle',
+    lastSavedAt: folderRecord.lastSavedAt,
+    lastError: folderRecord.lastError,
+    fileLastModified: null,
+    fileSize: null
+  };
+  if (!folderRecord.parentHandle) return state;
+  state.permission = await _folderQueryPermission();
+  if (state.permission === 'granted') {
+    try {
+      var sub = await folderRecord.parentHandle.getDirectoryHandle(folderRecord.subfolderName);
+      var fh = await sub.getFileHandle(FOLDER_RELATIONSHIPS_FILE);
+      var f = await fh.getFile();
+      state.fileLastModified = f.lastModified;
+      state.fileSize = f.size;
+    } catch (e) {
+      // File missing or unreadable; not fatal — page surfaces empty state.
+    }
+  }
+  return state;
+}
+
+// ----- Folder RPCs ----------------------------------------------------------
+
+handlers.getFolderState = async function () {
+  return _folderStateSnapshot();
+};
+
+// Step one of the picker flow. Page passes the handle returned by
+// window.showDirectoryPicker. `mode` controls the collision policy:
+//   - undefined / 'auto' — happy path; if the default subfolder already
+//     contains a relationships.db, return { requiresChoice, existing,
+//     suggestion } so the page can show the open-existing vs Create
+//     Fellows N dialog without committing anything.
+//   - 'open-existing' — open the default subfolder. Throws if it doesn't
+//     exist or doesn't have relationships.db.
+//   - 'create-new' — create the next-numbered subfolder.
+handlers.setFolderHandle = async function (args) {
+  var parentHandle = args && args.handle;
+  if (!parentHandle) throw new Error('missing handle');
+  // queryPermission/requestPermission live on FileSystemHandle. The picker
+  // call should have returned 'granted', but verify so a stale call (e.g.
+  // the page restored a stub) fails cleanly.
+  var perm = 'granted';
+  if (typeof parentHandle.queryPermission === 'function') {
+    try { perm = await parentHandle.queryPermission({ mode: 'readwrite' }); }
+    catch (e) { perm = 'denied'; }
+  }
+  if (perm !== 'granted') {
+    var permErr = new Error('Picker returned a handle without readwrite permission (' + perm + ')');
+    permErr.code = 'permission_not_granted';
+    throw permErr;
+  }
+  var mode = (args && args.mode) || 'auto';
+  var result = await _findOrCreateSubfolder(parentHandle, mode);
+  if (result.requiresChoice) {
+    // Page will re-invoke with mode='open-existing' or 'create-new'.
+    // Don't persist anything yet.
+    return {
+      ok: false,
+      requiresChoice: true,
+      parentName: parentHandle.name || null,
+      existing: result.existing,
+      suggestion: result.suggestion
+    };
+  }
+  folderRecord.parentHandle = parentHandle;
+  folderRecord.parentName = parentHandle.name || null;
+  folderRecord.subfolderName = result.subfolderName;
+  // Don't clobber lastSavedAt — open-existing legitimately keeps it null
+  // until the user explicitly saves.
+  if (mode === 'create-new' || folderRecord.lastSavedAt === undefined) {
+    folderRecord.lastSavedAt = null;
+  }
+  folderRecord.lastError = null;
+  await _folderRecordPersist();
+  trace('folder: set parent=' + folderRecord.parentName + ' subfolder=' + folderRecord.subfolderName + ' mode=' + mode);
+  return {
+    ok: true,
+    parentName: folderRecord.parentName,
+    subfolderName: folderRecord.subfolderName
+  };
+};
+
+handlers.clearFolderHandle = async function () {
+  folderRecord = _emptyFolderRecord();
+  try { await _folderIdbDelete(); } catch (e) { trace('folder: IDB delete failed: ' + (e && e.message || e)); }
+  trace('folder: cleared');
+  return { ok: true };
+};
+
+handlers.checkFolderPermission = async function () {
+  var state = await _folderQueryPermission();
+  return { permission: state };
+};
+
+// Re-hands the in-memory handle to the page so the page can call
+// requestPermission inside a user-gesture handler. The handle is
+// structured-cloned across; the worker keeps its own copy. Returns null
+// when no handle is persisted.
+handlers.getFolderHandleForReconnect = async function () {
+  if (!folderRecord.parentHandle) return { handle: null };
+  return { handle: folderRecord.parentHandle };
+};
+
+handlers.writeRelationshipsToFolder = async function () {
+  if (!poolUtil) throw new Error('pool util unavailable');
+  if (!folderRecord.parentHandle || !folderRecord.subfolderName) {
+    var ne = new Error('no folder configured');
+    ne.code = 'no_folder';
+    throw ne;
+  }
+  var perm = await _folderQueryPermission();
+  if (perm !== 'granted') {
+    var pe = new Error('folder permission not granted (' + perm + ')');
+    pe.code = 'permission_required';
+    pe.permission = perm;
+    throw pe;
+  }
+  var poolFiles = [];
+  try { poolFiles = poolUtil.getFileNames(); } catch (e) {}
+  if (poolFiles.indexOf(RELATIONSHIPS_DB_SLOT) === -1) {
+    var nde = new Error('no relationships.db to save (worker hasn\'t opened it yet)');
+    nde.code = 'no_relationships_db';
+    throw nde;
+  }
+  var bytes = poolUtil.exportFile(RELATIONSHIPS_DB_SLOT);
+  if (!bytes || !bytes.byteLength) {
+    var ee = new Error('relationships.db export was empty');
+    ee.code = 'empty_export';
+    throw ee;
+  }
+  var sub;
+  try {
+    sub = await folderRecord.parentHandle.getDirectoryHandle(folderRecord.subfolderName, { create: true });
+  } catch (e) {
+    folderRecord.lastError = { at: new Date().toISOString(), reason: 'subfolder open: ' + ((e && e.message) || e) };
+    await _folderRecordPersist();
+    var se = new Error('Could not open subfolder ' + folderRecord.subfolderName + ': ' + ((e && e.message) || e));
+    se.code = 'subfolder_open_failed';
+    throw se;
+  }
+  // FileSystemWritableFileStream.close() commits atomically per spec —
+  // the browser writes to a temp file and renames on close. No need to
+  // do .tmp + rename ourselves.
+  var fh;
+  try {
+    fh = await sub.getFileHandle(FOLDER_RELATIONSHIPS_FILE, { create: true });
+    var writable = await fh.createWritable();
+    await writable.write(bytes);
+    await writable.close();
+  } catch (e) {
+    folderRecord.lastError = { at: new Date().toISOString(), reason: 'write: ' + ((e && e.message) || e) };
+    await _folderRecordPersist();
+    var we = new Error('Folder write failed: ' + ((e && e.message) || e));
+    we.code = 'write_failed';
+    throw we;
+  }
+  var now = new Date().toISOString();
+  folderRecord.lastSavedAt = now;
+  folderRecord.lastError = null;
+  await _folderRecordPersist();
+  trace('folder: wrote ' + bytes.byteLength + ' bytes to ' +
+    folderRecord.subfolderName + '/' + FOLDER_RELATIONSHIPS_FILE + ' at ' + now);
+  return { ok: true, bytesWritten: bytes.byteLength, lastSavedAt: now };
+};
+
+handlers.readRelationshipsFromFolder = async function () {
+  if (!poolUtil) throw new Error('pool util unavailable');
+  if (!folderRecord.parentHandle || !folderRecord.subfolderName) {
+    var ne = new Error('no folder configured');
+    ne.code = 'no_folder';
+    throw ne;
+  }
+  var perm = await _folderQueryPermission();
+  if (perm !== 'granted') {
+    var pe = new Error('folder permission not granted (' + perm + ')');
+    pe.code = 'permission_required';
+    pe.permission = perm;
+    throw pe;
+  }
+  var sub;
+  try {
+    sub = await folderRecord.parentHandle.getDirectoryHandle(folderRecord.subfolderName);
+  } catch (e) {
+    folderRecord.lastError = { at: new Date().toISOString(), reason: 'subfolder open: ' + ((e && e.message) || e) };
+    await _folderRecordPersist();
+    var se = new Error('Could not open subfolder ' + folderRecord.subfolderName + ': ' + ((e && e.message) || e));
+    se.code = 'subfolder_open_failed';
+    throw se;
+  }
+  var fh;
+  try {
+    fh = await sub.getFileHandle(FOLDER_RELATIONSHIPS_FILE);
+  } catch (e) {
+    var nfe = new Error('No relationships.db in ' + folderRecord.subfolderName + ' yet');
+    nfe.code = 'no_file_in_folder';
+    throw nfe;
+  }
+  var bytes;
+  var fileLastModified = null;
+  try {
+    var f = await fh.getFile();
+    fileLastModified = f.lastModified;
+    bytes = new Uint8Array(await f.arrayBuffer());
+  } catch (e) {
+    folderRecord.lastError = { at: new Date().toISOString(), reason: 'read: ' + ((e && e.message) || e) };
+    await _folderRecordPersist();
+    var re = new Error('Folder read failed: ' + ((e && e.message) || e));
+    re.code = 'read_failed';
+    throw re;
+  }
+  // Reuse importRelationshipsBytes — it inspects, snapshots the current
+  // OPFS state into the auto-backup ring (so reading-back-a-stale-folder
+  // is undoable), then atomically replaces the OPFS slot.
+  var result = await handlers.importRelationshipsBytes({ bytes: bytes });
+  // After a successful read, the OPFS working copy matches the folder
+  // file — "saved" semantics hold. Tag lastSavedAt with the file's
+  // mtime so the badge flips to Saved with the file's authoring time
+  // (more honest than `now` for an open-existing flow — the user
+  // didn't author this version *now*).
+  if (fileLastModified) {
+    folderRecord.lastSavedAt = new Date(fileLastModified).toISOString();
+  }
+  folderRecord.lastError = null;
+  await _folderRecordPersist();
+  return {
+    counts: result.counts,
+    preRestoreSnapshot: result.preRestoreSnapshot,
+    bytesRead: bytes.byteLength,
+    lastSavedAt: folderRecord.lastSavedAt
+  };
 };
 
 // ===== Dispatcher ===========================================================

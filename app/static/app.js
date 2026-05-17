@@ -37,7 +37,7 @@
   // app/static/vendor/sqlite-worker.js (`WORKER_RPC_VERSION`,
   // `RELATIONSHIPS_SCHEMA_VERSION`). See plans/local_first_worker_architecture.md
   // §"Why build label is not the gate".
-  var EXPECTED_WORKER_RPC_VERSION = 2;
+  var EXPECTED_WORKER_RPC_VERSION = 3;
   var EXPECTED_RELATIONSHIPS_SCHEMA_VERSION = 1;
 
   // Thrown by mutating dataProvider methods when the worker reports a
@@ -2545,6 +2545,41 @@
         (pss.finishedAt ? ' at=' + pss.finishedAt : '')
       );
     }
+    // Data folder (issue #165 Phase 1) — handle present? what subfolder?
+    // last save outcome? Pulled live from the worker so this reflects
+    // current truth even after the user disconnects mid-session.
+    lines.push('');
+    lines.push('Data folder:');
+    try {
+      var folderCtrl = window.__folderController;
+      if (!folderCtrl) {
+        lines.push('  (folder controller not initialized)');
+      } else {
+        var fState = await folderCtrl.getState();
+        lines.push('  browser supports showDirectoryPicker: ' + !!fState.supported);
+        lines.push('  worker reachable: ' + !!fState.workerAvailable);
+        lines.push('  handle persisted: ' + !!fState.hasHandle);
+        if (fState.hasHandle) {
+          lines.push('  parent folder name: ' + (fState.parentName || '(unset)'));
+          lines.push('  subfolder name: ' + (fState.subfolderName || '(unset)'));
+          lines.push('  permission: ' + (fState.permission || '(unknown)'));
+          lines.push('  last saved at: ' + (fState.lastSavedAt || '(never)'));
+          if (fState.fileLastModified) {
+            lines.push('  file mtime (folder): ' + new Date(fState.fileLastModified).toISOString());
+          }
+          if (fState.fileSize != null) {
+            lines.push('  file size (folder): ' + fState.fileSize + ' bytes');
+          }
+          if (fState.lastError && fState.lastError.reason) {
+            lines.push('  last error: ' + fState.lastError.reason +
+              ' at ' + (fState.lastError.at || '(unknown)'));
+          }
+        }
+        lines.push('  badge: ' + folderCtrl.badge(fState));
+      }
+    } catch (folderErr) {
+      lines.push('  (read failed: ' + String(folderErr && folderErr.message || folderErr) + ')');
+    }
     lines.push('');
     // Auth trace: which routing branches fired during this page load.
     // Mirrors the "Auth trace" surfaced in the bug-report dialog —
@@ -3684,6 +3719,29 @@
       },
       _findOrphanedGroupMembers: function () {
         return rpc.call('findOrphanedGroupMembers');
+      },
+      // ----- User-folder durable storage (issue #165 Phase 1).
+      // Reads are version-tolerant — page surfaces folder state even on
+      // a stale worker, since the badge has to make sense before the
+      // user reloads. Writes are gated alongside other mutations.
+      _getFolderState: function () { return rpc.call('getFolderState'); },
+      _setFolderHandle: function (args) {
+        return refuseIfVersionSkew('setFolderHandle') ||
+          rpc.call('setFolderHandle', args);
+      },
+      _clearFolderHandle: function () {
+        return refuseIfVersionSkew('clearFolderHandle') ||
+          rpc.call('clearFolderHandle');
+      },
+      _checkFolderPermission: function () { return rpc.call('checkFolderPermission'); },
+      _getFolderHandleForReconnect: function () { return rpc.call('getFolderHandleForReconnect'); },
+      _writeRelationshipsToFolder: function () {
+        return refuseIfVersionSkew('writeRelationshipsToFolder') ||
+          rpc.call('writeRelationshipsToFolder');
+      },
+      _readRelationshipsFromFolder: function () {
+        return refuseIfVersionSkew('readRelationshipsFromFolder') ||
+          rpc.call('readRelationshipsFromFolder');
       }
     };
   }
@@ -7991,6 +8049,164 @@
     });
   }
 
+  // ===== User-folder durable storage controller (issue #165 Phase 1) =======
+  // Page-side wrapper around the worker's folder RPCs + the small bit of
+  // user-gesture orchestration that has to live here (showDirectoryPicker
+  // and requestPermission both require transient user activation; the
+  // worker can't synthesize that). Pure controller — owns no DOM; the
+  // Settings page consumes it through render-time callbacks.
+
+  var FOLDER_CONTROLLER = (function () {
+    function browserSupportsFolderPicker() {
+      return typeof window.showDirectoryPicker === 'function';
+    }
+
+    function workerProvider() {
+      // The folder controller only operates against the worker provider.
+      // On api+idb fallback the warmWorker may still be alive (auth
+      // failure mid-boot); fall through to it so a Reconnect attempt in
+      // Settings doesn't pop a misleading "not available" message.
+      if (dataProvider && dataProvider.kind === 'worker') return dataProvider;
+      if (warmWorker && warmWorker.rpc) {
+        // Wrap a minimal subset around warmWorker.rpc so the API shape
+        // matches the worker provider.
+        return {
+          kind: 'worker-warm',
+          _getFolderState: function () { return warmWorker.rpc.call('getFolderState'); },
+          _setFolderHandle: function (a) { return warmWorker.rpc.call('setFolderHandle', a); },
+          _clearFolderHandle: function () { return warmWorker.rpc.call('clearFolderHandle'); },
+          _checkFolderPermission: function () { return warmWorker.rpc.call('checkFolderPermission'); },
+          _getFolderHandleForReconnect: function () { return warmWorker.rpc.call('getFolderHandleForReconnect'); },
+          _writeRelationshipsToFolder: function () { return warmWorker.rpc.call('writeRelationshipsToFolder'); },
+          _readRelationshipsFromFolder: function () { return warmWorker.rpc.call('readRelationshipsFromFolder'); }
+        };
+      }
+      return null;
+    }
+
+    function getState() {
+      var p = workerProvider();
+      if (!p) {
+        return Promise.resolve({
+          supported: browserSupportsFolderPicker(),
+          workerAvailable: false,
+          hasHandle: false,
+          parentName: null,
+          subfolderName: null,
+          permission: 'no-worker',
+          lastSavedAt: null,
+          lastError: null,
+          fileLastModified: null
+        });
+      }
+      return p._getFolderState().then(function (raw) {
+        raw.supported = browserSupportsFolderPicker();
+        raw.workerAvailable = true;
+        return raw;
+      });
+    }
+
+    // Compute the badge state from a state snapshot. Returns one of:
+    //   'unsupported'   — browser has no showDirectoryPicker.
+    //   'browser-only'  — supported but no folder chosen.
+    //   'saved'         — folder chosen and last write succeeded.
+    //   'pending'       — folder chosen but no write yet (open-existing path).
+    //   'inaccessible'  — folder chosen but queryPermission isn't 'granted'.
+    //   'write-failed'  — most recent write attempt errored.
+    function badge(state) {
+      if (!state.supported) return 'unsupported';
+      if (!state.hasHandle) return 'browser-only';
+      if (state.permission !== 'granted') return 'inaccessible';
+      if (state.lastError && state.lastError.at &&
+          (!state.lastSavedAt || state.lastError.at > state.lastSavedAt)) {
+        return 'write-failed';
+      }
+      if (!state.lastSavedAt) return 'pending';
+      return 'saved';
+    }
+
+    // Step 1: invoke the OS folder picker. Must be called from a user-
+    // gesture handler (showDirectoryPicker requires transient activation).
+    // Returns the FileSystemDirectoryHandle, or null on user-cancel /
+    // unsupported.
+    function pickParentFolder() {
+      if (!browserSupportsFolderPicker()) return Promise.resolve(null);
+      return window.showDirectoryPicker({ mode: 'readwrite', id: 'fellows-data-folder' })
+        .catch(function (e) {
+          // AbortError = user cancelled the picker. Treat as null, not a
+          // failure to surface to the user.
+          if (e && (e.name === 'AbortError' || /cancel/i.test(String(e.message || '')))) return null;
+          throw e;
+        });
+    }
+
+    // Step 2: hand the handle to the worker. Returns either
+    //   { ok: true, parentName, subfolderName }
+    // or
+    //   { ok: false, requiresChoice: true, existing, suggestion }
+    function setHandle(handle, mode) {
+      var p = workerProvider();
+      if (!p) return Promise.reject(new Error('worker provider unavailable'));
+      return p._setFolderHandle({ handle: handle, mode: mode || 'auto' });
+    }
+
+    function clearHandle() {
+      var p = workerProvider();
+      if (!p) return Promise.reject(new Error('worker provider unavailable'));
+      return p._clearFolderHandle();
+    }
+
+    function writeNow() {
+      var p = workerProvider();
+      if (!p) return Promise.reject(new Error('worker provider unavailable'));
+      return p._writeRelationshipsToFolder();
+    }
+
+    function readNow() {
+      var p = workerProvider();
+      if (!p) return Promise.reject(new Error('worker provider unavailable'));
+      return p._readRelationshipsFromFolder();
+    }
+
+    // Reconnect path: pull the in-memory handle from the worker, call
+    // requestPermission on it inside the page's user-gesture, then ask
+    // the worker to recheck. Returns the new state.
+    function reconnect() {
+      var p = workerProvider();
+      if (!p) return Promise.reject(new Error('worker provider unavailable'));
+      return p._getFolderHandleForReconnect().then(function (res) {
+        if (!res || !res.handle) {
+          throw new Error('no folder handle persisted');
+        }
+        var handle = res.handle;
+        if (typeof handle.requestPermission !== 'function') {
+          // Older shim — already granted (was returned by the picker).
+          return p._checkFolderPermission().then(function () { return getState(); });
+        }
+        return handle.requestPermission({ mode: 'readwrite' }).then(function (state) {
+          // Worker re-runs queryPermission to refresh its cached value.
+          return p._checkFolderPermission().then(function () {
+            return getState();
+          });
+        });
+      });
+    }
+
+    return {
+      browserSupportsFolderPicker: browserSupportsFolderPicker,
+      getState: getState,
+      badge: badge,
+      pickParentFolder: pickParentFolder,
+      setHandle: setHandle,
+      clearHandle: clearHandle,
+      writeNow: writeNow,
+      readNow: readNow,
+      reconnect: reconnect
+    };
+  })();
+  // Exposed for tests + diag panel.
+  window.__folderController = FOLDER_CONTROLLER;
+
   // ===== Settings page (PR 5) ==============================================
 
   function renderSettingsPage() {
@@ -8015,6 +8231,37 @@
           '<span id="settings-status" class="settings-status" aria-live="polite"></span>' +
         '</div>' +
       '</form>' +
+      '<div class="settings-section" id="settings-folder-section">' +
+        '<h3 class="settings-section-title">Data folder</h3>' +
+        '<p class="settings-hint">' +
+          'Pick a folder on your device for the app to keep <code>relationships.db</code> in. ' +
+          'The app creates a <code>Fellows/</code> subfolder inside the folder you choose, so your other files in that folder are untouched. ' +
+          'Your data still lives on your device — nothing is uploaded — but it becomes a real file you can browse to, copy, sync, or back up like any other file.' +
+        '</p>' +
+        '<div id="settings-folder-badge" class="settings-folder-badge" role="status" aria-live="polite">' +
+          '<span class="settings-folder-badge-dot"></span>' +
+          '<span class="settings-folder-badge-text">Checking…</span>' +
+        '</div>' +
+        '<div id="settings-folder-actions" class="settings-folder-actions">' +
+          '<button type="button" id="settings-folder-choose" class="settings-download" hidden>Choose data folder…</button>' +
+          '<button type="button" id="settings-folder-save-now" class="settings-download" hidden>Save now</button>' +
+          '<button type="button" id="settings-folder-refresh" class="settings-download" hidden>Refresh from folder</button>' +
+          '<button type="button" id="settings-folder-reconnect" class="settings-download" hidden>Reconnect folder…</button>' +
+          '<button type="button" id="settings-folder-disconnect" class="settings-download settings-folder-disconnect" hidden>Disconnect folder</button>' +
+        '</div>' +
+        '<p id="settings-folder-detail" class="settings-hint settings-folder-detail" hidden></p>' +
+      '</div>' +
+      '<dialog id="settings-folder-collision-dialog" class="settings-folder-dialog">' +
+        '<form method="dialog">' +
+          '<h4 id="settings-folder-collision-title">This folder already contains fellows data</h4>' +
+          '<p id="settings-folder-collision-body"></p>' +
+          '<menu class="settings-folder-dialog-actions">' +
+            '<button type="submit" value="create-new" class="settings-folder-dialog-primary" id="settings-folder-collision-create"></button>' +
+            '<button type="submit" value="open-existing" class="settings-folder-dialog-secondary">Open existing data</button>' +
+            '<button type="submit" value="cancel" class="settings-folder-dialog-cancel">Cancel</button>' +
+          '</menu>' +
+        '</form>' +
+      '</dialog>' +
       '<div class="settings-section" id="settings-export-section">' +
         '<h3 class="settings-section-title">Your saved data</h3>' +
         '<p class="settings-hint">' +
@@ -8422,6 +8669,330 @@
           });
       });
     }
+
+    wireFolderSection();
+  }
+
+  // Settings → Data folder section: badge, action buttons, collision
+  // dialog. State is owned by FOLDER_CONTROLLER; this function is pure
+  // glue between the controller and the DOM nodes injected by
+  // renderSettingsPage.
+  function wireFolderSection() {
+    var sectionEl = document.getElementById('settings-folder-section');
+    if (!sectionEl) return;
+    var badgeEl = document.getElementById('settings-folder-badge');
+    var detailEl2 = document.getElementById('settings-folder-detail');
+    var btnChoose = document.getElementById('settings-folder-choose');
+    var btnSave = document.getElementById('settings-folder-save-now');
+    var btnRefresh = document.getElementById('settings-folder-refresh');
+    var btnReconnect = document.getElementById('settings-folder-reconnect');
+    var btnDisconnect = document.getElementById('settings-folder-disconnect');
+    var dialog = document.getElementById('settings-folder-collision-dialog');
+    var dialogTitle = document.getElementById('settings-folder-collision-title');
+    var dialogBody = document.getElementById('settings-folder-collision-body');
+    var dialogCreateBtn = document.getElementById('settings-folder-collision-create');
+
+    if (!FOLDER_CONTROLLER) return;
+
+    var BADGE_COPY = {
+      'unsupported': {
+        text: 'Browser-only — this browser doesn\'t support saving to a folder',
+        cls: 'settings-folder-badge--warning'
+      },
+      'browser-only': {
+        text: 'Browser-only — your data is not yet saved to a folder',
+        cls: 'settings-folder-badge--warning'
+      },
+      'saved': {
+        text: 'Saved',
+        cls: 'settings-folder-badge--saved'
+      },
+      'pending': {
+        text: 'Folder selected — no save yet',
+        cls: 'settings-folder-badge--pending'
+      },
+      'inaccessible': {
+        text: 'Folder set but unreachable — reconnect to keep saving',
+        cls: 'settings-folder-badge--warning'
+      },
+      'write-failed': {
+        text: 'Last save failed — Retry to save again',
+        cls: 'settings-folder-badge--warning'
+      }
+    };
+
+    function renderState(state) {
+      if (!state) return;
+      var b = FOLDER_CONTROLLER.badge(state);
+      var copy = BADGE_COPY[b] || BADGE_COPY['browser-only'];
+      var dotEl = badgeEl && badgeEl.querySelector('.settings-folder-badge-dot');
+      var textEl = badgeEl && badgeEl.querySelector('.settings-folder-badge-text');
+      if (badgeEl) {
+        badgeEl.className = 'settings-folder-badge ' + copy.cls;
+        if (textEl) {
+          var label = copy.text;
+          if (b === 'saved' && state.parentName && state.subfolderName) {
+            label = 'Saved to ' + escapeHtml(state.parentName) + ' / ' + escapeHtml(state.subfolderName);
+            if (state.lastSavedAt) label += ' · ' + formatRelativeTime(state.lastSavedAt);
+            textEl.innerHTML = label;
+          } else {
+            textEl.textContent = label;
+          }
+        }
+        if (dotEl) dotEl.setAttribute('aria-hidden', 'true');
+      }
+      // The detail line is reserved for transient status/errors (the
+      // flashDetail messages). Don't stomp on it here — the badge above
+      // already shows folder path + timestamp, and an in-progress
+      // "Saving…" flash would be lost if we overwrote on every refresh.
+      // We only update detailEl2 here for a sticky error message; the
+      // happy path leaves whatever flashDetail last wrote in place.
+      if (detailEl2 && state.lastError && state.lastError.reason &&
+          (!state.lastSavedAt || (state.lastError.at && state.lastError.at > state.lastSavedAt))) {
+        detailEl2.textContent = 'Last error: ' + state.lastError.reason;
+        detailEl2.hidden = false;
+      }
+      // Wire which buttons are visible to the badge state.
+      var supported = !!state.supported && (state.workerAvailable !== false);
+      function showBtn(btn, on) { if (btn) btn.hidden = !on; }
+      showBtn(btnChoose,     supported && (b === 'browser-only'));
+      showBtn(btnSave,       supported && (b === 'pending' || b === 'saved' || b === 'write-failed'));
+      showBtn(btnRefresh,    supported && b === 'saved');
+      showBtn(btnReconnect,  supported && b === 'inaccessible');
+      showBtn(btnDisconnect, supported && state.hasHandle);
+    }
+
+    function refresh() {
+      return FOLDER_CONTROLLER.getState().then(renderState).catch(function (e) {
+        if (detailEl2) {
+          detailEl2.textContent = 'Could not read folder state: ' + (e && e.message || String(e));
+          detailEl2.hidden = false;
+        }
+      });
+    }
+
+    function flashDetail(msg) {
+      if (!detailEl2) return;
+      detailEl2.textContent = msg;
+      detailEl2.hidden = false;
+    }
+
+    function fmtCountsSummary(c) {
+      if (!c) return '';
+      return c.groups + ' group' + (c.groups === 1 ? '' : 's') +
+        ', ' + c.members + ' member' + (c.members === 1 ? '' : 's') +
+        ', ' + c.tags + ' tag' + (c.tags === 1 ? '' : 's');
+    }
+
+    function askCollision(parentName, existing, suggestion) {
+      // Native <dialog>.showModal — falls back to confirm() on browsers
+      // without dialog support (extremely rare in 2026; Chromium/Safari/
+      // Firefox all ship it).
+      if (!dialog || typeof dialog.showModal !== 'function') {
+        var msg = (existing && existing.counts)
+          ? 'This folder already has fellows data (' + fmtCountsSummary(existing.counts) + '). ' +
+            'Use existing data here? OK → Open existing · Cancel → save to a new folder (' + suggestion + ').'
+          : 'This folder already has fellows data. OK → Open existing · Cancel → save to a new folder (' + suggestion + ').';
+        return Promise.resolve(window.confirm(msg) ? 'open-existing' : 'create-new');
+      }
+      if (dialogTitle) {
+        dialogTitle.textContent = parentName
+          ? '"' + parentName + '" already contains fellows data'
+          : 'This folder already contains fellows data';
+      }
+      if (dialogBody) {
+        var summary = existing && existing.counts ? fmtCountsSummary(existing.counts) : '';
+        var lines = [];
+        if (existing && existing.subfolderName) {
+          lines.push('A "' + existing.subfolderName + '" folder is already there' +
+            (summary ? ' with ' + summary + '.' : '.'));
+        }
+        if (existing && existing.invalid) {
+          lines.push('(Existing relationships.db looks unreadable: ' +
+            (existing.invalidReason || 'unknown') + '.)');
+        }
+        lines.push(
+          'To avoid overwriting it, the app can save your current data into a new "' +
+          (suggestion || 'Fellows N') + '" folder. Or open the existing data and use it here.'
+        );
+        dialogBody.textContent = lines.join(' ');
+      }
+      if (dialogCreateBtn) {
+        dialogCreateBtn.textContent = 'Create "' + (suggestion || 'Fellows N') + '"';
+      }
+      return new Promise(function (resolve) {
+        dialog.addEventListener('close', function once() {
+          dialog.removeEventListener('close', once);
+          var v = dialog.returnValue;
+          if (v === 'open-existing' || v === 'create-new') resolve(v);
+          else resolve(null);
+        });
+        try { dialog.showModal(); }
+        catch (e) {
+          // Already open or browser quirk — treat as cancel.
+          resolve(null);
+        }
+      });
+    }
+
+    if (btnChoose) {
+      btnChoose.addEventListener('click', function () {
+        btnChoose.disabled = true;
+        flashDetail('Pick a folder…');
+        FOLDER_CONTROLLER.pickParentFolder()
+          .then(function (handle) {
+            if (!handle) {
+              flashDetail('No folder selected.');
+              return null;
+            }
+            return FOLDER_CONTROLLER.setHandle(handle, 'auto').then(function (res) {
+              if (res && res.requiresChoice) {
+                return askCollision(res.parentName, res.existing, res.suggestion).then(function (choice) {
+                  if (!choice) {
+                    flashDetail('Cancelled.');
+                    return null;
+                  }
+                  return FOLDER_CONTROLLER.setHandle(handle, choice).then(function (resolved) {
+                    return { picked: resolved, mode: choice };
+                  });
+                });
+              }
+              return { picked: res, mode: 'auto' };
+            });
+          })
+          .then(function (outcome) {
+            if (!outcome || !outcome.picked || !outcome.picked.ok) return;
+            // Newly-attached folder: do an immediate save so the badge
+            // flips to "Saved" right away on create-new, and (for the
+            // happy-path "auto" case where the subfolder was empty) the
+            // file exists. open-existing skips the write and instead
+            // reads the existing data into OPFS.
+            if (outcome.mode === 'open-existing') {
+              flashDetail('Loading existing data from folder…');
+              return FOLDER_CONTROLLER.readNow().then(function (result) {
+                flashDetail('Loaded ' + (result && result.counts ? fmtCountsSummary(result.counts) : '') +
+                  ' from the folder.');
+              });
+            }
+            flashDetail('Saving to folder…');
+            return FOLDER_CONTROLLER.writeNow().then(function () { flashDetail('Saved.'); });
+          })
+          .catch(function (e) {
+            flashDetail('Could not set folder: ' + (e && e.message || String(e)));
+          })
+          .then(function () {
+            btnChoose.disabled = false;
+            return refresh();
+          });
+      });
+    }
+
+    if (btnSave) {
+      btnSave.addEventListener('click', function () {
+        btnSave.disabled = true;
+        flashDetail('Saving to folder…');
+        FOLDER_CONTROLLER.writeNow()
+          .then(function (res) {
+            flashDetail('Saved (' + res.bytesWritten + ' bytes).');
+          })
+          .catch(function (e) {
+            flashDetail('Save failed: ' + (e && e.message || String(e)));
+          })
+          .then(function () {
+            btnSave.disabled = false;
+            return refresh();
+          });
+      });
+    }
+
+    if (btnRefresh) {
+      btnRefresh.addEventListener('click', function () {
+        var ok = window.confirm(
+          'Replace this browser\'s saved data with whatever\'s in the folder?\n\n' +
+          'Your current data is captured as an auto-backup first, so this is undoable.'
+        );
+        if (!ok) return;
+        btnRefresh.disabled = true;
+        flashDetail('Reading from folder…');
+        FOLDER_CONTROLLER.readNow()
+          .then(function (res) {
+            flashDetail('Loaded ' + fmtCountsSummary(res.counts) + ' from the folder.' +
+              (res.preRestoreSnapshot ? ' Previous data saved as auto-backup.' : ''));
+          })
+          .catch(function (e) {
+            flashDetail('Refresh failed: ' + (e && e.message || String(e)));
+          })
+          .then(function () {
+            btnRefresh.disabled = false;
+            return refresh();
+          });
+      });
+    }
+
+    if (btnReconnect) {
+      btnReconnect.addEventListener('click', function () {
+        btnReconnect.disabled = true;
+        flashDetail('Reconnecting…');
+        FOLDER_CONTROLLER.reconnect()
+          .then(function (state) {
+            renderState(state);
+            if (state && state.permission === 'granted') {
+              flashDetail('Reconnected.');
+            } else {
+              flashDetail('Reconnect declined — folder still unreachable.');
+            }
+          })
+          .catch(function (e) {
+            flashDetail('Reconnect failed: ' + (e && e.message || String(e)));
+          })
+          .then(function () {
+            btnReconnect.disabled = false;
+          });
+      });
+    }
+
+    if (btnDisconnect) {
+      btnDisconnect.addEventListener('click', function () {
+        var ok = window.confirm(
+          'Disconnect this folder?\n\n' +
+          'Your data stays in this browser (and the file in the folder is untouched). ' +
+          'You can re-pick the same folder later to reconnect.'
+        );
+        if (!ok) return;
+        btnDisconnect.disabled = true;
+        FOLDER_CONTROLLER.clearHandle()
+          .then(function () { flashDetail('Disconnected.'); })
+          .catch(function (e) {
+            flashDetail('Disconnect failed: ' + (e && e.message || String(e)));
+          })
+          .then(function () {
+            btnDisconnect.disabled = false;
+            return refresh();
+          });
+      });
+    }
+
+    refresh();
+  }
+
+  // Tiny relative-time formatter: "just now", "2 min ago", etc. Used by
+  // the folder badge so the timestamp doesn't dominate the UI.
+  function formatRelativeTime(iso) {
+    if (!iso) return '';
+    var t = new Date(iso).getTime();
+    if (isNaN(t)) return iso;
+    var ms = Date.now() - t;
+    if (ms < 0) return new Date(iso).toLocaleString();
+    var sec = Math.round(ms / 1000);
+    if (sec < 30) return 'just now';
+    if (sec < 60) return sec + 's ago';
+    var min = Math.round(sec / 60);
+    if (min < 60) return min + ' min ago';
+    var hr = Math.round(min / 60);
+    if (hr < 24) return hr + ' hr ago';
+    var day = Math.round(hr / 24);
+    if (day < 30) return day + ' day' + (day === 1 ? '' : 's') + ' ago';
+    return new Date(iso).toLocaleDateString();
   }
 
   /** Boot-time: if relationships.settings is empty for self_email but
