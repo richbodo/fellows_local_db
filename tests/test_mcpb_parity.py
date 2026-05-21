@@ -52,6 +52,23 @@ NODE_COMMS_JS = REPO_ROOT / "mcpb" / "node" / "dist" / "comms" / "index.js"
 PY_SHARED = REPO_ROOT / "mcp_servers" / "shared_data_ops.py"
 NODE_SHARED_JS = REPO_ROOT / "mcpb" / "node" / "dist" / "shared_data_ops" / "index.js"
 
+PY_PRIVATE = REPO_ROOT / "mcp_servers" / "private_data_ops.py"
+NODE_PRIVATE_JS = REPO_ROOT / "mcpb" / "node" / "dist" / "private_data_ops" / "index.js"
+REL_DB = REPO_ROOT / "app" / "relationships.db"
+
+# Staged-bundle paths — these point at the layout build_mcpb.py
+# produces inside mcpb/node/.staging/. Running the parity test against
+# the staged layout (with no env vars or extra args) is what would have
+# caught the path bugs from #187 (missing _shared/ + missing data/
+# resolution under the bundle root). Per plans/easy_mcp_install.md
+# § 13 polish-checklist.
+STAGED_SHARED_JS = (
+    REPO_ROOT / "mcpb" / "node" / ".staging" / "shared_data_ops" / "server" / "index.js"
+)
+STAGED_PRIVATE_JS = (
+    REPO_ROOT / "mcpb" / "node" / ".staging" / "private_data_ops" / "server" / "index.js"
+)
+
 
 def _have_python_venv() -> bool:
     return PY_VENV_PYTHON.is_file()
@@ -84,6 +101,37 @@ needs_both_shared = pytest.mark.skipif(
         "shared-data-ops parity needs both implementations + fellows.db. "
         "Run `just mcp-install-deps`, `just build-mcpb shared_data_ops`, "
         "and `just db-rebuild`."
+    ),
+)
+
+
+needs_both_private = pytest.mark.skipif(
+    not (
+        _have_python(PY_PRIVATE)
+        and _have_node(NODE_PRIVATE_JS)
+        and FELLOWS_DB.is_file()
+        and REL_DB.is_file()
+    ),
+    reason=(
+        "private-data-ops parity needs both implementations + fellows.db + "
+        "relationships.db. Run `just mcp-install-deps`, "
+        "`just build-mcpb private_data_ops`, `just db-rebuild`, and ensure "
+        "app/relationships.db exists (open the PWA at least once)."
+    ),
+)
+
+
+needs_staged_shared = pytest.mark.skipif(
+    not STAGED_SHARED_JS.is_file(),
+    reason="staged shared_data_ops layout needs `just build-mcpb shared_data_ops`.",
+)
+
+
+needs_staged_private = pytest.mark.skipif(
+    not (STAGED_PRIVATE_JS.is_file() and REL_DB.is_file()),
+    reason=(
+        "staged private_data_ops layout needs `just build-mcpb private_data_ops` "
+        "and app/relationships.db."
     ),
 )
 
@@ -380,3 +428,167 @@ class TestSharedDataOps:
         py_fc = sorted(py["field_completeness"], key=lambda r: (-r["count"], r["label"]))
         node_fc = sorted(node["field_completeness"], key=lambda r: (-r["count"], r["label"]))
         assert py_fc == node_fc
+
+
+def _call_both_private(tool_name: str, arguments: dict) -> tuple[dict, dict]:
+    """private-data-ops parity helper. Both servers run against the same
+    relationships.db (RW for the user, but both implementations open it
+    RO) with the same fellows.db ATTACHed."""
+    py = _call_tool(
+        [
+            str(PY_VENV_PYTHON),
+            str(PY_PRIVATE),
+            "--db",
+            str(REL_DB),
+            "--fellows-db",
+            str(FELLOWS_DB),
+        ],
+        tool_name,
+        arguments,
+    )
+    node = _call_tool(
+        [
+            "node",
+            str(NODE_PRIVATE_JS),
+            "--db",
+            str(REL_DB),
+            "--fellows-db",
+            str(FELLOWS_DB),
+        ],
+        tool_name,
+        arguments,
+    )
+    return py, node
+
+
+@needs_both_private
+class TestPrivateDataOps:
+    """``private-data-ops`` returns Private DB rows + joins to the Shared
+    DB. Divergence here is more sensitive than shared-data-ops: it would
+    mean Claude shows different group contents depending on which
+    implementation runs, and the cross-DB ATTACH join is where SQL
+    semantics most easily drift between Python's sqlite3 and Node's
+    node:sqlite.
+    """
+
+    def test_list_groups_total_and_first_few(self):
+        """The total count + the first few groups (ordered by
+        updated_at DESC, id DESC). Both implementations should agree
+        on row counts and ordering.
+        """
+        py, node = _call_both_private("list_groups", {"limit": 50})
+        assert py == node, (
+            "list_groups divergence: "
+            f"py.total={py.get('total')} node.total={node.get('total')}; "
+            f"first names: py={[g.get('name') for g in py.get('results', [])[:3]]} "
+            f"node={[g.get('name') for g in node.get('results', [])[:3]]}"
+        )
+
+    def test_find_group_case_insensitive_substring(self):
+        """Python uses ``LIKE ? COLLATE NOCASE`` and so does the Node
+        port. Pick a substring that's likely to match at least one
+        group in any well-developed relationships.db.
+        """
+        py, node = _call_both_private("find_group", {"name": "a"})
+        assert py == node
+
+    def test_find_group_empty_query_returns_zero(self):
+        py, node = _call_both_private("find_group", {"name": "   "})
+        assert py == node
+        assert py["total"] == 0
+
+    def test_find_group_no_match(self):
+        py, node = _call_both_private(
+            "find_group", {"name": "zzz-no-such-group-xyz"}
+        )
+        assert py == node
+        assert py["total"] == 0
+
+    def test_get_group_members_first_existing_group(self):
+        """Pick the first group from list_groups and pull its members.
+        Exercises the load-bearing cross-DB ATTACH join: fellow names +
+        emails come from f.fellows. The COALESCE(name, record_id) sort
+        order is where Python and Node's sqlite ATTACH semantics could
+        diverge on locale collation; ensure they match exactly.
+        """
+        listing = _call_both_private("list_groups", {"limit": 1})
+        py_list, node_list = listing
+        # Pre-check the listing matches; otherwise this test is testing
+        # the wrong group on each side.
+        assert py_list == node_list
+        if not py_list.get("results"):
+            pytest.skip("relationships.db has no groups; can't test members")
+        gid = py_list["results"][0]["group_id"]
+        py, node = _call_both_private(
+            "get_group_members", {"group_id": gid}
+        )
+        assert py == node, (
+            f"member-join divergence on group_id={gid}: "
+            f"py member count={len((py or {}).get('members', []))} "
+            f"node member count={len((node or {}).get('members', []))}"
+        )
+
+    def test_get_group_members_missing_returns_null(self):
+        # 999999 is highly unlikely to exist as a real group id.
+        py, node = _call_both_private(
+            "get_group_members", {"group_id": 999999}
+        )
+        assert py is None
+        assert node is None
+
+
+# ----- Staged-bundle smoke tests ------------------------------------------
+#
+# Per plans/easy_mcp_install.md § 13: the parity tests above run against
+# ``mcpb/node/dist/<name>/index.js`` where ``_shared/`` IS a sibling and
+# (for shared-data-ops) ``FELLOWS_DB_PATH`` is set explicitly. That's
+# two unrealistic conditions stacked — neither holds inside an installed
+# .mcpb. The staged bundle layout (``mcpb/node/.staging/<name>/server/
+# index.js`` with ``_shared/`` and ``data/`` as siblings of ``server/``)
+# IS what gets packed into the .mcpb. Smoking it without env-var help
+# would have caught both #187 bugs (missing better-sqlite3 native binding;
+# missing path-resolution under bundle root).
+
+
+def _staged_call(cmd: list[str], tool_name: str, arguments: dict) -> dict | None:
+    """Like _call_tool but no env-var override — we want the staged
+    bundle's default path resolution to do its work.
+    """
+    return _call_tool(cmd, tool_name, arguments)
+
+
+@needs_staged_shared
+def test_staged_shared_bundle_default_resolution():
+    """Spawn the staged shared_data_ops bundle with no env vars and no
+    --db arg. Its default path resolution should find the bundled
+    fellows.db at ``../data/fellows.db`` relative to server/index.js.
+    Asserts only that the call returns a sane stats payload — the byte-
+    level parity is already covered by TestSharedDataOps.
+    """
+    result = _staged_call(
+        ["node", str(STAGED_SHARED_JS)], "get_directory_stats", {}
+    )
+    assert result is not None
+    assert isinstance(result.get("total"), int)
+    assert result["total"] > 0, "bundled fellows.db should have rows"
+
+
+@needs_staged_private
+def test_staged_private_bundle_default_resolution():
+    """Spawn the staged private_data_ops bundle, passing relationships.db
+    via --db (the .mcpb's user_config does this at install time too),
+    but NOT --fellows-db. The bundled fellows.db must be found via
+    default path resolution at ``../data/fellows.db``.
+    """
+    result = _staged_call(
+        [
+            "node",
+            str(STAGED_PRIVATE_JS),
+            "--db",
+            str(REL_DB),
+        ],
+        "list_groups",
+        {"limit": 1},
+    )
+    assert result is not None
+    assert isinstance(result.get("total"), int)
