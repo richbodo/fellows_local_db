@@ -16,9 +16,14 @@
  * See plans/easy_mcp_install.md § 5 (OPFS handoff) and
  * docs/Architecture.md § Two-DB architecture for why these are split.
  *
- * Read-only-ness is enforced at the SQLite layer (readonly: true on the
- * better-sqlite3 connection, same posture as Python's mode=ro URI flag).
+ * Read-only-ness is enforced at the SQLite layer (readOnly: true on the
+ * node:sqlite connection, same posture as Python's mode=ro URI flag).
  * Even a buggy tool can't mutate the directory snapshot.
+ *
+ * Uses Node's built-in `node:sqlite` (stable since Node 24) so the bundle
+ * has zero native dependencies — Claude Desktop ships Electron with
+ * Node 24, and a native better-sqlite3 binding would not survive any
+ * Node version skew between the build machine and Claude Desktop.
  *
  * DB path resolution mirrors the Python server: CLI --db, then env
  * FELLOWS_DB_PATH, then ${__dirname}/../data/fellows.db (the path inside
@@ -33,7 +38,7 @@ import { z } from "zod";
 import { existsSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 
 import {
   getFellowBySlugOrId,
@@ -79,7 +84,7 @@ if (!existsSync(DB_PATH) || !statSync(DB_PATH).isFile()) {
   process.exit(1);
 }
 
-const db = new Database(DB_PATH, { readonly: true, fileMustExist: true });
+const db = new DatabaseSync(DB_PATH, { readOnly: true });
 // Sanity check before handing control to the stdio loop — fail fast with
 // a useful stderr message rather than a cryptic JSON-RPC error on the
 // first tool call.

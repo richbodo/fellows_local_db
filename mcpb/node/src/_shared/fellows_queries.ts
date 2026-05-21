@@ -11,8 +11,14 @@
  * Conforms to mcp-shared-data-ops.schema.json from the PNA spec.
  * Behavioral parity with the Python helper is asserted by
  * tests/test_mcpb_parity.py per plans/easy_mcp_install.md § 6.
+ *
+ * Uses Node's built-in `node:sqlite` (stable since Node 24) rather than
+ * better-sqlite3 — the latter ships a native .node binding that has to
+ * match the host's Node ABI exactly, and Claude Desktop bundles a
+ * different Node version than the build machine. Built-in sqlite has
+ * zero native deps, no ABI to mismatch, and a nearly identical API.
  */
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 
 export const FELLOW_COLUMNS = [
   "record_id",
@@ -72,7 +78,7 @@ export function rowToFellow(row: FellowsRow): Record<string, unknown> {
 }
 
 export function getFellowBySlugOrId(
-  db: Database.Database,
+  db: DatabaseSync,
   slugOrId: string,
 ): Record<string, unknown> | null {
   const row = db
@@ -82,7 +88,7 @@ export function getFellowBySlugOrId(
 }
 
 export function searchFellows(
-  db: Database.Database,
+  db: DatabaseSync,
   q: string,
 ): Array<Record<string, unknown>> {
   const trimmed = (q ?? "").trim();
@@ -107,7 +113,7 @@ export function searchFellows(
  * Get aggregate directory stats. Mirrors get_stats in
  * app/fellows_queries.py.
  */
-export function getStats(db: Database.Database): Record<string, unknown> {
+export function getStats(db: DatabaseSync): Record<string, unknown> {
   const total = (
     db.prepare("SELECT COUNT(*) as c FROM fellows").get() as { c: number }
   ).c;
