@@ -18,6 +18,91 @@ link to the newer entry. Newest first.
 
 ---
 
+## 2026-05-21 — `.mcpb` bundles do not ship native Node dependencies
+
+**Why this is worth recording.** A future contributor adding the
+`private-data-ops` port (or any new server in `mcpb/node/`) will be
+tempted to reach for `better-sqlite3` (or `sharp`, or any other
+N-API/native module). The existing Python `mcp_servers/` uses the
+stdlib `sqlite3` module — there's no parallel "obvious" choice for
+Node, and the better-sqlite3 ergonomics are excellent. The constraint
+that forbids it isn't visible from the source side; it shows up only
+when the bundle is installed in Claude Desktop and fails to load.
+
+**Context.** Found during smoke test of #187. The first
+`shared-data-ops.mcpb` build used `better-sqlite3`. It built cleanly,
+passed all parity tests on the host, and the `.mcpb` validated. But
+on install in Claude Desktop, the server process crashed 64ms after
+the `initialize` message arrived — before the SDK could even respond.
+Claude Desktop logged *"Server transport closed unexpectedly"*.
+
+Direct reproduction (against the installed bundle):
+
+```
+$ node -e 'new (require("better-sqlite3"))("./fellows.db")'
+Error: Could not locate the bindings file. Tried:
+ → .../better-sqlite3/build/Release/better_sqlite3.node
+ → ... [13 more paths]
+```
+
+The native `.node` binary wasn't in the bundle. Two compounding
+reasons:
+
+1. **`build/build_mcpb.py` ran `npm install --ignore-scripts`** so
+   better-sqlite3's `install` hook (which downloads/compiles the
+   native binding via `prebuild-install`) never ran.
+2. **Even with that flag removed, the prebuilt would have been wrong:**
+   the host machine runs Node 25 (modules ABI v141); Claude Desktop's
+   Electron 41.6.1 bundles Node 24.15.0 (modules ABI v137).
+   `prebuild-install` matches against the host's ABI, so a host-built
+   bundle would have shipped a v141 binary that Claude Desktop's v137
+   runtime couldn't load.
+
+**Alternatives considered.**
+
+1. **Remove `--ignore-scripts` and accept the ABI mismatch.**
+   Doesn't actually work — the host-built binary would crash in
+   Claude Desktop with a different error.
+
+2. **Cross-build the binary against Claude Desktop's Node ABI.**
+   Requires pinning a specific Node version in CI, running
+   `prebuild-install --target=24.15.0`. Fragile to Electron's Node
+   version changes (every Electron release updates the bundled Node
+   version eventually). High maintenance cost.
+
+3. **Use Node's built-in `node:sqlite` module.** Stable since
+   Node 24.0. Zero native dependencies — it's compiled into Node
+   itself, so it's *guaranteed* to work whatever Node version
+   Claude Desktop bundles. **Chosen.**
+
+**Decision.** `.mcpb` bundles do not ship native Node dependencies.
+For SQLite specifically, `node:sqlite` is the path. For anything
+else that would normally call for a native module (image processing,
+crypto-with-fast-paths, etc.), the bundle either uses Node's
+built-ins, falls back to a pure-JS implementation, or doesn't ship
+that capability.
+
+**Consequences.**
+
+- Pro: zero ABI surface area between the bundle and Claude Desktop's
+  Node runtime. Survives any Electron version change.
+- Pro: smaller bundles — `shared_data_ops.mcpb` dropped from 6.7 MB
+  to 3.8 MB after the better-sqlite3 removal.
+- Pro: build pipeline can keep `--ignore-scripts` as a defense-in-depth
+  measure against postinstall script supply-chain attacks.
+- Con: gives up some performance-sensitive native libraries. Not
+  relevant for our current surface; revisit if a future tool needs
+  one (and address as a per-tool exception rather than a blanket
+  policy change).
+
+**Links.**
+
+- Fix commit on `feat/mcpb-shared-data-ops`: `2807bba`
+- [`plans/easy_mcp_install.md`](../plans/easy_mcp_install.md) — the parent plan
+- [`mcpb/node/src/_shared/fellows_queries.ts`](../mcpb/node/src/_shared/fellows_queries.ts) — the actual `node:sqlite` import comment
+
+---
+
 ## 2026-05-21 — MCP servers ship as three separate `.mcpb` files, not one consolidated bundle
 
 **Why this is worth recording.** A future contributor looking at

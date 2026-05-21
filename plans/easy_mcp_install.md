@@ -65,6 +65,15 @@ Desktop. Material facts:
 - Claude Desktop **does not** require `.mcpb` signing today.
 - The install writes Claude Desktop's internal config; no
   `claude_desktop_config.json` hand-editing.
+- **However, Claude Desktop has its own install-time warning** for
+  any extension that isn't Anthropic-verified — a prominent red
+  banner reading *"Installing will grant this extension access to
+  everything on your computer. Any developer information shown has
+  not been verified by Anthropic."* This is a separate trust layer
+  from Gatekeeper (Apple Developer ID signing doesn't address it).
+  Tracking the disclosure UX in [issue #186](https://github.com/richbodo/fellows_local_db/issues/186);
+  the PWA preamble (§ 7) previews the warning so users aren't
+  surprised. Discovered during smoke test of #185.
 
 Two gotchas for Python servers (see
 [Issue #84](https://github.com/modelcontextprotocol/mcpb/issues/84),
@@ -322,6 +331,15 @@ dialogs become a sequence they already understand.
 >    Claude never sends mail itself — drafts open in your mail app
 >    with To, Subject, and Body filled in, and you click Send.
 >
+> **One thing to expect during install:** Claude Desktop will show a
+> red warning banner for each of these extensions saying *"Installing
+> will grant this extension access to everything on your computer..."*
+> That warning fires for any extension that isn't Anthropic-verified —
+> it's not specific to ours and doesn't mean anything is wrong. The
+> extensions only read the fellows data files they were configured
+> with; they don't have wider access than you grant them. Click
+> **Install** to proceed.
+>
 > **What happens next:** four files will download to your
 > Downloads folder (your saved groups + three installer files).
 > Claude Desktop will pop up an Install dialog for each installer
@@ -340,7 +358,11 @@ and the *Cloud LLM caveat* in `mcp_servers/README.md`.
 
 Copy will be reviewed in implementation; the structure (the
 three-bundle boundary + the consent moment + the per-bundle
-opt-in) is the load-bearing part.
+opt-in + the install-warning preview) is the load-bearing part.
+The install-warning preview specifically is tracked in
+[issue #186](https://github.com/richbodo/fellows_local_db/issues/186) —
+the wording above is a first draft to be refined with a real
+screenshot once the Settings UI is in implementation.
 
 ## 8. Interactions with in-flight plans
 
@@ -472,6 +494,21 @@ level):
 
 Each PR is independently reviewable + revertable. The parity test
 grows incrementally across PRs 2-4.
+
+## 13. End-of-Stage-1 polish checklist
+
+Working scratchpad for found-in-implementation realities and small
+documentation items that should land before Stage 1 ships. Items
+accumulate as work proceeds — when the list stabilizes, it becomes
+the work-plan for the final-polish PR (somewhere around § 12 step
+8). Each item should link a GH issue if it warrants tracking
+beyond this file.
+
+- **[#186](https://github.com/richbodo/fellows_local_db/issues/186) — install-warning disclosure UX.** Claude Desktop shows a red *"access to everything / not Anthropic-verified"* banner during `.mcpb` install. Apple Developer ID code signing does not address it (different trust layer). The realistic resolution is the PWA preamble previewing the warning so users aren't surprised; copy lives in § 7 above. Address in the `feat/mcpb-settings-ui` and `docs/mcpb-walkthrough-rewrite` PRs.
+
+- **Parity test should exercise the staged bundle layout, not just `dist/`.** Found-while-fixing in #187 (commits `2807bba`, `91525b5`): two bundle-layout bugs (missing `better-sqlite3` native binding, and `_shared/`/`data/` placed inside `server/` instead of as siblings) reached install because `tests/test_mcpb_parity.py` runs against `mcpb/node/dist/<name>/index.js` with `FELLOWS_DB_PATH` explicitly set. Both conditions are unrealistic — they mask path-resolution bugs that only fire in the staged bundle layout. Either (a) extend the parity test to also exercise `mcpb/node/.staging/<name>/server/index.js` with no env var, or (b) add a separate `tests/test_mcpb_bundle_layout.py` smoke that just spawns `node` against the staging dir and asserts a successful `initialize` + `tools/call get_directory_stats` round-trip. Address before Stage 1 ships — current state has known false-green coverage.
+
+(More items will land here as they emerge.)
 
 ---
 

@@ -29,6 +29,10 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
 
+// Unconditional startup line — appears in Claude Desktop's per-server
+// log so any future startup failure has a trace.
+process.stderr.write(`comms: boot node=${process.version}\n`);
+
 const MAILTO_URL_WARN_BYTES = 2000;
 const STAGED_MAX = 100;
 

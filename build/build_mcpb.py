@@ -49,6 +49,13 @@ MANIFESTS_DIR = MCPB_NODE_DIR / "manifests"
 DIST_TS_DIR = MCPB_NODE_DIR / "dist"
 PACKAGE_JSON = MCPB_NODE_DIR / "package.json"
 OUTPUT_DIR = REPO_ROOT / "deploy" / "dist" / "mcpb"
+FELLOWS_DB = REPO_ROOT / "app" / "fellows.db"
+
+# Bundles that need fellows.db bundled inside server/data/ at build time.
+# Per plans/easy_mcp_install.md § 5: fellows.db is the read-only shared
+# snapshot — safe to bundle. relationships.db is per-user OPFS and
+# **never** bundled.
+BUNDLES_NEEDING_FELLOWS_DB = {"shared_data_ops"}
 
 
 def _run(cmd: list[str], cwd: Path) -> None:
@@ -103,6 +110,37 @@ def _stage_bundle(name: str, manifest: dict, staging: Path) -> None:
     # Copy compiled JS as server/index.js + any sibling files (sourcemaps etc).
     for item in src_dir.iterdir():
         shutil.copy2(item, server_dir / item.name)
+
+    # Some servers import from a sibling `_shared/` module (e.g.
+    # shared_data_ops imports ../_shared/fellows_queries.js). The compiled
+    # output in `dist/` has shared_data_ops/ and _shared/ as siblings, so
+    # the import resolves there in dev. In the bundle, server/index.js
+    # comes from dist/shared_data_ops/, so `../_shared/` must live ONE
+    # LEVEL UP from server/ — i.e. at the bundle root, sibling to server/.
+    # Don't place it inside server/, that's what broke #187 — the import
+    # path would refer to a non-existent dir and ESM would throw
+    # ERR_MODULE_NOT_FOUND during module load, before our own code runs.
+    shared_src = DIST_TS_DIR / "_shared"
+    if shared_src.is_dir():
+        shutil.copytree(shared_src, staging / "_shared")
+
+    # Bundles that read fellows.db get a copy of the live build at
+    # bundle-root/data/fellows.db (sibling to server/). The server's
+    # default path resolution does `resolve(__dirname, "..", "data",
+    # "fellows.db")` — so `data/` must live ONE LEVEL UP from server/,
+    # not inside it. Same trap as `_shared/` above; mirrored fix.
+    # Per plan § 5: fellows.db is the read-only shared snapshot — safe
+    # to bundle. relationships.db is per-user OPFS and never bundled.
+    if name in BUNDLES_NEEDING_FELLOWS_DB:
+        if not FELLOWS_DB.is_file():
+            raise SystemExit(
+                f"fellows.db not found at {FELLOWS_DB} — run `just db-rebuild` first."
+            )
+        data_dir = staging / "data"
+        data_dir.mkdir()
+        shutil.copy2(FELLOWS_DB, data_dir / "fellows.db")
+        sz_mb = FELLOWS_DB.stat().st_size / (1024 * 1024)
+        print(f"  Bundled fellows.db ({sz_mb:.1f} MB) into staging/data/", file=sys.stderr)
 
     # Bundle production node_modules INSIDE server/ so the manifest's
     # entry_point and ${__dirname}/server/index.js Just Work after install.
