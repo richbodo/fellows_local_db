@@ -1,0 +1,44 @@
+{
+  "manifest_version": "0.3",
+  "name": "fellows-comms",
+  "display_name": "Fellows: Email Staging",
+  "version": "0.1.0",
+  "description": "Lets Claude prepare draft emails to your fellows groups and hand them back to you for review. Claude never sends mail itself — drafts open in your mail app with To, Subject, and Body pre-filled, and you click Send.",
+  "long_description": "Part of the Fellows Directory integration with Claude Desktop. The Communications extension stages outreach as a mailto: URL that your mail client opens with the composition pre-populated. This server never launches a transport itself, never logs who you emailed, and writes nothing to disk. Architectural posture: AC-MCP-B — the MCP server proposes, the workspace disposes.",
+  "author": {
+    "name": "Rich Bodo",
+    "email": "richbodo@gmail.com"
+  },
+  "homepage": "https://github.com/richbodo/fellows_local_db",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/richbodo/fellows_local_db.git"
+  },
+  "license": "MIT",
+  "keywords": ["fellows", "ehf", "email", "mailto", "outreach"],
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.js"],
+      "env": {}
+    }
+  },
+  "tools": [
+    {
+      "name": "stage_email",
+      "description": "Stage an email composition as a mailto: URL for the user to review and send."
+    },
+    {
+      "name": "get_staged",
+      "description": "Look up a previously staged composition by id."
+    }
+  ],
+  "compatibility": {
+    "platforms": ["darwin"],
+    "runtimes": {
+      "node": ">=20.0.0"
+    }
+  }
+}

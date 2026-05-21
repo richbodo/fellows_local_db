@@ -315,6 +315,27 @@ test-comms:
 test-mcp: test-shared-data-ops test-private-data-ops test-comms
 
 
+# ---- MCPB bundles (Claude Desktop install path) --------------------------
+# See plans/easy_mcp_install.md and mcpb/node/README.md.
+
+# Build all available .mcpb Desktop Extension bundles into
+# deploy/dist/mcpb/. Runs npm install in mcpb/node/ on first call,
+# compiles TS via tsc, then runs `npx @anthropic-ai/mcpb pack` per
+# bundle. Pass a name to build just one (e.g. `just build-mcpb comms`).
+[group('mcpb')]
+build-mcpb *NAMES:
+    python3 build/build_mcpb.py {{NAMES}}
+
+# Run the dual-codebase parity test: same inputs through the Python
+# servers in mcp_servers/ and the Node servers in mcpb/node/, assert
+# structurally-equal output against the PNA spec contracts. Required
+# to pass before any change to either implementation merges.
+# See plans/easy_mcp_install.md § 6.
+[group('mcpb')]
+test-mcpb-parity:
+    {{mcp_pytest}} tests/test_mcpb_parity.py -v
+
+
 # ---- build / deploy ------------------------------------------------------
 
 # Assemble deploy/dist/ (runs build/build_pwa.py).
