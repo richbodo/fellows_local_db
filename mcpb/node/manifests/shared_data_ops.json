@@ -1,0 +1,52 @@
+{
+  "manifest_version": "0.3",
+  "name": "fellows-shared-data-ops",
+  "display_name": "Fellows: Directory (Shared)",
+  "version": "0.1.0",
+  "description": "Lets Claude read the EHF fellows directory: search, look up individual fellows, list by filters, and pull aggregate statistics. Read-only — never modifies the directory data.",
+  "long_description": "Part of the Fellows Directory integration with Claude Desktop. Bundles a snapshot of fellows.db inside the extension so it works offline. Read-only access only — the SQLite connection is opened with the readonly flag so even a buggy tool cannot mutate the directory snapshot. Architectural posture: spec axis pick `mcp-exposure:shared+private+comms`, the Shared half of that boundary. The fellows directory is the public-shared layer (per docs/Architecture.md § Two-DB architecture); when Claude reads it, that data goes to Anthropic's cloud — see the privacy disclosure in the PWA's setup screen.",
+  "author": {
+    "name": "Rich Bodo",
+    "email": "richbodo@gmail.com"
+  },
+  "homepage": "https://github.com/richbodo/fellows_local_db",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/richbodo/fellows_local_db.git"
+  },
+  "license": "MIT",
+  "keywords": ["fellows", "ehf", "directory", "search", "sqlite"],
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.js"],
+      "env": {}
+    }
+  },
+  "tools": [
+    {
+      "name": "search_fellows",
+      "description": "Full-text search across name, bio, cohort, fellow type, search tags, and key links."
+    },
+    {
+      "name": "get_fellow",
+      "description": "Fetch one fellow's full record by slug or record_id."
+    },
+    {
+      "name": "list_fellows",
+      "description": "List fellows by structured filters (fellow_type, cohort, region, primary_citizenship, has_contact_email)."
+    },
+    {
+      "name": "get_directory_stats",
+      "description": "Aggregate statistics: totals, breakdowns by fellow type / cohort / region, field-completeness counts."
+    }
+  ],
+  "compatibility": {
+    "platforms": ["darwin"],
+    "runtimes": {
+      "node": ">=20.0.0"
+    }
+  }
+}

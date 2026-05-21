@@ -49,6 +49,13 @@ MANIFESTS_DIR = MCPB_NODE_DIR / "manifests"
 DIST_TS_DIR = MCPB_NODE_DIR / "dist"
 PACKAGE_JSON = MCPB_NODE_DIR / "package.json"
 OUTPUT_DIR = REPO_ROOT / "deploy" / "dist" / "mcpb"
+FELLOWS_DB = REPO_ROOT / "app" / "fellows.db"
+
+# Bundles that need fellows.db bundled inside server/data/ at build time.
+# Per plans/easy_mcp_install.md § 5: fellows.db is the read-only shared
+# snapshot — safe to bundle. relationships.db is per-user OPFS and
+# **never** bundled.
+BUNDLES_NEEDING_FELLOWS_DB = {"shared_data_ops"}
 
 
 def _run(cmd: list[str], cwd: Path) -> None:
@@ -103,6 +110,29 @@ def _stage_bundle(name: str, manifest: dict, staging: Path) -> None:
     # Copy compiled JS as server/index.js + any sibling files (sourcemaps etc).
     for item in src_dir.iterdir():
         shutil.copy2(item, server_dir / item.name)
+
+    # Some servers import from a sibling `_shared/` module (e.g.
+    # shared_data_ops imports fellows_queries.js). Carry those compiled
+    # helpers across so the import resolves inside the staged bundle.
+    shared_src = DIST_TS_DIR / "_shared"
+    if shared_src.is_dir():
+        shutil.copytree(shared_src, server_dir / "_shared")
+
+    # Bundles that read fellows.db get a copy of the live build at
+    # server/data/fellows.db. The server resolves the path relative to
+    # __dirname so it Just Works after install. Per plan § 5: fellows.db
+    # is the read-only shared snapshot — bundling it is safe. relationships.db
+    # is per-user OPFS and is never bundled.
+    if name in BUNDLES_NEEDING_FELLOWS_DB:
+        if not FELLOWS_DB.is_file():
+            raise SystemExit(
+                f"fellows.db not found at {FELLOWS_DB} — run `just db-rebuild` first."
+            )
+        data_dir = server_dir / "data"
+        data_dir.mkdir()
+        shutil.copy2(FELLOWS_DB, data_dir / "fellows.db")
+        sz_mb = FELLOWS_DB.stat().st_size / (1024 * 1024)
+        print(f"  Bundled fellows.db ({sz_mb:.1f} MB) into staging/server/data/", file=sys.stderr)
 
     # Bundle production node_modules INSIDE server/ so the manifest's
     # entry_point and ${__dirname}/server/index.js Just Work after install.
