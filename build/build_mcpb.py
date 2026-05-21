@@ -112,27 +112,35 @@ def _stage_bundle(name: str, manifest: dict, staging: Path) -> None:
         shutil.copy2(item, server_dir / item.name)
 
     # Some servers import from a sibling `_shared/` module (e.g.
-    # shared_data_ops imports fellows_queries.js). Carry those compiled
-    # helpers across so the import resolves inside the staged bundle.
+    # shared_data_ops imports ../_shared/fellows_queries.js). The compiled
+    # output in `dist/` has shared_data_ops/ and _shared/ as siblings, so
+    # the import resolves there in dev. In the bundle, server/index.js
+    # comes from dist/shared_data_ops/, so `../_shared/` must live ONE
+    # LEVEL UP from server/ — i.e. at the bundle root, sibling to server/.
+    # Don't place it inside server/, that's what broke #187 — the import
+    # path would refer to a non-existent dir and ESM would throw
+    # ERR_MODULE_NOT_FOUND during module load, before our own code runs.
     shared_src = DIST_TS_DIR / "_shared"
     if shared_src.is_dir():
-        shutil.copytree(shared_src, server_dir / "_shared")
+        shutil.copytree(shared_src, staging / "_shared")
 
     # Bundles that read fellows.db get a copy of the live build at
-    # server/data/fellows.db. The server resolves the path relative to
-    # __dirname so it Just Works after install. Per plan § 5: fellows.db
-    # is the read-only shared snapshot — bundling it is safe. relationships.db
-    # is per-user OPFS and is never bundled.
+    # bundle-root/data/fellows.db (sibling to server/). The server's
+    # default path resolution does `resolve(__dirname, "..", "data",
+    # "fellows.db")` — so `data/` must live ONE LEVEL UP from server/,
+    # not inside it. Same trap as `_shared/` above; mirrored fix.
+    # Per plan § 5: fellows.db is the read-only shared snapshot — safe
+    # to bundle. relationships.db is per-user OPFS and never bundled.
     if name in BUNDLES_NEEDING_FELLOWS_DB:
         if not FELLOWS_DB.is_file():
             raise SystemExit(
                 f"fellows.db not found at {FELLOWS_DB} — run `just db-rebuild` first."
             )
-        data_dir = server_dir / "data"
+        data_dir = staging / "data"
         data_dir.mkdir()
         shutil.copy2(FELLOWS_DB, data_dir / "fellows.db")
         sz_mb = FELLOWS_DB.stat().st_size / (1024 * 1024)
-        print(f"  Bundled fellows.db ({sz_mb:.1f} MB) into staging/server/data/", file=sys.stderr)
+        print(f"  Bundled fellows.db ({sz_mb:.1f} MB) into staging/data/", file=sys.stderr)
 
     # Bundle production node_modules INSIDE server/ so the manifest's
     # entry_point and ${__dirname}/server/index.js Just Work after install.

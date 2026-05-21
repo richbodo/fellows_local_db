@@ -76,7 +76,16 @@ function resolveDbPath(argv: ReadonlyArray<string>): string {
   return resolve(here, "..", "data", "fellows.db");
 }
 
+// Unconditional startup line — appears in Claude Desktop's per-server
+// log (~/Library/Logs/Claude/mcp-server-<name>.log on macOS) so any
+// future startup failure has a trace of what was tried, not just
+// "Server transport closed unexpectedly".
+process.stderr.write(
+  `shared-data-ops: boot node=${process.version} cwd=${process.cwd()}\n`,
+);
+
 const DB_PATH = resolveDbPath(process.argv.slice(2));
+process.stderr.write(`shared-data-ops: resolved db=${DB_PATH}\n`);
 if (!existsSync(DB_PATH) || !statSync(DB_PATH).isFile()) {
   process.stderr.write(
     `shared-data-ops: fellows.db not found at ${DB_PATH}\n`,
