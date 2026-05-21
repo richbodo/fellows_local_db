@@ -435,6 +435,20 @@ data?".
 
 ---
 
+## Use with Claude Desktop (optional)
+
+You can plug the directory into **Claude Desktop** so you can ask Claude
+things like *"who's in my Climate Action group?"* or *"draft an invite
+email to my Climate Action group — don't send, just stage it for me to
+review."* Claude reads your local fellows data to answer, and hands
+email drafts back to you to review and send.
+
+See [Use with Claude Desktop](use_with_claude_desktop.md) for the
+step-by-step setup walkthrough. Optional — the Fellows app itself
+doesn't need any of this.
+
+---
+
 ## Updates
 
 The app handles two kinds of updates separately. Both are surfaced on
