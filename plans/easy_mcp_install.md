@@ -2,7 +2,7 @@
 
 > **Status: ACTIVE.** Decisions locked 2026-05-21 after the planning
 > conversation that produced this file and
-> [`docs/acdecisionslog.md`](../docs/acdecisionslog.md). This plan
+> [`docs/ac_decisions_log.md`](../docs/ac_decisions_log.md). This plan
 > supersedes the rough "two-stage installer with scary-warning UX"
 > shape sketched earlier in the conversation; research into MCP
 > packaging standards reframed the problem (see § 3).
@@ -92,7 +92,7 @@ PWA Settings → "Set up Claude Desktop integration" sequences the
 three downloads + the install preamble (see § 7).
 
 **Why three bundles, not one** — see
-[`docs/acdecisionslog.md` § 2026-05-21](../docs/acdecisionslog.md).
+[`docs/ac_decisions_log.md` § 2026-05-21](../docs/ac_decisions_log.md).
 The short version: the `mcp-exposure:shared+private+comms` axis
 pick and AC-MCP-A's exception clause require the three servers to
 be independently enableable, and Claude Desktop's Extensions UI
@@ -387,7 +387,7 @@ opt-in) is the load-bearing part.
   per-extension-optional. If post-launch feedback says it's too
   much, the fallback is one combined bundle accepting the
   architectural cost — and documenting that flip in
-  `docs/acdecisionslog.md` as a follow-up entry.
+  `docs/ac_decisions_log.md` as a follow-up entry.
 - **Privacy: an installed `.mcpb` still leaks fellows data to
   Anthropic's cloud when used.** Already covered in current
   users-manual privacy section; carry the same disclosure into the
@@ -415,7 +415,7 @@ opt-in) is the load-bearing part.
 Captured in the architectural decisions log:
 
 - [2026-05-21 — MCP servers ship as three separate `.mcpb` files,
-  not one consolidated bundle](../docs/acdecisionslog.md#2026-05-21--mcp-servers-ship-as-three-separate-mcpb-files-not-one-consolidated-bundle)
+  not one consolidated bundle](../docs/ac_decisions_log.md#2026-05-21--mcp-servers-ship-as-three-separate-mcpb-files-not-one-consolidated-bundle)
 
 Decisions internal to this plan (don't rise to architectural-log
 level):
