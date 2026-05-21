@@ -35,7 +35,7 @@ Extensions UI toggles whole bundles, so per-server enable/disable
 requires per-server bundles. This preserves AC-MCP-A's exception
 clause (a user can wire only Shared to a cloud client) at the
 install layer. See
-[`docs/acdecisionslog.md` § 2026-05-21](../../docs/acdecisionslog.md).
+[`docs/ac_decisions_log.md` § 2026-05-21](../../docs/ac_decisions_log.md).
 
 ## Layout
 
