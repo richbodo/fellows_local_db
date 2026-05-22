@@ -3422,6 +3422,112 @@ a.group-action-btn--primary {
   color: #64748b !important;
 }
 
+/* ===== Claude Desktop integration =====================================
+   Settings-page section that drives the .mcpb download flow + the
+   preamble dialog. The dialog inherits .settings-folder-dialog above
+   for chrome; .settings-mcpb-dialog overrides max-width because the
+   preamble has substantially more content (three bundle descriptions
+   + install-warning preview + next-steps paragraph) than the folder
+   collision dialog. Plan: plans/easy_mcp_install.md § 4 + § 7. */
+.settings-mcpb-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.settings-mcpb-meta {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: #6b7280;
+}
+
+.settings-mcpb-update-row {
+  margin: 0.75rem 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid #e7c873;
+  border-radius: 6px;
+  background: #fff8e1;
+  color: #3a3a3a;
+}
+
+.settings-mcpb-update-row p {
+  margin: 0 0 0.5rem;
+}
+
+.settings-mcpb-post-install {
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid #d8d2e8;
+  border-radius: 6px;
+  background: #f7f4fb;
+}
+
+.settings-mcpb-post-install h4 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.settings-mcpb-next-steps {
+  margin: 0 0 0.5rem;
+  padding-left: 1.25rem;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: #334155;
+}
+
+.settings-mcpb-next-steps li {
+  margin-bottom: 0.35rem;
+}
+
+/* Preamble dialog overrides — wider, with structured warnings. */
+.settings-mcpb-dialog {
+  max-width: 36rem;
+}
+
+.settings-mcpb-dialog ol.settings-mcpb-bundles {
+  margin: 0 0 1rem;
+  padding-left: 1.25rem;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: #334155;
+}
+
+.settings-mcpb-dialog ol.settings-mcpb-bundles li {
+  margin-bottom: 0.5rem;
+}
+
+.settings-mcpb-warning {
+  margin: 0 0 1rem;
+  padding: 0.6rem 0.85rem;
+  border: 1px solid #e7c873;
+  border-left-width: 3px;
+  border-radius: 4px;
+  background: #fff8e1;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: #3a3a3a;
+}
+
+.settings-mcpb-warning--banner {
+  border-color: #dc2626;
+  border-left-color: #dc2626;
+  background: #fef2f2;
+}
+
+.settings-mcpb-manual-link {
+  margin: 0.75rem 0 0;
+  font-size: 0.85rem;
+  color: #64748b;
+  text-align: right;
+}
+
+.settings-restore-migrate-hint {
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+  color: #475569;
+}
+
 .settings-backup-restore:disabled {
   opacity: 0.5;
   cursor: not-allowed;

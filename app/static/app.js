@@ -404,6 +404,57 @@
     } catch (e) {}
   }
 
+  // MCP bundle setup state. Tracks (a) whether the user has run the
+  // Claude Desktop integration setup at least once so the Settings UI
+  // can flip from "Set up…" to a refresh flow, and (b) the
+  // fellows_db_sha that was current at setup time so we can detect
+  // a server-side directory snapshot change and prompt for a re-install
+  // of just shared_data_ops.mcpb. Plan:
+  // plans/easy_mcp_install.md § 4 + § 8.
+  var MCPB_SETUP_KEY = 'fellows_mcpb_setup';
+  // Three-bundle layout — names match the .mcpb filenames served by
+  // deploy/server.py (Handler.MCPB_NAMES whitelist) and the manifest
+  // filenames in mcpb/node/manifests/. Order is the install order
+  // shown in the preamble UI: directory first (recommended), private
+  // second (per-call consent boundary), comms last (no DB).
+  var MCPB_BUNDLE_NAMES = ['shared_data_ops', 'private_data_ops', 'comms'];
+
+  function getMcpbSetupState() {
+    try {
+      var raw = localStorage.getItem(MCPB_SETUP_KEY);
+      if (!raw) return null;
+      var parsed = JSON.parse(raw);
+      return (parsed && typeof parsed === 'object') ? parsed : null;
+    } catch (e) { return null; }
+  }
+
+  function persistMcpbSetupState(state) {
+    try { localStorage.setItem(MCPB_SETUP_KEY, JSON.stringify(state)); }
+    catch (e) {}
+  }
+
+  function recordMcpbSetup(fellowsDbSha) {
+    var now = new Date().toISOString();
+    var state = getMcpbSetupState() || {};
+    if (!state.setupAt) state.setupAt = now;
+    state.refreshedAt = now;
+    state.fellowsDbSha = fellowsDbSha || null;
+    persistMcpbSetupState(state);
+  }
+
+  function recordMcpbDirectoryRefresh(fellowsDbSha) {
+    var state = getMcpbSetupState();
+    if (!state) {
+      // No setup record — directory refresh-only is meaningless on its
+      // own. Treat as a full setup.
+      recordMcpbSetup(fellowsDbSha);
+      return;
+    }
+    state.fellowsDbSha = fellowsDbSha || null;
+    state.refreshedAt = new Date().toISOString();
+    persistMcpbSetupState(state);
+  }
+
   function initBuildBadge() {
     var clientEl = document.getElementById('build-badge-client');
     if (clientEl) clientEl.textContent = 'app: ' + FELLOWS_UI_DIAG;
@@ -8487,6 +8538,11 @@
           'into the auto-backup rotation before each restore, so the recent-backups ' +
           'list below always lets you undo.' +
         '</p>' +
+        '<p class="settings-hint settings-restore-migrate-hint">' +
+          'Migrating from another browser? ' +
+          '<a href="https://github.com/richbodo/fellows_local_db/blob/main/docs/users_manual.md#migrating-from-another-browser" target="_blank" rel="noopener">See the recipe</a> ' +
+          '(it\'s the same Download / Restore flow on this page, but in a deliberate order).' +
+        '</p>' +
         '<input type="file" id="settings-restore-file" accept=".db,.sqlite,application/octet-stream" hidden />' +
         '<button type="button" id="settings-restore-pick" class="settings-download">' +
           '⬆ Restore from a file…' +
@@ -8498,6 +8554,101 @@
         '</p>' +
         '<ul id="settings-backup-list" class="settings-backup-list" hidden></ul>' +
       '</div>' +
+      '<div class="settings-section" id="settings-mcpb-section">' +
+        '<h3 class="settings-section-title">Claude Desktop integration (beta)</h3>' +
+        '<p class="settings-hint" id="settings-mcpb-intro">' +
+          'Plug the directory into Claude Desktop so you can ask things like ' +
+          '<em>"draft an invite email to my Climate Action group, don\'t send."</em> ' +
+          'Three small extensions, installed in one go. ' +
+          '<a href="https://github.com/richbodo/fellows_local_db/blob/main/docs/use_with_claude_desktop.md" target="_blank" rel="noopener">Walkthrough</a>.' +
+        '</p>' +
+        '<div id="settings-mcpb-update-row" class="settings-mcpb-update-row" hidden>' +
+          '<p class="settings-hint">' +
+            '<strong>Directory data update available.</strong> ' +
+            'A newer snapshot of the public fellows directory is on the server. ' +
+            'Re-install the Fellows directory extension to pick it up.' +
+          '</p>' +
+          '<button type="button" id="settings-mcpb-refresh-directory" class="settings-download">' +
+            '⬇ Re-install Fellows directory' +
+          '</button>' +
+        '</div>' +
+        '<div class="settings-mcpb-actions">' +
+          '<button type="button" id="settings-mcpb-setup" class="settings-download">' +
+            'Set up Claude Desktop integration' +
+          '</button>' +
+        '</div>' +
+        '<p id="settings-mcpb-setup-meta" class="settings-hint settings-mcpb-meta" hidden></p>' +
+        '<span id="settings-mcpb-status" class="settings-status" aria-live="polite"></span>' +
+        '<div id="settings-mcpb-post-install" class="settings-mcpb-post-install" hidden>' +
+          '<h4 class="settings-section-subtitle">After the downloads finish</h4>' +
+          '<ol class="settings-mcpb-next-steps">' +
+            '<li>Open each <code>.mcpb</code> file you just downloaded. Claude Desktop will pop up an Install dialog for each.</li>' +
+            '<li>For <strong>Your saved groups (Private)</strong>, the install dialog will ask you to pick a file: navigate to your data folder → <code>Fellows</code> → <code>relationships.db</code>.</li>' +
+            '<li>Quit Claude Desktop (⌘Q) and reopen it.</li>' +
+            '<li>Try it: ask Claude <em>"how many fellows are in the directory?"</em></li>' +
+          '</ol>' +
+          '<p class="settings-hint">' +
+            'Stuck? See the <a href="https://github.com/richbodo/fellows_local_db/blob/main/docs/use_with_claude_desktop.md" target="_blank" rel="noopener">walkthrough</a>.' +
+          '</p>' +
+        '</div>' +
+      '</div>' +
+      '<dialog id="settings-mcpb-preamble-dialog" class="settings-folder-dialog settings-mcpb-dialog">' +
+        '<form method="dialog">' +
+          '<h4>Set up Claude Desktop integration</h4>' +
+          '<p id="settings-mcpb-preamble-folder-warning" class="settings-mcpb-warning" hidden>' +
+            '<strong>Heads up.</strong> You haven\'t set up a data folder yet. ' +
+            'The integration works best when your fellows data lives at a stable path on your disk, ' +
+            'so the install dialog can find <code>relationships.db</code> reliably. ' +
+            'We recommend setting that up first: <em>Settings → Data folder → Choose data folder…</em> ' +
+            '(takes about ten seconds). ' +
+            'You can also proceed without a folder, but the file picker in Claude Desktop will land in your Downloads, ' +
+            'and you\'ll need to repeat this whole setup every time the file changes.' +
+          '</p>' +
+          '<p id="settings-mcpb-preamble-browser-warning" class="settings-mcpb-warning" hidden>' +
+            '<strong>Your browser:</strong> the easy install works on Chrome, Edge, Brave, and Arc. ' +
+            'Safari and Firefox need a manual setup — see the link at the bottom of this dialog.' +
+          '</p>' +
+          '<p>' +
+            'This will install <strong>three small extensions</strong> into Claude Desktop so it can read your fellows data and help you compose group emails. ' +
+            'Each extension covers a different boundary; you can install just the ones you want.' +
+          '</p>' +
+          '<ol class="settings-mcpb-bundles">' +
+            '<li>' +
+              '<strong>Fellows directory (Shared).</strong> Lets Claude read the public fellows directory: names, bios, contact info, search. ' +
+              '<em>Recommended.</em>' +
+            '</li>' +
+            '<li>' +
+              '<strong>Your saved groups (Private).</strong> Lets Claude read your saved groups, group members, and any notes you\'ve added. ' +
+              'This data is private to you and never leaves your device through the Fellows app — but when Claude reads it, it goes to Claude\'s servers (Anthropic). ' +
+              'If that\'s not OK for you, skip this extension and Claude will only have access to the directory.' +
+            '</li>' +
+            '<li>' +
+              '<strong>Email staging (Communications).</strong> Lets Claude prepare draft emails to your groups and hand them back to you for review. ' +
+              'Claude never sends mail itself — drafts open in your mail app with To, Subject, and Body filled in, and you click Send.' +
+            '</li>' +
+          '</ol>' +
+          '<div class="settings-mcpb-warning settings-mcpb-warning--banner">' +
+            '<strong>One thing to expect during install:</strong> ' +
+            'Claude Desktop will show a red warning banner for each extension saying <em>"Installing will grant this extension access to everything on your computer..."</em> ' +
+            'That warning fires for any extension that isn\'t Anthropic-verified — it\'s not specific to ours and doesn\'t mean anything is wrong. ' +
+            'The extensions only read the fellows data files they were configured with; they don\'t have wider access than you grant them. ' +
+            'Click <strong>Install</strong> to proceed past it.' +
+          '</div>' +
+          '<p>' +
+            '<strong>What happens next:</strong> three <code>.mcpb</code> installer files will download. ' +
+            'Claude Desktop will pop up an Install dialog for each in turn — approve the ones you want, skip the ones you don\'t. ' +
+            'For the <strong>Your saved groups</strong> extension, the install dialog will ask you to pick a file: navigate to your data folder → <strong>Fellows</strong> → <code>relationships.db</code>. ' +
+            'When all three install dialogs are done, quit Claude Desktop (⌘Q) and reopen it.' +
+          '</p>' +
+          '<menu class="settings-folder-dialog-actions">' +
+            '<button type="submit" value="continue" class="settings-folder-dialog-primary" id="settings-mcpb-preamble-continue">Continue — start downloads</button>' +
+            '<button type="submit" value="cancel" class="settings-folder-dialog-cancel">Cancel</button>' +
+          '</menu>' +
+          '<p class="settings-mcpb-manual-link">' +
+            '<a href="https://github.com/richbodo/fellows_local_db/blob/main/docs/use_with_claude_desktop.md" target="_blank" rel="noopener">Manual setup walkthrough (Safari / Firefox / other browsers)</a>' +
+          '</p>' +
+        '</form>' +
+      '</dialog>' +
       '</div>';
     detailEl.innerHTML = html;
     var input = document.getElementById('settings-self-email');
@@ -8875,6 +9026,192 @@
     }
 
     wireFolderSection();
+    wireMcpbSection();
+  }
+
+  // Settings → Claude Desktop integration. Pure glue between the DOM
+  // nodes injected by renderSettingsPage, the MCPB setup state
+  // (localStorage `fellows_mcpb_setup`), and the auth-gated
+  // `/mcpb/<name>.mcpb` routes served by deploy/server.py. Plan:
+  // plans/easy_mcp_install.md § 4 + § 7.
+  function wireMcpbSection() {
+    var sectionEl = document.getElementById('settings-mcpb-section');
+    if (!sectionEl) return;
+    var setupBtn = document.getElementById('settings-mcpb-setup');
+    var statusEl = document.getElementById('settings-mcpb-status');
+    var metaEl = document.getElementById('settings-mcpb-setup-meta');
+    var postInstall = document.getElementById('settings-mcpb-post-install');
+    var updateRow = document.getElementById('settings-mcpb-update-row');
+    var refreshDirBtn = document.getElementById('settings-mcpb-refresh-directory');
+    var dialog = document.getElementById('settings-mcpb-preamble-dialog');
+    var folderWarning = document.getElementById('settings-mcpb-preamble-folder-warning');
+    var browserWarning = document.getElementById('settings-mcpb-preamble-browser-warning');
+    var continueBtn = document.getElementById('settings-mcpb-preamble-continue');
+    if (!setupBtn || !dialog) return;
+
+    function setStatus(text) {
+      if (statusEl) statusEl.textContent = text || '';
+    }
+
+    function browserIsChromium() {
+      // Conservative — only the four browsers we explicitly support on
+      // the easy path. Brave / Arc / other Chromium derivatives advertise
+      // "Chrome/..." in UA so they fall through into this set. Safari /
+      // Firefox are deliberately excluded; they get the manual-setup link
+      // in the preamble dialog and the no-easy-path messaging in the
+      // walkthrough doc. The same caveat that lives in
+      // detectBrowserBestEffort() applies here — UA can be spoofed.
+      var ua = (navigator && navigator.userAgent) || '';
+      if (/Firefox\//.test(ua)) return false;
+      if (/Edg\//.test(ua)) return true;
+      if (/Chrome\//.test(ua)) return true;
+      if (/Safari\//.test(ua) && /Version\//.test(ua)) return false;
+      return false;
+    }
+
+    function refreshUiFromState() {
+      var state = getMcpbSetupState();
+      var serverSha = (bootBuildMeta && bootBuildMeta.fellows_db_sha) || null;
+      if (state && state.setupAt) {
+        setupBtn.textContent = 'Re-download all extensions';
+        if (metaEl) {
+          metaEl.hidden = false;
+          metaEl.textContent = 'Last set up: ' +
+            formatRelativeTime(state.refreshedAt || state.setupAt) +
+            '. Re-downloading replaces the extensions you have installed in Claude Desktop.';
+        }
+        if (postInstall) postInstall.hidden = false;
+      } else {
+        setupBtn.textContent = 'Set up Claude Desktop integration';
+        if (metaEl) {
+          metaEl.hidden = true;
+          metaEl.textContent = '';
+        }
+        if (postInstall) postInstall.hidden = true;
+      }
+      // Directory-data-update affordance — only meaningful after at
+      // least one prior setup AND when the server's current fellows.db
+      // snapshot differs from the one bundled at last setup.
+      if (updateRow && refreshDirBtn) {
+        if (state && state.setupAt && serverSha && state.fellowsDbSha && state.fellowsDbSha !== serverSha) {
+          updateRow.hidden = false;
+        } else {
+          updateRow.hidden = true;
+        }
+      }
+    }
+
+    function openPreamble() {
+      if (!dialog) return;
+      // Decide which warnings to surface BEFORE opening so first
+      // render is correct. The folder check is async (worker RPC); the
+      // browser check is sync.
+      if (browserWarning) browserWarning.hidden = browserIsChromium();
+      // Default: hide the folder warning; flip it on if folder mode
+      // isn't active. The check uses FOLDER_CONTROLLER which surfaces
+      // the worker's `getFolderState` RPC. Failing the check (e.g.,
+      // unsupported browser) leaves the warning hidden — the browser
+      // warning already covers that audience.
+      if (folderWarning) folderWarning.hidden = true;
+      try {
+        if (window.__folderController && typeof window.__folderController.getState === 'function') {
+          window.__folderController.getState().then(function (state) {
+            if (!folderWarning) return;
+            var folderActive = state && state.hasHandle &&
+              (state.permission === 'granted');
+            // Only Chromium users benefit from this nudge — Safari /
+            // Firefox got the browser warning instead.
+            folderWarning.hidden = folderActive || !browserIsChromium();
+          }, function () {});
+        }
+      } catch (e) {}
+      try { dialog.showModal(); }
+      catch (e) {
+        // Fallback for browsers without <dialog> support — surface as
+        // a confirm() so the user can at least proceed past the
+        // preamble. The actual download trigger still works.
+        if (window.confirm('Set up Claude Desktop integration — three .mcpb files will download. Proceed?')) {
+          runMcpbDownloads();
+        }
+      }
+    }
+
+    function downloadFromUrl(url, filename) {
+      // Trigger a download via a synthetic <a click()>. The browser
+      // sends the existing session cookie (same-origin), so the auth
+      // gate accepts. A short setTimeout between calls keeps Chrome
+      // from coalescing the downloads into a "this site is downloading
+      // multiple files" prompt; if the user denies the prompt the rest
+      // of the chain is best-effort.
+      return new Promise(function (resolve) {
+        var a = document.createElement('a');
+        a.href = url;
+        if (filename) a.download = filename;
+        a.rel = 'noopener';
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        try { a.click(); } catch (e) {}
+        setTimeout(function () {
+          try { document.body.removeChild(a); } catch (e) {}
+          resolve();
+        }, 250);
+      });
+    }
+
+    function downloadBundles(bundleNames) {
+      var seq = Promise.resolve();
+      bundleNames.forEach(function (name) {
+        seq = seq.then(function () {
+          return downloadFromUrl('/mcpb/' + name + '.mcpb', name + '.mcpb');
+        });
+      });
+      return seq;
+    }
+
+    function runMcpbDownloads() {
+      setStatus('Downloading three .mcpb files…');
+      setupBtn.disabled = true;
+      return downloadBundles(MCPB_BUNDLE_NAMES).then(function () {
+        var serverSha = (bootBuildMeta && bootBuildMeta.fellows_db_sha) || null;
+        recordMcpbSetup(serverSha);
+        setStatus('Downloads triggered. Check your Downloads folder.');
+        refreshUiFromState();
+      }).catch(function (e) {
+        setStatus('Download failed: ' + (e && e.message ? e.message : String(e)));
+      }).then(function () {
+        setupBtn.disabled = false;
+      });
+    }
+
+    function runDirectoryRefresh() {
+      if (!refreshDirBtn) return;
+      setStatus('Re-downloading Fellows directory extension…');
+      refreshDirBtn.disabled = true;
+      return downloadFromUrl('/mcpb/shared_data_ops.mcpb', 'shared_data_ops.mcpb').then(function () {
+        var serverSha = (bootBuildMeta && bootBuildMeta.fellows_db_sha) || null;
+        recordMcpbDirectoryRefresh(serverSha);
+        setStatus('Fellows directory extension re-downloaded. Open the file to re-install in Claude Desktop.');
+        refreshUiFromState();
+      }).catch(function (e) {
+        setStatus('Download failed: ' + (e && e.message ? e.message : String(e)));
+      }).then(function () {
+        refreshDirBtn.disabled = false;
+      });
+    }
+
+    setupBtn.addEventListener('click', openPreamble);
+    if (refreshDirBtn) refreshDirBtn.addEventListener('click', runDirectoryRefresh);
+    if (dialog) {
+      dialog.addEventListener('close', function () {
+        // <dialog>'s close event fires for any submit (including the
+        // primary "Continue" button). returnValue carries the button's
+        // value attribute — "continue" / "cancel" / empty (Esc).
+        if (dialog.returnValue === 'continue') {
+          runMcpbDownloads();
+        }
+      });
+    }
+    refreshUiFromState();
   }
 
   // Settings → Data folder section: badge, action buttons, collision

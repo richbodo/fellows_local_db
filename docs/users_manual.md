@@ -186,6 +186,51 @@ browser tab.
 
 ---
 
+## Migrating from another browser
+
+If you've been using the app in one browser (say, Safari) and want
+to switch to another (Chrome, for the Claude Desktop integration —
+see *[Use with Claude Desktop](use_with_claude_desktop.md)*), your
+saved groups and notes don't follow automatically. Browsers don't
+share storage; each install starts empty.
+
+Bringing your data across is a two-step copy:
+
+### Step 1 — Export from the source browser
+
+1. Open the app **in the browser where your data currently lives**
+   (Safari, in this example).
+2. **Settings → ⬇ Download my user data**. Save the `relationships.db`
+   file somewhere stable on your disk — `~/Documents/` works well,
+   or anywhere you can find again. **Don't put it in Downloads** if
+   you regularly empty that folder.
+
+### Step 2 — Import into the new browser
+
+1. Open the app **in the new browser** (Chrome, in this example). If
+   you haven't installed there yet, do that first.
+2. *(Recommended, Chromium browsers only)* **Settings → Data folder →
+   Choose data folder…**. Pick a folder under your home directory.
+   This sets up the new browser to keep its `relationships.db` at a
+   stable path on your disk — which makes the Claude Desktop
+   integration much easier and survives clearing site data.
+3. **Settings → ⬆ Restore from a file…**, then pick the
+   `relationships.db` you saved in Step 1.
+
+That's it. Your groups, notes, and tags are now visible in the new
+browser. The source browser still has its copy — you can keep both
+in sync by re-exporting / re-importing, but it's usually simpler to
+[uninstall the source copy](#uninstall-a-copy) once you're confident
+the new one is working.
+
+**A note for the future.** Doing this two-step migration regularly
+is a sign you should pick one browser and stay there. PWAs don't
+have a cross-browser sync API, so there's no automatic way to keep
+two installs aligned. Pick whichever browser you prefer and treat
+the other as a backup.
+
+---
+
 ## Where your data is stored
 
 Your groups, notes, and settings live **on your device only** —
