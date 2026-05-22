@@ -3321,6 +3321,26 @@ a.group-action-btn--primary {
   margin-top: 0.5rem;
 }
 
+.settings-folder-path {
+  margin: 0.5rem 0 0;
+}
+
+.settings-folder-path code {
+  font-family: ui-monospace, "Cascadia Code", Menlo, Monaco, Consolas, monospace;
+  font-size: 0.85em;
+  background: rgba(0,0,0,0.04);
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+}
+
+.settings-folder-path-note {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.85em;
+  color: var(--muted-soft, #666);
+  font-style: italic;
+}
+
 .settings-folder-detail {
   margin-top: 0.5rem;
   font-style: italic;
