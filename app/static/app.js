@@ -302,6 +302,108 @@
     try { return localStorage.getItem(AUTH_ONCE_KEY) === '1'; } catch (e) { return false; }
   }
 
+  // Install identity — per-browser-storage codename + browser/OS metadata.
+  // Generated once on first launch, persisted in localStorage. Survives
+  // Clear App Cache; reset by Reset Everything (intentional — a fresh
+  // reset deserves a fresh identity). Surfaces in document.title, the
+  // About page, and bug-report diagnostics so users with multiple installs
+  // (different browsers on the same Mac, multiple Chrome profiles, etc.)
+  // can identify which install they're in. Rationale in docs/never-saas.md
+  // § Stretched fit; user-facing explanation in
+  // docs/users_manual.md § Install name / Multiple installs on the same
+  // device.
+  var INSTALL_IDENTITY_KEY = 'fellows_install_identity';
+  var CODENAME_WORDS = [
+    'giraffe', 'gorilla', 'mouse', 'panda', 'otter', 'koala', 'badger',
+    'beaver', 'raccoon', 'squirrel', 'hamster', 'rabbit', 'fox', 'wolf',
+    'bear', 'deer', 'moose', 'elk', 'bison', 'zebra', 'hippo', 'rhino',
+    'elephant', 'camel', 'llama', 'alpaca', 'sloth', 'lemur', 'monkey',
+    'baboon', 'gibbon', 'chimp', 'lynx', 'bobcat', 'puma', 'jaguar',
+    'leopard', 'cheetah', 'lion', 'tiger', 'ocelot', 'mongoose', 'meerkat',
+    'hedgehog', 'porcupine', 'armadillo', 'anteater', 'capybara',
+    'marmot', 'wombat', 'possum', 'platypus', 'kangaroo', 'wallaby',
+    'dingo', 'hyena', 'jackal', 'coyote', 'falcon', 'hawk', 'eagle',
+    'owl', 'raven', 'sparrow', 'robin', 'finch', 'heron', 'crane',
+    'pelican', 'flamingo', 'ostrich', 'penguin', 'puffin', 'parrot',
+    'toucan', 'magpie', 'dolphin', 'whale', 'narwhal', 'walrus', 'seal',
+    'manatee', 'octopus', 'turtle', 'tortoise', 'gecko', 'iguana',
+    'chameleon', 'frog', 'salamander'
+  ];
+  var INSTALL_IDENTITY_CACHE = null;
+
+  function detectBrowserBestEffort() {
+    var ua = (navigator && navigator.userAgent) || '';
+    if (/Edg\//.test(ua)) return 'Edge';
+    if (/Firefox\//.test(ua)) return 'Firefox';
+    if (/OPR\//.test(ua) || /Opera\//.test(ua)) return 'Opera';
+    // Chrome match also covers Brave / Arc / other Chromium derivatives;
+    // they all advertise "Chrome/..." in UA. The users-manual explains
+    // the detection is best-effort and may collapse derivatives under
+    // "Chrome".
+    if (/Chrome\//.test(ua)) return 'Chrome';
+    if (/Safari\//.test(ua) && /Version\//.test(ua)) return 'Safari';
+    return 'Unknown';
+  }
+
+  function detectOSBestEffort() {
+    var ua = (navigator && navigator.userAgent) || '';
+    if (/Android/.test(ua)) return 'Android';
+    if (/iPhone|iPad|iPod/.test(ua)) return 'iOS';
+    if (/Macintosh|Mac OS X/.test(ua)) return 'macOS';
+    if (/Windows/.test(ua)) return 'Windows';
+    if (/Linux/.test(ua)) return 'Linux';
+    return 'Unknown';
+  }
+
+  function generateCodename() {
+    var n = CODENAME_WORDS.length;
+    function pick() {
+      return CODENAME_WORDS[Math.floor(Math.random() * n)];
+    }
+    // Three words picked independently. Repeat-allowed: the pool is
+    // large enough that per-user collisions across a handful of
+    // installs are vanishingly rare, and distinct-by-index would feel
+    // hand-curated rather than auto-generated.
+    return pick() + '-' + pick() + '-' + pick();
+  }
+
+  function getOrCreateInstallIdentity() {
+    if (INSTALL_IDENTITY_CACHE) return INSTALL_IDENTITY_CACHE;
+    try {
+      var raw = localStorage.getItem(INSTALL_IDENTITY_KEY);
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        if (parsed && typeof parsed.codename === 'string' && parsed.codename) {
+          INSTALL_IDENTITY_CACHE = parsed;
+          return parsed;
+        }
+      }
+    } catch (e) {}
+    var identity = {
+      codename: generateCodename(),
+      browser: detectBrowserBestEffort(),
+      os: detectOSBestEffort(),
+      installedAt: new Date().toISOString()
+    };
+    try {
+      localStorage.setItem(INSTALL_IDENTITY_KEY, JSON.stringify(identity));
+    } catch (e) {}
+    INSTALL_IDENTITY_CACHE = identity;
+    return identity;
+  }
+
+  function initInstallIdentityTitle() {
+    try {
+      var identity = getOrCreateInstallIdentity();
+      // Append the codename to the existing window/tab title so it's
+      // visible in OS window chrome, browser tab strips, command-tab
+      // labels, and macOS Mission Control. Sticky enough that users
+      // notice it without needing to navigate anywhere.
+      document.title = (document.title || 'EHF Fellows Directory') +
+        ' · ' + identity.codename;
+    } catch (e) {}
+  }
+
   function initBuildBadge() {
     var clientEl = document.getElementById('build-badge-client');
     if (clientEl) clientEl.textContent = 'app: ' + FELLOWS_UI_DIAG;
@@ -348,6 +450,7 @@
   }
 
   initBuildBadge();
+  initInstallIdentityTitle();
   // Install early so the ring buffer captures errors thrown during the rest
   // of the IIFE setup. Function declaration is hoisted; definition lives
   // further down with the rest of the bug-report module.
@@ -2266,6 +2369,20 @@
     lines.push('=== Fellows client diagnostics (UI mark: ' + FELLOWS_UI_DIAG + ') ===');
     lines.push('time (ISO): ' + new Date().toISOString());
     lines.push('href: ' + String(location.href));
+    // Per-install identity — auto-generated codename + best-effort
+    // browser/OS detection + first-launch timestamp. Lets a maintainer
+    // disambiguate which install of the app a bug report came from when
+    // a user has more than one (e.g., Safari + Chrome on the same Mac).
+    try {
+      var diagIdentity = getOrCreateInstallIdentity();
+      lines.push('install codename: ' + diagIdentity.codename);
+      lines.push('install detected browser/OS: ' +
+        (diagIdentity.browser || '?') + ' on ' + (diagIdentity.os || '?'));
+      lines.push('install first launched (ISO): ' +
+        (diagIdentity.installedAt || '(unknown)'));
+    } catch (e) {
+      lines.push('install identity: (unavailable — ' + String(e && e.message) + ')');
+    }
     lines.push(
       'document.cookie length (HttpOnly cookies are NOT visible to JS): ' +
         String((document.cookie || '').length)
@@ -6368,7 +6485,15 @@
     aboutHtml += 'There is no API, login, or web app, so this can only be shared intentionally. ';
     aboutHtml += 'For support, request to join the github repository or just ask on one of the fellows channels.</p>';
     aboutHtml += '<p class="about-support">Having trouble with the app? Contact the EHF Communications Working Group.</p>';
-    aboutHtml += '<p class="about-users-manual"><a href="https://github.com/richbodo/fellows_local_db/blob/main/docs/users_manual.md" target="_blank" rel="noopener">User Guide</a> \u2014 how to install, browse, save groups, export, and manage settings.</p>';
+    aboutHtml += '<p class="about-users-manual"><a href="https://github.com/richbodo/fellows_local_db/blob/main/docs/users_manual.md" target="_blank" rel="noopener">Help from the user manual</a> \u2014 how to install, use the app, fix common issues, and uninstall.</p>';
+    // Install name surfaces the per-install codename so a user with
+    // multiple installs (Safari + Chrome on the same Mac, multiple
+    // Chrome profiles, etc.) can tell instances apart. Intentionally
+    // small + unalarming \u2014 the explanation lives in the users-manual.
+    var aboutIdentity = getOrCreateInstallIdentity();
+    aboutHtml += '<p class="about-install-name">This install: <strong>' +
+      escapeHtml(aboutIdentity.codename) +
+      '</strong> <a href="https://github.com/richbodo/fellows_local_db/blob/main/docs/users_manual.md#install-name" target="_blank" rel="noopener">(What\u2019s this?)</a></p>';
     // Two-row update status block. App and Directory data are
     // independently versioned (build/build_pwa.py emits both `git_sha`
     // and `fellows_db_sha` into /build-meta.json); the user can act on
