@@ -14,16 +14,12 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <div
-    id="build-badge"
-    class="build-badge"
-    role="status"
-    aria-live="polite"
-    title="app.js constant (what this tab is running) · server build SHA / timestamp (what was deployed)"
-  >
-    <span id="build-badge-client" class="build-badge-line">app: …</span>
-    <span id="build-badge-server" class="build-badge-line build-badge-line--muted">server: …</span>
-  </div>
+  <!-- The floating build badge that previously lived here (showing
+       "app: <FELLOWS_UI_DIAG>" and "server: <gitSha>") was removed
+       2026-05-22 because it overlapped the folder-push banner CTA
+       (and other UI). The same info is available on the About page
+       (#/about → Build) for users who need it. The mobile kebab
+       sheet's "App info" mirror was removed at the same time. -->
   <button type="button" id="clear-app-cache-button" class="clear-app-cache-button">
     Clear App Cache & Reload
   </button>
@@ -495,11 +491,9 @@
       <div class="sheet__title" id="kebab-sheet-title">App info</div>
       <button type="button" id="kebab-sheet-close" class="sheet__close" aria-label="Close">×</button>
     </div>
-    <ul class="diag-list" id="kebab-sheet-build">
-      <li><span>app</span><b id="kebab-sheet-build-app">…</b></li>
-      <li><span>server</span><b id="kebab-sheet-build-server">…</b></li>
-    </ul>
-    <div class="sheet__divider" aria-hidden="true"></div>
+    <!-- Build-info mirror (id=kebab-sheet-build) removed 2026-05-22
+         alongside the floating build badge. About page is the
+         canonical surface; kebab sheet is action-focused. -->
     <button type="button" class="sheet-action" data-kebab-action="diagnostics">Diagnostics…</button>
     <button type="button" class="sheet-action" data-kebab-action="report-bug">Report a bug…</button>
     <button type="button" class="sheet-action sheet-action--danger" data-kebab-action="clear-cache">Clear app cache &amp; reload</button>

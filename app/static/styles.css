@@ -57,40 +57,9 @@ body {
   background: var(--paper);
 }
 
-.build-badge {
-  position: fixed;
-  top: 0.4rem;
-  right: 0.5rem;
-  z-index: 9999;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.1rem;
-  padding: 0.25rem 0.45rem;
-  font-family: ui-monospace, "Cascadia Code", Menlo, Monaco, Consolas, monospace;
-  font-size: 0.68rem;
-  line-height: 1.25;
-  color: var(--subink);
-  background: rgba(243, 240, 248, 0.9);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  pointer-events: none;
-  max-width: 22rem;
-}
-
-.build-badge-line {
-  white-space: nowrap;
-}
-
-.build-badge-line--muted {
-  color: var(--muted-soft);
-}
-
-.build-badge--mismatch {
-  background: #fff3cd;
-  border-color: #ffe69c;
-  color: #664d03;
-}
+/* Floating build badge styles removed 2026-05-22 along with the
+   DOM element — about-page #/about surfaces the same info without
+   overlapping other UI. */
 
 .clear-app-cache-button {
   position: fixed;
@@ -3964,8 +3933,9 @@ a.group-action-btn--primary {
   }
 
   /* Floating chrome → kebab sheet. The originals remain in the DOM so
-     desktop continues to use them; mobile users hit the kebab menu. */
-  #build-badge,
+     desktop continues to use them; mobile users hit the kebab menu.
+     (#build-badge was removed 2026-05-22; About page is the canonical
+     surface for app+server build info.) */
   #clear-app-cache-button,
   #reset-everything-button,
   #diag-toggle,

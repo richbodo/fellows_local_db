@@ -3205,14 +3205,10 @@
 
   function openKebabSheet() {
     if (!kebabSheetEl) return;
-    // Mirror the current build-badge values into the sheet so users on
-    // mobile (where the badge is hidden) still see what they're running.
-    var appBadge = document.getElementById('build-badge-client');
-    var serverBadge = document.getElementById('build-badge-server');
-    var appOut = document.getElementById('kebab-sheet-build-app');
-    var serverOut = document.getElementById('kebab-sheet-build-server');
-    if (appOut && appBadge) appOut.textContent = (appBadge.textContent || '').replace(/^app:\s*/, '');
-    if (serverOut && serverBadge) serverOut.textContent = (serverBadge.textContent || '').replace(/^server:\s*/, '');
+    // The build-info mirror that used to populate kebab-sheet-build
+    // from the floating build-badge was removed 2026-05-22 along with
+    // the badge itself. Users who need app+server build info open the
+    // About page from the menu instead — that's the canonical surface.
     kebabSheetEl.classList.remove('hidden');
     kebabSheetEl.removeAttribute('hidden');
     if (kebabScrimEl) {
