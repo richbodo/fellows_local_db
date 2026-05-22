@@ -34,23 +34,6 @@ class TestDirectoryPage:
         imgs_in_directory = page.locator("#directory img")
         assert imgs_in_directory.count() == 0
 
-    def test_build_badge_is_visible_with_client_constant(self, standalone_page, base_url_fixture):
-        """Always-visible build badge renders the client constant on boot, before any async response."""
-        page = standalone_page
-        page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
-        badge = page.locator("#build-badge")
-        expect(badge).to_be_visible()
-        client_line = page.locator("#build-badge-client")
-        # FELLOWS_UI_DIAG format is <YYYY-MM-DD>-<short-sha>[-<label>]
-        # since PR #80; assert structure rather than a specific tag so
-        # this stays green across bumps.
-        import re
-        text = client_line.inner_text()
-        assert re.match(r"^app: \d{4}-\d{2}-\d{2}-[0-9a-f]+", text), \
-            "build badge should show 'app: <YYYY-MM-DD>-<sha>' format, got: " + repr(text)
-        server_line = page.locator("#build-badge-server")
-        expect(server_line).to_be_visible()
-
     def test_has_email_filter_default_on_and_toggles(self, standalone_page, base_url_fixture):
         """'has email' filter is checked by default, hides fellows without email, and persists across reload."""
         page = standalone_page

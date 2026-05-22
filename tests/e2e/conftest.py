@@ -11,6 +11,15 @@ from app.server import PORT
 
 # App treats non-standalone browser tabs as install-only (no directory). E2E that
 # needs the directory must emulate installed PWA display mode before navigation.
+#
+# Also forces the anchor-download fallback in ``downloadBlob`` by removing
+# ``window.showSaveFilePicker``. The picker triggers a native OS save dialog
+# that Playwright's ``page.expect_download`` does not fire for — so any test
+# using ``expect_download`` (group exports, reset-everything backup) hangs
+# until timeout. Removing the picker forces ``downloadBlob``'s
+# ``triggerAnchorDownload`` fallback path, which Playwright reliably catches.
+# No e2e test specifically asserts picker UX; this stub keeps the suite
+# deterministic across Playwright/Chromium upgrades.
 _STANDALONE_DISPLAY_INIT = """
 (function () {
   var orig = window.matchMedia.bind(window);
@@ -26,6 +35,9 @@ _STANDALONE_DISPLAY_INIT = """
     }
     return orig(q);
   };
+  try { delete window.showSaveFilePicker; } catch (e) {
+    try { window.showSaveFilePicker = undefined; } catch (e2) {}
+  }
 })();
 """
 

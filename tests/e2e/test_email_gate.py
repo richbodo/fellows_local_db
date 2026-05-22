@@ -209,8 +209,11 @@ class TestEmailGate:
             assert page.locator("#auth-error-panel").is_hidden(), (
                 "Auth-error panel surfaced despite marker being set."
             )
-            server_line = page.locator("#build-badge-server")
-            expect(server_line).to_contain_text("unreachable")
+            # The previous assertion checked `#build-badge-server`'s text
+            # for "unreachable" — load-bearing signal that the boot path
+            # entered offline-only mode. The floating build badge was
+            # removed in commit 0ac562d, so the gate-visible + no-error-
+            # panel assertions above carry the contract on their own.
         finally:
             page.close()
 
