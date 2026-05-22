@@ -380,6 +380,94 @@ async function _rotateRelationshipsBackups() {
   }
 }
 
+// ----- Backup store routing (Phase 2 pivot) ---------------------------------
+//
+// In folder mode the auto-backup ring lives in the user's folder
+// (siblings of relationships.db). In OPFS-only mode it stays in
+// OPFS, unchanged. The dynamic check below mirrors the per-commit
+// hook in _maybeWriteFolderAfterCommit — a user who attached a
+// folder mid-session sees subsequent backups land in the folder
+// alongside the per-commit writes; a user whose permission lapsed
+// gets OPFS-resident backups as a fallback. Source of truth for
+// the ring at any moment is whichever store the per-commit hook
+// would also be writing to.
+//
+// Dependencies (defined later in the user-folder-storage section
+// — JS function-declaration hoisting means call order is fine,
+// but they're noted here for orientation):
+//   _listFolderBackups, _folderReadBackup, _rotateFolderBackups,
+//   _writeBytesToFolder, _folderQueryPermission, folderRecord.
+
+async function _isFolderBackupActive() {
+  if (!folderRecord.parentHandle || !folderRecord.subfolderName) return false;
+  var perm = await _folderQueryPermission();
+  return perm === 'granted';
+}
+
+async function _listActiveBackups() {
+  if (await _isFolderBackupActive()) return await _listFolderBackups();
+  return await listRelationshipsBackups();
+}
+
+async function _writeBackupToActiveStore(name, bytes) {
+  if (await _isFolderBackupActive()) {
+    // Reuse _writeBytesToFolder — it handles atomic write semantics
+    // and only updates folderRecord.lastSavedAt for the canonical
+    // relationships.db filename, so backup writes don't muddy that
+    // signal.
+    await _writeBytesToFolder(bytes, name);
+    return;
+  }
+  await _opfsWriteBinary(name, bytes);
+}
+
+async function _rotateActiveBackups() {
+  if (await _isFolderBackupActive()) {
+    await _rotateFolderBackups();
+    return;
+  }
+  await _rotateRelationshipsBackups();
+}
+
+async function _readActiveBackup(name) {
+  if (await _isFolderBackupActive()) return await _folderReadBackup(name);
+  return await _opfsReadBinary(name);
+}
+
+// One-time migration of the OPFS-resident backup ring into the
+// user's folder. Runs whenever we boot in folder mode AND find
+// stragglers in OPFS (opportunistic — naturally idempotent because
+// the migration deletes the OPFS originals, so subsequent boots
+// find nothing left to move). Per Rich's "rip the band-aid off"
+// call (2026-05-22 conversation): we DO delete the OPFS originals,
+// but we copy the bytes to the folder first so backup history is
+// preserved in a discoverable place.
+async function _maybeMigrateOpfsBackupsToFolder() {
+  if (!(await _isFolderBackupActive())) return;
+  var opfsBackups = await listRelationshipsBackups();
+  if (!opfsBackups.length) return;
+  trace('backup-ring: migrating ' + opfsBackups.length +
+    ' OPFS bak.* file(s) into folder/' + folderRecord.subfolderName + '/');
+  var migrated = 0;
+  for (var i = 0; i < opfsBackups.length; i++) {
+    var entry = opfsBackups[i];
+    try {
+      var bytes = await _opfsReadBinary(entry.name);
+      await _writeBytesToFolder(bytes, entry.name);
+      await _opfsRemoveEntry(entry.name);
+      migrated++;
+    } catch (e) {
+      trace('backup-ring: migrate ' + entry.name + ' failed (' +
+        (e && e.message || e) + ') — leaving OPFS copy in place for safety');
+    }
+  }
+  if (migrated) {
+    trace('backup-ring: migrated ' + migrated + '/' + opfsBackups.length +
+      ' OPFS backups → folder; rotating to ' + BACKUP_KEEP + ' newest');
+    await _rotateFolderBackups();
+  }
+}
+
 // ===== Auto-backup (debounced per-boot) =====================================
 
 // Per Phase 0 Q-C: trigger flips from "build-SHA differs" to "newest
@@ -394,7 +482,12 @@ async function maybeBackupRelationshipsDb() {
     trace('backup: skipped (no relationships.db yet — first install)');
     return { backedUp: false, reason: 'first install' };
   }
-  var backups = await listRelationshipsBackups();
+  // Active store is folder when folder-mode permission is granted,
+  // otherwise OPFS. The debounce timer reads "newest bak.<ISO>" from
+  // whichever store we're actually writing to, so it stays consistent
+  // across mode transitions (e.g., a user who attached a folder
+  // mid-session and just migrated existing OPFS backups into it).
+  var backups = await _listActiveBackups();
   if (backups.length) {
     var newest = backups[backups.length - 1];
     var ageMs = Date.now() - newest.lastModified;
@@ -416,13 +509,14 @@ async function maybeBackupRelationshipsDb() {
   }
   var ts = new Date().toISOString().replace(/[:.]/g, '-');
   var backupName = BACKUP_PREFIX + ts;
-  try { await _opfsWriteBinary(backupName, bytes); }
+  try { await _writeBackupToActiveStore(backupName, bytes); }
   catch (e) {
     trace('backup: write failed: ' + (e && e.message || e));
     return { backedUp: false, reason: 'write failed' };
   }
-  await _rotateRelationshipsBackups();
-  trace('backup: wrote ' + backupName + ' (' + bytes.byteLength + ' bytes)');
+  await _rotateActiveBackups();
+  var storeLabel = (await _isFolderBackupActive()) ? 'folder' : 'opfs';
+  trace('backup: wrote ' + backupName + ' to ' + storeLabel + ' (' + bytes.byteLength + ' bytes)');
   return { backedUp: true, name: backupName, size: bytes.byteLength };
 }
 
@@ -438,10 +532,11 @@ async function snapshotRelationshipsDbToBackup() {
   if (!bytes || !bytes.byteLength) return { backedUp: false, reason: 'empty file' };
   var ts = new Date().toISOString().replace(/[:.]/g, '-');
   var backupName = BACKUP_PREFIX + ts;
-  try { await _opfsWriteBinary(backupName, bytes); }
+  try { await _writeBackupToActiveStore(backupName, bytes); }
   catch (e) { return { backedUp: false, reason: 'write failed: ' + (e && e.message || e) }; }
-  await _rotateRelationshipsBackups();
-  trace('snapshot: wrote ' + backupName + ' (' + bytes.byteLength + ' bytes)');
+  await _rotateActiveBackups();
+  var storeLabel = (await _isFolderBackupActive()) ? 'folder' : 'opfs';
+  trace('snapshot: wrote ' + backupName + ' to ' + storeLabel + ' (' + bytes.byteLength + ' bytes)');
   return { backedUp: true, name: backupName, size: bytes.byteLength };
 }
 
@@ -602,15 +697,6 @@ handlers.init = async function () {
   var sentinelRemoved = await _opfsRemoveEntry(LEGACY_SENTINEL);
   if (sentinelRemoved) trace('cleanup: removed legacy ' + LEGACY_SENTINEL);
 
-  // Auto-backup runs before opening relationships.db for app use, so the
-  // snapshot reflects the user's last-saved state, not anything mutated
-  // this session. Failure is non-fatal — logged via bootTrace.
-  // NOTE: This is the OPFS-resident auto-backup ring. Under the pivot,
-  // folder-mode users get a folder-resident backup ring in a follow-up
-  // PR; until that lands, both rings coexist (folder-mode users
-  // effectively get backups in two places — harmless redundancy).
-  await maybeBackupRelationshipsDb();
-
   // Hydrate the user-folder handle from IDB so we know which storage
   // mode applies BEFORE opening relDb. (Phase 1 hydrated after relDb
   // was open; the pivot needs the order reversed so we can populate
@@ -637,15 +723,24 @@ handlers.init = async function () {
     ' permission=' + folderPermission + ')');
 
   // Folder mode: one-time migration (if Phase 1 hybrid state exists)
-  // and then hydrate the OPFS working buffer from folder bytes. After
-  // this block, the OPFS slot reflects the folder file's content —
-  // opening relDb against the slot gives us the folder's data.
+  // for relationships.db, then OPFS→folder backup-ring migration, then
+  // hydrate the OPFS working buffer from folder bytes. After this
+  // block, the OPFS slot reflects the folder file's content — opening
+  // relDb against the slot gives us the folder's data, and the
+  // auto-backup that fires next lands in the correct store (folder).
   if (_storageMode === 'folder') {
     try {
       await _maybeRunPivotMigration();
     } catch (migrateErr) {
       trace('pivot-migration: FAILED — ' + ((migrateErr && migrateErr.message) || migrateErr) +
         ' (continuing in folder mode; user can recover via Settings)');
+    }
+    try {
+      await _maybeMigrateOpfsBackupsToFolder();
+    } catch (backupMigErr) {
+      trace('backup-ring migration: FAILED — ' +
+        ((backupMigErr && backupMigErr.message) || backupMigErr) +
+        ' (OPFS backups stay in place; new backups go to folder)');
     }
     try {
       await _hydrateOpfsBufferFromFolder();
@@ -658,6 +753,15 @@ handlers.init = async function () {
       // an empty DB). The page-side badge surfaces the lastError.
     }
   }
+
+  // Auto-backup runs before opening relationships.db for app use, so the
+  // snapshot reflects the user's last-saved state, not anything mutated
+  // this session. Failure is non-fatal — logged via bootTrace. The
+  // routing inside maybeBackupRelationshipsDb sends the snapshot to
+  // whichever store is active for this session: folder when folder mode
+  // resolved successfully above, OPFS otherwise. Folder-mode users no
+  // longer accumulate OPFS-resident backups after this PR.
+  await maybeBackupRelationshipsDb();
 
   var hasRelationshipsDb = false;
   try {
@@ -883,13 +987,16 @@ handlers.importRelationshipsBytes = async function (args) {
 
 handlers.listRelationshipsBackups = async function () {
   if (!poolUtil) return [];
-  var raw = await listRelationshipsBackups();
+  // Active store is folder when folder-mode permission is granted,
+  // otherwise OPFS. After PR backup-ring migration, folder-mode
+  // users never see OPFS-resident backups here (migrated + cleared).
+  var raw = await _listActiveBackups();
   var out = [];
   // Sequential — staging slot is shared across inspects.
   for (var i = 0; i < raw.length; i++) {
     var entry = raw[i];
     try {
-      var bytes = await _opfsReadBinary(entry.name);
+      var bytes = await _readActiveBackup(entry.name);
       var insp = await inspectBytes(bytes);
       out.push({
         name: entry.name, size: entry.size, lastModified: entry.lastModified,
@@ -910,13 +1017,13 @@ handlers.listRelationshipsBackups = async function () {
 handlers.restoreRelationshipsBackup = async function (args) {
   if (!poolUtil) throw new Error('pool util unavailable');
   var name = args && args.name;
-  var backups = await listRelationshipsBackups();
+  var backups = await _listActiveBackups();
   var match = null;
   for (var i = 0; i < backups.length; i++) {
     if (backups[i].name === name) { match = backups[i]; break; }
   }
   if (!match) throw new Error('Backup not found: ' + name);
-  var bytes = await _opfsReadBinary(name);
+  var bytes = await _readActiveBackup(name);
   return await handlers.importRelationshipsBytes({ bytes: bytes });
 };
 
@@ -2116,9 +2223,74 @@ async function _writeBytesToFolder(bytes, filename) {
   }
 }
 
-// Post-commit hook called at the end of each mutating RPC. If a folder
-// is currently attached AND has granted readwrite permission, exports
-// the OPFS buffer and writes atomically to the folder. Otherwise no-op.
+// ----- Folder-resident backup ring helpers ---------------------------------
+//
+// In folder mode the auto-backup ring lives alongside relationships.db
+// in the user's Fellows/ subfolder, as `relationships.db.bak.<ISO>`
+// siblings. Visible in Finder; the user can see + recover their own
+// backups without opening the app. OPFS-only-mode users keep today's
+// OPFS-resident ring, unchanged. See plans/user_folder_storage.md
+// § Architecture → Auto-backup ring (folder mode).
+
+async function _listFolderBackups() {
+  if (!folderRecord.parentHandle || !folderRecord.subfolderName) return [];
+  var sub;
+  try {
+    sub = await folderRecord.parentHandle.getDirectoryHandle(folderRecord.subfolderName);
+  } catch (e) {
+    return [];
+  }
+  var out = [];
+  try {
+    for await (var entry of sub.values()) {
+      if (entry.kind === 'file' && entry.name.indexOf(BACKUP_PREFIX) === 0) {
+        try {
+          var f = await entry.getFile();
+          out.push({ name: entry.name, size: f.size, lastModified: f.lastModified });
+        } catch (e) {
+          // File disappeared between iteration and getFile — skip.
+        }
+      }
+    }
+  } catch (e) {
+    return [];
+  }
+  // Sort lexicographically — backup filenames embed an ISO timestamp
+  // after BACKUP_PREFIX so this is also chronological order.
+  out.sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
+  return out;
+}
+
+async function _folderReadBackup(name) {
+  if (!folderRecord.parentHandle || !folderRecord.subfolderName) {
+    throw new Error('no folder configured');
+  }
+  var sub = await folderRecord.parentHandle.getDirectoryHandle(folderRecord.subfolderName);
+  var fh = await sub.getFileHandle(name);
+  var f = await fh.getFile();
+  return new Uint8Array(await f.arrayBuffer());
+}
+
+async function _rotateFolderBackups() {
+  if (!folderRecord.parentHandle || !folderRecord.subfolderName) return;
+  var backups = await _listFolderBackups();
+  if (backups.length <= BACKUP_KEEP) return;
+  var sub;
+  try {
+    sub = await folderRecord.parentHandle.getDirectoryHandle(folderRecord.subfolderName);
+  } catch (e) { return; }
+  while (backups.length > BACKUP_KEEP) {
+    var oldest = backups.shift();
+    try {
+      await sub.removeEntry(oldest.name);
+      trace('folder-backup: rotated out ' + oldest.name);
+    } catch (e) {
+      trace('folder-backup: rotate removeEntry failed for ' + oldest.name);
+    }
+  }
+}
+
+// ----- Post-commit folder write (Phase 2 pivot) -----------------------------
 //
 // Dynamic check (vs. the boot-time `_storageMode` global) is intentional:
 // a user who booted without a folder handle and then attached one

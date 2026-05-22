@@ -44,10 +44,10 @@ _STUB_DIRECTORY_PICKER = """
   };
   // Test affordance: read back a probe of what landed in the stub
   // folder. Returns { hasFellows: bool, hasFellows2: bool,
-  // relSize: int|null }.
+  // relSize: int|null, folderBackupNames: string[] }.
   window.__probeE2EUserFolder = async function () {
     var root = await navigator.storage.getDirectory();
-    var out = { hasFellows: false, hasFellows2: false, relSize: null };
+    var out = { hasFellows: false, hasFellows2: false, relSize: null, folderBackupNames: [] };
     var stub;
     try { stub = await root.getDirectoryHandle(STUB_NAME); }
     catch (e) { return out; }
@@ -59,12 +59,51 @@ _STUB_DIRECTORY_PICKER = """
         var file = await fh.getFile();
         out.relSize = file.size;
       } catch (e) {}
+      // Enumerate bak.* siblings of relationships.db. These are the
+      // folder-resident backup ring (Phase 2 PR backup-ring-move).
+      try {
+        for await (var entry of f.values()) {
+          if (entry.kind === 'file' && entry.name.indexOf('relationships.db.bak.') === 0) {
+            out.folderBackupNames.push(entry.name);
+          }
+        }
+        out.folderBackupNames.sort();
+      } catch (e) {}
     } catch (e) {}
     try {
       await stub.getDirectoryHandle('Fellows 2');
       out.hasFellows2 = true;
     } catch (e) {}
     return out;
+  };
+  // Test affordance: count OPFS-resident bak.* files. Used to verify
+  // (a) that backups land in OPFS when folder mode is inactive, and
+  // (b) that the OPFS→folder migration deletes them after migrating.
+  window.__listE2EOpfsBackups = async function () {
+    var root = await navigator.storage.getDirectory();
+    var names = [];
+    try {
+      for await (var entry of root.values()) {
+        if (entry.kind === 'file' && entry.name.indexOf('relationships.db.bak.') === 0) {
+          names.push(entry.name);
+        }
+      }
+    } catch (e) {}
+    names.sort();
+    return names;
+  };
+  // Test affordance: write a synthetic bak.* file directly to OPFS
+  // root, so a test can pre-seed the state before triggering a
+  // folder-mode boot (to verify the OPFS→folder migration path).
+  window.__seedE2EOpfsBackup = async function (name, contentBase64) {
+    var root = await navigator.storage.getDirectory();
+    var fh = await root.getFileHandle(name, { create: true });
+    var w = await fh.createWritable();
+    var bin = atob(contentBase64);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    await w.write(bytes);
+    await w.close();
   };
   // Test affordance: clear the worker's IDB-persisted handle so the
   // next page load boots fresh. Same DB the worker uses internally.
@@ -377,3 +416,121 @@ class TestPhase2Pivot:
         # ("just now" / "X min ago") — verify it stayed in Saved state
         # rather than flipping to a warning state.
         expect(badge_text).to_contain_text("Saved to")
+
+    def test_snapshot_lands_in_folder_when_folder_mode_active(
+        self, folder_page, base_url_fixture
+    ):
+        """When a folder is active, the pre-import snapshot (taken
+        inside importRelationshipsBytes) lands in the folder's
+        Fellows/ subdirectory as a bak.<ISO> sibling — not in OPFS.
+        Verifies _writeBackupToActiveStore routes correctly under
+        the folder-mode dynamic check.
+        """
+        _open_settings(folder_page, base_url_fixture)
+        folder_page.locator("#settings-folder-choose").click()
+        badge_text = folder_page.locator("#settings-folder-badge .settings-folder-badge-text")
+        expect(badge_text).to_contain_text("Saved to", timeout=10000)
+        # Export the current relationships.db bytes, then re-import them.
+        # importRelationshipsBytes always snapshots-before-import, so this
+        # round-trip generates exactly one new bak.* file in whichever
+        # store is active.
+        folder_page.evaluate("""
+          async () => {
+            var dp = window.__dataProvider;
+            var bytes = await dp.exportRelationshipsBytes();
+            await dp.importRelationshipsBytes(bytes);
+          }
+        """)
+        probe = folder_page.evaluate("() => window.__probeE2EUserFolder()")
+        assert probe["folderBackupNames"], (
+            f"folder mode should write the snapshot to folder/Fellows/; "
+            f"probe.folderBackupNames={probe['folderBackupNames']!r}"
+        )
+        assert probe["folderBackupNames"][0].startswith("relationships.db.bak."), (
+            f"backup filename should follow the bak prefix; got {probe['folderBackupNames'][0]!r}"
+        )
+        # OPFS should NOT have accumulated a backup for this snapshot —
+        # folder-mode users no longer write to the OPFS shadow ring.
+        opfs_backups = folder_page.evaluate("() => window.__listE2EOpfsBackups()")
+        assert opfs_backups == [], (
+            f"folder mode should not write backups to OPFS; OPFS backups={opfs_backups!r}"
+        )
+
+    def test_opfs_to_folder_backup_migration_on_folder_boot(
+        self, folder_page, base_url_fixture
+    ):
+        """Pre-seed an OPFS-resident bak.* file (the state a Phase 1
+        user would arrive with), pick a folder, then reload the page.
+        Worker re-init runs _maybeMigrateOpfsBackupsToFolder, which
+        moves the OPFS bak to the folder's Fellows/ subdir and deletes
+        the OPFS original. Rip-the-band-aid-off per Rich's call.
+        """
+        _open_settings(folder_page, base_url_fixture)
+        # Step 1: pick the folder (creates handle in IDB). Initial
+        # save populates Fellows/relationships.db.
+        folder_page.locator("#settings-folder-choose").click()
+        badge_text = folder_page.locator("#settings-folder-badge .settings-folder-badge-text")
+        expect(badge_text).to_contain_text("Saved to", timeout=10000)
+        # Step 2: pre-seed an OPFS-resident bak file. Use a real
+        # SQLite database header so any future strict-validation code
+        # paths don't reject it. The bak file's content doesn't
+        # matter for the migration — we're testing that the bytes
+        # land in the folder and the OPFS file is removed.
+        SAMPLE_SQLITE_HEADER_B64 = (
+            "U1FMaXRlIGZvcm1hdCAzAA=="  # "SQLite format 3\0"
+        )
+        seeded_name = "relationships.db.bak.2026-05-22T01-00-00-000Z"
+        folder_page.evaluate(
+            "(args) => window.__seedE2EOpfsBackup(args[0], args[1])",
+            [seeded_name, SAMPLE_SQLITE_HEADER_B64],
+        )
+        # Sanity: OPFS now has our seeded backup.
+        opfs_before = folder_page.evaluate("() => window.__listE2EOpfsBackups()")
+        assert seeded_name in opfs_before, (
+            f"sanity: seed didn't land; OPFS backups={opfs_before!r}"
+        )
+        # Step 3: reload the page. Worker re-init runs in folder
+        # mode (handle persisted in IDB + permission still granted
+        # via the OPFS-backed stub). Migration fires.
+        folder_page.reload(wait_until="domcontentloaded")
+        folder_page.wait_for_function(
+            "() => window.__dataProvider && typeof window.__dataProvider.listGroups === 'function'",
+            timeout=10000,
+        )
+        # Step 4: OPFS bak is gone; folder bak is present.
+        opfs_after = folder_page.evaluate("() => window.__listE2EOpfsBackups()")
+        assert seeded_name not in opfs_after, (
+            f"migration should have deleted OPFS bak; OPFS still has it: {opfs_after!r}"
+        )
+        probe = folder_page.evaluate("() => window.__probeE2EUserFolder()")
+        assert seeded_name in probe["folderBackupNames"], (
+            f"migration should have copied OPFS bak to folder; "
+            f"folder bak files: {probe['folderBackupNames']!r}"
+        )
+
+    def test_opfs_only_mode_keeps_backups_in_opfs(
+        self, folder_page, base_url_fixture
+    ):
+        """Regression check: a user who has NOT picked a folder still
+        gets OPFS-resident backups. Migration only kicks in when
+        folder mode is active.
+        """
+        _open_settings(folder_page, base_url_fixture)
+        # Don't pick a folder. Trigger a snapshot via the same
+        # export/import round-trip used in the folder-mode test.
+        folder_page.evaluate("""
+          async () => {
+            var dp = window.__dataProvider;
+            var bytes = await dp.exportRelationshipsBytes();
+            await dp.importRelationshipsBytes(bytes);
+          }
+        """)
+        opfs_backups = folder_page.evaluate("() => window.__listE2EOpfsBackups()")
+        assert opfs_backups, (
+            f"OPFS-only mode should write snapshots to OPFS; OPFS backups={opfs_backups!r}"
+        )
+        # No folder was picked, so the stub folder shouldn't exist at all.
+        probe = folder_page.evaluate("() => window.__probeE2EUserFolder()")
+        assert probe["hasFellows"] is False, (
+            "no folder mode → no Fellows/ subfolder should exist"
+        )
