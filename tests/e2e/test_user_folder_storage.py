@@ -615,6 +615,72 @@ class TestPhase2Pivot:
         expect(folder_page.locator("#settings-folder-section")).to_be_visible(timeout=5000)
         expect(folder_page.locator("#settings-folder-choose")).to_be_visible()
 
+    def test_path_detail_line_shows_after_folder_picked(
+        self, folder_page, base_url_fixture
+    ):
+        """After picking a folder, the Settings page surfaces the
+        relative path (parent / Fellows / relationships.db) below the
+        green Saved badge — handy for users who forget where their
+        data lives. File System Access API doesn't expose absolute
+        paths; the in-app text says to look in Finder for the full one.
+        """
+        _open_settings(folder_page, base_url_fixture)
+        # No folder picked yet — path line is hidden.
+        expect(folder_page.locator("#settings-folder-path")).to_be_hidden()
+        folder_page.locator("#settings-folder-choose").click()
+        badge_text = folder_page.locator("#settings-folder-badge .settings-folder-badge-text")
+        expect(badge_text).to_contain_text("Saved to", timeout=10000)
+        # Path line shows the parent / subfolder / filename.
+        path_value = folder_page.locator("#settings-folder-path-value")
+        expect(path_value).to_be_visible(timeout=5000)
+        expect(path_value).to_contain_text("Fellows / relationships.db")
+        # And the muted hint about absolute paths is there.
+        expect(folder_page.locator(".settings-folder-path-note")).to_contain_text(
+            "absolute system paths"
+        )
+
+    def test_reload_from_folder_button_relabeled(
+        self, folder_page, base_url_fixture
+    ):
+        """The previously-named 'Refresh from folder' button is now
+        'Reload from folder' with an explanatory tooltip. The button
+        appears in the saved-state action row after a folder is
+        picked.
+        """
+        _open_settings(folder_page, base_url_fixture)
+        folder_page.locator("#settings-folder-choose").click()
+        badge_text = folder_page.locator("#settings-folder-badge .settings-folder-badge-text")
+        expect(badge_text).to_contain_text("Saved to", timeout=10000)
+        reload_btn = folder_page.locator("#settings-folder-refresh")
+        expect(reload_btn).to_be_visible()
+        expect(reload_btn).to_have_text("Reload from folder")
+        # Tooltip / title should hint at the use case.
+        tooltip = reload_btn.get_attribute("title") or ""
+        assert "another browser" in tooltip or "cloud-sync" in tooltip, (
+            f"Reload button tooltip should explain the use case; got {tooltip!r}"
+        )
+
+    def test_your_saved_data_section_hidden_in_folder_mode(
+        self, folder_page, base_url_fixture
+    ):
+        """The 'Your saved data' (Download my user data) section is
+        redundant in folder mode — the user can grab relationships.db
+        directly from Finder. It hides when folder mode is active +
+        permission granted. It re-shows in OPFS-only / degraded states
+        (those users need the Download button to extract a backup).
+        """
+        _open_settings(folder_page, base_url_fixture)
+        # No folder yet — Your saved data section is visible.
+        expect(folder_page.locator("#settings-export-section")).to_be_visible()
+        # Pick a folder → section should hide.
+        folder_page.locator("#settings-folder-choose").click()
+        badge_text = folder_page.locator("#settings-folder-badge .settings-folder-badge-text")
+        expect(badge_text).to_contain_text("Saved to", timeout=10000)
+        expect(folder_page.locator("#settings-export-section")).to_be_hidden()
+        # Restore-from-backup section stays visible in both modes
+        # (still useful in folder mode for undo from backup ring).
+        expect(folder_page.locator("#settings-restore-section")).to_be_visible()
+
     def test_opfs_only_mode_keeps_backups_in_opfs(
         self, folder_page, base_url_fixture
     ):

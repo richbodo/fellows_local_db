@@ -8315,10 +8315,16 @@
           '<span class="settings-folder-badge-dot"></span>' +
           '<span class="settings-folder-badge-text">Checking…</span>' +
         '</div>' +
+        '<p id="settings-folder-path" class="settings-hint settings-folder-path" hidden>' +
+          'File: <code id="settings-folder-path-value"></code> ' +
+          '<span class="settings-folder-path-note">(your browser doesn\'t expose absolute system paths — find this in Finder / Explorer to see the full path)</span>' +
+        '</p>' +
         '<div id="settings-folder-actions" class="settings-folder-actions">' +
           '<button type="button" id="settings-folder-choose" class="settings-download" hidden>Choose data folder…</button>' +
-          '<button type="button" id="settings-folder-save-now" class="settings-download" hidden>Save now</button>' +
-          '<button type="button" id="settings-folder-refresh" class="settings-download" hidden>Refresh from folder</button>' +
+          '<button type="button" id="settings-folder-save-now" class="settings-download" hidden ' +
+            'title="Manually re-save your current data to the folder. Auto-save runs after every change; this is a retry button for when auto-save fails.">Save now</button>' +
+          '<button type="button" id="settings-folder-refresh" class="settings-download" hidden ' +
+            'title="Replace your current working data with whatever is in the folder right now. Useful if you edited the file in another browser, or your cloud-sync service pulled in a new version. Your current data is captured as an auto-backup first, so this is undoable.">Reload from folder</button>' +
           '<button type="button" id="settings-folder-reconnect" class="settings-download" hidden>Reconnect folder…</button>' +
           '<button type="button" id="settings-folder-disconnect" class="settings-download settings-folder-disconnect" hidden>Disconnect folder</button>' +
         '</div>' +
@@ -8825,6 +8831,19 @@
         detailEl2.textContent = 'Last error: ' + state.lastError.reason;
         detailEl2.hidden = false;
       }
+      // Path detail line — show the parent/Fellows/relationships.db
+      // relative path so forgetful users have a reminder of where their
+      // file lives. The File System Access API does NOT expose absolute
+      // system paths (security by design), so we show the best we can
+      // and direct the user to Finder for the full path.
+      var pathLineEl = document.getElementById('settings-folder-path');
+      var pathValueEl = document.getElementById('settings-folder-path-value');
+      var showPath = state.hasHandle && state.parentName && state.subfolderName;
+      if (pathLineEl) pathLineEl.hidden = !showPath;
+      if (pathValueEl && showPath) {
+        pathValueEl.textContent =
+          state.parentName + ' / ' + state.subfolderName + ' / relationships.db';
+      }
       // Wire which buttons are visible to the badge state.
       var supported = !!state.supported && (state.workerAvailable !== false);
       function showBtn(btn, on) { if (btn) btn.hidden = !on; }
@@ -8833,6 +8852,18 @@
       showBtn(btnRefresh,    supported && b === 'saved');
       showBtn(btnReconnect,  supported && b === 'inaccessible');
       showBtn(btnDisconnect, supported && state.hasHandle);
+      // The "Your saved data" / Download my user data section is
+      // redundant when folder mode is actively writing to the user's
+      // disk — they can just grab the file from Finder. Hide it in
+      // that case. Keep it visible for OPFS-only-mode users (their
+      // only path to a backup file) and for degraded folder-mode
+      // sessions where permission has lapsed (the folder file may
+      // be stale; the in-browser data is what they'd want to grab).
+      var exportSectionEl = document.getElementById('settings-export-section');
+      if (exportSectionEl) {
+        var folderActive = b === 'saved' || b === 'pending';
+        exportSectionEl.hidden = folderActive;
+      }
       // Cascade: state change here may also affect whether the top-of-
       // page folder-push banner is visible (e.g., user just picked a
       // folder → badge becomes 'saved' → banner should hide).
@@ -8985,8 +9016,8 @@
     if (btnRefresh) {
       btnRefresh.addEventListener('click', function () {
         var ok = window.confirm(
-          'Replace this browser\'s saved data with whatever\'s in the folder?\n\n' +
-          'Your current data is captured as an auto-backup first, so this is undoable.'
+          'Reload your working data from the folder file?\n\n' +
+          'This replaces what you\'re currently looking at with whatever is in the folder right now — useful if the file was edited elsewhere (another browser, cloud sync, or a manual restore). Your current data is captured as an auto-backup first, so this is undoable.'
         );
         if (!ok) return;
         btnRefresh.disabled = true;
