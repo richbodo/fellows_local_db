@@ -103,6 +103,89 @@ directory.
 
 ---
 
+## Multiple installs on the same device
+
+Each browser installs the app as its own copy with its own private
+data. If you install in **Safari**, then later in **Chrome**, your
+Mac has *two* "EHF Fellows Directory" apps — same name, same icon,
+different homes on disk, different data.
+
+This is intentional browser isolation, not a bug: there's no API
+that lets a PWA reach across browser sandboxes. But it can be
+confusing if you weren't expecting it.
+
+### What you'll see
+
+- **Spotlight (`⌘-Space → "EHF"`)** shows two (or more) results,
+  all identical-looking.
+- **Each install has its own data.** Groups, notes, and tags you
+  created in Safari aren't visible to the Chrome copy and vice
+  versa.
+- **The window title** (and the **About** page) shows a unique
+  *install name* per copy — something like `giraffe-gorilla-mouse`.
+  That's the easiest way to tell which one you opened.
+
+### Tell installs apart in Finder
+
+Each browser puts the `.app` bundle in a different folder, so you
+can rename them visibly:
+
+- **Safari** → `~/Applications/EHF Fellows Directory.app`
+- **Chrome / Brave / Edge** → `~/Applications/Chrome Apps/EHF Fellows Directory.app`
+- **Arc** → managed by Arc, accessed through Arc's sidebar
+
+Right-click each bundle in Finder → **Rename** → give them
+distinctive labels like `EHF Fellows — Safari.app` and
+`EHF Fellows — Chrome.app`. The renamed labels surface in Spotlight
+on subsequent searches.
+
+### Consolidate to one install
+
+If you've accumulated copies and want to keep just one:
+
+1. Open each copy in turn. The **About** page shows its install
+   name (and so does the window title).
+2. Identify the copy with the data you want to keep (groups
+   visible, notes intact).
+3. From the copy you're keeping, **Settings → Data folder →
+   Choose data folder…**, and pick a folder under your home
+   directory. This creates a stable file you can later re-attach
+   from any new install. (Folder mode also makes
+   [Use with Claude Desktop](use_with_claude_desktop.md) easier.)
+4. Uninstall the other copies (steps below).
+
+### Uninstall a copy
+
+Each browser uninstalls its own PWA differently. Below is the short
+form; if a step is out of date for your browser version, check the
+browser's official help — that's always the canonical reference:
+
+- **Safari (macOS)** — drag `~/Applications/EHF Fellows Directory.app`
+  to the Trash. →
+  [Apple's Web Apps doc](https://support.apple.com/guide/safari/manage-web-apps-pdsuc1d62cd4/mac)
+- **Chrome** — visit `chrome://apps`, right-click the app, **Remove
+  from Chrome…**. →
+  [Google's PWA management doc](https://support.google.com/chrome/answer/9658361)
+- **Edge** — visit `edge://apps`, click **⋯** on the app,
+  **Uninstall**.
+- **Brave** — same as Chrome but at `brave://apps`.
+- **Arc** — right-click in Arc's sidebar, **Delete**.
+- **Firefox** — no PWA install on desktop; close the tab and remove
+  the bookmark.
+
+**Important:** uninstalling a copy does **not** delete a data folder
+you set up. The folder lives on your disk and stays put. To remove
+the data too, separately drag the `Fellows/` subfolder you picked
+to the Trash. (Auto-backups inside it go with it.)
+
+If you've uninstalled what you thought was the last copy and now
+the app appears to be gone, see *Where the installed app lives*
+above — Spotlight may surface a copy you forgot about, and the
+`https://fellows.globaldonut.com` URL always opens fresh in a
+browser tab.
+
+---
+
 ## Where your data is stored
 
 Your groups, notes, and settings live **on your device only** —
@@ -434,6 +517,39 @@ data?".
 
 ![About page.](images/users_manual/12_about_page.png)
 
+### Install name
+
+Below the support and help links, the About page shows a line like:
+
+> This install: **giraffe-gorilla-mouse**
+
+That's an auto-generated name unique to this copy of the app. It's
+also tacked onto the window title bar, so it's visible without
+opening the About page.
+
+**Why it's there.** If you install the app in more than one browser
+(or more than one browser profile), each install has its own data
+and its own name. The install name is the easiest way to confirm
+which copy you have open when something looks off. See
+[Multiple installs on the same device](#multiple-installs-on-the-same-device)
+above for the rest of the story.
+
+**What changes the name:**
+
+- *Reset Everything* generates a new name (it's a fresh start in
+  every other respect, too).
+- *Clear App Cache* keeps your name.
+- Reloading the page, restarting the browser, app updates — all
+  keep your name.
+- The name doesn't carry over to a different browser or device —
+  each install gets its own.
+
+The name is entirely local. It isn't sent anywhere, doesn't identify
+you, and isn't tied to any account. If you ever
+[file a bug report](#reporting-a-bug), the install name is
+automatically included so the maintainer can join the report to the
+right install.
+
 ---
 
 ## Use with Claude Desktop (optional)
@@ -571,8 +687,9 @@ report if both fail — that's the case where we want to hear about it.
 
 Click **Report a bug** (small button bottom-left on desktop; kebab →
 *Report a bug…* on mobile). The dialog pre-fills your browser, OS,
-build SHA, and the most recent app errors. Add a one-line description
-and submit; it lands in the maintainer's log.
+build SHA, [install name](#install-name), and the most recent app
+errors. Add a one-line description and submit; it lands in the
+maintainer's log.
 
 If you're stuck at the email-gate page (no link arriving, error on
 submit), the gate has its own diagnostics block:

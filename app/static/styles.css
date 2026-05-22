@@ -1576,6 +1576,21 @@ h1 {
   font-size: 0.95rem;
 }
 
+.about-install-name {
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+  color: var(--muted, #6b6480);
+}
+
+.about-install-name strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--text, #1a1a2e);
+}
+
+.about-install-name a {
+  font-size: 0.85rem;
+}
+
 .about-update-block {
   margin: 1rem 0 0.75rem;
   padding: 0.75rem 1rem;
