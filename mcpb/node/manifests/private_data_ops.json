@@ -1,0 +1,61 @@
+{
+  "manifest_version": "0.3",
+  "name": "fellows-private-data-ops",
+  "display_name": "Fellows: Your Groups (Private)",
+  "version": "0.1.0",
+  "description": "Lets Claude read your saved groups, group members, and notes you've added. This data is private to you — when Claude reads it, it goes to Anthropic's cloud. Skip this extension if you'd rather Claude only see the public fellows directory.",
+  "long_description": "Part of the Fellows Directory integration with Claude Desktop. Reads relationships.db (your saved groups) — exported from the Fellows app's Settings → Download a backup. Joins to a bundled snapshot of fellows.db so group-member queries return names and emails in one round-trip without a second extension hop. Both DBs are opened read-only at the SQLite layer (readOnly:true on relationships.db; mode=ro URI ATTACH on fellows.db). Architectural posture: spec axis pick mcp-exposure:shared+private+comms, the Private half. AC-MCP-A applies: cloud AI clients see your group data when they use this — the PWA's setup screen surfaces that boundary up front so it's an informed choice. v1 does not implement a per-call consent gate; the boundary is documented + the user picks.",
+  "author": {
+    "name": "Rich Bodo",
+    "email": "richbodo@gmail.com"
+  },
+  "homepage": "https://github.com/richbodo/fellows_local_db",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/richbodo/fellows_local_db.git"
+  },
+  "license": "MIT",
+  "keywords": ["fellows", "ehf", "groups", "private", "sqlite"],
+  "user_config": {
+    "relationships_db": {
+      "type": "file",
+      "title": "Your groups database",
+      "description": "Path to relationships.db — export it from the Fellows app: Settings → Download a backup. The file usually lands in ~/Downloads.",
+      "default": "${HOME}/Downloads/relationships.db",
+      "required": true
+    }
+  },
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/server/index.js",
+        "--db",
+        "${user_config.relationships_db}"
+      ],
+      "env": {}
+    }
+  },
+  "tools": [
+    {
+      "name": "list_groups",
+      "description": "List all groups in your Private DB, newest-touched first."
+    },
+    {
+      "name": "find_group",
+      "description": "Find groups whose name contains the given substring (case-insensitive)."
+    },
+    {
+      "name": "get_group_members",
+      "description": "Fetch one group plus its members, joined to fellows.db for names + emails."
+    }
+  ],
+  "compatibility": {
+    "platforms": ["darwin"],
+    "runtimes": {
+      "node": ">=20.0.0"
+    }
+  }
+}

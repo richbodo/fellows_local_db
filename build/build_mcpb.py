@@ -55,7 +55,7 @@ FELLOWS_DB = REPO_ROOT / "app" / "fellows.db"
 # Per plans/easy_mcp_install.md § 5: fellows.db is the read-only shared
 # snapshot — safe to bundle. relationships.db is per-user OPFS and
 # **never** bundled.
-BUNDLES_NEEDING_FELLOWS_DB = {"shared_data_ops"}
+BUNDLES_NEEDING_FELLOWS_DB = {"shared_data_ops", "private_data_ops"}
 
 
 def _run(cmd: list[str], cwd: Path) -> None:
