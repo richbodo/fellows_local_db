@@ -18,6 +18,160 @@ link to the newer entry. Newest first.
 
 ---
 
+## 2026-05-22 — MCP easy install is Chromium-desktop-first; Safari / Firefox get a documented secondary path; cross-browser-on-one-device data silos are accepted, not engineered around
+
+**Why this is worth recording.** A future contributor reading
+`plans/easy_mcp_install.md` and the user-folder-storage code will
+reasonably ask: *"why don't we support easy MCP install for Safari
+users?"* and *"why doesn't installing the PWA in a second browser
+pick up the user's existing data?"* The answer to both is the same
+shape: **browser storage is per-origin per-browser, and only
+Chromium has the `showDirectoryPicker` API that lets a PWA hold
+ongoing read/write access to a folder.** This constraint is
+fundamental to the browser platform, not something our code
+chose. Without this entry, a contributor might either (a) try to
+engineer around it (cross-browser sync, server-side storage,
+periodic-re-export prompts on Safari) — each of which violates a
+different architectural commitment — or (b) silently let the user
+experience drift toward "works in Chrome, mysteriously broken in
+Safari" without documenting why.
+
+**Context.** The MCP install plan
+([`plans/easy_mcp_install.md`](../plans/easy_mcp_install.md))
+needs a stable filesystem path that the `.mcpb`'s `user_config`
+can default to, so the user picks their `relationships.db` once
+and it stays current going forward. The post-Phase-2 design
+anchors this on the user-folder storage feature: the user picks
+a data folder, the PWA writes `<folder>/Fellows/relationships.db`
+on every commit, and the `.mcpb` install dialog file-picker
+points at that stable file.
+
+This works because the PWA can write to a user-picked folder
+continuously via `showDirectoryPicker` + the persistent handle
+stored in IDB. The browsers that ship the API as of 2026:
+Chrome 86+, Edge, Brave, Arc, Opera. The browsers that don't:
+**Safari** (single-file `showOpenFilePicker` / `showSaveFilePicker`
+only, since 15.2 — no directory access), **Firefox** (no File
+System Access API at all), and Safari/Chrome on iOS (mobile
+browsers).
+
+For Safari and Firefox users, the only way to get
+`relationships.db` onto the filesystem is the existing
+*Download my user data* button, which emits a one-shot snapshot
+into `~/Downloads/`. The `.mcpb` install dialog can point at that
+snapshot — but the snapshot goes stale the moment the user makes
+any further mutation in the PWA, and there is no API for the PWA
+to silently re-export.
+
+A separate constraint surfaced during the conversation that
+produced this entry: **browser storage is per-origin per-browser
+on the same device.** A fellow who installs the PWA in Safari,
+uses it for a month, then opens the same URL in Chrome will see a
+fresh empty state — Chrome's OPFS namespace for the origin is
+empty, and the `fellows_authenticated_once` localStorage marker
+is also per-browser. There is no API to detect "this user has
+data for this origin in another browser on this device"; storage
+isolation is the whole point of per-browser sandboxes. Manual
+export-from-Safari + import-into-Chrome via the existing
+*Restore from a file* button is the only migration path.
+
+**Alternatives considered.**
+
+1. **Auto-export on Safari/Firefox.** Some kind of
+   `beforeunload` or periodic export that lands a fresh
+   `relationships.db` in `~/Downloads`. **Rejected**: the
+   File System Access API the PWA would need (`showSaveFilePicker`)
+   requires explicit user-gesture activation for each write. There
+   is no headless "save my data automatically" mechanism for
+   non-OPFS files on Safari/Firefox. Trying to fake it (prompt on
+   every commit) is worse UX than the current stale-after-export
+   reality.
+
+2. **Server-side mirror of relationships.db.** Persist the user's
+   private DB on prod so the MCP can fetch from there. **Rejected**:
+   violates AC-2 *(no SaaS surface — `deploy/server.py` has no
+   per-user RW endpoints)* and the entire never-SaaS stance the app
+   is built on. Worth re-evaluating only if AC-2 itself is
+   revisited.
+
+3. **Cross-browser data sync via shared filesystem location.**
+   Have the PWA write to a known absolute path that any browser
+   could read. **Rejected**: Safari/Firefox have no API to write
+   to a user-chosen path at all (let alone a hardcoded one). Even
+   on Chromium, two browsers picking the same folder produces
+   dueling writes — Web Locks API scope is per-origin-per-browser
+   and can't coordinate cross-browser. Plan already calls this
+   out in § Non-goals.
+
+4. **Document the constraints + recommend Chromium for fellows
+   who want MCP.** **Chosen.** The MCP install walkthrough makes
+   the Chromium requirement explicit. Safari/Firefox users see a
+   documented secondary path (manual re-export). The plan accepts
+   cross-browser data silos as a user-visible reality and
+   provides a "migrate from another browser" affordance in
+   Settings (export-from-A → import-to-B) for users who want to
+   consolidate.
+
+**Decision.**
+
+- **Easy MCP install (set-it-up-once UX)** is supported on
+  Chromium desktop browsers (Chrome / Edge / Brave / Arc) on
+  macOS, Windows, Linux. This is the Pareto slice; the
+  `plans/easy_mcp_install.md` § 2 v1 scope.
+
+- **Safari / Firefox desktop**: documented secondary path. The
+  `.mcpb` install dialog file-picker accepts a one-shot
+  `Download my user data` snapshot; the MCP's view is whatever
+  was exported last. Users who want a live MCP view are
+  recommended to switch to a Chromium browser for the fellows
+  app.
+
+- **Cross-browser-on-one-device data silos**: accepted as a
+  user-visible reality, not engineered around. Documented in the
+  users-manual + addressed via a *"migrate from another
+  browser"* affordance (link to the export/import recipe) in
+  Settings → Restore from backup. No attempt to detect the
+  cross-browser case in the PWA (no API for it).
+
+- **Forward-looking**: when WebKit ships `showDirectoryPicker`
+  (currently "in development" on
+  [webkit.org/status](https://webkit.org/status)), Safari users
+  automatically join the green path with zero code change. Same
+  for Firefox if/when they ship the API. No special migration —
+  they pick a folder and they're in folder mode.
+
+**Consequences.**
+
+- Pro: the MCP install UX is honest, scoped, and shippable. No
+  attempt to hide the constraint behind awkward workarounds that
+  would feel broken in production.
+- Pro: the implementation roadmap stays small. Stage 1 of the
+  MCP install plan (Chromium-desktop only) is the v1 ship; the
+  Safari/Firefox secondary path is documentation + reuse of
+  existing UI, not new code.
+- Pro: free upgrade for Safari/Firefox users when WebKit / Gecko
+  ship the API. Their migration is automatic.
+- Con: the test group includes Safari-primary users who will
+  have a degraded MCP experience until they either switch
+  browsers for the fellows app or wait for WebKit to ship FSA.
+  The honest framing is *"MCP is a Chromium-desktop bonus
+  feature"* — not a universal one — and the install walkthrough
+  has to be upfront about that.
+- Con: users who install the PWA in multiple browsers on the
+  same Mac will discover their data is per-browser. The
+  *"migrate from another browser"* affordance mitigates but
+  doesn't fully resolve the surprise. Some friction is
+  unavoidable here.
+
+**Links.**
+
+- [`plans/easy_mcp_install.md`](../plans/easy_mcp_install.md) — § 2 Pareto slice (Chromium desktop), § 5 folder-anchor handoff, § 5b browser compatibility matrix (where this analysis lives in the plan).
+- [`plans/user_folder_storage.md`](../plans/user_folder_storage.md) — § Browser compatibility matrix + § Non-goals (single-writer assumption).
+- MDN — [`Window.showDirectoryPicker` compatibility](https://developer.mozilla.org/en-US/docs/Web/API/Window/showDirectoryPicker#browser_compatibility).
+- WebKit feature status — [webkit.org/status](https://webkit.org/status) (search "File System Access").
+
+---
+
 ## 2026-05-22 — User-folder storage uses pure-folder semantics for folder-mode users, not a hybrid OPFS+folder mirror
 
 **Why this is worth recording.** The original `plans/user_folder_storage.md` (and the Phase 1 code shipped in #181) was built on a **hybrid** model: OPFS is the working store, the user's folder is a debounced mirror, and the worker synchronizes them after every committed mutation. A future contributor reading that code — particularly the auto-sync timers, the `markRelationshipsDirty` hook the plan was about to add in Phase 2, and the boot-time "read folder into OPFS" path — would reasonably conclude this is the canonical design and continue extending it. **It is not.** Phase 2 was the moment to pivot to pure-folder, because the hybrid's sync complexity buys us nothing at our DB scale and introduces a silent-data-loss failure mode.
