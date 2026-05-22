@@ -273,3 +273,107 @@ class TestUserFolderStorage:
         assert "Round 1 group" in names, (
             f"open-existing should have loaded the saved group back; got {names!r}"
         )
+
+
+class TestPhase2Pivot:
+    """Pivot-specific scenarios per plans/user_folder_storage.md § Phase 2
+    (revised 2026-05-22). Phase 1 tests above keep the manual save/restore
+    UX honest; these add the per-commit auto-write + boot-time mode
+    detection that the pivot delivers.
+    """
+
+    def test_post_commit_auto_writes_advance_last_saved_at(
+        self, folder_page, base_url_fixture
+    ):
+        """After picking a folder, every committed mutation should fire the
+        post-commit folder write — observable via `lastSavedAt` advancing
+        after each mutation, WITHOUT any Save Now click. File size is an
+        unreliable witness (SQLite pages can absorb new rows), but
+        `lastSavedAt` is set to `new Date().toISOString()` on every
+        successful folder write so it's the canonical "did we write?"
+        signal.
+
+        Three mutating RPCs are exercised: createGroup, setSetting, and
+        updateGroup — covering both the group-mutation path and the
+        non-group settings path. deleteGroup + importRelationshipsBytes
+        are covered structurally by the same _maybeWriteFolderAfterCommit
+        helper; not exhaustively pinned here.
+        """
+        _open_settings(folder_page, base_url_fixture)
+        folder_page.locator("#settings-folder-choose").click()
+        badge_text = folder_page.locator("#settings-folder-badge .settings-folder-badge-text")
+        expect(badge_text).to_contain_text("Saved to", timeout=10000)
+
+        # Helper: read the worker's folder state and return lastSavedAt.
+        def saved_at():
+            state = folder_page.evaluate(
+                "() => window.__dataProvider._getFolderState()"
+            )
+            return state.get("lastSavedAt")
+
+        # Mutation 1: createGroup. wait_for_function loops until
+        # lastSavedAt has changed from its current value — robust to
+        # the async RPC + post-commit-hook timing.
+        full = folder_page.evaluate("() => window.__dataProvider.getFull()")
+        rids = [f["record_id"] for f in full[:5]]
+        before_create = saved_at()
+        folder_page.evaluate(
+            "(rids) => window.__dataProvider.createGroup({"
+            "name: 'Auto-write G1', note: '', fellow_record_ids: rids})",
+            rids,
+        )
+        folder_page.wait_for_function(
+            "(before) => window.__dataProvider._getFolderState()"
+            "  .then(s => s.lastSavedAt && s.lastSavedAt !== before)",
+            arg=before_create,
+            timeout=5000,
+        )
+        after_create = saved_at()
+        assert after_create and after_create != before_create, (
+            f"lastSavedAt should advance after createGroup; "
+            f"before={before_create!r} after={after_create!r}"
+        )
+
+        # Mutation 2: setSetting (smallest mutating RPC).
+        before_set = after_create
+        folder_page.evaluate(
+            "() => window.__dataProvider.setSetting('e2e_phase2_key', 'phase2-auto-write')"
+        )
+        folder_page.wait_for_function(
+            "(before) => window.__dataProvider._getFolderState()"
+            "  .then(s => s.lastSavedAt && s.lastSavedAt !== before)",
+            arg=before_set,
+            timeout=5000,
+        )
+        after_set = saved_at()
+        assert after_set != before_set, (
+            f"lastSavedAt should advance after setSetting; "
+            f"before={before_set!r} after={after_set!r}"
+        )
+
+        # Mutation 3: updateGroup on the group we just created.
+        groups = folder_page.evaluate("() => window.__dataProvider.listGroups()")
+        gid = next(g["id"] for g in groups if g["name"] == "Auto-write G1")
+        before_update = after_set
+        folder_page.evaluate(
+            "(gid) => window.__dataProvider.updateGroup(gid, "
+            "{name: 'Auto-write G1 (renamed)', note: 'updated'})",
+            gid,
+        )
+        folder_page.wait_for_function(
+            "(before) => window.__dataProvider._getFolderState()"
+            "  .then(s => s.lastSavedAt && s.lastSavedAt !== before)",
+            arg=before_update,
+            timeout=5000,
+        )
+        after_update = saved_at()
+        assert after_update != before_update, (
+            f"lastSavedAt should advance after updateGroup; "
+            f"before={before_update!r} after={after_update!r}"
+        )
+
+        # Final cross-check: the badge UI also reflects the most recent
+        # write. The "Saved" badge subtitle includes a relative time
+        # ("just now" / "X min ago") — verify it stayed in Saved state
+        # rather than flipping to a warning state.
+        expect(badge_text).to_contain_text("Saved to")

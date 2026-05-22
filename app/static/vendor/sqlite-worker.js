@@ -184,6 +184,23 @@ var relDb = null;
 var fellowsDb = null;
 var bootTrace = [];
 
+// Storage mode for relationships.db, resolved during init. Two values:
+//   'opfs'   — OPFS-resident SAH-pool VFS is the source of truth. Today's
+//              behavior for Safari / Firefox / iOS / Android Chrome users
+//              without a folder picker, plus the brief window where a
+//              capable user hasn't yet set up a data folder.
+//   'folder' — User's filesystem folder is the source of truth. The OPFS
+//              slot is used as a synchronous working buffer that is
+//              hydrated from folder bytes on boot and written back
+//              atomically to the folder after every committed mutation.
+//              The buffer is reset from the folder on every session boot —
+//              folder is canonical, OPFS is transient.
+// See plans/user_folder_storage.md § Architecture (revised 2026-05-22)
+// and docs/ac_decisions_log.md § 2026-05-22 — User-folder storage uses
+// pure-folder semantics for folder-mode users, not a hybrid OPFS+folder
+// mirror.
+var _storageMode = 'opfs';
+
 // User-driven directory-data update, between previewFellowsDbSwap and
 // applyFellowsDbSwap / cancelFellowsDbSwap. Holds the SHA + an opaque
 // stagingId that the page must echo back. Bytes live in the staging
@@ -588,29 +605,86 @@ handlers.init = async function () {
   // Auto-backup runs before opening relationships.db for app use, so the
   // snapshot reflects the user's last-saved state, not anything mutated
   // this session. Failure is non-fatal — logged via bootTrace.
+  // NOTE: This is the OPFS-resident auto-backup ring. Under the pivot,
+  // folder-mode users get a folder-resident backup ring in a follow-up
+  // PR; until that lands, both rings coexist (folder-mode users
+  // effectively get backups in two places — harmless redundancy).
   await maybeBackupRelationshipsDb();
+
+  // Hydrate the user-folder handle from IDB so we know which storage
+  // mode applies BEFORE opening relDb. (Phase 1 hydrated after relDb
+  // was open; the pivot needs the order reversed so we can populate
+  // the OPFS buffer from folder bytes before SAH-pool acquires the slot.)
+  await _hydrateFolderRecord();
+
+  // Resolve storage mode. Folder mode requires both a persisted handle
+  // and a currently-granted readwrite permission. 'prompt' and 'denied'
+  // states fall back to OPFS-only mode for this session — the page will
+  // surface a "Reconnect folder" CTA, and a successful reconnect kicks
+  // off a re-init via a separate code path (handled in a follow-up PR;
+  // for now, the user clicks Save manually after reconnecting).
+  var folderPermission = 'no-handle';
+  if (folderRecord.parentHandle) {
+    folderPermission = await _folderQueryPermission();
+  }
+  if (folderRecord.parentHandle && folderPermission === 'granted') {
+    _storageMode = 'folder';
+  } else {
+    _storageMode = 'opfs';
+  }
+  trace('storageMode=' + _storageMode +
+    ' (handle=' + (folderRecord.parentHandle ? 'yes' : 'no') +
+    ' permission=' + folderPermission + ')');
+
+  // Folder mode: one-time migration (if Phase 1 hybrid state exists)
+  // and then hydrate the OPFS working buffer from folder bytes. After
+  // this block, the OPFS slot reflects the folder file's content —
+  // opening relDb against the slot gives us the folder's data.
+  if (_storageMode === 'folder') {
+    try {
+      await _maybeRunPivotMigration();
+    } catch (migrateErr) {
+      trace('pivot-migration: FAILED — ' + ((migrateErr && migrateErr.message) || migrateErr) +
+        ' (continuing in folder mode; user can recover via Settings)');
+    }
+    try {
+      await _hydrateOpfsBufferFromFolder();
+    } catch (hydrateErr) {
+      // Hard failure on hydration: surface to the page so the user
+      // sees a clear "Folder unreadable" state rather than a blank app.
+      trace('folder hydrate: FAILED — ' + ((hydrateErr && hydrateErr.message) || hydrateErr));
+      // Don't throw; we'll proceed and open relDb against whatever's in
+      // OPFS (which may be empty, in which case schema bootstrap creates
+      // an empty DB). The page-side badge surfaces the lastError.
+    }
+  }
 
   var hasRelationshipsDb = false;
   try {
     relDb = new poolUtil.OpfsSAHPoolDb(RELATIONSHIPS_DB_SLOT);
     bootstrapRelationshipsSchema(relDb);
     hasRelationshipsDb = true;
-    trace('relationships.db: open + schema OK');
+    trace('relationships.db: open + schema OK (mode=' + _storageMode + ')');
   } catch (relErr) {
     trace('relationships.db: open failed (' + (relErr && relErr.message || relErr) + ')');
     relDb = null;
   }
 
+  // Folder mode + fresh install (no folder file yet): the schema was
+  // just bootstrapped into an empty OPFS buffer. Write it out to the
+  // folder so the file exists from the start. Failure here is
+  // non-fatal — the user sees the badge flip to write-failed and can
+  // retry. (Same code path as the per-commit write.)
+  if (_storageMode === 'folder' && hasRelationshipsDb && !folderRecord.lastSavedAt) {
+    await _maybeWriteFolderAfterCommit();
+  }
+
   // Open fellows.db if it's already on disk. Cold-start fetch is the
   // page-driven ensureFellowsDb RPC, gated behind directory-mode commit
   // (per L4a). Init is network-free.
+  // fellows.db stays OPFS-resident in both storage modes (refreshable
+  // shared data, not user-authored — per plan § Non-goals).
   var hasFellowsDb = _openFellowsDbIfPresent();
-
-  // Hydrate the user-folder handle from IDB so getFolderState reflects
-  // reality on the first page query. Permission lookup is deferred to
-  // the page-driven checkFolderPermission (queryPermission is cheap but
-  // there's no reason to block init on it).
-  await _hydrateFolderRecord();
 
   return {
     ok: true,
@@ -625,6 +699,7 @@ handlers.init = async function () {
     folderParentName: folderRecord.parentName,
     folderSubfolderName: folderRecord.subfolderName,
     folderLastSavedAt: folderRecord.lastSavedAt,
+    storageMode: _storageMode,
     poolFiles: (function () { try { return poolUtil.getFileNames(); } catch (e) { return []; } })(),
     trace: bootTrace.slice()
   };
@@ -664,21 +739,27 @@ handlers.createGroup = async function (data) {
   var note = (data && typeof data.note === 'string') ? data.note : '';
   var ids = dedupeRecordIds(data && data.fellow_record_ids);
   var now = nowIsoSecond();
+  var gid;
   relDb.exec('BEGIN');
   try {
     dbRun(relDb, 'INSERT INTO groups(name, note, created_at, updated_at) VALUES (?, ?, ?, ?)',
           [name, note, now, now]);
     var idRow = dbSelectOne(relDb, 'SELECT last_insert_rowid() AS id', null);
-    var gid = idRow && idRow.id;
+    gid = idRow && idRow.id;
     for (var i = 0; i < ids.length; i++) {
       dbRun(relDb, 'INSERT INTO group_members(group_id, fellow_record_id) VALUES (?, ?)', [gid, ids[i]]);
     }
     relDb.exec('COMMIT');
-    return await handlers.getGroup({ id: gid });
   } catch (e) {
     try { relDb.exec('ROLLBACK'); } catch (e2) {}
     throw e;
   }
+  // Commit succeeded; mirror to folder if we're in folder mode. The
+  // hook handles its own errors — it sets folderRecord.lastError but
+  // does not throw, so a folder-write failure surfaces in the badge
+  // without rolling back the OPFS-resident commit.
+  await _maybeWriteFolderAfterCommit();
+  return await handlers.getGroup({ id: gid });
 };
 
 handlers.updateGroup = async function (args) {
@@ -703,11 +784,12 @@ handlers.updateGroup = async function (args) {
       }
     }
     relDb.exec('COMMIT');
-    return await handlers.getGroup({ id: id });
   } catch (e) {
     try { relDb.exec('ROLLBACK'); } catch (e2) {}
     throw e;
   }
+  await _maybeWriteFolderAfterCommit();
+  return await handlers.getGroup({ id: id });
 };
 
 handlers.deleteGroup = async function (args) {
@@ -716,6 +798,7 @@ handlers.deleteGroup = async function (args) {
   var existing = dbSelectOne(relDb, 'SELECT 1 AS x FROM groups WHERE id = ?', [id]);
   if (!existing) return false;
   dbRun(relDb, 'DELETE FROM groups WHERE id = ?', [id]);
+  await _maybeWriteFolderAfterCommit();
   return true;
 };
 
@@ -746,6 +829,7 @@ handlers.setSetting = async function (args) {
       [key, value]
     );
   }
+  await _maybeWriteFolderAfterCommit();
   return { key: key, value: value };
 };
 
@@ -788,6 +872,9 @@ handlers.importRelationshipsBytes = async function (args) {
   poolUtil.importDb(RELATIONSHIPS_DB_SLOT, bytes);
   relDb = new poolUtil.OpfsSAHPoolDb(RELATIONSHIPS_DB_SLOT);
   bootstrapRelationshipsSchema(relDb);
+  // A whole-DB replace is the biggest mutation we do. Mirror to folder
+  // immediately so the user's badge reflects the new state.
+  await _maybeWriteFolderAfterCommit();
   return {
     counts: inspection.counts,
     preRestoreSnapshot: snap && snap.backedUp ? snap.name : null
@@ -1555,7 +1642,8 @@ function _emptyFolderRecord() {
     subfolderName: null,   // string — e.g. "Fellows" or "Fellows 2"
     lastSavedAt: null,     // ISO string of most recent successful write
     lastError: null,       // { at, reason } of most recent failed read/write
-    lastPermission: null   // 'granted' | 'prompt' | 'denied' — most recent queryPermission result
+    lastPermission: null,  // 'granted' | 'prompt' | 'denied' — most recent queryPermission result
+    pivotMigratedAt: null  // ISO string set after the one-time Phase 1 → pure-folder migration completes
   };
 }
 
@@ -1631,7 +1719,8 @@ function _folderRecordPersist() {
     parentName: folderRecord.parentName || null,
     subfolderName: folderRecord.subfolderName,
     lastSavedAt: folderRecord.lastSavedAt || null,
-    lastError: folderRecord.lastError || null
+    lastError: folderRecord.lastError || null,
+    pivotMigratedAt: folderRecord.pivotMigratedAt || null
   });
 }
 
@@ -1647,9 +1736,11 @@ async function _hydrateFolderRecord() {
       folderRecord.subfolderName = rec.subfolderName;
       folderRecord.lastSavedAt = rec.lastSavedAt || null;
       folderRecord.lastError = rec.lastError || null;
+      folderRecord.pivotMigratedAt = rec.pivotMigratedAt || null;
       trace('folder: hydrated handle parent=' + folderRecord.parentName +
         ' subfolder=' + folderRecord.subfolderName +
-        ' lastSavedAt=' + (folderRecord.lastSavedAt || '(never)'));
+        ' lastSavedAt=' + (folderRecord.lastSavedAt || '(never)') +
+        ' pivotMigratedAt=' + (folderRecord.pivotMigratedAt || '(never)'));
     } else {
       trace('folder: no persisted handle (browser-only mode)');
     }
@@ -1819,6 +1910,256 @@ async function _folderStateSnapshot() {
     }
   }
   return state;
+}
+
+// ----- Storage-mode helpers (Phase 2 pivot) ---------------------------------
+//
+// Folder-mode boot: read folder's relationships.db into the OPFS slot used
+// by OpfsSAHPoolDb, so opening relDb against the slot sees the folder's
+// content. The slot is treated as a transient working buffer — overwritten
+// by the folder file on every boot. Folder is canonical.
+
+async function _hydrateOpfsBufferFromFolder() {
+  // Returns true if the slot was populated from folder bytes; false if the
+  // folder file doesn't exist yet (caller bootstraps an empty schema).
+  if (!folderRecord.parentHandle || !folderRecord.subfolderName) {
+    return false;
+  }
+  var sub;
+  try {
+    sub = await folderRecord.parentHandle.getDirectoryHandle(folderRecord.subfolderName);
+  } catch (e) {
+    trace('folder: subfolder not found at boot — bootstrapping empty');
+    return false;
+  }
+  var fh;
+  try {
+    fh = await sub.getFileHandle(FOLDER_RELATIONSHIPS_FILE);
+  } catch (e) {
+    trace('folder: relationships.db not in subfolder at boot — bootstrapping empty');
+    return false;
+  }
+  var bytes;
+  try {
+    var f = await fh.getFile();
+    bytes = new Uint8Array(await f.arrayBuffer());
+  } catch (e) {
+    folderRecord.lastError = { at: new Date().toISOString(), reason: 'boot read: ' + ((e && e.message) || e) };
+    await _folderRecordPersist();
+    throw new Error('Could not read folder relationships.db at boot: ' + ((e && e.message) || e));
+  }
+  if (!bytes || !bytes.byteLength) {
+    trace('folder: empty relationships.db at boot — bootstrapping empty');
+    return false;
+  }
+  // Inspect before importing so we don't pollute the working buffer with
+  // garbage and silently break the session.
+  var inspection = await inspectBytes(bytes);
+  if (!inspection.valid) {
+    folderRecord.lastError = { at: new Date().toISOString(), reason: 'boot inspect: ' + (inspection.error || 'unreadable') };
+    await _folderRecordPersist();
+    throw new Error('Folder relationships.db failed validation: ' + (inspection.error || 'unreadable'));
+  }
+  // If relDb is already open against the slot (shouldn't be at boot, but
+  // defensive), close it first — importDb on an open slot is undefined
+  // behavior on some SAH-pool versions.
+  if (relDb) { try { relDb.close(); } catch (e) {} relDb = null; }
+  poolUtil.importDb(RELATIONSHIPS_DB_SLOT, bytes);
+  trace('folder: hydrated OPFS buffer from folder file (' + bytes.byteLength + ' bytes, ' +
+    inspection.counts.groups + ' groups)');
+  return true;
+}
+
+// One-time migration for users coming from Phase 1's hybrid state.
+// On first boot in folder mode after the pivot, both the OPFS slot AND
+// the folder file may contain valid data — possibly divergent if a
+// previous-session sync failed. Resolve by trusting the newer copy and
+// preserving the loser as `pre-pivot-<ISO>.<existing-name>.bak` so the
+// user can manually recover if our newer-wins heuristic picked wrong.
+async function _maybeRunPivotMigration() {
+  if (folderRecord.pivotMigratedAt) return;
+  // Check OPFS slot for existing data.
+  var opfsHasData = false;
+  var opfsBytes = null;
+  try {
+    var poolFiles = poolUtil.getFileNames();
+    if (poolFiles.indexOf(RELATIONSHIPS_DB_SLOT) !== -1) {
+      opfsBytes = poolUtil.exportFile(RELATIONSHIPS_DB_SLOT);
+      if (opfsBytes && opfsBytes.byteLength) {
+        var opfsInspect = await inspectBytes(opfsBytes);
+        opfsHasData = opfsInspect.valid && (
+          opfsInspect.counts.groups + opfsInspect.counts.members +
+          opfsInspect.counts.tags + opfsInspect.counts.notes +
+          opfsInspect.counts.settings) > 0;
+      }
+    }
+  } catch (e) {
+    trace('pivot-migration: OPFS inspect failed (' + (e && e.message || e) + ')');
+  }
+  // Check folder for existing data.
+  var folderHasData = false;
+  var folderBytes = null;
+  var folderFileLastModified = 0;
+  try {
+    var sub = await folderRecord.parentHandle.getDirectoryHandle(folderRecord.subfolderName);
+    var fh = await sub.getFileHandle(FOLDER_RELATIONSHIPS_FILE);
+    var f = await fh.getFile();
+    folderFileLastModified = f.lastModified;
+    folderBytes = new Uint8Array(await f.arrayBuffer());
+    if (folderBytes && folderBytes.byteLength) {
+      var folderInspect = await inspectBytes(folderBytes);
+      folderHasData = folderInspect.valid && (
+        folderInspect.counts.groups + folderInspect.counts.members +
+        folderInspect.counts.tags + folderInspect.counts.notes +
+        folderInspect.counts.settings) > 0;
+    }
+  } catch (e) {
+    // Subfolder or file missing — common case, not an error.
+  }
+  if (!opfsHasData && !folderHasData) {
+    trace('pivot-migration: fresh install or empty (OPFS + folder both empty); nothing to migrate');
+    folderRecord.pivotMigratedAt = new Date().toISOString();
+    await _folderRecordPersist();
+    return;
+  }
+  if (opfsHasData && !folderHasData) {
+    trace('pivot-migration: OPFS has data, folder empty — writing OPFS to folder');
+    await _writeBytesToFolder(opfsBytes);
+    folderRecord.pivotMigratedAt = new Date().toISOString();
+    await _folderRecordPersist();
+    return;
+  }
+  if (!opfsHasData && folderHasData) {
+    trace('pivot-migration: folder has data, OPFS empty — boot will hydrate from folder');
+    folderRecord.pivotMigratedAt = new Date().toISOString();
+    await _folderRecordPersist();
+    return;
+  }
+  // Both have data. Pick newer.
+  // Heuristic: folder's lastModified comes from the OS; OPFS doesn't expose
+  // a sibling mtime. Use folderRecord.lastSavedAt as a proxy for "folder
+  // was successfully written at this time" — if both folderFileLastModified
+  // and OPFS state are present, lastSavedAt being absent OR stale means
+  // OPFS likely has unsynced post-Phase-1 mutations. Conservative:
+  // compare hash; if equal, treat folder as canonical; if different,
+  // preserve OPFS as the pre-pivot backup AND adopt folder as canonical
+  // (Phase 1 manual-save users almost always have folder == OPFS).
+  var opfsHash = await _sha256Hex(opfsBytes);
+  var folderHash = await _sha256Hex(folderBytes);
+  if (opfsHash === folderHash) {
+    trace('pivot-migration: OPFS and folder content match; folder is canonical');
+    folderRecord.pivotMigratedAt = new Date().toISOString();
+    await _folderRecordPersist();
+    return;
+  }
+  // Genuinely divergent. Preserve OPFS state as a pre-pivot backup
+  // sibling in the folder, then continue with folder as canonical.
+  // (A user who realizes the wrong side won can copy the .bak back
+  // into place via Settings → Restore.)
+  trace('pivot-migration: OPFS and folder content DIFFER (opfs hash=' + opfsHash.slice(0, 8) +
+    ' folder hash=' + folderHash.slice(0, 8) + ') — preserving OPFS as pre-pivot.bak, keeping folder');
+  try {
+    var ts = new Date().toISOString().replace(/[:.]/g, '-');
+    var bakName = BACKUP_PREFIX + 'pre-pivot-' + ts;
+    await _writeBytesToFolder(opfsBytes, bakName);
+    trace('pivot-migration: preserved OPFS as folder/' + folderRecord.subfolderName + '/' + bakName);
+  } catch (e) {
+    trace('pivot-migration: pre-pivot bak write failed: ' + (e && e.message || e) +
+      ' — proceeding with folder as canonical anyway (OPFS state may be unrecoverable)');
+  }
+  folderRecord.pivotMigratedAt = new Date().toISOString();
+  await _folderRecordPersist();
+}
+
+// Atomic folder-file write helper. Used by the pivot migration and by
+// the per-commit hook. Default filename is the live relationships.db;
+// caller can override for backup writes. Updates folderRecord.lastSavedAt
+// on success / lastError on failure. Single-flight is guarded by the
+// caller (handlers.writeRelationshipsToFolder serializes its own calls;
+// the per-commit hook is awaited from inside each mutating RPC handler,
+// and the worker is single-threaded so handler invocations don't overlap
+// at the JS level).
+async function _writeBytesToFolder(bytes, filename) {
+  if (!folderRecord.parentHandle || !folderRecord.subfolderName) {
+    var ne = new Error('no folder configured');
+    ne.code = 'no_folder';
+    throw ne;
+  }
+  var sub;
+  try {
+    sub = await folderRecord.parentHandle.getDirectoryHandle(folderRecord.subfolderName, { create: true });
+  } catch (e) {
+    folderRecord.lastError = { at: new Date().toISOString(), reason: 'subfolder open: ' + ((e && e.message) || e) };
+    await _folderRecordPersist();
+    var se = new Error('Could not open subfolder ' + folderRecord.subfolderName + ': ' + ((e && e.message) || e));
+    se.code = 'subfolder_open_failed';
+    throw se;
+  }
+  var targetName = filename || FOLDER_RELATIONSHIPS_FILE;
+  try {
+    var fh = await sub.getFileHandle(targetName, { create: true });
+    var writable = await fh.createWritable();
+    await writable.write(bytes);
+    await writable.close();
+  } catch (e) {
+    folderRecord.lastError = { at: new Date().toISOString(), reason: 'write ' + targetName + ': ' + ((e && e.message) || e) };
+    await _folderRecordPersist();
+    var we = new Error('Folder write to ' + targetName + ' failed: ' + ((e && e.message) || e));
+    we.code = 'write_failed';
+    throw we;
+  }
+  // Only update lastSavedAt for the canonical file, not backup siblings.
+  if (targetName === FOLDER_RELATIONSHIPS_FILE) {
+    folderRecord.lastSavedAt = new Date().toISOString();
+    folderRecord.lastError = null;
+    await _folderRecordPersist();
+  }
+}
+
+// Post-commit hook called at the end of each mutating RPC. If a folder
+// is currently attached AND has granted readwrite permission, exports
+// the OPFS buffer and writes atomically to the folder. Otherwise no-op.
+//
+// Dynamic check (vs. the boot-time `_storageMode` global) is intentional:
+// a user who booted without a folder handle and then attached one
+// mid-session via Settings → Choose data folder (Phase 1 UX) should have
+// their subsequent mutations land in the folder, not just OPFS. Same for
+// the reconnect-after-permission-lapse case.
+//
+// Failures populate folderRecord.lastError but do NOT throw — the
+// mutation succeeded in OPFS, the user just needs to retry the save
+// (Settings → Save now button). The page sees the badge flip to
+// "Last save failed" on its next getFolderState poll.
+async function _maybeWriteFolderAfterCommit() {
+  if (!poolUtil) return;
+  if (!folderRecord.parentHandle || !folderRecord.subfolderName) return;
+  var perm = await _folderQueryPermission();
+  if (perm !== 'granted') {
+    // Folder configured but currently inaccessible. The badge already
+    // shows that state via the page's getFolderState poll. Don't try
+    // to write — would just fail and populate lastError with noise.
+    return;
+  }
+  var bytes;
+  try {
+    bytes = poolUtil.exportFile(RELATIONSHIPS_DB_SLOT);
+  } catch (e) {
+    folderRecord.lastError = { at: new Date().toISOString(), reason: 'post-commit export: ' + ((e && e.message) || e) };
+    trace('folder: post-commit export failed: ' + ((e && e.message) || e));
+    return;
+  }
+  if (!bytes || !bytes.byteLength) {
+    folderRecord.lastError = { at: new Date().toISOString(), reason: 'post-commit export was empty' };
+    return;
+  }
+  try {
+    await _writeBytesToFolder(bytes);
+  } catch (e) {
+    // lastError already populated by the helper. Don't rethrow — the
+    // OPFS commit is the user's data; they need to retry the folder
+    // write, not redo the mutation.
+    trace('folder: post-commit folder write failed: ' + ((e && e.message) || e));
+  }
 }
 
 // ----- Folder RPCs ----------------------------------------------------------
