@@ -1,18 +1,20 @@
 # Use with Claude Desktop
 
-This is an optional add-on to the EHF Fellows Directory app. Once set up,
-you can ask **Claude Desktop** questions about the directory and your
-saved groups, and have it draft outreach emails for you to review and
-send.
+This is an optional add-on to the EHF Fellows Directory app. Once set
+up, you can ask **Claude Desktop** questions about the directory and
+your saved groups, and have it draft outreach emails for you to
+review and send.
 
 Example things you can ask:
 
 - *"How many fellows are based in Aotearoa?"*
-- *"Find the fellow who runs that climate finance fund — I forget the name."*
+- *"Find the fellow who runs that climate finance fund — I forget the
+  name."*
 - *"List my saved groups."*
 - *"Who's in my Climate Action group?"*
 - *"Draft an email to my Climate Action group inviting them to meet
-  Thursday at 1pm NZ time — don't send, just stage it for me to review."*
+  Thursday at 1pm NZ time — don't send, just stage it for me to
+  review."*
 
 Claude reads your **local** copy of the directory to answer. For the
 email demo, it hands the draft back to you as a pre-filled compose
@@ -26,313 +28,254 @@ This is optional. The Fellows app works perfectly well without it.
 
 You should already have:
 
-- The **Fellows Directory app** installed and working (you've used it, you have
-  groups).
+- The **Fellows Directory app** installed and working (you've used it,
+  you have groups saved).
 - **Claude Desktop** installed.
-- A Mac.
-- About 15 minutes.
+- A **data folder set up** in the Fellows app (Settings → Data folder
+  → Choose data folder…). See *[Where your data is stored](users_manual.md#where-your-data-is-stored)*.
+- About **5 minutes**.
 
-You'll also need **GitHub access** to download the project files — if you
-don't have it, ask Rich first.
+### Best with: Chrome, Edge, Brave, Arc on macOS
 
----
+The easy install path works on Chromium-family browsers (Chrome,
+Edge, Brave, Arc) running on macOS Sonoma 14 or newer. This is the
+combination that supports the data-folder feature the integration
+depends on.
 
-## What you're going to do (overview)
+**Safari and Firefox:** keep reading — there's a [secondary path](#secondary-path-safari-firefox-and-other-browsers)
+below. It works but needs a few extra steps.
 
-1. Download a small folder of connector files.
-2. Drop two copies of your data into that folder (the fellows directory
-   + your groups).
-3. Run one Terminal command to install the connector's helpers.
-4. Tell Claude Desktop where the folder lives.
-5. Quit and reopen Claude Desktop. Done.
-
-The connectors only run when Claude calls them. Nothing extra runs in
-the background.
-
----
-
-## Step 1 — Download the connector files
-
-1. Open <https://github.com/richbodo/fellows_local_db> in your browser.
-   (If you see "404 Not Found," ask Rich for repo access.)
-2. Click the green **Code** button → **Download ZIP**.
-3. Open the downloaded zip — it creates a folder called
-   `fellows_local_db-main` in your **Downloads** folder.
-4. In Finder, **drag that folder into your home folder** (the one with the
-   little house icon in the sidebar, named after you).
-5. **Rename** it from `fellows_local_db-main` to just `fellows_local_db`.
-
-When you're done, in Finder you should see a folder called
-`fellows_local_db` directly inside your home folder.
-
-> **What's my Mac username?** Open Finder → menu bar → **Go → Home**. The
-> window title is your username. You'll need it again in Step 4.
+**Already installed the Fellows app in two browsers on the same Mac?**
+Each browser has its own data store; see *[Multiple installs on the
+same device](users_manual.md#multiple-installs-on-the-same-device)*
+to consolidate before you set up Claude Desktop integration.
 
 ---
 
-## Step 2 — Copy your data into the folder
+## The 3-step easy path
 
-You need two data files: **the fellows directory** (everyone's profile)
-and **your private groups**.
+The Fellows app downloads three small extensions for Claude Desktop;
+Claude Desktop installs them with two clicks each. Total active time
+~3 minutes.
 
-### 2A. The fellows directory
+### Step 1 — Open Settings → "Set up Claude Desktop integration"
 
-1. Open your usual browser (whichever you signed into the Fellows app with).
-2. Go to <https://fellows.globaldonut.com/fellows.db>
-3. The browser downloads a file called `fellows.db`.
-   - If Safari asks whether to keep an unrecognized file type, click **Keep**.
-4. In Finder, move that `fellows.db` into the `app` subfolder of your
-   project folder. The final location should be:
+In the Fellows app:
 
-   `~/fellows_local_db/app/fellows.db`
+1. Click **Settings** (gear icon, or `#/settings`).
+2. Scroll to **Claude Desktop integration (beta)**.
+3. Click **Set up Claude Desktop integration**.
 
-   (i.e. Home → `fellows_local_db` → `app` → `fellows.db`)
+A dialog opens explaining what the three extensions do and previews
+the warning banner Claude Desktop will show during install (see
+*[About that red warning banner](#about-that-red-warning-banner)*
+below).
 
-If a `fellows.db` is already there, replace it.
+### Step 2 — Read the preamble, click Continue
 
-### 2B. Your private groups
+The dialog covers three extensions:
 
-1. Open the Fellows Directory app.
-2. Tap/click **Settings**.
-3. Click **Download a backup**.
-4. A file called `relationships.db` downloads.
-5. In Finder, move it into the **same** `app` subfolder:
+- **Fellows directory (Shared)** — Claude reads the public fellows
+  directory (names, bios, contact info).
+- **Your saved groups (Private)** — Claude reads your saved groups
+  and notes. *Privacy note*: this data is private to you and never
+  leaves your device through the Fellows app — but when Claude reads
+  it, it goes to Claude's servers. If that's not OK for you, skip
+  this extension and Claude will only have access to the directory.
+- **Email staging (Communications)** — Claude prepares draft emails
+  and hands them back to your mail app. Claude never sends mail
+  itself.
 
-   `~/fellows_local_db/app/relationships.db`
+When you click **Continue**, three `.mcpb` installer files download
+into your Downloads folder:
 
-If a `relationships.db` is already there, replace it.
+- `shared_data_ops.mcpb`
+- `private_data_ops.mcpb`
+- `comms.mcpb`
 
-> Whenever you make new groups in the app and want Claude to see them,
-> just redo this step.
+### Step 3 — Open each .mcpb, approve in Claude Desktop, restart
 
----
+For each of the three files:
 
-## Step 3 — Install the connector's helpers
+1. **Open the file** (Finder → double-click, or `Downloads → open`).
+   Claude Desktop pops up an Install dialog.
+2. **For `private_data_ops.mcpb` only**: the install dialog asks you
+   to pick a file. Navigate to your **data folder → Fellows →
+   `relationships.db`** and select it. (This is the file the
+   extension reads to find your saved groups; the data folder you
+   set up in *Before you start* is where it lives.)
+3. **Click Install**. Approve the red warning banner — see below.
 
-This is the only step that uses Terminal. We do it once.
+When all three are done:
 
-1. Open the **Terminal** app: press **⌘+Space**, type "Terminal", press Return.
-   A window opens with a `$` prompt.
-2. Copy this whole line, paste it into Terminal, press Return:
+4. **Quit Claude Desktop** (⌘Q) and reopen it. (This is the only
+   reliable way to get it to load freshly-installed extensions.)
+5. Open a new chat and ask: *"How many fellows are in the
+   directory?"*
 
-   ```
-   cd ~/fellows_local_db && python3 -m venv mcp_servers/.venv && mcp_servers/.venv/bin/pip install -r mcp_servers/requirements.txt
-   ```
-
-3. You'll see lines about downloading and installing. When the `$` prompt
-   comes back (usually under a minute), it's done.
-
-You can close Terminal now.
-
-> **If Terminal says `python3: command not found`:** macOS will pop up an
-> "Install Command Line Developer Tools" dialog. Click **Install**, wait
-> for it to finish (a few minutes), then rerun the command above. This
-> is a one-time Apple install — it's the developer toolkit Apple ships
-> for any program that needs Python.
-
----
-
-## Step 4 — Tell Claude Desktop where the connectors live
-
-1. Open **Claude Desktop**.
-2. Menu bar: **Claude → Settings…** → **Developer** tab → click
-   **Edit Config**.
-3. A text file opens in your default editor (TextEdit, usually).
-
-What you do next depends on what's already in the file.
-
-### If the file is empty or just shows `{}`
-
-Replace whatever's there with this — but **change `richbodo` to your own
-Mac username everywhere** (8 places):
-
-```json
-{
-  "mcpServers": {
-    "shared-data-ops": {
-      "command": "/Users/richbodo/fellows_local_db/mcp_servers/.venv/bin/python",
-      "args": [
-        "/Users/richbodo/fellows_local_db/mcp_servers/shared_data_ops.py",
-        "--db",
-        "/Users/richbodo/fellows_local_db/app/fellows.db"
-      ]
-    },
-    "private-data-ops": {
-      "command": "/Users/richbodo/fellows_local_db/mcp_servers/.venv/bin/python",
-      "args": [
-        "/Users/richbodo/fellows_local_db/mcp_servers/private_data_ops.py",
-        "--db",
-        "/Users/richbodo/fellows_local_db/app/relationships.db",
-        "--fellows-db",
-        "/Users/richbodo/fellows_local_db/app/fellows.db"
-      ]
-    },
-    "comms": {
-      "command": "/Users/richbodo/fellows_local_db/mcp_servers/.venv/bin/python",
-      "args": [
-        "/Users/richbodo/fellows_local_db/mcp_servers/comms.py"
-      ]
-    }
-  }
-}
-```
-
-Save the file (**⌘S**) and close the editor.
-
-### If the file already has stuff in it
-
-You'll see something like `{ "preferences": { … } }`. You need to **add**
-`mcpServers` as a second top-level item next to `preferences`.
-
-Step-by-step:
-
-1. Find the **last `}`** in the file. That's the outermost closing brace.
-2. Just **before** that final `}`, add a **comma** to the line above it
-   (if there isn't one already).
-3. Then paste this block (with `richbodo` changed to your Mac username
-   everywhere):
-
-   ```json
-   "mcpServers": {
-     "shared-data-ops": {
-       "command": "/Users/richbodo/fellows_local_db/mcp_servers/.venv/bin/python",
-       "args": [
-         "/Users/richbodo/fellows_local_db/mcp_servers/shared_data_ops.py",
-         "--db",
-         "/Users/richbodo/fellows_local_db/app/fellows.db"
-       ]
-     },
-     "private-data-ops": {
-       "command": "/Users/richbodo/fellows_local_db/mcp_servers/.venv/bin/python",
-       "args": [
-         "/Users/richbodo/fellows_local_db/mcp_servers/private_data_ops.py",
-         "--db",
-         "/Users/richbodo/fellows_local_db/app/relationships.db",
-         "--fellows-db",
-         "/Users/richbodo/fellows_local_db/app/fellows.db"
-       ]
-     },
-     "comms": {
-       "command": "/Users/richbodo/fellows_local_db/mcp_servers/.venv/bin/python",
-       "args": [
-         "/Users/richbodo/fellows_local_db/mcp_servers/comms.py"
-       ]
-     }
-   }
-   ```
-
-4. Save (**⌘S**) and close.
-
-> JSON is picky about commas and brackets. If Claude Desktop later says
-> the config has an error, the comma in step 2 is the most common
-> culprit. When in doubt, ask in the fellows channel — a screenshot of
-> the file goes a long way.
+If you get a count back, you're set up.
 
 ---
 
-## Step 5 — Quit and reopen Claude Desktop
+## About that red warning banner
 
-This part matters. Closing the window isn't enough — Claude Desktop
-keeps running.
+When you click **Install** in Claude Desktop, you'll see a red banner
+that says:
 
-1. With Claude Desktop in front, press **⌘Q** to fully quit.
-2. Wait a few seconds.
-3. Open Claude Desktop again.
+> "Installing will grant this extension access to everything on your
+> computer. Any developer information shown has not been verified by
+> Anthropic."
 
-To check the connectors loaded: **Claude → Settings… → Developer**. You
-should see three entries listed: `shared-data-ops`, `private-data-ops`,
-`comms`. If the page says "No servers added," go back to Step 4 — the
-config file didn't load. (Usually a missing comma, or `mcpServers` got
-nested inside `preferences` by accident instead of sitting next to it.)
+That banner fires for **any extension that isn't Anthropic-verified**
+— it's not specific to ours and doesn't mean anything is wrong with
+the Fellows integration. The extensions only read the data files
+they were configured with; they don't have wider access than you
+grant them in the install dialog.
 
----
-
-## Step 6 — Try it
-
-Start a new chat in Claude Desktop. Try these in order:
-
-1. *"How many fellows are in the directory?"* — confirms the directory
-   connector works.
-2. *"List my saved groups."* — confirms the groups connector works.
-3. *"Who's in my [your group name] group?"* — confirms the groups
-   connector can pull member details.
-4. *"Draft an email to my [your group name] group inviting them to meet
-   Thursday at 1pm NZ time. Don't send — stage it for me to review."* —
-   the flagship demo.
-
-**The first time** Claude wants to use a connector, it'll pop up a
-permission prompt asking you to approve the tool call. Read what it's
-about to do and click **Allow**. After the first time per connector,
-it won't ask again.
-
-For the email demo, Claude will hand you back a `mailto:` link. Clicking
-it opens your default mail app with **To**, **Subject**, and **Body**
-pre-filled. You review, edit, and click Send — Claude never sends mail
-itself.
+Click **Install** to proceed past the banner. This is tracked
+upstream as [issue #186](https://github.com/richbodo/fellows_local_db/issues/186)
+— we'd prefer a less alarming UX but it's Claude Desktop's
+load-bearing trust check, so it stays until Anthropic ships
+verification for community extensions.
 
 ---
 
-## If something doesn't work
+## Refreshing your data
 
-| Symptom | Most likely cause / fix |
-|---|---|
-| **"No servers added"** in Settings → Developer. | The config file didn't parse. Open it again, check that `mcpServers` is at the top level (a sibling of `preferences`, not nested inside it), and that every `{` has a matching `}` and every list of items is separated by commas. |
-| Claude says it can't find the directory or your groups. | Either you didn't fully quit Claude Desktop with ⌘Q, or one of the paths still has the placeholder `richbodo` in it instead of your Mac username. |
-| Claude tries to answer from memory and gets it wrong (e.g. wrong fellow count). | Ask again, more explicitly: *"Use the fellows database to count …"* Once it picks the connector up in a chat, it'll keep using it. |
-| Terminal in Step 3 said `python3: command not found`. | Click **Install** on the Command Line Developer Tools popup, wait for it to finish, rerun the command. |
-| Safari opens the `fellows.db` link as a page of gibberish instead of downloading. | Right-click (or Control-click) the link → **Download Linked File**. Or hold **Option** while clicking. |
-| Your groups in Claude look out of date. | Re-do Step 2B. The connectors read whatever was in your backup at the moment you exported it. |
-| Worked yesterday, broken today after a Claude Desktop update. | Quit and reopen Claude Desktop again. If still broken, re-check Step 4. |
+You don't need to redo this setup for normal updates. Three
+scenarios:
 
-If you're stuck, post in the fellows channel or email Rich — a screenshot
-of Claude Desktop's Developer settings panel and of your config file is
-the fastest way to get help.
+### You changed your saved groups
 
----
+Nothing to do. The **Your saved groups** extension reads
+`relationships.db` directly from your data folder. The Fellows app
+auto-saves to that folder whenever you change a group, so Claude
+sees your latest groups on its next read.
 
-## A note on privacy
+### The Fellows directory has new fellows
 
-When Claude Desktop uses these connectors, **the parts of your fellows
-data that Claude reads get sent to Claude's servers** (Anthropic's),
-because that's where Claude does its thinking. This is the same as if
-you'd copy-pasted that info into a Claude chat by hand — just easier to
-forget you're doing it.
+The Fellows app surfaces a *"Directory data update available"*
+status in the About page. When you click *Update directory data*,
+the app downloads a new `fellows.db`. **You'll also need to
+re-install the `shared_data_ops` extension** so Claude sees the new
+snapshot.
 
-- The **fellows directory** (names, bios, contact info) goes over the
-  network when you ask Claude about specific fellows.
-- Your **private groups** (names, members, any notes you've added) go
-  over the network when you ask Claude about your groups.
-- The **email connector** only stages a draft locally — but the email
-  body Claude writes was composed using the fellow info above, so the
-  same boundary applies.
+Settings → Claude Desktop integration (beta) shows a banner when
+this is needed:
 
-Nothing happens unless you ask. Claude only reads what it needs to
-answer the prompt you typed.
+> **Directory data update available.** A newer snapshot of the
+> public fellows directory is on the server. Re-install the Fellows
+> directory extension to pick it up.
 
-If a particular question feels too sensitive to send to Claude, just
-don't use Claude for that question — the Fellows app itself shows you
-the same info without any of it leaving your Mac.
+Click **Re-install Fellows directory** to download just
+`shared_data_ops.mcpb`. Open the file when it downloads to re-install
+in Claude Desktop, then restart Claude Desktop.
 
-You can disable any of the three connectors at any time in **Claude
-Desktop → Settings → Developer**.
+### You want to fully re-download everything
+
+Click **Re-download all extensions** in Settings → Claude Desktop
+integration (beta). Repeats Steps 2-3 above.
 
 ---
 
-## Updating later
+## Secondary path (Safari, Firefox, and other browsers)
 
-- **Newer fellows directory** (when Rich announces a directory update):
-  redo **Step 2A**.
-- **Newer copy of your groups** (any time you've added or changed groups
-  in the Fellows app): redo **Step 2B**.
-- **Newer connector tools** (when there are improvements to announce):
-  download the latest ZIP per **Step 1**, but before replacing the
-  folder, copy your `app/fellows.db` and `app/relationships.db` aside
-  so you can drop them back into the fresh `app/` subfolder. Then redo
-  **Step 3**.
+Safari and Firefox don't support the data-folder feature
+(`window.showDirectoryPicker`) the easy path depends on, so the file
+picker in Claude Desktop's `private_data_ops` install dialog has no
+stable location to land on. You can still set it up; you just need
+to manage the `relationships.db` file by hand.
+
+### Once-only setup
+
+1. In the Fellows app: **Settings → ⬇ Download my user data**.
+   Save the file somewhere stable on your disk — `~/Documents/`
+   works well. Note the file's location.
+2. Visit each of these URLs in turn while signed in to the Fellows
+   app (the magic-link gate must already be open in this browser):
+   - <https://fellows.globaldonut.com/mcpb/shared_data_ops.mcpb>
+   - <https://fellows.globaldonut.com/mcpb/private_data_ops.mcpb>
+   - <https://fellows.globaldonut.com/mcpb/comms.mcpb>
+
+   Each one downloads as an `.mcpb` file.
+3. Follow **Step 3** of the easy path above (open each, approve,
+   restart Claude Desktop). For `private_data_ops.mcpb`'s file
+   picker, navigate to wherever you saved `relationships.db` in
+   step 1.
+
+### Re-export discipline
+
+**Every time you change a group**, you need to redo step 1 (download
+your user data, save it over the previous `relationships.db`).
+Otherwise Claude sees the version that was current at install time.
+
+The Chromium easy path doesn't have this problem because the data
+folder *is* `relationships.db` — auto-save handles it. If you find
+yourself doing this re-export more than once or twice a week, the
+honest answer is: try the Fellows app in Chrome instead. See
+*[Migrating from another browser](users_manual.md#migrating-from-another-browser)*
+for how to bring your data along.
 
 ---
 
-For developers / curious readers: the technical reference for these
-connectors (what tools each one exposes, where the typed contracts
-live, how to run them standalone) is in
-[`../mcp_servers/README.md`](../mcp_servers/README.md).
+## Troubleshooting
+
+### Claude Desktop doesn't see my groups
+
+Most likely cause: `private_data_ops.mcpb` was pointed at the wrong
+`relationships.db` during install (or you're on the secondary path
+and your exported file is stale).
+
+1. In Claude Desktop: **Settings → Extensions**. Find *Your saved
+   groups* (or `private_data_ops`).
+2. Confirm the **Configuration** field points at the
+   `relationships.db` from your current data folder (Chromium) or
+   your latest export (Safari/Firefox).
+3. If wrong, uninstall and re-run the appropriate setup step.
+
+### "Extension failed to start"
+
+Usually means Claude Desktop's bundled Node runtime had trouble
+loading the extension. Quit Claude Desktop fully (⌘Q, then check
+Activity Monitor for stray processes), reopen, and try again. If
+that doesn't help, file a bug report from the Fellows app
+(Settings → Report a bug…); the diagnostics include your
+[install name](users_manual.md#install-name) so the maintainer can
+correlate.
+
+### I'm not sure which install of the Fellows app I'm using
+
+Check the **About** page — it shows the install name
+(`giraffe-gorilla-mouse` or similar). See *[Install name](users_manual.md#install-name)*.
+
+### Other issues
+
+The integration is in beta — if something doesn't work and isn't
+covered above, file a [GitHub issue](https://github.com/richbodo/fellows_local_db/issues)
+or use the in-app **Report a bug** button.
+
+---
+
+## What gets installed where
+
+For the curious (or for cleanup):
+
+- The three `.mcpb` files unpack into Claude Desktop's internal
+  extensions directory. **Settings → Extensions** in Claude Desktop
+  lists them with **Uninstall** buttons.
+- `relationships.db` lives in **your data folder** (Chromium easy
+  path) or wherever you saved it (Safari/Firefox secondary path).
+  Uninstalling Claude Desktop doesn't touch this file — it's yours.
+- `fellows.db` ships **inside** `shared_data_ops.mcpb` (~3 MB).
+  Uninstalling that extension removes it.
+- No environment variables, no Terminal commands, no
+  hand-edited config files. The `claude_desktop_config.json` flow
+  the previous version of this doc used is gone.
+
+---
+
+## Removing the integration
+
+**Settings → Extensions** in Claude Desktop → click **Uninstall** on
+each of the three extensions. That fully removes them. Your data
+folder is untouched.
