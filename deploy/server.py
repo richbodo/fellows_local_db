@@ -141,7 +141,14 @@ class Handler(SimpleHTTPRequestHandler):
         ".json": "application/json; charset=utf-8",
         ".wasm": "application/wasm",
         ".db": "application/octet-stream",
+        ".mcpb": "application/octet-stream",
     }
+
+    # Whitelist of MCP bundles served from DIST_DIR/mcpb/<name>.mcpb.
+    # Mirrors mcpb/node/manifests/ — adding a new bundle means updating
+    # this set in lockstep. Defensive against directory traversal even
+    # though urllib's path-strip already collapses ``..`` segments.
+    MCPB_NAMES = frozenset({"comms", "shared_data_ops", "private_data_ops"})
 
     def log_message(self, format, *args):
         sys.stdout.write(
@@ -339,6 +346,14 @@ class Handler(SimpleHTTPRequestHandler):
                     )
                 return
 
+        # MCP bundle download. Handled explicitly (rather than falling
+        # through to super().do_GET()'s static serving) so we control
+        # the whitelist, Content-Disposition, and a clean stderr log
+        # line for download correlation.
+        if path.startswith("/mcpb/") and path.endswith(".mcpb"):
+            self._serve_mcpb_download(path)
+            return
+
         conn = sq.connect(DB_PATH) if DB_PATH.is_file() else None
 
         if conn is not None:
@@ -372,6 +387,66 @@ class Handler(SimpleHTTPRequestHandler):
                 conn.close()
 
         super().do_GET()
+
+    def _serve_mcpb_download(self, path: str) -> None:
+        """Stream a `.mcpb` bundle from ``DIST_DIR/mcpb/<name>.mcpb``.
+
+        Whitelist-gated: only the three names declared in
+        ``MCPB_NAMES`` are valid. Anything else 404s without disclosing
+        whether the file would exist. Same posture as `/fellows.db` —
+        callers must hold a valid session when ``AUTH_ACTIVE`` is True;
+        the gate check upstream of this method has already enforced
+        that. Plan: ``plans/easy_mcp_install.md`` § 4.
+        """
+        # path is `/mcpb/<name>.mcpb` (caller guard ensures the
+        # prefix/suffix). Strip both, leaving the bare name.
+        name = path[len("/mcpb/"):-len(".mcpb")]
+        if name not in self.MCPB_NAMES:
+            self.send_error(HTTPStatus.NOT_FOUND, "Not Found")
+            return
+        file_path = DIST_DIR / "mcpb" / f"{name}.mcpb"
+        try:
+            stat = file_path.stat()
+        except OSError:
+            self.send_error(HTTPStatus.NOT_FOUND, "Not Found")
+            return
+        size = stat.st_size
+        print(
+            json.dumps(
+                {
+                    "event": "mcpb_download",
+                    "name": name,
+                    "size_bytes": size,
+                    "user_agent": (self.headers.get("User-Agent") or "")[:240],
+                }
+            ),
+            file=sys.stderr,
+        )
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header(
+            "Content-Disposition",
+            f'attachment; filename="{name}.mcpb"',
+        )
+        self.send_header("Content-Length", str(size))
+        # Each download is auth-gated and stamps a fresh log line; no
+        # public proxy / shared cache should retain a copy.
+        self.send_header("Cache-Control", "private, no-store")
+        self._security_headers()
+        self._telemetry_headers()
+        self.end_headers()
+        try:
+            with file_path.open("rb") as fh:
+                while True:
+                    chunk = fh.read(64 * 1024)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+        except (OSError, ConnectionError):
+            # Client may close mid-transfer (common when Claude Desktop
+            # picks up the file then the browser tab navigates). Nothing
+            # to do but stop streaming.
+            return
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)

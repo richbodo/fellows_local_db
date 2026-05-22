@@ -560,6 +560,13 @@ def is_protected_data_path(path: str) -> bool:
         return True
     if path.startswith("/images/"):
         return True
+    # MCP bundle downloads — same posture as /fellows.db. The bundles
+    # carry `fellows.db` (in shared-data-ops.mcpb) and the cross-DB
+    # ATTACH wiring (in private-data-ops.mcpb), so an unauthenticated
+    # download would defeat the same gate that /fellows.db protects.
+    # See plans/easy_mcp_install.md § 4 and § 8.
+    if path.startswith("/mcpb/") and path.endswith(".mcpb"):
+        return True
     return False
 
 
