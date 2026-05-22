@@ -1544,6 +1544,58 @@ h1 {
   cursor: pointer;
 }
 
+/* Folder-push banner — shown to capable browsers in OPFS-only mode
+   to encourage picking a data folder. Hidden once a folder is picked
+   or once the user dismisses for the session. Yellow/warning palette
+   to distinguish from the blue sw-update-banner. */
+.folder-push-banner {
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+  background: #fff7e6;
+  color: #6b4500;
+  border: 1px solid #f3d8a0;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.folder-push-banner.hidden { display: none; }
+
+.folder-push-banner-text { flex: 1 1 280px; min-width: 0; }
+.folder-push-banner-text strong { font-weight: 600; margin-right: 0.25rem; }
+
+.folder-push-banner-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.folder-push-cta,
+.folder-push-dismiss {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.folder-push-cta {
+  border: 1px solid #6b4500;
+  background: #6b4500;
+  color: #fff;
+  font-weight: 500;
+}
+
+.folder-push-dismiss {
+  border: 1px solid #c2a36b;
+  background: transparent;
+  color: #6b4500;
+}
+
 .about-support {
   margin-top: 1rem;
   font-size: 0.95rem;

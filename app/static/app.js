@@ -8207,6 +8207,83 @@
   // Exposed for tests + diag panel.
   window.__folderController = FOLDER_CONTROLLER;
 
+  // ===== Folder-push banner (Phase 2 PR 3) =================================
+  // Top-of-page banner that surfaces to capable browsers in OPFS-only mode,
+  // pushing the user to pick a data folder. Hidden when:
+  //   - The browser doesn't support showDirectoryPicker (Safari, Firefox,
+  //     iOS) — the user manual explains the OPFS-only fallback for them.
+  //   - A folder is already picked (folderRecord.parentHandle present).
+  //   - The user clicked "Not now" this session (sessionStorage flag —
+  //     re-appears on next browser session).
+  // Re-evaluated after any folder operation via wireFolderSection's
+  // renderState hook + on an initial post-boot delay so the worker has
+  // time to load folderRecord from IDB.
+  var FOLDER_PUSH_DISMISS_KEY = 'fellows_folder_push_dismissed';
+
+  function isFolderPushDismissed() {
+    try { return sessionStorage.getItem(FOLDER_PUSH_DISMISS_KEY) === '1'; }
+    catch (e) { return false; }
+  }
+
+  function refreshFolderPushBanner() {
+    var bannerEl = document.getElementById('folder-push-banner');
+    if (!bannerEl) return;
+    if (isFolderPushDismissed()) {
+      bannerEl.classList.add('hidden');
+      return;
+    }
+    if (!FOLDER_CONTROLLER) {
+      bannerEl.classList.add('hidden');
+      return;
+    }
+    FOLDER_CONTROLLER.getState().then(function (state) {
+      // Hide for: incapable browser, worker not yet ready (avoids flash),
+      // or folder already picked. Show otherwise (i.e., capable + OPFS-only).
+      if (!state.supported || !state.workerAvailable || state.hasHandle) {
+        bannerEl.classList.add('hidden');
+        return;
+      }
+      bannerEl.classList.remove('hidden');
+    }).catch(function () {
+      bannerEl.classList.add('hidden');
+    });
+  }
+
+  (function bindFolderPushBanner() {
+    var ctaBtn = document.getElementById('folder-push-cta');
+    var dismissBtn = document.getElementById('folder-push-dismiss');
+    if (ctaBtn) {
+      ctaBtn.addEventListener('click', function () {
+        // Navigate to Settings → focus the Data folder section so the
+        // user lands on the Choose button. Use a small post-hashchange
+        // delay so the section markup is mounted before scrolling.
+        location.hash = '#/settings';
+        setTimeout(function () {
+          var section = document.getElementById('settings-folder-section');
+          var chooseBtn = document.getElementById('settings-folder-choose');
+          if (section) section.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          if (chooseBtn) {
+            try { chooseBtn.focus(); } catch (e) {}
+          }
+        }, 200);
+      });
+    }
+    if (dismissBtn) {
+      dismissBtn.addEventListener('click', function () {
+        try { sessionStorage.setItem(FOLDER_PUSH_DISMISS_KEY, '1'); }
+        catch (e) {}
+        var bannerEl = document.getElementById('folder-push-banner');
+        if (bannerEl) bannerEl.classList.add('hidden');
+      });
+    }
+    // Initial evaluation. The worker may still be initializing — that
+    // case returns workerAvailable:false and the banner stays hidden.
+    // Subsequent re-evaluations happen on Settings page render and on
+    // a small delay below as a safety net for users who never open
+    // Settings.
+    setTimeout(refreshFolderPushBanner, 1500);
+  })();
+
   // ===== Settings page (PR 5) ==============================================
 
   function renderSettingsPage() {
@@ -8760,6 +8837,10 @@
       showBtn(btnRefresh,    supported && b === 'saved');
       showBtn(btnReconnect,  supported && b === 'inaccessible');
       showBtn(btnDisconnect, supported && state.hasHandle);
+      // Cascade: state change here may also affect whether the top-of-
+      // page folder-push banner is visible (e.g., user just picked a
+      // folder → badge becomes 'saved' → banner should hide).
+      refreshFolderPushBanner();
     }
 
     function refresh() {
