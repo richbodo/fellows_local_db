@@ -115,7 +115,7 @@ class TestAboutUpdateCheck:
         try:
             _route_build_meta(context, git_sha="abc123")
             page.goto(base_url_fixture + "/#/about", wait_until="domcontentloaded")
-            link = page.get_by_role("link", name="User Guide")
+            link = page.get_by_role("link", name="Help from the user manual")
             expect(link).to_be_visible()
             expect(link).to_have_attribute(
                 "href",

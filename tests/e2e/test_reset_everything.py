@@ -91,6 +91,13 @@ class TestResetEverythingBackupPrompt:
         page.add_init_script(
             "window.localStorage.setItem('fellows_authenticated_once', '1');"
         )
+        # Force downloadBlob's anchor-fallback path so page.expect_download
+        # fires. See the matching stub in tests/e2e/conftest.py's
+        # _STANDALONE_DISPLAY_INIT for the longer rationale.
+        page.add_init_script(
+            "try { delete window.showSaveFilePicker; }"
+            " catch (e) { window.showSaveFilePicker = undefined; }"
+        )
         page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
         page.locator("#loading").wait_for(state="hidden", timeout=10000)
         return page
