@@ -108,36 +108,30 @@ directory.
 Your groups, notes, and settings live **on your device only** —
 never sent to any server, never visible to other apps or websites.
 
-There are two places they can sit, and you choose which:
+**The recommended setup is a data folder on your disk** — a real
+file at a path you pick, visible in Finder/Explorer, durable across
+clearing site data or switching browsers. The app prompts you to
+set this up via a banner at the top of the screen on first launch.
 
-1. **In your browser** (default). The data file (`relationships.db`)
-   lives in a private storage area your browser manages. Survives
-   updates and **Clear App Cache**, but you can't see the file from
-   Finder/Explorer, and clearing site data or switching browsers
-   wipes it.
-2. **In a folder on your disk** (Settings → *Data folder*). A real
-   file at a path you pick — visible in Finder/Explorer, copyable,
-   syncable through Dropbox / iCloud Drive / Syncthing if you put it
-   there, durable across clearing site data or switching browsers.
-   Available in Chrome / Edge / Brave / Arc on desktop today.
-
-The browser is always your **working store** either way — that's
-where the app reads and writes during use. When you pick a data
-folder, the app keeps a copy of your data there too and updates it
-when you click *Save now*.
+If you skip the prompt or you're on a browser that doesn't support
+folder selection (Safari, Firefox, iOS, Android), the app falls
+back to **browser-only mode** — your data still works, but it lives
+in private browser storage that can be lost when you clear site
+data or switch browsers. Use the **Download a backup** feature
+(below) to make file copies you can save anywhere.
 
 ### Setting up a data folder (Chrome / Edge / Brave on desktop)
 
-1. Go to **Settings → Data folder**.
-2. Click **Choose data folder…**.
-3. Your OS pops a folder picker. Pick any folder you like —
+1. Click **Set up data folder** on the banner at the top of the app
+   (or go to **Settings → Data folder** → **Choose data folder…**).
+2. Your OS pops a folder picker. Pick any folder you like —
    `Documents`, a Dropbox / iCloud / Syncthing folder, anywhere.
-4. The app creates a `Fellows/` subfolder inside it and saves
+3. The app creates a `Fellows/` subfolder inside it and saves
    `relationships.db` there.
 
 The badge at the top of the section flips to **Saved** with the
 path and a timestamp, and your data is now a real file you can
-browse to.
+browse to. The banner at the top of the screen disappears.
 
 **If `Fellows/` already exists in the folder you picked**, the app
 asks before doing anything: open the existing data (the typical
@@ -146,11 +140,18 @@ folder), or save your current data into a new `Fellows 2/`
 subfolder (the safe choice when you don't recognize what's there).
 Cancel leaves both untouched.
 
-After setup, every time you make changes you'll see the *Save now*
-button. (Phase 1 is manual save; automatic background sync ships
-in Phase 2.) **Refresh from folder** does the reverse: replace the
-browser's copy with whatever's currently in the folder — useful
-after editing in another browser or restoring a synced file.
+After setup, **every change you make is automatically saved to the
+folder** — no Save button to remember. You'll see the badge update
+each time. The *Save now* button stays as a manual retry if a write
+ever fails (badge flips to *Last save failed*). **Refresh from
+folder** does the reverse: replace your working data with whatever's
+currently in the folder — useful after editing in another browser
+or restoring a synced file.
+
+Backups (the `relationships.db.bak.<timestamp>` files in the same
+`Fellows/` subfolder) are also automatic — the app keeps the most
+recent few alongside the live file. Visible in Finder so you can
+copy them out if you want extra safety.
 
 ### Badge states
 

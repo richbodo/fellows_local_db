@@ -508,6 +508,113 @@ class TestPhase2Pivot:
             f"folder bak files: {probe['folderBackupNames']!r}"
         )
 
+    def test_folder_push_banner_appears_until_folder_picked(
+        self, folder_page, base_url_fixture
+    ):
+        """The top-of-page banner pushes capable-browser OPFS-only users
+        to pick a data folder. Phase 2 PR 3 (settings UI push).
+
+        On a fresh load with no folder handle, banner is visible.
+        After picking a folder it hides immediately (Settings page's
+        renderState cascade calls refreshFolderPushBanner).
+
+        Note: the banner has an initial 1.5s delay so the worker has
+        time to report workerAvailable=true. Test waits for that.
+
+        Uses the page state established by the folder_page fixture —
+        no re-navigation, which would trigger an OPFS-pool ownership
+        conflict against the still-warm worker.
+        """
+        folder_page.wait_for_function(
+            "() => document.getElementById('folder-push-banner') !== null",
+            timeout=10000,
+        )
+        banner = folder_page.locator("#folder-push-banner")
+        # Wait for the initial-load delayed evaluation to fire and the
+        # banner to become visible. The banner reads
+        # window.__folderController.getState() which returns
+        # workerAvailable=false until init completes; in this fixture
+        # the worker provider is already up (the fixture asserts it),
+        # so once the 1.5s setTimeout fires the banner appears.
+        # Wait for the banner to NOT have the hidden class (it has other
+        # classes too — folder-push-banner — so to_have_class can't be
+        # used for "contains hidden"; use a wait_for_function instead).
+        folder_page.wait_for_function(
+            "() => { var el = document.getElementById('folder-push-banner');"
+            "        return el && !el.classList.contains('hidden'); }",
+            timeout=10000,
+        )
+        # Both buttons are present.
+        expect(folder_page.locator("#folder-push-cta")).to_be_visible()
+        expect(folder_page.locator("#folder-push-dismiss")).to_be_visible()
+        # Pick a folder via the Settings UI. This is the same flow a
+        # user would follow after clicking the banner CTA.
+        _open_settings(folder_page, base_url_fixture)
+        folder_page.locator("#settings-folder-choose").click()
+        badge_text = folder_page.locator("#settings-folder-badge .settings-folder-badge-text")
+        expect(badge_text).to_contain_text("Saved to", timeout=10000)
+        # The Settings page's renderState cascades to refreshFolderPushBanner;
+        # banner should now be hidden.
+        folder_page.wait_for_function(
+            "() => { var el = document.getElementById('folder-push-banner');"
+            "        return el && el.classList.contains('hidden'); }",
+            timeout=5000,
+        )
+
+    def test_folder_push_banner_dismiss_persists_within_session(
+        self, folder_page, base_url_fixture
+    ):
+        """'Not now' sets a sessionStorage flag; the banner stays hidden
+        for the rest of the browser session even on reload. Re-appearing
+        after browser close is the next-session behavior (out of scope
+        for sessionStorage-based testing).
+        """
+        folder_page.wait_for_function(
+            "() => { var el = document.getElementById('folder-push-banner');"
+            "        return el && !el.classList.contains('hidden'); }",
+            timeout=10000,
+        )
+        folder_page.locator("#folder-push-dismiss").click()
+        # Hides immediately on dismiss.
+        folder_page.wait_for_function(
+            "() => { var el = document.getElementById('folder-push-banner');"
+            "        return el && el.classList.contains('hidden'); }",
+            timeout=2000,
+        )
+        # Reload — sessionStorage survives reload-within-the-same-tab.
+        folder_page.reload(wait_until="domcontentloaded")
+        folder_page.wait_for_function(
+            "() => document.getElementById('folder-push-banner') !== null",
+            timeout=10000,
+        )
+        # Give the initial-load setTimeout a chance to fire. Banner
+        # should still be hidden because the sessionStorage flag is set.
+        folder_page.wait_for_timeout(2000)
+        assert folder_page.evaluate(
+            "() => document.getElementById('folder-push-banner').classList.contains('hidden')"
+        ), "banner should remain hidden across reload-within-session"
+
+    def test_folder_push_banner_cta_navigates_to_settings(
+        self, folder_page, base_url_fixture
+    ):
+        """Clicking 'Set up data folder' navigates to #/settings and the
+        Data folder section becomes visible (the user lands on the
+        actionable surface).
+        """
+        folder_page.wait_for_function(
+            "() => { var el = document.getElementById('folder-push-banner');"
+            "        return el && !el.classList.contains('hidden'); }",
+            timeout=10000,
+        )
+        folder_page.locator("#folder-push-cta").click()
+        # Hash navigation happens synchronously; verify we landed in
+        # Settings + the Data folder section is now visible.
+        folder_page.wait_for_function(
+            "() => window.location.hash === '#/settings'", timeout=5000
+        )
+        expect(folder_page.locator("#settings-folder-section")).to_be_visible(timeout=5000)
+        expect(folder_page.locator("#settings-folder-choose")).to_be_visible()
+
     def test_opfs_only_mode_keeps_backups_in_opfs(
         self, folder_page, base_url_fixture
     ):
