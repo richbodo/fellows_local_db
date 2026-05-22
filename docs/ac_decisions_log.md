@@ -18,6 +18,58 @@ link to the newer entry. Newest first.
 
 ---
 
+## 2026-05-22 — User-folder storage uses pure-folder semantics for folder-mode users, not a hybrid OPFS+folder mirror
+
+**Why this is worth recording.** The original `plans/user_folder_storage.md` (and the Phase 1 code shipped in #181) was built on a **hybrid** model: OPFS is the working store, the user's folder is a debounced mirror, and the worker synchronizes them after every committed mutation. A future contributor reading that code — particularly the auto-sync timers, the `markRelationshipsDirty` hook the plan was about to add in Phase 2, and the boot-time "read folder into OPFS" path — would reasonably conclude this is the canonical design and continue extending it. **It is not.** Phase 2 was the moment to pivot to pure-folder, because the hybrid's sync complexity buys us nothing at our DB scale and introduces a silent-data-loss failure mode.
+
+**Context.** During the Phase 2 (auto-sync) scoping conversation on 2026-05-22, the question came up: *"is the hybrid model genuinely more reliable and less complex than a pure folder model, given the trajectory of the project?"* Walking through the failure modes carefully, we found one that hadn't surfaced in the original plan review:
+
+1. User makes a mutation. OPFS commit succeeds. Debounced sync to folder scheduled.
+2. Within the debounce window (500 ms), folder permission briefly lapses (system sleep, app eviction, parent folder temporarily unmounted by a sync service, etc.). Sync fires, fails. `folderRecord.lastError` is set; OPFS now has new data that the folder does not.
+3. User closes the tab — or the browser crashes — before noticing the badge state.
+4. User re-opens. The plan's documented boot sequence reads `relationships.db` from the folder (the "Saved" semantics treat the folder as canonical), copies it into OPFS, **overwriting the unsaved OPFS data**.
+5. The user's recent mutations are silently gone, with no error indication.
+
+The bug is structural to the hybrid model — two storage substrates plus async sync means there are scenarios where the "less authoritative" copy quietly wins. Patching the boot sequence to detect divergence is *more* code paths, not fewer. And we found this bug in a half-hour conversation; production was likely to surface others.
+
+The hybrid model was chosen in the original plan because the canonical fast SQLite-wasm VFS (`OpfsSAHPoolVfs`) requires OPFS-resident `FileSystemSyncAccessHandle`s — folder files only expose async handles. Two arguments dismissed the pure-folder alternatives: (1) async-VFS is slow (Asyncify shim makes every read yield), (2) in-memory + rewrite-whole-file is "correctness risk on crash, thrashes the OS file cache." Both arguments are correct for medium/large databases. They do not apply at our scale (`relationships.db` is currently 98 KB and unlikely to exceed a few MB lifetime; mutations are user-paced, not high-frequency; storage I/O is not on any hot path). The browser's `FileSystemWritableFileStream.close()` is atomic per spec, so whole-file rewrite is crash-safe.
+
+**Alternatives considered.**
+
+1. **Hybrid OPFS + debounced folder sync** (the original plan). Performance preserved via sync-access handles. Cost: every divergence scenario must be reasoned about; silent-data-loss path exists; sync timers + dirty marker + in-flight guard + last-error tracking + boot-time divergence handling is real ongoing complexity. **Rejected.**
+
+2. **Pure folder via async-VFS** (Asyncify, async file handles). Single source of truth. Cost: Asyncify performance hit (2-5x slower in synthetic benchmarks), need to write/maintain a custom VFS, File System Access API's `FileSystemWritableFileStream` doesn't expose random-access writes (which standard SQLite expects), so it would effectively rewrite the whole file on close anyway. **Rejected — same I/O behavior as option 3 with more code complexity.**
+
+3. **Pure folder via mem-VFS + atomic full-file rewrite on commit.** Worker boots, reads folder file, `sqlite3_deserialize` into an in-memory DB. All reads/writes against the mem-DB synchronously. On committed mutation, `sqlite3_serialize` to bytes and atomic write to folder. Boot reads folder; close discards mem-DB. One source of truth (the folder), one storage path per session, no sync state, no divergence possible. Cost: per-mutation latency includes a whole-file folder write (sub-millisecond for our DB sizes). **Chosen.**
+
+For users without folder picker support (Safari, Firefox, iOS, Android where the picker is unreliable), today's OPFS-resident SAH-pool VFS remains the path. Those users have one source of truth too (OPFS), with backup-to-Downloads as their durability story. The pivot does NOT introduce a hybrid for them — it preserves their existing single-source-of-truth model.
+
+**Decision.** Phase 2 of `plans/user_folder_storage.md` pivots from "automatic debounced sync from OPFS to folder" to "swap the worker's VFS based on folder-handle presence: pure folder for folder-mode users, OPFS-only for the rest." Two storage modes, decided at boot per session. No sync between them.
+
+**Consequences.**
+
+- Pro: silent-data-loss failure mode eliminated. Every storage failure is either prevented or surfaces as a visible "your last change wasn't saved" UI state.
+- Pro: the folder file is the truth at all times for folder-mode users. External readers (MCP servers, command-line `sqlite3`, manual `cp`, sync services) can rely on it without "is the folder current?" reasoning.
+- Pro: dramatically simpler state machine in the worker. No sync timers, no dirty marker, no in-flight guard, no debounce, no last-sync-attempt tracking, no divergence detection.
+- Pro: Phase 1's UI/permission/IDB surface (~540 lines) survives intact. Phase 1's `writeRelationshipsToFolder` becomes the per-commit write path.
+- Pro: trajectory fit — MCP install plan (`plans/easy_mcp_install.md`) can anchor on the folder path as a current, authoritative file. Future multi-client support (Cursor, Continue, Ollama, etc.) inherits the same anchor.
+- Con: per-mutation latency now includes a folder write. For our DB sizes this is sub-millisecond; if `relationships.db` ever grows past several MB it becomes user-visible, at which point caching/incremental-write strategies become an optimization play. Not a v1 concern.
+- Con: in-memory mutation lost on tab crash is an HONEST failure mode (the user knows their change wasn't saved) rather than a SILENT one (the change appeared to save but didn't). This is the same posture as any non-syncing draft editor and is materially better than the hybrid's silent-divergence risk.
+- Con: requires a one-time migration for Phase 1 users with both OPFS and folder state. Designed in the Phase 2 implementation spec.
+- Con: Phase 2's engineering effort is ~1.5x the originally-scoped auto-sync work, because the worker's data path is genuinely rewritten. Phase 1 UI stays.
+
+**Auto-backup ring**: lives in the user's folder for folder-mode users (`<parent>/Fellows/relationships.db.bak.<ISO>` siblings of `relationships.db`). Visible in Finder, comforting to users. OPFS-only-mode users keep today's OPFS-resident auto-backup ring. There is no auto-backup-in-OPFS for folder-mode users — one place per user, by design.
+
+**OPFS-only users in the long term**: get a degraded experience (no MCP integration, no external visibility, browser-data-wipe-loses-everything). This is acceptable v2 floor; when those users want richer integration they switch browsers or get migrated to a future app variant. Out of scope for this decision.
+
+**Links.**
+
+- [`plans/user_folder_storage.md`](../plans/user_folder_storage.md) — the parent plan; § Architecture rewritten to reflect this decision.
+- [`plans/easy_mcp_install.md`](../plans/easy_mcp_install.md) — § 5 OPFS handoff resolution becomes "folder anchor" once this lands.
+- The full architectural analysis lives in the conversation that produced this entry (PR description for the plan-revision PR).
+
+---
+
 ## 2026-05-21 — `.mcpb` bundles do not ship native Node dependencies
 
 **Why this is worth recording.** A future contributor adding the
