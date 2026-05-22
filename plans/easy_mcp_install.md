@@ -347,6 +347,38 @@ multiple browsers:
 | Two Chromium browsers (Chrome + Brave) on the same folder | Both browsers' OPFS buffers diverge from the folder file; both write atomically; last-write-wins. **Single-writer assumption per [`plans/user_folder_storage.md` § Non-goals](./user_folder_storage.md). Real data loss possible.** Don't share folders across browsers in one session. |
 | Two Chromium browsers on DIFFERENT folders | Each browser has its own folder + its own data. No conflict, but also no sync. Same export-from-A → import-into-B recipe to consolidate. |
 
+### macOS Spotlight: multiple installs = multiple identical entries
+
+A related practical wrinkle for the Mac users in the test group: each
+browser's PWA install creates a separate `.app` bundle on disk, and
+Spotlight indexes them all under the same display name (`EHF Fellows
+Directory`) with the same manifest icon. The user can't visually tell
+them apart.
+
+| Browser | `.app` location on macOS |
+|---|---|
+| Safari (macOS 14+, *File → Add to Dock*) | `~/Applications/EHF Fellows Directory.app` |
+| Chrome (*Install app…*) | `~/Applications/Chrome Apps/EHF Fellows Directory.app` |
+| Edge (Chromium) | `~/Applications/Edge Apps/EHF Fellows Directory.app` |
+| Brave | `~/Applications/Brave Apps/EHF Fellows Directory.app` |
+| Arc | varies (often inside Arc's library folder under *Save as App*) |
+| Firefox | **no `.app` created** — Firefox dropped PWA install on desktop in 2021 ([bug 1748503](https://bugzilla.mozilla.org/show_bug.cgi?id=1748503)). Just a bookmark/tab. |
+
+A fellow who installs in Safari + Chrome sees **two identical
+results** in Spotlight when they search "EHF" or "Fellows
+Directory." Spotlight ranks by MRU + alphabetical fallback; new
+users often click the wrong one on first try and see an empty
+state — which they then mistake for data loss.
+
+**We can't distinguish the bundles per browser** — `manifest.webmanifest`
+is one URL the server serves; the bundle name is baked in at
+install time from `name` in that manifest; there's no API to
+differentiate per-browser at manifest-fetch time without breaking
+caching. The user-facing mitigation is the same as the cross-
+browser silo mitigation: document it + recommend one browser.
+Power users can right-click → Rename the bundle in Finder for
+clarity.
+
 ### What we DO (and don't) build to mitigate this
 
 **Build** (Phase 2-follow-up scope — separate small PR after this
