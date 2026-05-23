@@ -45,6 +45,23 @@ def _make_standalone_page(context):
     return page
 
 
+def _wait_for_boot_settled(page, timeout_ms: int = 15000) -> None:
+    """Wait for the directory boot path to complete both ``route()``
+    calls — once after ``getList`` and once after ``getFull``. Without
+    this, the ``getFull``-triggered ``route()`` can re-render
+    ``renderAboutPage`` mid-test, overwriting ``paintAppRow``'s output
+    with the initial markup (build labels, no status suffix) and
+    making this suite intermittently fail.
+
+    The 300 ms ``wait_for_timeout`` the suite used to rely on caught
+    the first re-render but not the second.
+    """
+    page.wait_for_function(
+        "() => window.__bootMarks && window.__bootMarks.get_full_done != null",
+        timeout=timeout_ms,
+    )
+
+
 class TestAboutUpdateCheck:
     """About-page "Check for updates" flow."""
 
@@ -53,8 +70,7 @@ class TestAboutUpdateCheck:
         try:
             _route_build_meta(context, git_sha="abc123")
             page.goto(base_url_fixture + "/#/about", wait_until="domcontentloaded")
-            # Let the boot fetch land and populate bootBuildMeta.
-            page.wait_for_timeout(300)
+            _wait_for_boot_settled(page)
 
             btn = page.locator("#about-check-updates")
             expect(btn).to_be_visible()
@@ -72,7 +88,7 @@ class TestAboutUpdateCheck:
         try:
             _route_build_meta(context, git_sha="abc123")
             page.goto(base_url_fixture + "/#/about", wait_until="domcontentloaded")
-            page.wait_for_timeout(300)
+            _wait_for_boot_settled(page)
 
             # A newer build is now live — re-arm the mock with a different sha.
             context.unroute(BUILD_META_PATH)
@@ -93,7 +109,7 @@ class TestAboutUpdateCheck:
         try:
             _route_build_meta(context, git_sha="abc123")
             page.goto(base_url_fixture + "/#/about", wait_until="domcontentloaded")
-            page.wait_for_timeout(300)
+            _wait_for_boot_settled(page)
 
             # Simulate server outage on the manual check.
             context.unroute(BUILD_META_PATH)
@@ -115,6 +131,7 @@ class TestAboutUpdateCheck:
         try:
             _route_build_meta(context, git_sha="abc123")
             page.goto(base_url_fixture + "/#/about", wait_until="domcontentloaded")
+            _wait_for_boot_settled(page)
             link = page.get_by_role("link", name="Help from the user manual")
             expect(link).to_be_visible()
             expect(link).to_have_attribute(
