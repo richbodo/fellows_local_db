@@ -3455,31 +3455,6 @@ a.group-action-btn--primary {
   margin: 0 0 0.5rem;
 }
 
-.settings-mcpb-post-install {
-  margin-top: 1rem;
-  padding: 0.75rem 1rem;
-  border: 1px solid #d8d2e8;
-  border-radius: 6px;
-  background: #f7f4fb;
-}
-
-.settings-mcpb-post-install h4 {
-  margin: 0 0 0.5rem;
-  font-size: 1rem;
-}
-
-.settings-mcpb-next-steps {
-  margin: 0 0 0.5rem;
-  padding-left: 1.25rem;
-  font-size: 0.92rem;
-  line-height: 1.5;
-  color: #334155;
-}
-
-.settings-mcpb-next-steps li {
-  margin-bottom: 0.35rem;
-}
-
 /* Preamble dialog overrides — wider, with structured warnings. */
 .settings-mcpb-dialog {
   max-width: 36rem;

@@ -85,11 +85,17 @@ class TestMcpbSection:
         expect(btn).to_be_visible()
         expect(btn).to_have_text("Set up Claude Desktop integration")
 
-    def test_post_install_section_is_hidden_initially(self, standalone_page, base_url_fixture):
+    def test_setup_meta_line_is_hidden_initially(self, standalone_page, base_url_fixture):
+        """The meta line ("Last set up: X ago...") only appears once the
+        user has run setup at least once. Previously this assertion was
+        on the now-removed "After the downloads finish" post-install
+        panel; the meta line is its successor as the post-setup state
+        indicator.
+        """
         page = standalone_page
         _boot_to_settings(page, base_url_fixture)
-        post = page.locator("#settings-mcpb-post-install")
-        expect(post).to_be_hidden()
+        meta = page.locator("#settings-mcpb-setup-meta")
+        expect(meta).to_be_hidden()
 
     def test_directory_update_row_is_hidden_initially(self, standalone_page, base_url_fixture):
         page = standalone_page
@@ -214,7 +220,16 @@ class TestPreambleActions:
 
 
 class TestPostSetupState:
-    def test_button_relabels_after_first_setup(self, standalone_page, base_url_fixture):
+    def test_meta_line_appears_after_first_setup(self, standalone_page, base_url_fixture):
+        """After Continue → downloads triggered, the meta line below the
+        button surfaces (with the bolded relative-time fragment). The
+        button label itself does NOT change — it stays "Set up Claude
+        Desktop integration" — because the meta line carries the
+        post-setup state. Earlier iteration relabelled the button to
+        "Re-download all extensions"; maintainer feedback was that the
+        label was awkward and the meta line already conveyed the same
+        info.
+        """
         page = standalone_page
         _install_anchor_intercept(page)
         _boot_to_settings(page, base_url_fixture)
@@ -227,11 +242,16 @@ class TestPostSetupState:
             }""",
             timeout=5000,
         )
+        # Button label is unchanged.
         expect(page.locator("#settings-mcpb-setup")).to_have_text(
-            "Re-download all extensions"
+            "Set up Claude Desktop integration"
         )
-        expect(page.locator("#settings-mcpb-post-install")).to_be_visible()
-        expect(page.locator("#settings-mcpb-setup-meta")).to_be_visible()
+        meta = page.locator("#settings-mcpb-setup-meta")
+        expect(meta).to_be_visible()
+        expect(meta).to_contain_text("Last set up:")
+        # The relative-time fragment is wrapped in <strong> so the
+        # "just now" / "5 minutes ago" lands as the scannable element.
+        expect(meta.locator("strong")).to_be_visible()
 
     def test_setup_state_persists_in_localstorage(self, standalone_page, base_url_fixture):
         page = standalone_page

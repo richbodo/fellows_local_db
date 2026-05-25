@@ -15,7 +15,9 @@
 | #197 | `feat/mcpb-prod-routes` | merged | Auth-gated `GET /mcpb/<name>.mcpb` routes in `deploy/server.py` |
 | #198 | `feat/mcpb-settings-ui` | merged | Settings UI + preamble dialog + walkthrough rewrite + migrate-from-browser hint (steps 6 / 7 / 8 of `plans/easy_mcp_install.md` § 12) |
 | #199 | `fix/e2e-stale-ui-assertions` | merged | Unblocks 10 pre-existing e2e failures (build-badge removal aftermath + Playwright + showSaveFilePicker + User Guide rename) |
-| #200 | `fix/about-update-check-flake` | this PR | Fixes the last pre-existing e2e flake (TestAboutUpdateCheck — boot's `getFull` re-render clobbered `paintAppRow` output) |
+| #200 | `fix/about-update-check-flake` | merged | Fixes the last pre-existing e2e flake (TestAboutUpdateCheck — boot's `getFull` re-render clobbered `paintAppRow` output) |
+| #201 | `feat/onboarding-clarity-pr200-followup` | open | Recommended-platform intro on users-manual, feature ↔ platform matrix doc, MCPB preamble restructure (warning to top, 6-step what-happens-next, three-extensions detail collapsed), Never-SaaS image |
+| #202 | `feat/mcpb-preamble-feedback-pr202` | open | Round-2 preamble polish: new warning wording, removed redundant post-install panel, button label stays "Set up…", meta line bolded. Plus the test-plan section 4d/4e clarifications below. Files [GH issue #202](https://github.com/richbodo/fellows_local_db/issues/202) for the data-folder "reveal in Finder" affordance discovered during testing. |
 
 After #200 merges, `just test` should run clean against `main` with no known failures or flakes from this 24-hour window.
 
@@ -93,17 +95,27 @@ Open the app, navigate to `#/settings`.
 
 ### 4d. Continue flow (dev server returns 404 — that's expected locally)
 - [ ] Click **Set up** → **Continue**. Status flips to *Downloading three .mcpb files…* then *Downloads triggered.*
-- [ ] Browser pops up 3 download notifications (or starts 3 downloads). Each is a 404 / empty file from the dev server. **Don't worry — that's expected; real bundles are served from prod.**
-- [ ] **Setup button** relabels to "Re-download all extensions."
-- [ ] **Post-install panel** ("After the downloads finish") now visible with 4-step next-steps list.
-- [ ] **Setup-meta line** says "Last set up: a few seconds ago."
-- [ ] **Reload** the page — state persists; button still says "Re-download all extensions."
+- [ ] Browser pops up 3 download notifications (or starts 3 downloads). Each is a 404 / "File wasn't available on site" from the dev server. **Don't worry — that's expected; real bundles are served from prod.**
+- [ ] **Setup button label is unchanged** — still says "Set up Claude Desktop integration." (This was a maintainer-flagged regression; the post-setup state lives in the meta line below the button now, not in a relabel.)
+- [ ] **Setup-meta line** below the button is now visible: "Last set up: **just now**. Re-running this will replace the extensions you have installed in Claude Desktop." (The "just now" fragment is bold.)
+- [ ] **Reload** the page — meta line persists with updated relative time ("Last set up: **a minute ago**").
 
 ### 4e. Directory-data-update affordance
-- [ ] In DevTools console: `localStorage.setItem('fellows_mcpb_setup', JSON.stringify({setupAt: new Date().toISOString(), refreshedAt: new Date().toISOString(), fellowsDbSha: 'stale-sha'}))`. Reload Settings page.
-- [ ] **Directory data update row** is now visible with a *Re-install Fellows directory* button.
-- [ ] Click the button — single download fires (`shared_data_ops.mcpb`).
-- [ ] Clear the localStorage key to reset.
+
+> **Order matters** — the row only renders during `renderSettingsPage`, which runs on hash navigation. Don't expect the row to appear *on the same page view* where you set localStorage; navigate away and back.
+
+- [ ] First confirm 4d above has been done so a `fellows_mcpb_setup` record exists (with a real `fellowsDbSha`).
+- [ ] Open DevTools console (⌥⌘I) and run:
+  ```js
+  const s = JSON.parse(localStorage.getItem('fellows_mcpb_setup'));
+  s.fellowsDbSha = 'stale-sha';
+  localStorage.setItem('fellows_mcpb_setup', JSON.stringify(s));
+  ```
+  (Or if no setup record exists yet: `localStorage.setItem('fellows_mcpb_setup', JSON.stringify({setupAt: new Date().toISOString(), refreshedAt: new Date().toISOString(), fellowsDbSha: 'stale-sha'}))`)
+- [ ] **Navigate away** from Settings (`#/about` works) then **navigate back** (`#/settings`). This triggers re-render; just clicking *Settings* in the nav also works.
+- [ ] **Directory data update row** is now visible above the *Set up Claude Desktop integration* button, with a *Re-install Fellows directory* button.
+- [ ] Click *Re-install Fellows directory* — single download fires (`shared_data_ops.mcpb`).
+- [ ] To clean up: `localStorage.removeItem('fellows_mcpb_setup')` + reload.
 
 ## 5. Migrate-from-another-browser hint (PR #198) — (L)
 

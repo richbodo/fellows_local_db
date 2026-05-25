@@ -8579,18 +8579,6 @@
         '</div>' +
         '<p id="settings-mcpb-setup-meta" class="settings-hint settings-mcpb-meta" hidden></p>' +
         '<span id="settings-mcpb-status" class="settings-status" aria-live="polite"></span>' +
-        '<div id="settings-mcpb-post-install" class="settings-mcpb-post-install" hidden>' +
-          '<h4 class="settings-section-subtitle">After the downloads finish</h4>' +
-          '<ol class="settings-mcpb-next-steps">' +
-            '<li>Open each <code>.mcpb</code> file you just downloaded. Claude Desktop will pop up an Install dialog for each.</li>' +
-            '<li>For <strong>Your saved groups (Private)</strong>, the install dialog will ask you to pick a file: navigate to your data folder → <code>Fellows</code> → <code>relationships.db</code>.</li>' +
-            '<li>Quit Claude Desktop (⌘Q) and reopen it.</li>' +
-            '<li>Try it: ask Claude <em>"how many fellows are in the directory?"</em></li>' +
-          '</ol>' +
-          '<p class="settings-hint">' +
-            'Stuck? See the <a href="https://github.com/richbodo/fellows_local_db/blob/main/docs/use_with_claude_desktop.md" target="_blank" rel="noopener">walkthrough</a>.' +
-          '</p>' +
-        '</div>' +
       '</div>' +
       '<dialog id="settings-mcpb-preamble-dialog" class="settings-folder-dialog settings-mcpb-dialog">' +
         '<form method="dialog">' +
@@ -8610,8 +8598,10 @@
             'Safari and Firefox need the manual setup linked above.' +
           '</p>' +
           '<div class="settings-mcpb-warning settings-mcpb-warning--banner">' +
-            '<strong>Installing will grant this extension access to everything on your computer.</strong> ' +
-            'Nothing is wrong. The extensions only read fellows data. Click <strong>Install</strong> to proceed.' +
+            '<strong>You will see three scary warnings from Claude Desktop.</strong> ' +
+            'They say <em>"Installing will grant this extension access to everything on your computer…"</em> ' +
+            'Nothing is wrong. The extensions only read fellows data. Anthropic just had to add these warnings. ' +
+            'Click <strong>Install</strong> to proceed on each.' +
           '</div>' +
           '<h5 class="settings-mcpb-section-title">What happens next</h5>' +
           '<ol class="settings-mcpb-steps">' +
@@ -9038,7 +9028,6 @@
     var setupBtn = document.getElementById('settings-mcpb-setup');
     var statusEl = document.getElementById('settings-mcpb-status');
     var metaEl = document.getElementById('settings-mcpb-setup-meta');
-    var postInstall = document.getElementById('settings-mcpb-post-install');
     var updateRow = document.getElementById('settings-mcpb-update-row');
     var refreshDirBtn = document.getElementById('settings-mcpb-refresh-directory');
     var dialog = document.getElementById('settings-mcpb-preamble-dialog');
@@ -9070,22 +9059,24 @@
     function refreshUiFromState() {
       var state = getMcpbSetupState();
       var serverSha = (bootBuildMeta && bootBuildMeta.fellows_db_sha) || null;
+      // Button label stays constant — "Set up Claude Desktop integration" —
+      // for both first-time and re-run. The meta line below carries the
+      // state distinction (whether the user has set up before, and when).
+      // Earlier iteration relabelled the button to "Re-download all
+      // extensions"; maintainer feedback was that the label was awkward
+      // and the meta line already conveyed the same info.
       if (state && state.setupAt) {
-        setupBtn.textContent = 'Re-download all extensions';
         if (metaEl) {
           metaEl.hidden = false;
-          metaEl.textContent = 'Last set up: ' +
-            formatRelativeTime(state.refreshedAt || state.setupAt) +
-            '. Re-downloading replaces the extensions you have installed in Claude Desktop.';
+          metaEl.innerHTML = 'Last set up: <strong>' +
+            escapeHtml(formatRelativeTime(state.refreshedAt || state.setupAt)) +
+            '</strong>. Re-running this will replace the extensions you have installed in Claude Desktop.';
         }
-        if (postInstall) postInstall.hidden = false;
       } else {
-        setupBtn.textContent = 'Set up Claude Desktop integration';
         if (metaEl) {
           metaEl.hidden = true;
           metaEl.textContent = '';
         }
-        if (postInstall) postInstall.hidden = true;
       }
       // Directory-data-update affordance — only meaningful after at
       // least one prior setup AND when the server's current fellows.db
