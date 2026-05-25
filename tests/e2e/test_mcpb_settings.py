@@ -91,11 +91,11 @@ class TestMcpbSection:
         post = page.locator("#settings-mcpb-post-install")
         expect(post).to_be_hidden()
 
-    def test_directory_update_row_is_hidden_initially(self, standalone_page, base_url_fixture):
-        page = standalone_page
-        _boot_to_settings(page, base_url_fixture)
-        row = page.locator("#settings-mcpb-update-row")
-        expect(row).to_be_hidden()
+    # The directory-update affordance moved from Settings → Claude
+    # Desktop integration to the About page's update box in PR #205
+    # (issue #202). Coverage for "Re-install Claude Desktop bundles
+    # when fellows_db_sha drifts" now lives in test_directory_data_update_flow.py
+    # (paintDataRow's mcpStaleVsServer branch).
 
 
 class TestPreambleDialog:
@@ -253,33 +253,9 @@ class TestPostSetupState:
         assert record["setupAt"]
         assert record["refreshedAt"]
 
-    def test_directory_update_row_shows_when_sha_changes(self, standalone_page, base_url_fixture):
-        """If the user has set up before but the server now reports a
-        different ``fellows_db_sha``, the Settings UI exposes the
-        re-install-directory button."""
-        page = standalone_page
-        _boot_to_settings(page, base_url_fixture)
-        # Seed localStorage with a setup record that pins a stale sha,
-        # then re-render the settings page (via hash bounce) so
-        # refreshUiFromState runs.
-        page.evaluate(
-            """() => {
-              localStorage.setItem('fellows_mcpb_setup', JSON.stringify({
-                setupAt: new Date().toISOString(),
-                refreshedAt: new Date().toISOString(),
-                fellowsDbSha: 'stale-sha-not-on-server'
-              }));
-              window.bootBuildMeta = window.bootBuildMeta || {};
-              window.bootBuildMeta.fellows_db_sha = 'fresh-server-sha';
-            }"""
-        )
-        # Bounce off then back to trigger re-render.
-        page.evaluate("location.hash = '#/about'")
-        page.wait_for_function(
-            "() => !document.getElementById('settings-mcpb-section')",
-            timeout=5000,
-        )
-        page.evaluate("location.hash = '#/settings'")
-        page.wait_for_selector("#settings-mcpb-section", timeout=5000)
-        expect(page.locator("#settings-mcpb-update-row")).to_be_visible()
-        expect(page.locator("#settings-mcpb-refresh-directory")).to_be_visible()
+    # test_directory_update_row_shows_when_sha_changes was removed in
+    # PR #205 (issue #202). The Re-install Claude Desktop bundles
+    # affordance migrated from the Settings → Claude Desktop integration
+    # section to the About page (paintDataRow surfaces it inline with
+    # the directory-data check result). New coverage lives in
+    # test_directory_data_update_flow.py.

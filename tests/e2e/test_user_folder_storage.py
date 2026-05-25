@@ -1,14 +1,17 @@
 """E2E for issue #165 Phase 1 — user-folder durable storage.
 
 Pins:
-- The Data folder section renders on the Settings page.
-- Choose data folder picks a folder, the badge flips to Saved, and a
+- The Private data folder section renders on the Settings page.
+- Choose folder picks a folder, the badge flips to Saved, and a
   real relationships.db lands in the Fellows/ subfolder.
-- Save Now updates the file timestamp.
-- Disconnect folder reverts the badge to Browser-only and clears the
-  IDB handle (subsequent boots see no handle).
+- Auto-write after a commit advances last_saved_at.
 - Re-picking the same parent triggers the collision dialog, and
   Create-Fellows-2 lands in a sibling subfolder.
+
+Save now / Reload from folder / Reconnect / Disconnect were removed
+in PR #205 (issue #202); the affordances they exposed (auto-save
+retry, cross-browser reload, handle teardown) are either automatic
+now or covered by re-picking the folder via Change folder.
 
 The picker is stubbed to return a real FileSystemDirectoryHandle backed
 by an OPFS subfolder. The worker's write/read path runs unchanged
@@ -172,13 +175,14 @@ class TestUserFolderStorage:
         self, folder_page, base_url_fixture
     ):
         _open_settings(folder_page, base_url_fixture)
-        # On a fresh state, badge says "Browser-only" and only the
-        # Choose button is visible.
+        # On a fresh state, badge says "Browser-only" and the single
+        # Choose folder… button is visible (Save now / Reload from
+        # folder / Reconnect / Disconnect removed in PR #205).
         badge_text = folder_page.locator("#settings-folder-badge .settings-folder-badge-text")
         expect(badge_text).to_contain_text("Browser-only")
-        expect(folder_page.locator("#settings-folder-choose")).to_be_visible()
-        expect(folder_page.locator("#settings-folder-save-now")).to_be_hidden()
-        expect(folder_page.locator("#settings-folder-disconnect")).to_be_hidden()
+        choose = folder_page.locator("#settings-folder-choose")
+        expect(choose).to_be_visible()
+        expect(choose).to_have_text("Choose folder…")
 
     def test_choose_folder_writes_file_and_flips_badge_to_saved(
         self, folder_page, base_url_fixture
@@ -201,53 +205,12 @@ class TestUserFolderStorage:
         assert probe["relSize"] is not None and probe["relSize"] > 0, (
             f"relationships.db should have bytes; probe={probe!r}"
         )
-        # Save Now and Disconnect appear; Choose no longer.
-        expect(folder_page.locator("#settings-folder-save-now")).to_be_visible()
-        expect(folder_page.locator("#settings-folder-disconnect")).to_be_visible()
-        expect(folder_page.locator("#settings-folder-choose")).to_be_hidden()
-
-    def test_save_now_updates_file_after_mutation(
-        self, folder_page, base_url_fixture
-    ):
-        _open_settings(folder_page, base_url_fixture)
-        folder_page.locator("#settings-folder-choose").click()
-        badge_text = folder_page.locator("#settings-folder-badge .settings-folder-badge-text")
-        expect(badge_text).to_contain_text("Saved to", timeout=10000)
-        size_before = folder_page.evaluate(
-            "() => window.__probeE2EUserFolder().then(p => p.relSize)"
-        )
-        # Add a group + members to grow the DB.
-        full = folder_page.evaluate("() => window.__dataProvider.getFull()")
-        rids = [f["record_id"] for f in full[:5]]
-        folder_page.evaluate(
-            "(rids) => window.__dataProvider.createGroup({name: 'Grow', note: 'x', fellow_record_ids: rids})",
-            rids,
-        )
-        # Click Save now and assert the file changed.
-        folder_page.locator("#settings-folder-save-now").click()
-        # The Save now click fires writeRelationshipsToFolder; wait for
-        # the detail to flash "Saved (N bytes)."
-        detail = folder_page.locator("#settings-folder-detail")
-        expect(detail).to_contain_text("Saved (", timeout=10000)
-        size_after = folder_page.evaluate(
-            "() => window.__probeE2EUserFolder().then(p => p.relSize)"
-        )
-        assert size_after >= size_before, (
-            f"file should not shrink after adding a group; before={size_before} after={size_after}"
-        )
-
-    def test_disconnect_clears_handle(self, folder_page, base_url_fixture):
-        _open_settings(folder_page, base_url_fixture)
-        folder_page.locator("#settings-folder-choose").click()
-        badge_text = folder_page.locator("#settings-folder-badge .settings-folder-badge-text")
-        expect(badge_text).to_contain_text("Saved to", timeout=10000)
-        # Auto-accept the confirm dialog from window.confirm.
-        folder_page.once("dialog", lambda d: d.accept())
-        folder_page.locator("#settings-folder-disconnect").click()
-        expect(badge_text).to_contain_text("Browser-only", timeout=5000)
-        # Worker reports no handle now.
-        state = folder_page.evaluate("() => window.__folderController.getState()")
-        assert state["hasHandle"] is False
+        # The single button relabels to "Change folder…" once a folder
+        # is connected; it stays visible for re-picking (move to synced
+        # folder, re-grant permission, switch destinations).
+        choose = folder_page.locator("#settings-folder-choose")
+        expect(choose).to_be_visible()
+        expect(choose).to_have_text("Change folder…")
 
     def test_collision_dialog_offers_open_existing_or_create_new(
         self, folder_page, base_url_fixture
@@ -257,13 +220,11 @@ class TestUserFolderStorage:
         folder_page.locator("#settings-folder-choose").click()
         badge_text = folder_page.locator("#settings-folder-badge .settings-folder-badge-text")
         expect(badge_text).to_contain_text("Saved to", timeout=10000)
-        # Disconnect (handle gone from IDB; Fellows/ stays in the folder).
-        folder_page.once("dialog", lambda d: d.accept())
-        folder_page.locator("#settings-folder-disconnect").click()
-        expect(badge_text).to_contain_text("Browser-only", timeout=5000)
-        # Re-pick the same parent. The worker probes, finds Fellows/
-        # already with a relationships.db, returns requiresChoice → the
-        # collision dialog opens.
+        # Click Change folder and re-pick the same parent. The worker
+        # probes, finds Fellows/ already with a relationships.db, returns
+        # requiresChoice → the collision dialog opens. Post-PR-#205 the
+        # "disconnect first, then pick" flow is gone; users now hit
+        # collision by re-picking via Change folder directly.
         folder_page.locator("#settings-folder-choose").click()
         dialog = folder_page.locator("#settings-folder-collision-dialog")
         expect(dialog).to_be_visible(timeout=5000)
@@ -274,44 +235,17 @@ class TestUserFolderStorage:
         assert probe["hasFellows"] is True, "original Fellows/ should be untouched"
         assert probe["hasFellows2"] is True, "Fellows 2/ should have been created"
 
-    def test_open_existing_loads_data_back(self, folder_page, base_url_fixture):
-        _open_settings(folder_page, base_url_fixture)
-        # Round 1: seed a group, pick folder, save.
-        full = folder_page.evaluate("() => window.__dataProvider.getFull()")
-        rid = full[0]["record_id"]
-        folder_page.evaluate(
-            "(rid) => window.__dataProvider.createGroup({name: 'Round 1 group', note: '', fellow_record_ids: [rid]})",
-            rid,
-        )
-        folder_page.locator("#settings-folder-choose").click()
-        badge_text = folder_page.locator("#settings-folder-badge .settings-folder-badge-text")
-        expect(badge_text).to_contain_text("Saved to", timeout=10000)
-        # Disconnect + nuke groups in OPFS so a Refresh / Open-existing
-        # actually has work to do.
-        folder_page.once("dialog", lambda d: d.accept())
-        folder_page.locator("#settings-folder-disconnect").click()
-        expect(badge_text).to_contain_text("Browser-only", timeout=5000)
-        folder_page.evaluate("""
-          async () => {
-            var dp = window.__dataProvider;
-            var groups = await dp.listGroups();
-            for (var i = 0; i < groups.length; i++) {
-              await dp.deleteGroup(groups[i].id);
-            }
-          }
-        """)
-        assert folder_page.evaluate("() => window.__dataProvider.listGroups()") == []
-        # Re-pick → collision dialog → Open existing → groups come back.
-        folder_page.locator("#settings-folder-choose").click()
-        dialog = folder_page.locator("#settings-folder-collision-dialog")
-        expect(dialog).to_be_visible(timeout=5000)
-        folder_page.locator(".settings-folder-dialog-secondary").click()
-        expect(badge_text).to_contain_text("Saved to", timeout=10000)
-        groups = folder_page.evaluate("() => window.__dataProvider.listGroups()")
-        names = [g["name"] for g in groups]
-        assert "Round 1 group" in names, (
-            f"open-existing should have loaded the saved group back; got {names!r}"
-        )
+    # test_open_existing_loads_data_back was removed in PR #205. It
+    # used Disconnect (now removed) to break the OPFS→folder auto-save
+    # link before deleting groups, leaving the folder file intact so a
+    # re-pick + Open existing could recover the data into a now-empty
+    # OPFS. Without Disconnect, the auto-save propagates the deletes
+    # to disk, so the scenario the test was exercising isn't reachable
+    # from the UI any more. The collision dialog's Open-existing path
+    # itself is still covered by test_collision_dialog_offers_open_existing_or_create_new
+    # (which exercises the dialog mechanics). Recovery-from-OPFS-loss
+    # via folder bytes is now a worker-level concern best covered by a
+    # narrower test in a follow-up.
 
 
 class TestPhase2Pivot:
@@ -639,47 +573,13 @@ class TestPhase2Pivot:
             "absolute system paths"
         )
 
-    def test_reload_from_folder_button_relabeled(
-        self, folder_page, base_url_fixture
-    ):
-        """The previously-named 'Refresh from folder' button is now
-        'Reload from folder' with an explanatory tooltip. The button
-        appears in the saved-state action row after a folder is
-        picked.
-        """
-        _open_settings(folder_page, base_url_fixture)
-        folder_page.locator("#settings-folder-choose").click()
-        badge_text = folder_page.locator("#settings-folder-badge .settings-folder-badge-text")
-        expect(badge_text).to_contain_text("Saved to", timeout=10000)
-        reload_btn = folder_page.locator("#settings-folder-refresh")
-        expect(reload_btn).to_be_visible()
-        expect(reload_btn).to_have_text("Reload from folder")
-        # Tooltip / title should hint at the use case.
-        tooltip = reload_btn.get_attribute("title") or ""
-        assert "another browser" in tooltip or "cloud-sync" in tooltip, (
-            f"Reload button tooltip should explain the use case; got {tooltip!r}"
-        )
-
-    def test_your_saved_data_section_hidden_in_folder_mode(
-        self, folder_page, base_url_fixture
-    ):
-        """The 'Your saved data' (Download my user data) section is
-        redundant in folder mode — the user can grab relationships.db
-        directly from Finder. It hides when folder mode is active +
-        permission granted. It re-shows in OPFS-only / degraded states
-        (those users need the Download button to extract a backup).
-        """
-        _open_settings(folder_page, base_url_fixture)
-        # No folder yet — Your saved data section is visible.
-        expect(folder_page.locator("#settings-export-section")).to_be_visible()
-        # Pick a folder → section should hide.
-        folder_page.locator("#settings-folder-choose").click()
-        badge_text = folder_page.locator("#settings-folder-badge .settings-folder-badge-text")
-        expect(badge_text).to_contain_text("Saved to", timeout=10000)
-        expect(folder_page.locator("#settings-export-section")).to_be_hidden()
-        # Restore-from-backup section stays visible in both modes
-        # (still useful in folder mode for undo from backup ring).
-        expect(folder_page.locator("#settings-restore-section")).to_be_visible()
+    # test_reload_from_folder_button_relabeled and
+    # test_your_saved_data_section_hidden_in_folder_mode were removed
+    # in PR #205 (issue #202). The Reload from folder button + the
+    # "Your saved data" section both went away; Download my private
+    # data lives in the Private data folder section now and is always
+    # visible whenever local persistence is available, so the
+    # hide-on-folder-active behavior no longer applies.
 
     def test_opfs_only_mode_keeps_backups_in_opfs(
         self, folder_page, base_url_fixture

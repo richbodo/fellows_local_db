@@ -114,8 +114,8 @@ def test_codename_appears_on_about_page(standalone_page, base_url_fixture):
     codename = _read_identity(page)["codename"]
 
     page.evaluate("location.hash = '#/about'")
-    page.wait_for_selector(".about-install-name", timeout=10000)
-    install_p = page.locator(".about-install-name")
+    page.wait_for_selector(".about-install-name-inline", timeout=10000)
+    install_p = page.locator(".about-install-name-inline")
     expect(install_p).to_contain_text("This install:")
     expect(install_p).to_contain_text(codename)
     # "(What's this?)" links to the users-manual install-name anchor.

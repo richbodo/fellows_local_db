@@ -85,7 +85,7 @@ def _boot_then_about(page, base_url):
         timeout=15000,
     )
     page.goto(base_url + "/#/about", wait_until="domcontentloaded")
-    page.wait_for_selector("#about-check-updates", timeout=5000)
+    page.wait_for_selector("#about-check-data-update", timeout=5000)
 
 
 def test_check_updates_surfaces_directory_data_button(context, base_url_fixture):
@@ -104,7 +104,7 @@ def test_check_updates_surfaces_directory_data_button(context, base_url_fixture)
         context.unroute(BUILD_META_PATH)
         _route_build_meta(context, git_sha="boot-sha", fellows_db_sha="f" * 64)
 
-        page.locator("#about-check-updates").click()
+        page.locator("#about-check-data-update").click()
         data_status = page.locator("#about-data-status")
         expect(data_status).to_contain_text("Directory Data update available", timeout=5000)
         expect(page.locator("#about-data-update-btn")).to_be_visible()
@@ -124,7 +124,7 @@ def test_apply_with_no_group_impact_succeeds_silently(context, base_url_fixture)
         context.unroute(BUILD_META_PATH)
         _route_build_meta(context, git_sha="boot-sha", fellows_db_sha="f" * 64)
 
-        page.locator("#about-check-updates").click()
+        page.locator("#about-check-data-update").click()
         expect(page.locator("#about-data-update-btn")).to_be_visible(timeout=5000)
         page.locator("#about-data-update-btn").click()
 
@@ -165,7 +165,7 @@ def test_apply_with_group_impact_shows_dialog_and_can_cancel(context, base_url_f
         context.unroute(BUILD_META_PATH)
         _route_build_meta(context, git_sha="boot-sha", fellows_db_sha="f" * 64)
 
-        page.locator("#about-check-updates").click()
+        page.locator("#about-check-data-update").click()
         expect(page.locator("#about-data-update-btn")).to_be_visible(timeout=5000)
         page.locator("#about-data-update-btn").click()
 
@@ -239,7 +239,7 @@ def test_stale_worker_surfaces_reload_affordance(context, base_url_fixture):
             """
         )
 
-        page.locator("#about-check-updates").click()
+        page.locator("#about-check-data-update").click()
         data_status = page.locator("#about-data-status")
         expect(data_status).to_contain_text(
             "Reload the app to enable update checks", timeout=5000
@@ -275,7 +275,7 @@ def test_apply_with_group_impact_confirm_completes_swap(context, base_url_fixtur
         context.unroute(BUILD_META_PATH)
         _route_build_meta(context, git_sha="boot-sha", fellows_db_sha="f" * 64)
 
-        page.locator("#about-check-updates").click()
+        page.locator("#about-check-data-update").click()
         expect(page.locator("#about-data-update-btn")).to_be_visible(timeout=5000)
         page.locator("#about-data-update-btn").click()
         expect(page.locator("#directory-update-dialog")).to_be_visible(timeout=10000)

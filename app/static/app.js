@@ -715,7 +715,6 @@
   function handleUpdateDirectoryDataClick(checkResult, refreshBtn) {
     var dataStatusEl = document.getElementById('about-data-status');
     var dataActionEl = document.getElementById('about-data-action');
-    var lastCheckEl = document.getElementById('about-last-check');
     function setBusy(msg) {
       if (dataStatusEl) dataStatusEl.textContent = msg;
       if (dataActionEl) dataActionEl.innerHTML = '';
@@ -723,7 +722,6 @@
     function setDone(msg) {
       if (dataStatusEl) dataStatusEl.textContent = msg;
       if (dataActionEl) dataActionEl.innerHTML = '';
-      if (lastCheckEl) lastCheckEl.textContent = 'Last check: ' + new Date().toISOString();
     }
 
     if (!dataProvider || typeof dataProvider._previewFellowsDbSwap !== 'function') {
@@ -6537,14 +6535,22 @@
     aboutHtml += 'For support, request to join the github repository or just ask on one of the fellows channels.</p>';
     aboutHtml += '<p class="about-support">Having trouble with the app? Contact the EHF Communications Working Group.</p>';
     aboutHtml += '<p class="about-users-manual"><a href="https://github.com/richbodo/fellows_local_db/blob/main/docs/users_manual.md" target="_blank" rel="noopener">Help from the user manual</a> \u2014 how to install, use the app, fix common issues, and uninstall.</p>';
-    // Install name surfaces the per-install codename so a user with
-    // multiple installs (Safari + Chrome on the same Mac, multiple
-    // Chrome profiles, etc.) can tell instances apart. Intentionally
-    // small + unalarming \u2014 the explanation lives in the users-manual.
+    // GitHub link sits above the update block: it's a destination (the
+    // repo), not part of the identity-and-updates story below. Keeping
+    // it adjacent to the user-manual link groups "where to go for more"
+    // together and leaves the update box for "what you're running".
+    aboutHtml += '<p class="about-repo"><a href="https://github.com/richbodo/fellows_local_db" target="_blank" rel="noopener">';
+    aboutHtml += '<svg class="github-icon" viewBox="0 0 16 16" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>';
+    aboutHtml += ' richbodo/fellows_local_db</a></p>';
+    // Install codename surfaces below the App build labels (inside the
+    // update box) so a user with multiple installs (Safari + Chrome on
+    // the same Mac, multiple Chrome profiles, etc.) can tell instances
+    // apart. Belongs in the App row because it's part of "what's
+    // running here", not a standalone fact.
     var aboutIdentity = getOrCreateInstallIdentity();
-    aboutHtml += '<p class="about-install-name">This install: <strong>' +
+    var installNameHtml = '<div class="about-install-name-inline">This install: <strong>' +
       escapeHtml(aboutIdentity.codename) +
-      '</strong> <a href="https://github.com/richbodo/fellows_local_db/blob/main/docs/users_manual.md#install-name" target="_blank" rel="noopener">(What\u2019s this?)</a></p>';
+      '</strong> <a href="https://github.com/richbodo/fellows_local_db/blob/main/docs/users_manual.md#install-name" target="_blank" rel="noopener">(What\u2019s this?)</a></div>';
     // Two-row update status block. App and Directory data are
     // independently versioned (build/build_pwa.py emits both `git_sha`
     // and `fellows_db_sha` into /build-meta.json); the user can act on
@@ -6556,15 +6562,21 @@
     aboutHtml += '<div class="about-update-block">';
     aboutHtml += '<div class="about-update-row" id="about-app-row">';
     aboutHtml += '<div class="about-update-row-label">App</div>';
-    aboutHtml += '<div class="about-update-row-status" id="about-app-status" role="status" aria-live="polite">';
+    aboutHtml += '<div class="about-update-row-status">';
+    // about-app-status is the build-labels span only; paintAppRow
+    // rewrites its contents on every check. The codename sibling sits
+    // outside this span so re-paints don't clobber it.
+    aboutHtml += '<span id="about-app-status" role="status" aria-live="polite">';
     aboutHtml += '<code class="about-build-value">app: ' + escapeHtml(FELLOWS_UI_DIAG) + '</code> ';
     aboutHtml += '<code class="about-build-value">server: ' + escapeHtml(serverLabel) + '</code>';
+    aboutHtml += '</span>';
+    aboutHtml += installNameHtml;
     aboutHtml += '</div>';
     aboutHtml += '<div class="about-update-row-action" id="about-app-action"></div>';
     aboutHtml += '</div>';
     aboutHtml += '<div class="about-update-row" id="about-data-row">';
     aboutHtml += '<div class="about-update-row-label">Directory data</div>';
-    aboutHtml += '<div class="about-update-row-status" id="about-data-status" role="status" aria-live="polite">Click "Check for updates" to compare with the server.</div>';
+    aboutHtml += '<div class="about-update-row-status" id="about-data-status" role="status" aria-live="polite">Click "Check for directory data updates" to compare with the server.</div>';
     aboutHtml += '<div class="about-update-row-action" id="about-data-action"></div>';
     aboutHtml += '</div>';
     // Signing-key row. The fingerprint here should match the value
@@ -6586,9 +6598,14 @@
     aboutHtml += '</div></div>';
     aboutHtml += '<div class="about-update-row-action"></div>';
     aboutHtml += '</div>';
+    // Two explicit check buttons. App check covers the app shell (and,
+    // once the build-pipeline fusion lands, the MCPB bundle code
+    // freshness too); directory-data check covers the fellows.db
+    // snapshot. Splitting them makes "what each button does" obvious;
+    // each is one-shot per page load and relabels on result.
     aboutHtml += '<p class="about-update-check">';
-    aboutHtml += '<button type="button" id="about-check-updates" class="about-check-updates-btn">Check for updates</button>';
-    aboutHtml += '<span id="about-last-check" class="about-update-status"></span>';
+    aboutHtml += '<button type="button" id="about-check-app-update" class="about-check-updates-btn">Check for application updates</button>';
+    aboutHtml += '<button type="button" id="about-check-data-update" class="about-check-updates-btn">Check for directory data updates</button>';
     aboutHtml += '</p>';
     // Persistent record of when fellows.db was last fetched (or last
     // failed). Populated async from fellows.db.meta.json. Useful when a
@@ -6596,9 +6613,6 @@
     // actually working for me?" without sending them into the
     // diagnostics panel.
     aboutHtml += '<p class="about-last-update" id="about-last-update"></p>';
-    aboutHtml += '<p class="about-repo"><a href="https://github.com/richbodo/fellows_local_db" target="_blank" rel="noopener">';
-    aboutHtml += '<svg class="github-icon" viewBox="0 0 16 16" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>';
-    aboutHtml += ' richbodo/fellows_local_db</a></p>';
     aboutHtml += '</div>';
 
     aboutHtml += '<h2 class="stats-title">Fellowship Statistics</h2>';
@@ -6634,19 +6648,52 @@
       }).catch(function () { /* non-fatal — leave line empty */ });
     })();
 
-    // Wire the "Check for updates" button. Drives the app-shell check
-    // (existing checkForServerUpdate, which raises the SW reload banner
-    // on drift) AND the directory-data check in parallel; each result
-    // populates its own status row independently.
-    // plans/opt_in_directory_data_updates.md.
-    (function wireUpdateCheckButton() {
-      var btn = document.getElementById('about-check-updates');
-      var lastCheckEl = document.getElementById('about-last-check');
+    // Wire the two check buttons. Each is a one-shot per page load:
+    // click -> "Checking\u2026" -> result paints into the matching status row
+    // and the button relabels to "New \u2026 available" when stale (and stays
+    // disabled, since the action button next to it is the next step). On
+    // up-to-date / error / no-boot-snapshot, the button restores its
+    // default label and re-enables so the user can re-check later.
+    //
+    // The MCPB "Re-install Claude Desktop bundles" affordance surfaces
+    // inline with whichever check finds the staleness: directory-data
+    // staleness when the user's installed Shared bundle carries an older
+    // fellows.db sha than the server has now. App-code staleness for
+    // MCPB will hook in here once the build-pipeline fusion lands
+    // (currently MCPB bundles aren't versioned with the app, so we only
+    // signal data-axis drift today).
+    (function wireUpdateCheckButtons() {
+      var appBtn = document.getElementById('about-check-app-update');
+      var dataBtn = document.getElementById('about-check-data-update');
       var appStatusEl = document.getElementById('about-app-status');
       var appActionEl = document.getElementById('about-app-action');
       var dataStatusEl = document.getElementById('about-data-status');
       var dataActionEl = document.getElementById('about-data-action');
-      if (!btn) return;
+      if (!appBtn && !dataBtn) return;
+
+      var APP_BTN_DEFAULT = 'Check for application updates';
+      var DATA_BTN_DEFAULT = 'Check for directory data updates';
+
+      function mcpRefreshButtonHtml() {
+        return '<button type="button" class="about-update-action-btn" id="about-data-mcpb-refresh-btn">Re-install Claude Desktop bundles</button>';
+      }
+
+      function wireMcpRefreshButton(serverSha) {
+        var mcpbBtn = document.getElementById('about-data-mcpb-refresh-btn');
+        if (!mcpbBtn) return;
+        mcpbBtn.addEventListener('click', function () {
+          mcpbBtn.disabled = true;
+          var originalText = mcpbBtn.textContent;
+          mcpbBtn.textContent = 'Downloading\u2026';
+          triggerSameOriginDownload('/mcpb/shared_data_ops.mcpb', 'shared_data_ops.mcpb').then(function () {
+            recordMcpbDirectoryRefresh(serverSha);
+            mcpbBtn.textContent = 'Downloaded \u2014 open the file to re-install';
+          }).catch(function () {
+            mcpbBtn.disabled = false;
+            mcpbBtn.textContent = originalText;
+          });
+        });
+      }
 
       function paintAppRow(res) {
         if (!appStatusEl) return;
@@ -6668,15 +6715,26 @@
         }
         appStatusEl.innerHTML = build + statusText;
         if (appActionEl) appActionEl.innerHTML = actionHtml;
-        var appBtn = document.getElementById('about-app-update-btn');
-        if (appBtn) {
-          appBtn.addEventListener('click', function () { window.location.reload(); });
+        var appUpdateBtn = document.getElementById('about-app-update-btn');
+        if (appUpdateBtn) {
+          appUpdateBtn.addEventListener('click', function () { window.location.reload(); });
         }
       }
 
       function paintDataRow(res) {
         if (!dataStatusEl) return;
         var statusText = '', actionHtml = '';
+        // MCPB Shared bundle carries a snapshot of fellows.db inside it.
+        // When the user's installed bundle's fellows_db_sha differs from
+        // what the server reports now, the bundle is stale on the data
+        // axis. Same user action regardless of which side moved:
+        // re-download shared_data_ops.mcpb and re-install in Claude
+        // Desktop.
+        var mcpState = getMcpbSetupState();
+        var mcpStaleVsServer = !!(mcpState && mcpState.setupAt &&
+          res.serverSha && mcpState.fellowsDbSha &&
+          mcpState.fellowsDbSha !== res.serverSha);
+
         if (res.status === 'unsupported') {
           statusText = 'Directory data updates aren\u2019t available in this browser.';
         } else if (res.status === 'no-local-data') {
@@ -6691,40 +6749,87 @@
         } else if (res.status === 'update-available') {
           statusText = 'Directory Data update available';
           actionHtml = '<button type="button" class="about-update-action-btn" id="about-data-update-btn">Update directory data</button>';
+          if (mcpStaleVsServer) actionHtml += ' ' + mcpRefreshButtonHtml();
         } else if (res.status === 'up-to-date') {
           var snap = res.fetchedAt ? ' (snapshot from ' + escapeHtml(String(res.fetchedAt)) + ')' : '';
           statusText = 'up to date' + snap;
+          if (mcpStaleVsServer) {
+            statusText += ' \u2014 Claude Desktop bundles are older';
+            actionHtml = mcpRefreshButtonHtml();
+          }
         } else {
           statusText = 'Couldn\u2019t check (offline?)';
         }
         dataStatusEl.textContent = statusText;
         if (dataActionEl) dataActionEl.innerHTML = actionHtml;
-        var dataBtn = document.getElementById('about-data-update-btn');
-        if (dataBtn) {
-          dataBtn.addEventListener('click', function () {
-            handleUpdateDirectoryDataClick(res, btn);
+        var dataUpdateBtn = document.getElementById('about-data-update-btn');
+        if (dataUpdateBtn) {
+          dataUpdateBtn.addEventListener('click', function () {
+            handleUpdateDirectoryDataClick(res, dataBtn);
           });
         }
         var reloadBtn = document.getElementById('about-data-reload-btn');
         if (reloadBtn) {
           reloadBtn.addEventListener('click', function () { window.location.reload(); });
         }
+        wireMcpRefreshButton(res.serverSha);
       }
 
-      btn.addEventListener('click', function () {
-        btn.disabled = true;
-        if (lastCheckEl) lastCheckEl.textContent = 'Checking\u2026';
-        if (appStatusEl) appStatusEl.textContent = 'Checking\u2026';
-        if (appActionEl) appActionEl.innerHTML = '';
-        if (dataStatusEl) dataStatusEl.textContent = 'Checking\u2026';
-        if (dataActionEl) dataActionEl.innerHTML = '';
-        Promise.all([checkForServerUpdate(), checkForDirectoryDataUpdate()]).then(function (results) {
-          btn.disabled = false;
-          paintAppRow(results[0] || { status: 'error' });
-          paintDataRow(results[1] || { status: 'error' });
-          if (lastCheckEl) lastCheckEl.textContent = 'Last check: ' + new Date().toISOString();
+      function applyAppButtonState(res) {
+        if (!appBtn) return;
+        if (res && res.status === 'update-available') {
+          appBtn.textContent = 'New application version available';
+          // Leave disabled; the action button next to the row is the
+          // next step (Reload to apply). Reload triggers a fresh check.
+        } else {
+          appBtn.textContent = APP_BTN_DEFAULT;
+          appBtn.disabled = false;
+        }
+      }
+
+      function applyDataButtonState(res) {
+        if (!dataBtn) return;
+        if (res && res.status === 'update-available') {
+          dataBtn.textContent = 'New directory data update available';
+        } else {
+          dataBtn.textContent = DATA_BTN_DEFAULT;
+          dataBtn.disabled = false;
+        }
+      }
+
+      if (appBtn) {
+        appBtn.addEventListener('click', function () {
+          appBtn.disabled = true;
+          appBtn.textContent = 'Checking\u2026';
+          if (appStatusEl) appStatusEl.textContent = 'Checking\u2026';
+          if (appActionEl) appActionEl.innerHTML = '';
+          checkForServerUpdate().then(function (res) {
+            var result = res || { status: 'error' };
+            paintAppRow(result);
+            applyAppButtonState(result);
+          }).catch(function () {
+            paintAppRow({ status: 'error' });
+            applyAppButtonState({ status: 'error' });
+          });
         });
-      });
+      }
+
+      if (dataBtn) {
+        dataBtn.addEventListener('click', function () {
+          dataBtn.disabled = true;
+          dataBtn.textContent = 'Checking\u2026';
+          if (dataStatusEl) dataStatusEl.textContent = 'Checking\u2026';
+          if (dataActionEl) dataActionEl.innerHTML = '';
+          checkForDirectoryDataUpdate().then(function (res) {
+            var result = res || { status: 'error' };
+            paintDataRow(result);
+            applyDataButtonState(result);
+          }).catch(function () {
+            paintDataRow({ status: 'error' });
+            applyDataButtonState({ status: 'error' });
+          });
+        });
+      }
     })();
 
     // Render the "N / M" cached-photo counter using the existing helper.
@@ -8481,30 +8586,33 @@
         '</div>' +
       '</form>' +
       '<div class="settings-section" id="settings-folder-section">' +
-        '<h3 class="settings-section-title">Data folder</h3>' +
+        '<h3 class="settings-section-title">Private data folder</h3>' +
         '<p class="settings-hint">' +
-          'Pick a folder on your device for the app to keep <code>relationships.db</code> in. ' +
-          'The app creates a <code>Fellows/</code> subfolder inside the folder you choose, so your other files in that folder are untouched. ' +
-          'Your data still lives on your device — nothing is uploaded — but it becomes a real file you can browse to, copy, sync, or back up like any other file.' +
+          'Your saved groups, group notes, fellow tags, and settings live in ' +
+          '<code>relationships.db</code> on this device. Pick a folder to keep ' +
+          'this file in a real location on your disk — the app creates a ' +
+          '<code>Fellows/</code> subfolder inside it, so your other files are ' +
+          'untouched. Nothing is uploaded; the folder just lets you browse to ' +
+          'the file, copy it, sync it, or back it up like any other file.' +
         '</p>' +
         '<div id="settings-folder-badge" class="settings-folder-badge" role="status" aria-live="polite">' +
           '<span class="settings-folder-badge-dot"></span>' +
           '<span class="settings-folder-badge-text">Checking…</span>' +
         '</div>' +
         '<p id="settings-folder-path" class="settings-hint settings-folder-path" hidden>' +
-          'File: <code id="settings-folder-path-value"></code> ' +
-          '<span class="settings-folder-path-note">(your browser doesn\'t expose absolute system paths — find this in Finder / Explorer to see the full path)</span>' +
+          'Where your data lives: <code id="settings-folder-path-value"></code> ' +
+          '<span class="settings-folder-path-note">— browsers don\'t expose absolute system paths, so this is the relative location. ' +
+          '<a href="https://github.com/richbodo/fellows_local_db/blob/main/docs/users_manual.md#where-is-my-data-file" target="_blank" rel="noopener">Find the file in Finder / Explorer</a>.</span>' +
         '</p>' +
         '<div id="settings-folder-actions" class="settings-folder-actions">' +
-          '<button type="button" id="settings-folder-choose" class="settings-download" hidden>Choose data folder…</button>' +
-          '<button type="button" id="settings-folder-save-now" class="settings-download" hidden ' +
-            'title="Manually re-save your current data to the folder. Auto-save runs after every change; this is a retry button for when auto-save fails.">Save now</button>' +
-          '<button type="button" id="settings-folder-refresh" class="settings-download" hidden ' +
-            'title="Replace your current working data with whatever is in the folder right now. Useful if you edited the file in another browser, or your cloud-sync service pulled in a new version. Your current data is captured as an auto-backup first, so this is undoable.">Reload from folder</button>' +
-          '<button type="button" id="settings-folder-reconnect" class="settings-download" hidden>Reconnect folder…</button>' +
-          '<button type="button" id="settings-folder-disconnect" class="settings-download settings-folder-disconnect" hidden>Disconnect folder</button>' +
+          '<button type="button" id="settings-folder-choose" class="settings-download" hidden>Choose folder…</button>' +
+          '<button type="button" id="settings-download-userdata" class="settings-download" hidden>' +
+            '⬇ Download my private data' +
+          '</button>' +
+          '<span id="settings-download-status" class="settings-status" aria-live="polite"></span>' +
         '</div>' +
         '<p id="settings-folder-detail" class="settings-hint settings-folder-detail" hidden></p>' +
+        '<div id="settings-local-data-fallback" hidden></div>' +
       '</div>' +
       '<dialog id="settings-folder-collision-dialog" class="settings-folder-dialog">' +
         '<form method="dialog">' +
@@ -8517,19 +8625,6 @@
           '</menu>' +
         '</form>' +
       '</dialog>' +
-      '<div class="settings-section" id="settings-export-section">' +
-        '<h3 class="settings-section-title">Your saved data</h3>' +
-        '<p class="settings-hint">' +
-          'Download a copy of <code>relationships.db</code> — your saved groups, ' +
-          'group notes, fellow tags, and settings. ' +
-          'The app also auto-snapshots this file before every app upgrade ' +
-          '(rotated to keep the newest 3); see Diagnostics for the current list.' +
-        '</p>' +
-        '<button type="button" id="settings-download-userdata" class="settings-download">' +
-          '⬇ Download my user data' +
-        '</button>' +
-        '<span id="settings-download-status" class="settings-status" aria-live="polite"></span>' +
-      '</div>' +
       '<div class="settings-section" id="settings-restore-section">' +
         '<h3 class="settings-section-title">Restore from backup</h3>' +
         '<p class="settings-hint">' +
@@ -8562,16 +8657,6 @@
           'Three small extensions, installed in one go. ' +
           '<a href="https://github.com/richbodo/fellows_local_db/blob/main/docs/use_with_claude_desktop.md" target="_blank" rel="noopener">Walkthrough</a>.' +
         '</p>' +
-        '<div id="settings-mcpb-update-row" class="settings-mcpb-update-row" hidden>' +
-          '<p class="settings-hint">' +
-            '<strong>Directory data update available.</strong> ' +
-            'A newer snapshot of the public fellows directory is on the server. ' +
-            'Re-install the Fellows directory extension to pick it up.' +
-          '</p>' +
-          '<button type="button" id="settings-mcpb-refresh-directory" class="settings-download">' +
-            '⬇ Re-install Fellows directory' +
-          '</button>' +
-        '</div>' +
         '<div class="settings-mcpb-actions">' +
           '<button type="button" id="settings-mcpb-setup" class="settings-download">' +
             'Set up Claude Desktop integration' +
@@ -8601,8 +8686,8 @@
             '<a href="https://github.com/richbodo/fellows_local_db/blob/main/docs/use_with_claude_desktop.md" target="_blank" rel="noopener">manual walkthrough</a>.' +
           '</p>' +
           '<p id="settings-mcpb-preamble-folder-warning" class="settings-mcpb-warning" hidden>' +
-            '<strong>Heads up.</strong> You haven\'t set up a data folder yet. ' +
-            'We recommend <em>Settings → Data folder → Choose data folder…</em> first (takes about ten seconds). ' +
+            '<strong>Heads up.</strong> You haven\'t set up a private data folder yet. ' +
+            'We recommend <em>Settings → Private data folder → Choose folder…</em> first (takes about ten seconds). ' +
             'Without it, you\'ll need to redo this setup every time you change a group.' +
           '</p>' +
           '<p id="settings-mcpb-preamble-browser-warning" class="settings-mcpb-warning" hidden>' +
@@ -8654,22 +8739,15 @@
     var form = document.getElementById('settings-form');
     var downloadBtn = document.getElementById('settings-download-userdata');
     var downloadStatus = document.getElementById('settings-download-status');
-    var exportSection = document.getElementById('settings-export-section');
 
     // Backup + restore both depend on the OPFS-backed sqlite provider —
     // the API provider (dev fallback) operates on a server-side
     // relationships.db that isn't the user's data, and prod doesn't
-    // serve those routes at all. So when we're on the API provider we
-    // can't honor a click on "Download my user data" or "Restore from
-    // a file"; PR #84 hid the export section on click rejection and
-    // PR #92 hid both sections proactively at render time. That avoided
-    // broken affordances but turned the failure silent — a user who
-    // arrived hoping to restore got an email field and no explanation.
-    // Now: render the existing local-data-unavailable panel into the
-    // export section (covering "backup and restore" together), hide
-    // the restore section, and let the panel tell the user what to do.
-    // The late `localDataUnavailable` click-handler paths below remain
-    // for paranoia / late provider downgrades.
+    // serve those routes at all. When we're on the API provider we
+    // can't honor a click on "Download my private data" or "Restore
+    // from a file". Hide the download button, render the unavailable-
+    // panel inline inside the folder section, and hide the restore
+    // section entirely.
     // 'worker' = the dedicated sqlite-worker.js owns OPFS; backup/restore
     // both go through worker RPC. 'api+idb' = worker init failed (no OPFS-
     // capable browser); the unavailable-panel covers groups/settings.
@@ -8677,12 +8755,14 @@
       dataProvider && dataProvider.kind === 'worker'
     );
     if (!localPersistenceAvailable) {
-      var preExport = document.getElementById('settings-export-section');
-      if (preExport) {
-        preExport.innerHTML = renderLocalDataUnavailablePanel(
+      if (downloadBtn) downloadBtn.hidden = true;
+      var preFallback = document.getElementById('settings-local-data-fallback');
+      if (preFallback) {
+        preFallback.innerHTML = renderLocalDataUnavailablePanel(
           'backup and restore',
           { runtimeFailure: true }
         );
+        preFallback.hidden = false;
       }
       var preRestore = document.getElementById('settings-restore-section');
       if (preRestore) preRestore.style.display = 'none';
@@ -8725,7 +8805,7 @@
           })
           .catch(function (err) {
             if (err && err.localDataUnavailable) {
-              if (exportSection) exportSection.style.display = 'none';
+              if (downloadBtn) downloadBtn.hidden = true;
               return;
             }
             if (downloadStatus) {
@@ -8735,7 +8815,7 @@
           })
           .then(function () {
             downloadBtn.disabled = false;
-            downloadBtn.textContent = '⬇ Download my user data';
+            downloadBtn.textContent = '⬇ Download my private data';
           });
       });
     }
@@ -9039,8 +9119,6 @@
     var statusEl = document.getElementById('settings-mcpb-status');
     var metaEl = document.getElementById('settings-mcpb-setup-meta');
     var postInstall = document.getElementById('settings-mcpb-post-install');
-    var updateRow = document.getElementById('settings-mcpb-update-row');
-    var refreshDirBtn = document.getElementById('settings-mcpb-refresh-directory');
     var dialog = document.getElementById('settings-mcpb-preamble-dialog');
     var folderWarning = document.getElementById('settings-mcpb-preamble-folder-warning');
     var browserWarning = document.getElementById('settings-mcpb-preamble-browser-warning');
@@ -9087,16 +9165,9 @@
         }
         if (postInstall) postInstall.hidden = true;
       }
-      // Directory-data-update affordance — only meaningful after at
-      // least one prior setup AND when the server's current fellows.db
-      // snapshot differs from the one bundled at last setup.
-      if (updateRow && refreshDirBtn) {
-        if (state && state.setupAt && serverSha && state.fellowsDbSha && state.fellowsDbSha !== serverSha) {
-          updateRow.hidden = false;
-        } else {
-          updateRow.hidden = true;
-        }
-      }
+      // Directory-data-update affordance moved to the About page in
+      // PR #205 — all "your stuff needs refreshing" signals consolidate
+      // there alongside the app + directory-data version rows.
     }
 
     function openPreamble() {
@@ -9181,24 +9252,7 @@
       });
     }
 
-    function runDirectoryRefresh() {
-      if (!refreshDirBtn) return;
-      setStatus('Re-downloading Fellows directory extension…');
-      refreshDirBtn.disabled = true;
-      return downloadFromUrl('/mcpb/shared_data_ops.mcpb', 'shared_data_ops.mcpb').then(function () {
-        var serverSha = (bootBuildMeta && bootBuildMeta.fellows_db_sha) || null;
-        recordMcpbDirectoryRefresh(serverSha);
-        setStatus('Fellows directory extension re-downloaded. Open the file to re-install in Claude Desktop.');
-        refreshUiFromState();
-      }).catch(function (e) {
-        setStatus('Download failed: ' + (e && e.message ? e.message : String(e)));
-      }).then(function () {
-        refreshDirBtn.disabled = false;
-      });
-    }
-
     setupBtn.addEventListener('click', openPreamble);
-    if (refreshDirBtn) refreshDirBtn.addEventListener('click', runDirectoryRefresh);
     if (dialog) {
       dialog.addEventListener('close', function () {
         // <dialog>'s close event fires for any submit (including the
@@ -9212,20 +9266,21 @@
     refreshUiFromState();
   }
 
-  // Settings → Data folder section: badge, action buttons, collision
-  // dialog. State is owned by FOLDER_CONTROLLER; this function is pure
-  // glue between the controller and the DOM nodes injected by
-  // renderSettingsPage.
+  // Settings → Private data folder section: badge, single Choose/Change
+  // button, collision dialog. State is owned by FOLDER_CONTROLLER; this
+  // function is pure glue between the controller and the DOM nodes
+  // injected by renderSettingsPage. The Save now / Reload from folder /
+  // Reconnect / Disconnect buttons were removed in PR #205 (issue #202):
+  // saves are auto, reloads are auto, disconnect-without-replace was a
+  // surprising affordance. Picking a new folder via Change covers every
+  // intent users actually had — replace folder, re-grant permission
+  // (when 'inaccessible'), or migrate to a synced location.
   function wireFolderSection() {
     var sectionEl = document.getElementById('settings-folder-section');
     if (!sectionEl) return;
     var badgeEl = document.getElementById('settings-folder-badge');
     var detailEl2 = document.getElementById('settings-folder-detail');
     var btnChoose = document.getElementById('settings-folder-choose');
-    var btnSave = document.getElementById('settings-folder-save-now');
-    var btnRefresh = document.getElementById('settings-folder-refresh');
-    var btnReconnect = document.getElementById('settings-folder-reconnect');
-    var btnDisconnect = document.getElementById('settings-folder-disconnect');
     var dialog = document.getElementById('settings-folder-collision-dialog');
     var dialogTitle = document.getElementById('settings-folder-collision-title');
     var dialogBody = document.getElementById('settings-folder-collision-body');
@@ -9251,11 +9306,11 @@
         cls: 'settings-folder-badge--pending'
       },
       'inaccessible': {
-        text: 'Folder set but unreachable — reconnect to keep saving',
+        text: 'Folder set but unreachable — Change folder to re-pick',
         cls: 'settings-folder-badge--warning'
       },
       'write-failed': {
-        text: 'Last save failed — Retry to save again',
+        text: 'Last save failed — Change folder to re-pick',
         cls: 'settings-folder-badge--warning'
       }
     };
@@ -9304,25 +9359,30 @@
         pathValueEl.textContent =
           state.parentName + ' / ' + state.subfolderName + ' / relationships.db';
       }
-      // Wire which buttons are visible to the badge state.
+      // Single button visibility + label. Always show when the browser
+      // supports the picker; the label tracks state — "Choose folder…"
+      // when no folder is connected, "Change folder…" once one is. Per
+      // issue #202: re-picking is the only intent users actually have
+      // (replace destination, re-grant permission, migrate to a synced
+      // location); a separate Disconnect button surprised more users
+      // than it helped.
       var supported = !!state.supported && (state.workerAvailable !== false);
-      function showBtn(btn, on) { if (btn) btn.hidden = !on; }
-      showBtn(btnChoose,     supported && (b === 'browser-only'));
-      showBtn(btnSave,       supported && (b === 'pending' || b === 'saved' || b === 'write-failed'));
-      showBtn(btnRefresh,    supported && b === 'saved');
-      showBtn(btnReconnect,  supported && b === 'inaccessible');
-      showBtn(btnDisconnect, supported && state.hasHandle);
-      // The "Your saved data" / Download my user data section is
-      // redundant when folder mode is actively writing to the user's
-      // disk — they can just grab the file from Finder. Hide it in
-      // that case. Keep it visible for OPFS-only-mode users (their
-      // only path to a backup file) and for degraded folder-mode
-      // sessions where permission has lapsed (the folder file may
-      // be stale; the in-browser data is what they'd want to grab).
-      var exportSectionEl = document.getElementById('settings-export-section');
-      if (exportSectionEl) {
-        var folderActive = b === 'saved' || b === 'pending';
-        exportSectionEl.hidden = folderActive;
+      if (btnChoose) {
+        btnChoose.hidden = !supported;
+        btnChoose.textContent = state.hasHandle ? 'Change folder…' : 'Choose folder…';
+      }
+      // Download button stays visible whenever local persistence is
+      // available — folder-mode users still want backup files outside
+      // the folder (cloud-sync conflicts, sneakernet to another machine,
+      // etc., per issue #202). The renderSettingsPage init hides it
+      // when localPersistenceAvailable is false.
+      var dlBtn = document.getElementById('settings-download-userdata');
+      if (dlBtn && dlBtn.hidden && supported) {
+        // Only un-hide if we're not in the localPersistenceAvailable=false
+        // path (which sets hidden=true on init). Heuristic: if the
+        // fallback panel is shown, leave it hidden.
+        var fallbackEl = document.getElementById('settings-local-data-fallback');
+        if (!fallbackEl || fallbackEl.hidden) dlBtn.hidden = false;
       }
       // Cascade: state change here may also affect whether the top-of-
       // page folder-push banner is visible (e.g., user just picked a
@@ -9450,91 +9510,6 @@
           })
           .then(function () {
             btnChoose.disabled = false;
-            return refresh();
-          });
-      });
-    }
-
-    if (btnSave) {
-      btnSave.addEventListener('click', function () {
-        btnSave.disabled = true;
-        flashDetail('Saving to folder…');
-        FOLDER_CONTROLLER.writeNow()
-          .then(function (res) {
-            flashDetail('Saved (' + res.bytesWritten + ' bytes).');
-          })
-          .catch(function (e) {
-            flashDetail('Save failed: ' + (e && e.message || String(e)));
-          })
-          .then(function () {
-            btnSave.disabled = false;
-            return refresh();
-          });
-      });
-    }
-
-    if (btnRefresh) {
-      btnRefresh.addEventListener('click', function () {
-        var ok = window.confirm(
-          'Reload your working data from the folder file?\n\n' +
-          'This replaces what you\'re currently looking at with whatever is in the folder right now — useful if the file was edited elsewhere (another browser, cloud sync, or a manual restore). Your current data is captured as an auto-backup first, so this is undoable.'
-        );
-        if (!ok) return;
-        btnRefresh.disabled = true;
-        flashDetail('Reading from folder…');
-        FOLDER_CONTROLLER.readNow()
-          .then(function (res) {
-            flashDetail('Loaded ' + fmtCountsSummary(res.counts) + ' from the folder.' +
-              (res.preRestoreSnapshot ? ' Previous data saved as auto-backup.' : ''));
-          })
-          .catch(function (e) {
-            flashDetail('Refresh failed: ' + (e && e.message || String(e)));
-          })
-          .then(function () {
-            btnRefresh.disabled = false;
-            return refresh();
-          });
-      });
-    }
-
-    if (btnReconnect) {
-      btnReconnect.addEventListener('click', function () {
-        btnReconnect.disabled = true;
-        flashDetail('Reconnecting…');
-        FOLDER_CONTROLLER.reconnect()
-          .then(function (state) {
-            renderState(state);
-            if (state && state.permission === 'granted') {
-              flashDetail('Reconnected.');
-            } else {
-              flashDetail('Reconnect declined — folder still unreachable.');
-            }
-          })
-          .catch(function (e) {
-            flashDetail('Reconnect failed: ' + (e && e.message || String(e)));
-          })
-          .then(function () {
-            btnReconnect.disabled = false;
-          });
-      });
-    }
-
-    if (btnDisconnect) {
-      btnDisconnect.addEventListener('click', function () {
-        var ok = window.confirm(
-          'Disconnect this folder?\n\n' +
-          'Your data stays in this browser (and the file in the folder is untouched). ' +
-          'You can re-pick the same folder later to reconnect.'
-        );
-        if (!ok) return;
-        btnDisconnect.disabled = true;
-        FOLDER_CONTROLLER.clearHandle()
-          .then(function () { flashDetail('Disconnected.'); })
-          .catch(function (e) {
-            flashDetail('Disconnect failed: ' + (e && e.message || String(e)));
-          })
-          .then(function () {
-            btnDisconnect.disabled = false;
             return refresh();
           });
       });

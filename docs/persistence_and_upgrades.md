@@ -101,9 +101,9 @@ Independent of app-shell updates. The data on the device is treated as
 an installed snapshot — see [`plans/opt_in_directory_data_updates.md`](../plans/opt_in_directory_data_updates.md)
 for the full rationale.
 
-1. About page → **Check for updates** fetches `/build-meta.json` and
-   asks the worker to compare its `fellows_db_sha` to the local
-   `fellows.db.meta.json:sha`.
+1. About page → **Check for directory data updates** fetches
+   `/build-meta.json` and asks the worker to compare its
+   `fellows_db_sha` to the local `fellows.db.meta.json:sha`.
 2. If they match → row reads *up to date*; nothing to do.
 3. If they differ → row reads *Directory Data update available* with
    an **Update directory data** button.
@@ -179,9 +179,9 @@ but get cleaned up by `clearEverything()`'s root-iteration removal
 along with the rest of OPFS.
 
 The Settings page exposes the live `relationships.db` as a download
-("Your saved data" → "⬇ Download my user data") so the user can stash
-a copy off-device. Diagnostics lists the backup files with sizes and
-mtimes.
+("Private data folder" → "⬇ Download my private data") so the user
+can stash a copy off-device. Diagnostics lists the backup files with
+sizes and mtimes.
 
 ### Restore
 

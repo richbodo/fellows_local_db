@@ -31,8 +31,8 @@ You should already have:
 - The **Fellows Directory app** installed and working (you've used it,
   you have groups saved).
 - **Claude Desktop** installed.
-- A **data folder set up** in the Fellows app (Settings → Data folder
-  → Choose data folder…). See *[Where your data is stored](users_manual.md#where-your-data-is-stored)*.
+- A **private data folder set up** in the Fellows app (Settings →
+  Private data folder → Choose folder…). See *[Where your data is stored](users_manual.md#where-your-data-is-stored)*.
 - About **5 minutes**.
 
 ### Best with: Chrome, Edge, Brave, Arc on macOS
@@ -188,9 +188,9 @@ to manage the `relationships.db` file by hand.
 
 ### Once-only setup
 
-1. In the Fellows app: **Settings → ⬇ Download my user data**.
-   Save the file somewhere stable on your disk — `~/Documents/`
-   works well. Note the file's location.
+1. In the Fellows app: **Settings → Private data folder → ⬇ Download
+   my private data**. Save the file somewhere stable on your disk —
+   `~/Documents/` works well. Note the file's location.
 2. Visit each of these URLs in turn while signed in to the Fellows
    app (the magic-link gate must already be open in this browser):
    - <https://fellows.globaldonut.com/mcpb/shared_data_ops.mcpb>

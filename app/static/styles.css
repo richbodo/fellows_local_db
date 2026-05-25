@@ -1576,19 +1576,23 @@ h1 {
   font-size: 0.95rem;
 }
 
-.about-install-name {
-  margin-top: 0.5rem;
-  font-size: 0.9rem;
+/* Install codename sits inside the App row of the update box now,
+   beneath the app/server build labels. Slightly smaller than the row
+   status to keep visual hierarchy: build labels are primary,
+   codename is identifying detail. */
+.about-install-name-inline {
+  margin-top: 0.35rem;
+  font-size: 0.85rem;
   color: var(--muted, #6b6480);
 }
 
-.about-install-name strong {
+.about-install-name-inline strong {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color: var(--text, #1a1a2e);
 }
 
-.about-install-name a {
-  font-size: 0.85rem;
+.about-install-name-inline a {
+  font-size: 0.8rem;
 }
 
 .about-update-block {
@@ -3361,12 +3365,6 @@ a.group-action-btn--primary {
   font-style: italic;
 }
 
-.settings-folder-disconnect {
-  border-color: #fca5a5;
-  color: #991b1b;
-}
-.settings-folder-disconnect:hover:not(:disabled) { background: #fef2f2; }
-
 /* Collision dialog — confirm "Open existing" vs "Create Fellows 2".
    <dialog> ships its own default styling on Chromium/Firefox/Safari;
    we just tighten typography and reset the action-row layout. */
@@ -3440,19 +3438,6 @@ a.group-action-btn--primary {
   margin-top: 0.5rem;
   font-size: 0.85rem;
   color: #6b7280;
-}
-
-.settings-mcpb-update-row {
-  margin: 0.75rem 0;
-  padding: 0.75rem 1rem;
-  border: 1px solid #e7c873;
-  border-radius: 6px;
-  background: #fff8e1;
-  color: #3a3a3a;
-}
-
-.settings-mcpb-update-row p {
-  margin: 0 0 0.5rem;
 }
 
 .settings-mcpb-post-install {
