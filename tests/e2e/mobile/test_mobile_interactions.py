@@ -120,20 +120,20 @@ def test_can_open_and_close_composer_sheet(
         re.compile(r"\bcomposer-open\b"),
         timeout=3000,
     )
-    # The composer rail itself must now be visible on-screen.
+    # The composer rail must now slide up. CSS transition is ~220ms, so
+    # poll for the transformed-on-screen state rather than measuring
+    # mid-transit. The rail's top should end up above the viewport
+    # bottom edge once translateY(0) finishes.
     rail = page.locator("#group-rail")
     expect(rail).to_be_visible()
-    rail_metrics = page.evaluate(
+    page.wait_for_function(
         """
         () => {
           const r = document.getElementById('group-rail').getBoundingClientRect();
-          return {top: r.top, bottom: r.bottom, vh: window.innerHeight};
+          return r.top < window.innerHeight - 10;
         }
-        """
-    )
-    assert rail_metrics["top"] < rail_metrics["vh"], (
-        f"composer rail not on-screen after open at {device_name}: "
-        f"top={rail_metrics['top']}, vh={rail_metrics['vh']}"
+        """,
+        timeout=3000,
     )
 
 

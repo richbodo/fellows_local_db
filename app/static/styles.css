@@ -4518,6 +4518,137 @@ body:is(.route-about, .route-settings) #group-rail {
   }
 }
 
+/* =========================================================================
+ * Mobile tap targets — bring interactive elements to the iOS HIG
+ * 44x44 minimum at mobile widths. Desktop keeps the compact look
+ * (no overrides at >1024px). Surfaced by the touch-target audit in
+ * tests/e2e/mobile/test_mobile_layout.py (#207); each rule below
+ * turns one red audit assertion green.
+ * ========================================================================= */
+@media (max-width: 1024px) {
+  /* Tab strip — was 40px tall. */
+  .tabs {
+    height: 44px;
+  }
+  .tabs__tab {
+    min-height: 44px;
+  }
+  /* Tabs sit-sticky-just-below appbar; the sticky offset must follow. */
+  .tabs {
+    top: 48px; /* unchanged: appbar height */
+  }
+
+  /* Directory rows: +/× marker is 24x24 by design at desktop (the
+     row's flex container forces flex-basis: 24px there). At mobile,
+     also override the flex shorthand so the basis grows — without it
+     flex-basis pins the width to 24 regardless of `width: 44px`. */
+  .dir-mark {
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    font-size: 1.5rem;
+  }
+  #directory li.dir-row {
+    min-height: 44px;
+    align-items: center;
+  }
+  #directory .dir-link {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+
+  /* Fellow detail's add-to-group +/× — 2rem x 2rem (32x32) at desktop.
+     Same role as .dir-mark, so the same mobile floor applies. */
+  .detail-add-to-group {
+    width: 44px;
+    height: 44px;
+  }
+
+  /* About-page check buttons — bordered outline buttons at desktop
+     padding (~9px vertical). Add height floor at mobile. */
+  .about-check-updates-btn,
+  .about-update-action-btn {
+    min-height: 44px;
+    padding: 0.65em 0.85em;
+  }
+
+  /* Settings form buttons — Save, Choose folder, Download my private
+     data, Restore from a file, MCPB setup. All share .settings-save
+     or .settings-download styles. */
+  .settings-save,
+  .settings-download {
+    min-height: 44px;
+    padding: 0.65em 0.95em;
+  }
+
+  /* Composer rail Create-new-group button (rail itself slides up as
+     bottom sheet on mobile). */
+  .group-rail-create {
+    min-height: 44px;
+    padding: 0.65em 0.95em;
+  }
+
+  /* Install codename's "(What's this?)" link sits in the About-row
+     update box (a <div>, not a <p>), so the bare-text-link skip in
+     the audit doesn't apply — give it explicit tap height. */
+  .about-install-name-inline a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0.25em 0;
+  }
+
+  /* Folder-push banner CTA + dismiss — 28px tall at desktop. */
+  .folder-push-cta,
+  .folder-push-dismiss {
+    min-height: 44px;
+    padding: 0.5em 0.85em;
+  }
+
+  /* Inline 📋 copy button — was 12x21 (next to email / phone). Expand
+     to a real tap target. inline-flex preserves baseline placement
+     relative to the adjacent text. */
+  .copy-btn {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0.5em 0.75em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: middle;
+    font-size: 1em;
+  }
+
+  /* Fellow detail key-links + contact links live as bare <a> inside
+     .field-value table cells (see fieldRow in app.js). At desktop
+     they're ~17px tall; expand the hit box at mobile via inline-flex
+     + padding. The :not(.copy-btn) carve-out preserves the copy
+     button's own rule above. */
+  #detail .field-value a:not(.copy-btn) {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0.4em 0;
+  }
+
+  /* Filters trigger — 60x32 at desktop. */
+  #filter-trigger {
+    min-height: 44px;
+    padding: 0.5em 0.75em;
+  }
+
+  /* Native checkboxes that ship at 13x13. iOS HIG floor is 44x44;
+     trade visual compactness for tap-friendliness on mobile.
+     Note: browsers cap how large a native checkbox's check graphic
+     can render, so the box looks chunky but works. */
+  #has-email-filter,
+  #bulk-select-input {
+    width: 44px;
+    height: 44px;
+  }
+}
+
 /* ----- Screenshot mode (maintainer-only) ---------------------------
    Blurs PII fields on the fellow detail page so docs/users_manual
    screenshots can show the full layout without exposing a real
