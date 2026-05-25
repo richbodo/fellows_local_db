@@ -10,7 +10,7 @@ on macOS desktop, with Claude Desktop for AI integration.**
 | | Best on | Works on | Limited / no |
 |---|---|---|---|
 | **Browse the directory + save groups** | Anything | Every desktop + mobile browser | — |
-| **Local data folder** (stable file on disk) | Chromium desktop | — | Safari, Firefox, all mobile |
+| **Private data folder** (stable file on disk) | Chromium desktop | — | Safari, Firefox, all mobile |
 | **Claude Desktop AI integration** | Chrome on macOS | Other Chromium desktop | Safari/Firefox (secondary path); mobile (N/A) |
 
 If you're going to create groups and want a smooth experience, **install in one browser only**. See *[Multiple installs on the same device](users_manual.md#multiple-installs-on-the-same-device)*.
@@ -24,7 +24,7 @@ If you're going to create groups and want a smooth experience, **install in one 
 | **Save groups, tags, notes** | yes | yes | yes | yes | yes | yes |
 | **Manual backup download** | yes | yes | yes | yes (share sheet) | yes | yes |
 | **Auto-backups** (in browser storage) | yes | yes | yes | yes | yes | yes |
-| **Data folder** (stable file on disk for `relationships.db`) | yes | no[^3] | no[^3] | no | no | no |
+| **Private data folder** (stable file on disk for `relationships.db`) | yes | no[^3] | no[^3] | no | no | no |
 | **Claude Desktop AI integration — easy path** | yes | no | no | N/A[^4] | N/A | N/A |
 | **Claude Desktop AI integration — secondary path** | yes | yes (manual re-export per change) | yes (manual re-export per change) | N/A | N/A | N/A |
 | **Per-install codename** (debugging multi-install confusion) | yes | yes | yes | yes | yes | yes |

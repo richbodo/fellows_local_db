@@ -72,7 +72,7 @@ class TestAboutUpdateCheck:
             page.goto(base_url_fixture + "/#/about", wait_until="domcontentloaded")
             _wait_for_boot_settled(page)
 
-            btn = page.locator("#about-check-updates")
+            btn = page.locator("#about-check-app-update")
             expect(btn).to_be_visible()
             btn.click()
             # App row shows "up to date" when git_sha matches.
@@ -94,7 +94,7 @@ class TestAboutUpdateCheck:
             context.unroute(BUILD_META_PATH)
             _route_build_meta(context, git_sha="xyz999")
 
-            page.locator("#about-check-updates").click()
+            page.locator("#about-check-app-update").click()
             app_status = page.locator("#about-app-status")
             expect(app_status).to_contain_text("App update available", timeout=5000)
             # The Reload affordance lives in the action cell.
@@ -118,7 +118,7 @@ class TestAboutUpdateCheck:
                 lambda r: r.fulfill(status=503, body="service unavailable"),
             )
 
-            page.locator("#about-check-updates").click()
+            page.locator("#about-check-app-update").click()
             app_status = page.locator("#about-app-status")
             expect(app_status).to_contain_text("Couldn", timeout=5000)
             expect(page.locator("#sw-update-banner")).to_be_hidden()

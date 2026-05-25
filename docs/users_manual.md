@@ -161,8 +161,8 @@ If you've accumulated copies and want to keep just one:
    name (and so does the window title).
 2. Identify the copy with the data you want to keep (groups
    visible, notes intact).
-3. From the copy you're keeping, **Settings → Data folder →
-   Choose data folder…**, and pick a folder under your home
+3. From the copy you're keeping, **Settings → Private data folder →
+   Choose folder…**, and pick a folder under your home
    directory. This creates a stable file you can later re-attach
    from any new install. (Folder mode also makes
    [Use with Claude Desktop](use_with_claude_desktop.md) easier.)
@@ -187,7 +187,7 @@ browser's official help — that's always the canonical reference:
 - **Firefox** — no PWA install on desktop; close the tab and remove
   the bookmark.
 
-**Important:** uninstalling a copy does **not** delete a data folder
+**Important:** uninstalling a copy does **not** delete a private data folder
 you set up. The folder lives on your disk and stays put. To remove
 the data too, separately drag the `Fellows/` subfolder you picked
 to the Trash. (Auto-backups inside it go with it.)
@@ -214,7 +214,7 @@ Bringing your data across is a two-step copy:
 
 1. Open the app **in the browser where your data currently lives**
    (Safari, in this example).
-2. **Settings → ⬇ Download my user data**. Save the `relationships.db`
+2. **Settings → Private data folder → ⬇ Download my private data**. Save the `relationships.db`
    file somewhere stable on your disk — `~/Documents/` works well,
    or anywhere you can find again. **Don't put it in Downloads** if
    you regularly empty that folder.
@@ -223,8 +223,8 @@ Bringing your data across is a two-step copy:
 
 1. Open the app **in the new browser** (Chrome, in this example). If
    you haven't installed there yet, do that first.
-2. *(Recommended, Chromium browsers only)* **Settings → Data folder →
-   Choose data folder…**. Pick a folder under your home directory.
+2. *(Recommended, Chromium browsers only)* **Settings → Private data folder →
+   Choose folder…**. Pick a folder under your home directory.
    This sets up the new browser to keep its `relationships.db` at a
    stable path on your disk — which makes the Claude Desktop
    integration much easier and survives clearing site data.
@@ -250,10 +250,11 @@ the other as a backup.
 Your groups, notes, and settings live **on your device only** —
 never sent to any server, never visible to other apps or websites.
 
-**The recommended setup is a data folder on your disk** — a real
-file at a path you pick, visible in Finder/Explorer, durable across
-clearing site data or switching browsers. The app prompts you to
-set this up via a banner at the top of the screen on first launch.
+**The recommended setup is a private data folder on your disk** —
+a real file at a path you pick, visible in Finder/Explorer, durable
+across clearing site data or switching browsers. The app prompts
+you to set this up via a banner at the top of the screen on first
+launch.
 
 If you skip the prompt or you're on a browser that doesn't support
 folder selection (Safari, Firefox, iOS, Android), the app falls
@@ -262,10 +263,10 @@ in private browser storage that can be lost when you clear site
 data or switch browsers. Use the **Download a backup** feature
 (below) to make file copies you can save anywhere.
 
-### Setting up a data folder (Chrome / Edge / Brave on desktop)
+### Setting up a private data folder (Chrome / Edge / Brave on desktop)
 
 1. Click **Set up data folder** on the banner at the top of the app
-   (or go to **Settings → Data folder** → **Choose data folder…**).
+   (or go to **Settings → Private data folder** → **Choose folder…**).
 2. Your OS pops a folder picker. Pick any folder you like —
    `Documents`, a Dropbox / iCloud / Syncthing folder, anywhere.
 3. The app creates a `Fellows/` subfolder inside it and saves
@@ -273,7 +274,10 @@ data or switch browsers. Use the **Download a backup** feature
 
 The badge at the top of the section flips to **Saved** with the
 path and a timestamp, and your data is now a real file you can
-browse to. The banner at the top of the screen disappears.
+browse to. The banner at the top of the screen disappears. Once a
+folder is connected, the button relabels to **Change folder…** so
+you can re-pick (moving to a synced folder, re-granting permission
+after the browser idle-revokes, switching machines).
 
 **If `Fellows/` already exists in the folder you picked**, the app
 asks before doing anything: open the existing data (the typical
@@ -284,51 +288,66 @@ Cancel leaves both untouched.
 
 After setup, **every change you make is automatically saved to the
 folder** — no Save button to remember. You'll see the badge update
-each time. The *Save now* button stays as a manual retry if a write
-ever fails (badge flips to *Last save failed*). **Refresh from
-folder** does the reverse: replace your working data with whatever's
-currently in the folder — useful after editing in another browser
-or restoring a synced file.
+each time. If a save fails (badge flips to *Last save failed*), or
+the OS revokes permission (badge flips to *Folder set but
+unreachable*), click **Change folder…** and re-pick the same folder
+— that re-grants permission and triggers a fresh save.
 
 Backups (the `relationships.db.bak.<timestamp>` files in the same
 `Fellows/` subfolder) are also automatic — the app keeps the most
 recent few alongside the live file. Visible in Finder so you can
 copy them out if you want extra safety.
 
+### Where is my data file?
+
+`showDirectoryPicker` deliberately hides absolute system paths
+from web apps, so the badge can only show a relative location
+(e.g. *Documents / Fellows*). To find the live file on disk:
+
+- **macOS** — open Spotlight (⌘-Space), type `relationships.db`,
+  and the file you just created shows up. Or navigate to the
+  parent folder you picked in Finder; the `Fellows/` subfolder
+  is right there.
+- **Windows** — open File Explorer, paste `relationships.db` into
+  the search box at the top, and pick the result.
+- **Linux** — `find ~ -name relationships.db` from a terminal.
+
 ### Badge states
 
-The badge at the top of *Data folder* always tells you the current
-state of your data:
+The badge at the top of *Private data folder* always tells you the
+current state of your data:
 
 - **Saved** (green) — your data is in the folder and the last save
   succeeded.
 - **Folder selected — no save yet** (blue) — you've picked a folder
-  but haven't saved into it yet. Click *Save now*.
+  but the first save hasn't completed yet (rare; usually flips to
+  *Saved* within a second).
 - **Browser-only — your data is not yet saved to a folder** (yellow)
   — default state on a fresh install. Working fine, but not yet
   durable across browser-data clears.
-- **Folder set but unreachable — reconnect to keep saving** (yellow)
+- **Folder set but unreachable — Change folder to re-pick** (yellow)
   — the OS revoked permission to the folder (you moved it, denied
   on session start, or the browser idle-revoked). Your data is fine
-  in the browser; click *Reconnect folder…* to grant access again.
-- **Last save failed — Retry to save again** (yellow) — the most
-  recent write threw an error (disk full, permissions changed
+  in the browser; click *Change folder…* and re-pick the same folder
+  to re-grant access.
+- **Last save failed — Change folder to re-pick** (yellow) — the
+  most recent write threw an error (disk full, permissions changed
   mid-write). The change is still safe in the browser; click
-  *Save now* to retry.
+  *Change folder…* and re-pick to retry.
 - **Browser-only — this browser doesn't support saving to a folder**
   (yellow) — Safari, Firefox, iOS, and Android Chrome don't ship the
-  File System Access API. Use *Download my user data* (below) for
+  File System Access API. Use *Download my private data* (below) for
   manual backup instead.
 
 ### Backup and restore (works in every browser)
 
-Even when you haven't picked a data folder, you can still grab a
-file copy by hand:
+Even when you've picked a private data folder, you can still grab
+a portable file copy by hand:
 
-- **Download a backup.** Settings → *⬇ Download my user data*. Your
-  browser asks you where to save it (Chrome / Edge / Brave on desktop,
-  share sheet on iOS / Android) or drops it into your Downloads folder
-  (Safari / Firefox).
+- **Download a backup.** Settings → Private data folder → *⬇ Download my
+  private data*. Your browser asks you where to save it
+  (Chrome / Edge / Brave on desktop, share sheet on iOS / Android)
+  or drops it into your Downloads folder (Safari / Firefox).
 - **Restore from a backup.** Settings → *Restore from backup →
   Restore from a file* → pick the `.db` file you downloaded earlier.
   The current data is captured into the auto-backup list first, so
@@ -341,8 +360,8 @@ file copy by hand:
 breakdown): **Clear App Cache** keeps your data and auto-backups.
 **Reset Everything** wipes the in-browser data and auto-backups —
 that's why it pops up a *Save a backup first?* dialog. **Reset
-Everything does NOT delete the data folder file** — that file lives
-on your disk and is yours to keep or remove.
+Everything does NOT delete the private data folder file** — that
+file lives on your disk and is yours to keep or remove.
 
 **If you cleared site data and re-installed, but your data folder
 is still on disk**, choose the same folder again — the dialog will
@@ -353,12 +372,12 @@ in Android Settings wipes everything this app has saved, including
 the auto-backups. On **iOS**, *Settings → Safari → Clear History and
 Website Data* does the same. Both bypass the app's own confirm
 dialogs — download a backup yourself before doing either. (Phones
-don't yet support the data-folder feature.)
+don't yet support the private data folder feature.)
 
-**Switching browsers or devices.** If you set up a data folder
-inside a cloud-sync folder (Dropbox / iCloud Drive / Syncthing /
-OneDrive), point the new browser at the same folder and pick
-*Open existing* — your groups / notes / tags carry over.
+**Switching browsers or devices.** If you set up a private data
+folder inside a cloud-sync folder (Dropbox / iCloud Drive /
+Syncthing / OneDrive), point the new browser at the same folder
+and pick *Open existing* — your groups / notes / tags carry over.
 Otherwise, download a backup in the source browser, move the file
 across (AirDrop, email-to-yourself, USB, cloud drive), then use
 *Restore from a file* in the new browser.
@@ -518,13 +537,16 @@ action as the detail page.
 - **Your email ("me" email)** — used by export "Email it to me" and any
   other place the app addresses something *to you*. Auto-captured from
   your magic link, so most people never need to touch this.
-- **Your saved data → Download my user data** — saves all your groups,
-  notes, tags, and settings to a single `.db` file. Your browser
-  opens its native save dialog (Chrome / Edge / Brave on desktop) or
-  share sheet (iOS / Android) so **you choose where the file goes**;
-  on Safari and Firefox the file lands in your Downloads folder. The
-  app also auto-snapshots the same file before every upgrade and
-  keeps the newest 3.
+- **Private data folder** — shows where on disk your `relationships.db`
+  is being kept (or *Browser-only* if you haven't picked a folder yet).
+  See *[Where is my data file?](#where-is-my-data-file)*.
+- **Private data folder → ⬇ Download my private data** — saves all
+  your groups, notes, tags, and settings to a single `.db` file.
+  Your browser opens its native save dialog (Chrome / Edge / Brave
+  on desktop) or share sheet (iOS / Android) so **you choose where
+  the file goes**; on Safari and Firefox the file lands in your
+  Downloads folder. The app also auto-snapshots the same file before
+  every upgrade and keeps the newest 3.
 - **Restore from backup → Restore from a file** — replace your current
   saved data with a previously downloaded `.db`. The app shows a
   confirmation summary ("4 groups, 12 notes → 7 groups, 23 notes —
@@ -546,22 +568,35 @@ file or a recent auto-backup.](images/users_manual/11_settings.png)
 ## About
 
 `#/about` shows fellowship statistics (totals, breakdowns by region /
-cohort / fellow type) plus a two-line update status block:
+cohort / fellow type) plus a unified identity-and-updates block:
 
-- **App** — the build label running in this tab.
-- **Directory data** — when fellows.db was last fetched.
+- **App** — the build label running in this tab (app + server SHAs),
+  with the install codename right underneath so you can tell copies
+  apart on a multi-install device.
+- **Directory data** — when `fellows.db` was last fetched.
+- **Signing key** — the fingerprint of the key that signed this
+  bundle; compare against the value in your magic-link email.
 
-Click **Check for updates** to ask the server about both. Each row
-updates independently:
+Two independent buttons drive the freshness checks:
+
+- **Check for application updates** — asks the server whether the
+  app code (and the MCP server bundles that ship with it) is current.
+  Relabels to **New application version available** when stale; click
+  **Reload to apply** next to it to update.
+- **Check for directory data updates** — asks whether the server's
+  `fellows.db` snapshot is newer than yours. Relabels to **New
+  directory data update available** when stale; click **Update
+  directory data** to swap (see *Updating directory data* below).
+
+If Claude Desktop integration is installed and your local extension
+files are older than the app or directory snapshot on the server, a
+**Re-install Claude Desktop bundles** button appears next to the
+relevant row — one click downloads the current `.mcpb` files so you
+can re-install in Claude Desktop.
+
+Other status text you may see in either row:
 
 - *up to date* — nothing to do.
-- *App update available* — a newer app version is on the server. A
-  **Reload to apply** button appears next to the row; clicking it is
-  the same as clicking the *New version available* banner.
-- *Directory Data update available* — the bundled fellow data on the
-  server differs from the snapshot on this device. An **Update
-  directory data** button appears. See *Updating directory data*
-  below.
 - *Couldn't check (offline?)* — the server didn't respond. Try again
   when you're online.
 - *Reload the app to enable update checks* — appears briefly right
@@ -628,8 +663,8 @@ doesn't need any of this.
 ## Updates
 
 The app handles two kinds of updates separately. Both are surfaced on
-the **About** page; you can click **Check for updates** at any time to
-re-check.
+the **About** page; you can click **Check for application updates** or
+**Check for directory data updates** at any time to re-check each one.
 
 ### App updates
 
@@ -712,7 +747,7 @@ auto-backups stored alongside them — clicking it pops up a *Save a
 backup first?* dialog with three options:
 
 - **⬇ Download backup & continue** — downloads the same `.db` file
-  Settings → *Download my user data* produces, then proceeds to the
+  Settings → *Download my private data* produces, then proceeds to the
   destructive confirm. Safe choice if you might want to restore later.
 - **Skip — no data to save** — for clean installs or when you don't
   care about losing the data. Goes straight to the destructive confirm.
@@ -780,7 +815,7 @@ get a chance to fetch them.
 
 If you ever wonder whether the app has reached the server recently,
 the **About** page shows the timestamp of the last successful fetch
-under **Check for updates**. Picking up new fellows, fixes, or a
+under the update buttons. Picking up new fellows, fixes, or a
 refreshed profile is opt-in — see *Updates → Directory data updates*
 above. If your session has expired, visit `/?gate=1` for a new magic
 link.

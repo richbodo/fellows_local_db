@@ -100,12 +100,13 @@ class TestSettingsPage:
         page.goto(f"{base_url_fixture}/#/settings", wait_until="domcontentloaded")
         worker_data.wait()
         _wait_for_directory(page)
-        export_section = page.locator("#settings-export-section")
+        # Post-PR-#205: the Download button lives inside the Private
+        # data folder section; the api+idb fallback panel renders into
+        # a dedicated container inside the same section.
+        folder_section = page.locator("#settings-folder-section")
         restore_section = page.locator("#settings-restore-section")
-        # Both sections must be in the DOM regardless of mode.
-        expect(export_section).to_have_count(1)
+        expect(folder_section).to_have_count(1)
         expect(restore_section).to_have_count(1)
-        # Markup that doesn't depend on which mode we're in.
         file_input = page.locator("#settings-restore-file")
         expect(file_input).to_have_count(1)
         accept = file_input.get_attribute("accept") or ""
@@ -113,7 +114,7 @@ class TestSettingsPage:
 
         # The shipped guarantee: either backup works or we say why.
         download_btn = page.locator("#settings-download-userdata")
-        panel = export_section.locator(".local-data-unavailable")
+        panel = page.locator("#settings-local-data-fallback .local-data-unavailable")
         button_visible = download_btn.count() == 1 and download_btn.is_visible()
         panel_present = panel.count() == 1
 
