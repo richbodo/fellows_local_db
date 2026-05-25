@@ -17,7 +17,7 @@
 | #199 | `fix/e2e-stale-ui-assertions` | merged | Unblocks 10 pre-existing e2e failures (build-badge removal aftermath + Playwright + showSaveFilePicker + User Guide rename) |
 | #200 | `fix/about-update-check-flake` | merged | Fixes the last pre-existing e2e flake (TestAboutUpdateCheck — boot's `getFull` re-render clobbered `paintAppRow` output) |
 | #201 | `feat/onboarding-clarity-pr200-followup` | open | Recommended-platform intro on users-manual, feature ↔ platform matrix doc, MCPB preamble restructure (warning to top, 6-step what-happens-next, three-extensions detail collapsed), Never-SaaS image |
-| #202 | `feat/mcpb-preamble-feedback-pr202` | open | Round-2 preamble polish: new warning wording, removed redundant post-install panel, button label stays "Set up…", meta line bolded. Plus the test-plan section 4d/4e clarifications below. Files [GH issue #202](https://github.com/richbodo/fellows_local_db/issues/202) for the data-folder "reveal in Finder" affordance discovered during testing. |
+| #203 | `feat/mcpb-preamble-feedback-pr202` | open | Round-2 preamble polish: new warning wording, removed redundant post-install panel, button label stays "Set up…", meta line bolded. Plus the test-plan section 4d/4e clarifications below. Stacked on #201. (Branch name says "pr202" because [GH issue #202](https://github.com/richbodo/fellows_local_db/issues/202) — data-folder "reveal in Finder" — took the number first.) |
 
 After #200 merges, `just test` should run clean against `main` with no known failures or flakes from this 24-hour window.
 
