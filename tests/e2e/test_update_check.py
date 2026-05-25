@@ -141,3 +141,106 @@ class TestAboutUpdateCheck:
         finally:
             context.unroute(BUILD_META_PATH)
             page.close()
+
+
+class TestAboutDirectoryRefreshForMcpb:
+    """The MCPB "Re-install Fellows directory extension" affordance
+    lives in the About-page Directory data action cell (PR #204 moved
+    it out of the MCPB Settings section). It surfaces only when the
+    user has set up MCPB AND the bundled fellows.db sha is older than
+    the server's current sha. Two visible scenarios:
+
+      1. ``res.status === 'update-available'`` — local fellows.db is
+         also behind server. Both buttons render side by side:
+         "Update directory data" + "Re-install Fellows directory
+         extension".
+      2. ``res.status === 'up-to-date'`` but MCPB is still behind —
+         local fellows.db has been refreshed already, MCPB extension
+         in Claude Desktop has not. Only the MCPB refresh button
+         renders, with explanatory status text.
+    """
+
+    def test_mcpb_button_hidden_when_no_mcpb_setup(self, context, base_url_fixture):
+        """No localStorage record → no MCPB refresh button, even when
+        directory data is out of date."""
+        page = _make_standalone_page(context)
+        try:
+            _route_build_meta(context, git_sha="abc123", fellows_db_sha="server-sha-A")
+            page.goto(base_url_fixture + "/#/about", wait_until="domcontentloaded")
+            _wait_for_boot_settled(page)
+            page.evaluate("localStorage.removeItem('fellows_mcpb_setup')")
+            page.locator("#about-check-updates").click()
+            # Allow either status to settle; button must NOT appear.
+            page.wait_for_function(
+                """() => {
+                  const s = document.getElementById('about-data-status');
+                  return s && s.textContent && !/Checking/.test(s.textContent);
+                }""",
+                timeout=5000,
+            )
+            assert page.locator("#about-data-mcpb-refresh-btn").count() == 0
+        finally:
+            context.unroute(BUILD_META_PATH)
+            page.close()
+
+    def test_mcpb_button_appears_when_mcpb_sha_stale_vs_server(self, context, base_url_fixture):
+        """MCPB set up with a stale fellows.db sha + server reports a
+        different sha → the refresh button appears in the action cell."""
+        page = _make_standalone_page(context)
+        try:
+            # MCPB recorded a setup with sha "stale-mcpb" — server now
+            # returns "fresh-server". Status is 'up-to-date' or 'error'
+            # depending on what compareFellowsDbSha returns from the
+            # local worker; what matters for this test is that the MCPB
+            # button surfaces regardless of the local-vs-server status.
+            _route_build_meta(context, git_sha="abc123", fellows_db_sha="fresh-server")
+            page.goto(base_url_fixture + "/#/about", wait_until="domcontentloaded")
+            _wait_for_boot_settled(page)
+            page.evaluate(
+                """() => {
+                  localStorage.setItem('fellows_mcpb_setup', JSON.stringify({
+                    setupAt: new Date().toISOString(),
+                    refreshedAt: new Date().toISOString(),
+                    fellowsDbSha: 'stale-mcpb'
+                  }));
+                }"""
+            )
+            page.locator("#about-check-updates").click()
+            # Button shows up once Check-for-updates completes.
+            page.wait_for_selector("#about-data-mcpb-refresh-btn", timeout=5000)
+            btn = page.locator("#about-data-mcpb-refresh-btn")
+            expect(btn).to_be_visible()
+            expect(btn).to_contain_text("Re-install Fellows directory extension")
+        finally:
+            context.unroute(BUILD_META_PATH)
+            page.close()
+
+    def test_mcpb_button_hidden_when_mcpb_in_sync_with_server(self, context, base_url_fixture):
+        """MCPB recorded the same fellows.db sha that the server now
+        reports → no refresh needed → button stays hidden."""
+        page = _make_standalone_page(context)
+        try:
+            _route_build_meta(context, git_sha="abc123", fellows_db_sha="same-sha")
+            page.goto(base_url_fixture + "/#/about", wait_until="domcontentloaded")
+            _wait_for_boot_settled(page)
+            page.evaluate(
+                """() => {
+                  localStorage.setItem('fellows_mcpb_setup', JSON.stringify({
+                    setupAt: new Date().toISOString(),
+                    refreshedAt: new Date().toISOString(),
+                    fellowsDbSha: 'same-sha'
+                  }));
+                }"""
+            )
+            page.locator("#about-check-updates").click()
+            page.wait_for_function(
+                """() => {
+                  const s = document.getElementById('about-data-status');
+                  return s && s.textContent && !/Checking/.test(s.textContent);
+                }""",
+                timeout=5000,
+            )
+            assert page.locator("#about-data-mcpb-refresh-btn").count() == 0
+        finally:
+            context.unroute(BUILD_META_PATH)
+            page.close()

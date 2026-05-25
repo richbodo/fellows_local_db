@@ -97,13 +97,6 @@ class TestMcpbSection:
         meta = page.locator("#settings-mcpb-setup-meta")
         expect(meta).to_be_hidden()
 
-    def test_directory_update_row_is_hidden_initially(self, standalone_page, base_url_fixture):
-        page = standalone_page
-        _boot_to_settings(page, base_url_fixture)
-        row = page.locator("#settings-mcpb-update-row")
-        expect(row).to_be_hidden()
-
-
 class TestPreambleDialog:
     def test_setup_button_opens_preamble(self, standalone_page, base_url_fixture):
         page = standalone_page
@@ -273,33 +266,7 @@ class TestPostSetupState:
         assert record["setupAt"]
         assert record["refreshedAt"]
 
-    def test_directory_update_row_shows_when_sha_changes(self, standalone_page, base_url_fixture):
-        """If the user has set up before but the server now reports a
-        different ``fellows_db_sha``, the Settings UI exposes the
-        re-install-directory button."""
-        page = standalone_page
-        _boot_to_settings(page, base_url_fixture)
-        # Seed localStorage with a setup record that pins a stale sha,
-        # then re-render the settings page (via hash bounce) so
-        # refreshUiFromState runs.
-        page.evaluate(
-            """() => {
-              localStorage.setItem('fellows_mcpb_setup', JSON.stringify({
-                setupAt: new Date().toISOString(),
-                refreshedAt: new Date().toISOString(),
-                fellowsDbSha: 'stale-sha-not-on-server'
-              }));
-              window.bootBuildMeta = window.bootBuildMeta || {};
-              window.bootBuildMeta.fellows_db_sha = 'fresh-server-sha';
-            }"""
-        )
-        # Bounce off then back to trigger re-render.
-        page.evaluate("location.hash = '#/about'")
-        page.wait_for_function(
-            "() => !document.getElementById('settings-mcpb-section')",
-            timeout=5000,
-        )
-        page.evaluate("location.hash = '#/settings'")
-        page.wait_for_selector("#settings-mcpb-section", timeout=5000)
-        expect(page.locator("#settings-mcpb-update-row")).to_be_visible()
-        expect(page.locator("#settings-mcpb-refresh-directory")).to_be_visible()
+    # NB: directory-data refresh affordance moved out of the MCPB
+    # Settings section in PR #204. It now lives on the About page next
+    # to the existing "Update directory data" button. See
+    # tests/e2e/test_update_check.py::TestAboutDirectoryRefreshForMcpb.

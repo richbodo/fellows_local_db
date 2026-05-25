@@ -17,7 +17,8 @@
 | #199 | `fix/e2e-stale-ui-assertions` | merged | Unblocks 10 pre-existing e2e failures (build-badge removal aftermath + Playwright + showSaveFilePicker + User Guide rename) |
 | #200 | `fix/about-update-check-flake` | merged | Fixes the last pre-existing e2e flake (TestAboutUpdateCheck — boot's `getFull` re-render clobbered `paintAppRow` output) |
 | #201 | `feat/onboarding-clarity-pr200-followup` | open | Recommended-platform intro on users-manual, feature ↔ platform matrix doc, MCPB preamble restructure (warning to top, 6-step what-happens-next, three-extensions detail collapsed), Never-SaaS image |
-| #203 | `feat/mcpb-preamble-feedback-pr202` | open | Round-2 preamble polish: new warning wording, removed redundant post-install panel, button label stays "Set up…", meta line bolded. Plus the test-plan section 4d/4e clarifications below. Stacked on #201. (Branch name says "pr202" because [GH issue #202](https://github.com/richbodo/fellows_local_db/issues/202) — data-folder "reveal in Finder" — took the number first.) |
+| #203 | `feat/mcpb-preamble-feedback-pr202` | open | Round-2 preamble polish: new warning wording, removed redundant post-install panel, button label stays "Set up…", meta line bolded. Stacked on #201. (Branch name says "pr202" because [GH issue #202](https://github.com/richbodo/fellows_local_db/issues/202) — now broader *Data folder section UX non-functional* — took the number first.) |
+| #204 | `feat/about-mcpb-refresh-pr204` | open | Round-3: moves the MCPB "Re-install Fellows directory" affordance out of Settings into the About page's Directory data action cell (logical home for all "your data is out of date" controls). Drops "developers integrating other tools" from preamble blue box. Stacked on #203. |
 
 After #200 merges, `just test` should run clean against `main` with no known failures or flakes from this 24-hour window.
 
@@ -100,9 +101,9 @@ Open the app, navigate to `#/settings`.
 - [ ] **Setup-meta line** below the button is now visible: "Last set up: **just now**. Re-running this will replace the extensions you have installed in Claude Desktop." (The "just now" fragment is bold.)
 - [ ] **Reload** the page — meta line persists with updated relative time ("Last set up: **a minute ago**").
 
-### 4e. Directory-data-update affordance
+### 4e. Directory-data-update affordance (MOVED to About page in PR #204)
 
-> **Order matters** — the row only renders during `renderSettingsPage`, which runs on hash navigation. Don't expect the row to appear *on the same page view* where you set localStorage; navigate away and back.
+> **As of PR #204, this lives on the About page** next to the existing *Update directory data* button — all "your data is out of date" affordances in one logical place. The yellow row in the MCPB Settings section is gone.
 
 - [ ] First confirm 4d above has been done so a `fellows_mcpb_setup` record exists (with a real `fellowsDbSha`).
 - [ ] Open DevTools console (⌥⌘I) and run:
@@ -111,10 +112,10 @@ Open the app, navigate to `#/settings`.
   s.fellowsDbSha = 'stale-sha';
   localStorage.setItem('fellows_mcpb_setup', JSON.stringify(s));
   ```
-  (Or if no setup record exists yet: `localStorage.setItem('fellows_mcpb_setup', JSON.stringify({setupAt: new Date().toISOString(), refreshedAt: new Date().toISOString(), fellowsDbSha: 'stale-sha'}))`)
-- [ ] **Navigate away** from Settings (`#/about` works) then **navigate back** (`#/settings`). This triggers re-render; just clicking *Settings* in the nav also works.
-- [ ] **Directory data update row** is now visible above the *Set up Claude Desktop integration* button, with a *Re-install Fellows directory* button.
-- [ ] Click *Re-install Fellows directory* — single download fires (`shared_data_ops.mcpb`).
+- [ ] Navigate to **About** (`#/about`).
+- [ ] Click **Check for updates** in the update block.
+- [ ] In the *Directory data* row's action cell, you should see a **Re-install Fellows directory extension** button (alongside *Update directory data* if local data is also behind server, or alone if only the MCPB extension is behind).
+- [ ] Click it — single download fires (`shared_data_ops.mcpb`). Button flips to *"Downloaded — open the file to re-install"*.
 - [ ] To clean up: `localStorage.removeItem('fellows_mcpb_setup')` + reload.
 
 ## 5. Migrate-from-another-browser hint (PR #198) — (L)

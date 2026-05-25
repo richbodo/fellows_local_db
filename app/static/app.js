@@ -455,6 +455,29 @@
     persistMcpbSetupState(state);
   }
 
+  // Trigger a same-origin file download via synthetic <a click()>. The
+  // browser sends the existing session cookie automatically; the
+  // auth-gated /mcpb/<name>.mcpb route accepts. A short setTimeout
+  // between calls keeps Chrome from coalescing multiple sequential
+  // downloads into one "this site is downloading multiple files" prompt
+  // beyond the first. Used by both the MCPB Settings full-setup flow
+  // and the About-page directory-refresh button.
+  function triggerSameOriginDownload(url, filename) {
+    return new Promise(function (resolve) {
+      var a = document.createElement('a');
+      a.href = url;
+      if (filename) a.download = filename;
+      a.rel = 'noopener';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      try { a.click(); } catch (e) {}
+      setTimeout(function () {
+        try { document.body.removeChild(a); } catch (e) {}
+        resolve();
+      }, 250);
+    });
+  }
+
   function initBuildBadge() {
     var clientEl = document.getElementById('build-badge-client');
     if (clientEl) clientEl.textContent = 'app: ' + FELLOWS_UI_DIAG;
@@ -6677,6 +6700,23 @@
       function paintDataRow(res) {
         if (!dataStatusEl) return;
         var statusText = '', actionHtml = '';
+        // MCPB integration is set up AND its bundled fellows.db sha is
+        // out of step with what the server reports now. Two trigger
+        // cases: (a) local fellows.db is also behind server (the user
+        // hasn't run "Update directory data" yet either), and (b) local
+        // fellows.db has been updated already but the .mcpb extension
+        // installed in Claude Desktop still carries the old snapshot.
+        // The button surfaces in both, since the user action is the
+        // same: re-download shared_data_ops.mcpb. Pre-PR-#204 this
+        // lived in the MCPB Settings section; consolidated here per
+        // maintainer feedback so all "your data versions need
+        // refreshing" affordances live in one place.
+        var mcpState = getMcpbSetupState();
+        var mcpStaleVsServer = !!(mcpState && mcpState.setupAt &&
+          res.serverSha && mcpState.fellowsDbSha &&
+          mcpState.fellowsDbSha !== res.serverSha);
+        var mcpRefreshBtnHtml = '<button type="button" class="about-update-action-btn" id="about-data-mcpb-refresh-btn">Re-install Fellows directory extension</button>';
+
         if (res.status === 'unsupported') {
           statusText = 'Directory data updates aren\u2019t available in this browser.';
         } else if (res.status === 'no-local-data') {
@@ -6691,9 +6731,14 @@
         } else if (res.status === 'update-available') {
           statusText = 'Directory Data update available';
           actionHtml = '<button type="button" class="about-update-action-btn" id="about-data-update-btn">Update directory data</button>';
+          if (mcpStaleVsServer) actionHtml += ' ' + mcpRefreshBtnHtml;
         } else if (res.status === 'up-to-date') {
           var snap = res.fetchedAt ? ' (snapshot from ' + escapeHtml(String(res.fetchedAt)) + ')' : '';
           statusText = 'up to date' + snap;
+          if (mcpStaleVsServer) {
+            statusText += ' \u2014 Claude Desktop extension is older';
+            actionHtml = mcpRefreshBtnHtml;
+          }
         } else {
           statusText = 'Couldn\u2019t check (offline?)';
         }
@@ -6708,6 +6753,21 @@
         var reloadBtn = document.getElementById('about-data-reload-btn');
         if (reloadBtn) {
           reloadBtn.addEventListener('click', function () { window.location.reload(); });
+        }
+        var mcpbBtn = document.getElementById('about-data-mcpb-refresh-btn');
+        if (mcpbBtn) {
+          mcpbBtn.addEventListener('click', function () {
+            mcpbBtn.disabled = true;
+            var originalText = mcpbBtn.textContent;
+            mcpbBtn.textContent = 'Downloading\u2026';
+            triggerSameOriginDownload('/mcpb/shared_data_ops.mcpb', 'shared_data_ops.mcpb').then(function () {
+              recordMcpbDirectoryRefresh(res.serverSha);
+              mcpbBtn.textContent = 'Downloaded \u2014 open the file to re-install';
+            }).catch(function () {
+              mcpbBtn.disabled = false;
+              mcpbBtn.textContent = originalText;
+            });
+          });
         }
       }
 
@@ -8562,16 +8622,6 @@
           'Three small extensions, installed in one go. ' +
           '<a href="https://github.com/richbodo/fellows_local_db/blob/main/docs/use_with_claude_desktop.md" target="_blank" rel="noopener">Walkthrough</a>.' +
         '</p>' +
-        '<div id="settings-mcpb-update-row" class="settings-mcpb-update-row" hidden>' +
-          '<p class="settings-hint">' +
-            '<strong>Directory data update available.</strong> ' +
-            'A newer snapshot of the public fellows directory is on the server. ' +
-            'Re-install the Fellows directory extension to pick it up.' +
-          '</p>' +
-          '<button type="button" id="settings-mcpb-refresh-directory" class="settings-download">' +
-            '⬇ Re-install Fellows directory' +
-          '</button>' +
-        '</div>' +
         '<div class="settings-mcpb-actions">' +
           '<button type="button" id="settings-mcpb-setup" class="settings-download">' +
             'Set up Claude Desktop integration' +
@@ -8585,7 +8635,7 @@
           '<h4>Set up Claude Desktop integration</h4>' +
           '<p class="settings-mcpb-platform-note">' +
             'This easy path is for <strong>Chrome and Chrome-derived browsers</strong> (Edge, Brave, Arc). ' +
-            'Safari, Firefox, and developers integrating other tools should use the ' +
+            'If you\'re using Safari, Firefox, or another browser, use the ' +
             '<a href="https://github.com/richbodo/fellows_local_db/blob/main/docs/use_with_claude_desktop.md" target="_blank" rel="noopener">manual walkthrough</a>.' +
           '</p>' +
           '<p id="settings-mcpb-preamble-folder-warning" class="settings-mcpb-warning" hidden>' +
@@ -9028,8 +9078,6 @@
     var setupBtn = document.getElementById('settings-mcpb-setup');
     var statusEl = document.getElementById('settings-mcpb-status');
     var metaEl = document.getElementById('settings-mcpb-setup-meta');
-    var updateRow = document.getElementById('settings-mcpb-update-row');
-    var refreshDirBtn = document.getElementById('settings-mcpb-refresh-directory');
     var dialog = document.getElementById('settings-mcpb-preamble-dialog');
     var folderWarning = document.getElementById('settings-mcpb-preamble-folder-warning');
     var browserWarning = document.getElementById('settings-mcpb-preamble-browser-warning');
@@ -9058,13 +9106,18 @@
 
     function refreshUiFromState() {
       var state = getMcpbSetupState();
-      var serverSha = (bootBuildMeta && bootBuildMeta.fellows_db_sha) || null;
       // Button label stays constant — "Set up Claude Desktop integration" —
       // for both first-time and re-run. The meta line below carries the
       // state distinction (whether the user has set up before, and when).
       // Earlier iteration relabelled the button to "Re-download all
       // extensions"; maintainer feedback was that the label was awkward
       // and the meta line already conveyed the same info.
+      //
+      // Directory-data refresh affordance used to live in this section
+      // too. As of PR #204 it lives on the About page next to the
+      // existing "Update directory data" button — all "your data
+      // versions need updating" affordances in one place. paintDataRow
+      // owns it.
       if (state && state.setupAt) {
         if (metaEl) {
           metaEl.hidden = false;
@@ -9076,16 +9129,6 @@
         if (metaEl) {
           metaEl.hidden = true;
           metaEl.textContent = '';
-        }
-      }
-      // Directory-data-update affordance — only meaningful after at
-      // least one prior setup AND when the server's current fellows.db
-      // snapshot differs from the one bundled at last setup.
-      if (updateRow && refreshDirBtn) {
-        if (state && state.setupAt && serverSha && state.fellowsDbSha && state.fellowsDbSha !== serverSha) {
-          updateRow.hidden = false;
-        } else {
-          updateRow.hidden = true;
         }
       }
     }
@@ -9125,33 +9168,11 @@
       }
     }
 
-    function downloadFromUrl(url, filename) {
-      // Trigger a download via a synthetic <a click()>. The browser
-      // sends the existing session cookie (same-origin), so the auth
-      // gate accepts. A short setTimeout between calls keeps Chrome
-      // from coalescing the downloads into a "this site is downloading
-      // multiple files" prompt; if the user denies the prompt the rest
-      // of the chain is best-effort.
-      return new Promise(function (resolve) {
-        var a = document.createElement('a');
-        a.href = url;
-        if (filename) a.download = filename;
-        a.rel = 'noopener';
-        a.style.display = 'none';
-        document.body.appendChild(a);
-        try { a.click(); } catch (e) {}
-        setTimeout(function () {
-          try { document.body.removeChild(a); } catch (e) {}
-          resolve();
-        }, 250);
-      });
-    }
-
     function downloadBundles(bundleNames) {
       var seq = Promise.resolve();
       bundleNames.forEach(function (name) {
         seq = seq.then(function () {
-          return downloadFromUrl('/mcpb/' + name + '.mcpb', name + '.mcpb');
+          return triggerSameOriginDownload('/mcpb/' + name + '.mcpb', name + '.mcpb');
         });
       });
       return seq;
@@ -9172,24 +9193,7 @@
       });
     }
 
-    function runDirectoryRefresh() {
-      if (!refreshDirBtn) return;
-      setStatus('Re-downloading Fellows directory extension…');
-      refreshDirBtn.disabled = true;
-      return downloadFromUrl('/mcpb/shared_data_ops.mcpb', 'shared_data_ops.mcpb').then(function () {
-        var serverSha = (bootBuildMeta && bootBuildMeta.fellows_db_sha) || null;
-        recordMcpbDirectoryRefresh(serverSha);
-        setStatus('Fellows directory extension re-downloaded. Open the file to re-install in Claude Desktop.');
-        refreshUiFromState();
-      }).catch(function (e) {
-        setStatus('Download failed: ' + (e && e.message ? e.message : String(e)));
-      }).then(function () {
-        refreshDirBtn.disabled = false;
-      });
-    }
-
     setupBtn.addEventListener('click', openPreamble);
-    if (refreshDirBtn) refreshDirBtn.addEventListener('click', runDirectoryRefresh);
     if (dialog) {
       dialog.addEventListener('close', function () {
         // <dialog>'s close event fires for any submit (including the
