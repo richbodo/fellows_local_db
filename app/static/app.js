@@ -3449,9 +3449,29 @@
     var n = groupDraft && groupDraft.members ? groupDraft.members.size : 0;
     if (composerFabCountEl) composerFabCountEl.textContent = String(n);
     var body = document.body;
-    if (n > 0) body.classList.add('has-selection');
-    else {
+    if (n > 0) {
+      body.classList.add('has-selection');
+      // Also reveal the FAB itself. The element ships with both the
+      // `hidden` attribute and the `.hidden` class for boot-time
+      // suppression; the global `.hidden { display: none !important }`
+      // rule (styles.css ~line 381) wins over any media-query show
+      // rule, so toggling body.has-selection alone left the FAB
+      // permanently hidden on mobile (PR #207 surfaced this as
+      // test_can_create_group_from_directory_route failing across all
+      // mobile profiles). Mirror the same remove-class-and-attribute
+      // pattern used by updateAppbarFellowNav. CSS handles desktop
+      // (the `.fab` default `display: none` keeps it hidden when
+      // the mobile media query doesn't match).
+      if (composerFabEl) {
+        composerFabEl.classList.remove('hidden');
+        composerFabEl.removeAttribute('hidden');
+      }
+    } else {
       body.classList.remove('has-selection');
+      if (composerFabEl) {
+        composerFabEl.classList.add('hidden');
+        composerFabEl.setAttribute('hidden', '');
+      }
       // If the sheet was open and selection drained to zero, close it.
       if (body.classList.contains('composer-open')) closeComposerSheet();
     }

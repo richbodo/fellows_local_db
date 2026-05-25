@@ -80,16 +80,23 @@ def test_no_horizontal_overflow(
 def test_touch_targets_meet_minimum_size(
     mobile_page, device_name, base_url_fixture, hash_route, label
 ):
-    """Interactive elements must be at least 44x44 (iOS HIG).
+    """Standalone interactive controls must be at least 44x44 (iOS HIG).
 
-    Walks the DOM for clickable elements, asserts each visible one
-    meets the minimum bounding box. Failure message is the full list
-    of sub-44 elements as JSON — so the test output itself is the
-    fix list.
+    Walks the DOM for buttons, form controls, and classed action
+    links; asserts each visible one meets the bounding-box minimum.
+    Failure message is the full list of sub-44 elements as JSON — so
+    the test output itself is the fix list.
 
-    Skipped: hidden elements (display:none / visibility:hidden /
-    opacity:0 / .hidden class / aria-hidden="true") and zero-size
-    elements (typically purely-styled wrappers).
+    Skipped:
+      - Hidden elements (display/visibility/opacity, .hidden class,
+        aria-hidden=true, zero size).
+      - Bare <a> elements inside text-flow containers (<p>, <li>,
+        <summary>, <th>, <td> within <table>) — the iOS HIG 44x44
+        floor explicitly applies to standalone controls, not inline
+        text links within prose. A link in a body paragraph gets
+        enough vertical hit area from line-height and surrounding
+        whitespace.
+      - <a> without href (decorative).
     """
     page = mobile_page
     page.goto(base_url_fixture + "/" + hash_route, wait_until="domcontentloaded")
@@ -97,6 +104,9 @@ def test_touch_targets_meet_minimum_size(
     findings = page.evaluate(
         r"""
         () => {
+          const TEXT_FLOW_PARENTS = new Set([
+            'P', 'LI', 'SUMMARY', 'TH', 'TD',
+          ]);
           const sel = [
             'button',
             'a[href]',
@@ -116,6 +126,25 @@ def test_touch_targets_meet_minimum_size(
             if (parseFloat(styles.opacity) === 0) return;
             if (el.getAttribute('aria-hidden') === 'true') return;
             if (el.classList.contains('hidden')) return;
+            // Bare <a> inside text-flow containers — not a standalone
+            // control per HIG. Walk up to the nearest block-level
+            // ancestor; if it's a text-flow tag and this <a> has no
+            // class of its own, skip.
+            if (el.tagName === 'A' && !el.className) {
+              let p = el.parentElement;
+              while (p && p !== document.body) {
+                if (TEXT_FLOW_PARENTS.has(p.tagName)) {
+                  return;  // skipped: inline text link
+                }
+                const pcs = getComputedStyle(p);
+                if (pcs.display.indexOf('block') === 0
+                    || pcs.display.indexOf('flex') === 0
+                    || pcs.display.indexOf('grid') === 0) {
+                  break;  // hit a non-text-flow block-level ancestor
+                }
+                p = p.parentElement;
+              }
+            }
             if (r.width < 44 || r.height < 44) {
               small.push({
                 tag: el.tagName,
