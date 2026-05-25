@@ -245,6 +245,13 @@ test-fast:
 test-mobile *args="tests/e2e/mobile/ -v":
     ./scripts/ensure_port_8765_free.sh {{args}}
 
+# Mobile interaction + layout audits only — the functional tests that catch
+# "can't use this on a phone" bugs. Faster than `just test-mobile` because it
+# skips the screenshot smoke suite. See plans/mobile_redesign/ + issue #179.
+[group('test')]
+test-mobile-functional *args="-v":
+    ./scripts/ensure_port_8765_free.sh tests/e2e/mobile/test_mobile_layout.py tests/e2e/mobile/test_mobile_interactions.py tests/e2e/mobile/test_edit_mode_layout.py {{args}}
+
 # Promote the latest mobile captures to baselines. Run after deliberate UI
 # changes; review the visual diff in git before committing.
 [group('test')]
