@@ -1,5 +1,7 @@
 # Never-SaaS
 
+![Never-SaaS — Tobias Fünke, running.](./images/never-saas.jpeg)
+
 > **Working definition.** This page is the working draft of a useful
 > shorthand for an architectural posture this app embodies. Refine as
 > the term gets used in more contexts.

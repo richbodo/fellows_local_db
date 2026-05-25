@@ -3522,6 +3522,60 @@ a.group-action-btn--primary {
   text-align: right;
 }
 
+.settings-mcpb-platform-note {
+  margin: 0 0 0.75rem;
+  padding: 0.55rem 0.75rem;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: #1e3a8a;
+}
+
+.settings-mcpb-section-title {
+  margin: 1rem 0 0.4rem;
+  font-size: 0.95rem;
+  color: var(--text-strong, #0f172a);
+}
+
+.settings-mcpb-steps {
+  margin: 0 0 1rem;
+  padding-left: 1.25rem;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: #334155;
+}
+
+.settings-mcpb-steps li {
+  margin-bottom: 0.4rem;
+}
+
+.settings-mcpb-bundle-details {
+  margin-top: 1rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid #d8d2e8;
+  border-radius: 4px;
+  background: #faf9fc;
+  font-size: 0.88rem;
+  color: #334155;
+}
+
+.settings-mcpb-bundle-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-strong, #0f172a);
+}
+
+.settings-mcpb-bundle-details p {
+  margin: 0.5rem 0;
+}
+
+.settings-mcpb-bundle-details ol.settings-mcpb-bundles {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
 .settings-restore-migrate-hint {
   font-size: 0.85rem;
   margin-top: 0.5rem;

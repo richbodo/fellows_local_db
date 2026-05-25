@@ -8595,58 +8595,56 @@
       '<dialog id="settings-mcpb-preamble-dialog" class="settings-folder-dialog settings-mcpb-dialog">' +
         '<form method="dialog">' +
           '<h4>Set up Claude Desktop integration</h4>' +
+          '<p class="settings-mcpb-platform-note">' +
+            'This easy path is for <strong>Chrome and Chrome-derived browsers</strong> (Edge, Brave, Arc). ' +
+            'Safari, Firefox, and developers integrating other tools should use the ' +
+            '<a href="https://github.com/richbodo/fellows_local_db/blob/main/docs/use_with_claude_desktop.md" target="_blank" rel="noopener">manual walkthrough</a>.' +
+          '</p>' +
           '<p id="settings-mcpb-preamble-folder-warning" class="settings-mcpb-warning" hidden>' +
             '<strong>Heads up.</strong> You haven\'t set up a data folder yet. ' +
-            'The integration works best when your fellows data lives at a stable path on your disk, ' +
-            'so the install dialog can find <code>relationships.db</code> reliably. ' +
-            'We recommend setting that up first: <em>Settings → Data folder → Choose data folder…</em> ' +
-            '(takes about ten seconds). ' +
-            'You can also proceed without a folder, but the file picker in Claude Desktop will land in your Downloads, ' +
-            'and you\'ll need to repeat this whole setup every time the file changes.' +
+            'We recommend <em>Settings → Data folder → Choose data folder…</em> first (takes about ten seconds). ' +
+            'Without it, you\'ll need to redo this setup every time you change a group.' +
           '</p>' +
           '<p id="settings-mcpb-preamble-browser-warning" class="settings-mcpb-warning" hidden>' +
             '<strong>Your browser:</strong> the easy install works on Chrome, Edge, Brave, and Arc. ' +
-            'Safari and Firefox need a manual setup — see the link at the bottom of this dialog.' +
+            'Safari and Firefox need the manual setup linked above.' +
           '</p>' +
-          '<p>' +
-            'This will install <strong>three small extensions</strong> into Claude Desktop so it can read your fellows data and help you compose group emails. ' +
-            'Each extension covers a different boundary; you can install just the ones you want.' +
-          '</p>' +
-          '<ol class="settings-mcpb-bundles">' +
-            '<li>' +
-              '<strong>Fellows directory (Shared).</strong> Lets Claude read the public fellows directory: names, bios, contact info, search. ' +
-              '<em>Recommended.</em>' +
-            '</li>' +
-            '<li>' +
-              '<strong>Your saved groups (Private).</strong> Lets Claude read your saved groups, group members, and any notes you\'ve added. ' +
-              'This data is private to you and never leaves your device through the Fellows app — but when Claude reads it, it goes to Claude\'s servers (Anthropic). ' +
-              'If that\'s not OK for you, skip this extension and Claude will only have access to the directory.' +
-            '</li>' +
-            '<li>' +
-              '<strong>Email staging (Communications).</strong> Lets Claude prepare draft emails to your groups and hand them back to you for review. ' +
-              'Claude never sends mail itself — drafts open in your mail app with To, Subject, and Body filled in, and you click Send.' +
-            '</li>' +
-          '</ol>' +
           '<div class="settings-mcpb-warning settings-mcpb-warning--banner">' +
-            '<strong>One thing to expect during install:</strong> ' +
-            'Claude Desktop will show a red warning banner for each extension saying <em>"Installing will grant this extension access to everything on your computer..."</em> ' +
-            'That warning fires for any extension that isn\'t Anthropic-verified — it\'s not specific to ours and doesn\'t mean anything is wrong. ' +
-            'The extensions only read the fellows data files they were configured with; they don\'t have wider access than you grant them. ' +
-            'Click <strong>Install</strong> to proceed past it.' +
+            '<strong>Installing will grant this extension access to everything on your computer.</strong> ' +
+            'Nothing is wrong. The extensions only read fellows data. Click <strong>Install</strong> to proceed.' +
           '</div>' +
-          '<p>' +
-            '<strong>What happens next:</strong> three <code>.mcpb</code> installer files will download. ' +
-            'Claude Desktop will pop up an Install dialog for each in turn — approve the ones you want, skip the ones you don\'t. ' +
-            'For the <strong>Your saved groups</strong> extension, the install dialog will ask you to pick a file: navigate to your data folder → <strong>Fellows</strong> → <code>relationships.db</code>. ' +
-            'When all three install dialogs are done, quit Claude Desktop (⌘Q) and reopen it.' +
-          '</p>' +
+          '<h5 class="settings-mcpb-section-title">What happens next</h5>' +
+          '<ol class="settings-mcpb-steps">' +
+            '<li>Click <strong>Continue</strong> below. Your browser asks permission to download multiple files — approve.</li>' +
+            '<li>Three <code>.mcpb</code> files arrive in your Downloads folder.</li>' +
+            '<li>Open each file. Claude Desktop pops up an Install dialog showing the red warning above. Click <strong>Install</strong>.</li>' +
+            '<li>For <strong>private_data_ops.mcpb</strong>, the install dialog asks you to pick a file. Navigate to your data folder → <strong>Fellows</strong> → <code>relationships.db</code>.</li>' +
+            '<li>When all three are installed, <strong>quit Claude Desktop (⌘Q) and reopen it</strong>.</li>' +
+            '<li>Test by asking Claude: <em>"How many fellows are in the directory?"</em></li>' +
+          '</ol>' +
           '<menu class="settings-folder-dialog-actions">' +
             '<button type="submit" value="continue" class="settings-folder-dialog-primary" id="settings-mcpb-preamble-continue">Continue — start downloads</button>' +
             '<button type="submit" value="cancel" class="settings-folder-dialog-cancel">Cancel</button>' +
           '</menu>' +
-          '<p class="settings-mcpb-manual-link">' +
-            '<a href="https://github.com/richbodo/fellows_local_db/blob/main/docs/use_with_claude_desktop.md" target="_blank" rel="noopener">Manual setup walkthrough (Safari / Firefox / other browsers)</a>' +
-          '</p>' +
+          '<details class="settings-mcpb-bundle-details">' +
+            '<summary>What the three extensions do</summary>' +
+            '<p>Each extension covers a different boundary; you can install just the ones you want.</p>' +
+            '<ol class="settings-mcpb-bundles">' +
+              '<li>' +
+                '<strong>Fellows directory (Shared).</strong> Lets Claude read the public fellows directory: names, bios, contact info, search. ' +
+                '<em>Recommended.</em>' +
+              '</li>' +
+              '<li>' +
+                '<strong>Your saved groups (Private).</strong> Lets Claude read your saved groups, group members, and any notes you\'ve added. ' +
+                'This data is private to you and never leaves your device through the Fellows app — but when Claude reads it, it goes to Claude\'s servers (Anthropic). ' +
+                'If that\'s not OK for you, skip this extension and Claude will only have access to the directory.' +
+              '</li>' +
+              '<li>' +
+                '<strong>Email staging (Communications).</strong> Lets Claude prepare draft emails to your groups and hand them back to you for review. ' +
+                'Claude never sends mail itself — drafts open in your mail app with To, Subject, and Body filled in, and you click Send.' +
+              '</li>' +
+            '</ol>' +
+          '</details>' +
         '</form>' +
       '</dialog>' +
       '</div>';
