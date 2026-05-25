@@ -132,15 +132,43 @@ class TestPreambleDialog:
         )
 
     def test_preamble_has_manual_setup_link(self, standalone_page, base_url_fixture):
+        """The Chrome-only platform note at the top of the dialog links
+        to the manual walkthrough. Previously this link lived at the
+        bottom; moved up after maintainer feedback on dialog ordering.
+        """
         page = standalone_page
         _boot_to_settings(page, base_url_fixture)
         page.click("#settings-mcpb-setup")
-        link = page.locator(".settings-mcpb-manual-link a")
-        expect(link).to_be_visible()
+        platform_note = page.locator(
+            "#settings-mcpb-preamble-dialog .settings-mcpb-platform-note"
+        )
+        expect(platform_note).to_be_visible()
+        expect(platform_note).to_contain_text("Chrome and Chrome-derived")
+        link = platform_note.locator("a")
         expect(link).to_have_attribute(
             "href",
             re.compile(r"use_with_claude_desktop\.md$"),
         )
+
+    def test_preamble_lists_step_by_step_actions(self, standalone_page, base_url_fixture):
+        """The "What happens next" steps appear above the action
+        buttons so users know what to expect before clicking Continue.
+        """
+        page = standalone_page
+        _boot_to_settings(page, base_url_fixture)
+        page.click("#settings-mcpb-setup")
+        steps = page.locator(
+            "#settings-mcpb-preamble-dialog .settings-mcpb-steps li"
+        )
+        expect(steps).to_have_count(6)
+        # Sanity-check a couple of step substrings — full copy lives in
+        # the markup; we just want to know the section rendered with the
+        # expected count and the key install-cue is present.
+        all_text = steps.evaluate_all("(els) => els.map((e) => e.textContent).join(' | ')")
+        assert "Continue" in all_text
+        assert "Claude Desktop" in all_text
+        assert "private_data_ops" in all_text
+        assert "relationships.db" in all_text
 
 
 class TestPreambleActions:

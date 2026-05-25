@@ -12,6 +12,20 @@ screenshots inside the fellowship.
 
 ---
 
+## Recommended platform
+
+**Chrome (or any Chromium browser) on desktop, plus Claude Desktop
+for AI integration.** That combination gets every feature — local
+data folder on your disk, MCP integration, the works. The app runs
+fine in any modern browser (Safari, Firefox, mobile) but some
+features are limited there; check the
+[feature ↔ platform matrix](feature_platform_matrix.md) for the
+breakdown. Also: **install in one browser per device** — browsers
+don't share storage, so two installs = two separate sets of groups
+that can't auto-sync.
+
+---
+
 ## Installing the app
 
 You'll get a magic link in email. Click it.
