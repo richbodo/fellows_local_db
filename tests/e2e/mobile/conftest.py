@@ -10,6 +10,21 @@ Runs each test against three viewport profiles:
                    user reported overlap on was a similar-width Android.
 
 Phase 4 (real-device + BrowserStack) covers the engine-specific gap.
+
+Two fixtures here:
+
+  * mobile_page          — read-only / snapshot-only. PWA standalone is faked
+                           so the directory renders; no other shims. Used by
+                           the screenshot smoke tests.
+  * mobile_interaction_page — full-shim mobile page for interaction testing.
+                           Adds the showSaveFilePicker delete that the desktop
+                           conftest does (avoids download-dialog hangs) so the
+                           same e2e patterns desktop tests use work at mobile
+                           viewport.
+
+The interaction fixture pairs with mobile_worker_data (below) to drive
+window.__dataProvider RPCs for test setup (groups, settings), mirroring the
+desktop worker_data pattern.
 """
 from __future__ import annotations
 
@@ -32,8 +47,9 @@ _NARROW_360 = {
 }
 
 
-# The app gates the directory behind PWA standalone mode for non-installed
-# browsers. Mobile screenshots want the directory, not the install landing.
+# Standalone shim only — matches what mobile_page has always done. The
+# snapshot suite is read-only and doesn't need the showSaveFilePicker
+# delete (no downloads). Interaction tests use the richer shim below.
 _STANDALONE_DISPLAY_INIT = """
 (function () {
   var orig = window.matchMedia.bind(window);
@@ -49,6 +65,32 @@ _STANDALONE_DISPLAY_INIT = """
     }
     return orig(q);
   };
+})();
+"""
+
+# Interaction-fixture shim: same standalone fake PLUS the showSaveFilePicker
+# delete from the desktop conftest. The picker fires a native OS save
+# dialog that Playwright's page.expect_download doesn't see, hanging any
+# test that exports / downloads. Removing it forces the anchor-download
+# fallback, which Playwright catches reliably.
+_INTERACTION_INIT = """
+(function () {
+  var orig = window.matchMedia.bind(window);
+  window.matchMedia = function (q) {
+    q = String(q);
+    if (q.indexOf('display-mode: standalone') !== -1) {
+      return {
+        matches: true,
+        media: q,
+        addEventListener: function () {},
+        removeEventListener: function () {}
+      };
+    }
+    return orig(q);
+  };
+  try { delete window.showSaveFilePicker; } catch (e) {
+    try { window.showSaveFilePicker = undefined; } catch (e2) {}
+  }
 })();
 """
 
@@ -75,3 +117,41 @@ def mobile_page(playwright, browser, device_name):
         yield page
     finally:
         context.close()
+
+
+@pytest.fixture
+def mobile_interaction_page(playwright, browser, device_name):
+    """Mobile page configured for full interaction testing.
+
+    Same device matrix as mobile_page but the init script also removes
+    window.showSaveFilePicker so tests that trigger downloads (settings
+    backup, group export) don't hang on the native save dialog.
+    """
+    context = browser.new_context(**_device_kwargs(playwright, device_name))
+    page = context.new_page()
+    page.add_init_script(_INTERACTION_INIT)
+    try:
+        yield page
+    finally:
+        context.close()
+
+
+@pytest.fixture
+def mobile_worker_data(mobile_interaction_page, base_url_fixture):
+    """WorkerDataHelper bound to the mobile-emulated page.
+
+    Mirrors the desktop worker_data fixture: navigate to /, wait for
+    window.__dataProvider, wipe relationships state on entry + exit so
+    tests are order-independent. Use this fixture for tests that need
+    groups / settings pre-seeded (or need to assert post-state).
+    """
+    from tests.e2e.conftest import make_worker_data
+    helper = make_worker_data(mobile_interaction_page, base_url_fixture)
+    helper.wipe_relationships()
+    try:
+        yield helper
+    finally:
+        try:
+            helper.wipe_relationships()
+        except Exception:
+            pass
