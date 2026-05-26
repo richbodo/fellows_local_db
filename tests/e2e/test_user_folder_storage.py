@@ -41,9 +41,41 @@ _STUB_DIRECTORY_PICKER = """
   };
   // Test affordance: nuke the stub folder so each test starts from a
   // clean slate. Called from the test via page.evaluate.
+  //
+  // Recursive removeEntry can fail when a child handle hasn't been
+  // fully released yet by the just-terminated worker — the original
+  // implementation swallowed that error and let Fellows/relationships.db
+  // linger into the next test, which would then hit the collision
+  // dialog instead of the clean-pick happy path. We now walk the tree
+  // explicitly (so removeEntry doesn't have to recurse over partially-
+  // released handles) and retry the outer remove a few times.
   window.__resetE2EUserFolder = async function () {
     var root = await navigator.storage.getDirectory();
-    try { await root.removeEntry(STUB_NAME, { recursive: true }); } catch (e) {}
+    async function purge(dir) {
+      for await (var entry of dir.values()) {
+        if (entry.kind === 'directory') {
+          try { await purge(entry); } catch (e) {}
+          try { await dir.removeEntry(entry.name, { recursive: true }); } catch (e) {}
+        } else {
+          try { await dir.removeEntry(entry.name); } catch (e) {}
+        }
+      }
+    }
+    try {
+      var stub = await root.getDirectoryHandle(STUB_NAME);
+      await purge(stub);
+    } catch (e) {
+      // Stub didn't exist — nothing to purge.
+    }
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        await root.removeEntry(STUB_NAME, { recursive: true });
+        return;
+      } catch (e) {
+        if (attempt === 2) return;
+        await new Promise(function (r) { setTimeout(r, 50); });
+      }
+    }
   };
   // Test affordance: read back a probe of what landed in the stub
   // folder. Returns { hasFellows: bool, hasFellows2: bool,
@@ -169,9 +201,16 @@ def folder_page(standalone_page, base_url_fixture):
     kind = page.evaluate("() => window.__dataProvider.kind")
     if kind != "worker":
         pytest.skip(f"folder tests need the worker provider; got {kind!r}")
-    # Clean start: clear the IDB-stored handle and wipe any stub folder
-    # leftover from a previous run.
-    page.evaluate("() => window.__clearE2EFolderIdb()")
+    # Clean start: detach the worker's in-memory folder record AND
+    # delete the IDB-stored handle. Using _clearFolderHandle (rather
+    # than just __clearE2EFolderIdb) matters here: the worker keeps
+    # parentHandle/subfolderName in module-scope state, hydrated from
+    # IDB on init. If we only delete the IDB row, the next mutating
+    # RPC's post-commit hook still sees the stale in-memory handle
+    # and re-creates Fellows/relationships.db inside the just-purged
+    # stub folder — re-arming the collision dialog for whatever
+    # picks a folder next.
+    page.evaluate("() => window.__dataProvider._clearFolderHandle()")
     page.evaluate("() => window.__resetE2EUserFolder()")
     # Wipe relationships state so each test has a known baseline.
     page.evaluate("""
@@ -678,7 +717,13 @@ class TestPhase2WriteLock:
         # or the collision dialog opens (folder had prior content).
         dialog = folder_page.locator("#settings-folder-collision-dialog")
         try:
-            dialog.wait_for(state="visible", timeout=2000)
+            # 5s rather than 2s: under full-suite load the worker's
+            # setHandle('auto') probe (which surfaces requiresChoice
+            # and triggers the dialog) can run later than the snappy
+            # isolated case. A too-short wait drops into the except
+            # branch, leaving the modal undismissed for the 15s
+            # "Saved to" wait below.
+            dialog.wait_for(state="visible", timeout=5000)
             # Open existing — adopt the prior content; we'll overwrite
             # it with our test mutations anyway, and the badge flips
             # to Saved as soon as the open completes.
