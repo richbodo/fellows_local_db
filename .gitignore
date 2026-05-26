@@ -37,6 +37,10 @@ ansible/inventory/hosts.ini
 # Production build output (rsync / Ansible target)
 deploy/dist/
 
+# Local staging server scratch (scripts/serve_prod_local.py output).
+# Contains a tmp dist, signed manifest, magic-link log, test email marker.
+tmp/
+
 # Ansible Galaxy collections (see ansible/collections/requirements.yml)
 ansible/collections/ansible_collections/
 

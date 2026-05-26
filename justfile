@@ -133,6 +133,36 @@ serve-lan:
     ./run.sh start
 
 
+# ---- local staging (deploy/server.py + auth + stubbed Postmark) ----------
+# See docs/local_staging.md. Foreground on http://127.0.0.1:8766.
+
+# Start local staging server. Ctrl-C to stop. Pass --reset to rebuild dist.
+[group('staging')]
+serve-prod *args:
+    {{python}} scripts/serve_prod_local.py {{args}}
+
+# Print the most recent magic-link URL captured by the fake Postmark stub.
+[group('staging')]
+serve-prod-link:
+    @if [ -f tmp/prod-local/magic_links.log ]; then \
+        grep -E '^Link:' tmp/prod-local/magic_links.log | tail -1 | sed 's/^Link: //'; \
+    else \
+        echo "No magic links yet. Submit the gate form at http://127.0.0.1:8766/ first."; \
+    fi
+
+# Wipe tmp/prod-local/ so next serve-prod rebuilds from current sources.
+[group('staging')]
+serve-prod-reset:
+    rm -rf tmp/prod-local
+    @echo "Reset. Run 'just serve-prod' to rebuild."
+
+# Free port 8766 (e.g. previous run didn't shut down cleanly).
+[group('staging')]
+serve-prod-stop:
+    @lsof -ti:8766 | xargs -r kill -9 2>/dev/null || true
+    @echo "Port 8766 freed."
+
+
 # ---- db / data -----------------------------------------------------------
 
 # Canonical rebuild from Knack dump (auto-backup first).
