@@ -23,13 +23,26 @@ EXPECTED_BUNDLES = ["shared_data_ops", "private_data_ops", "comms"]
 
 
 def _boot_to_settings(page, base_url: str) -> None:
-    """Boot to the directory, wait for the worker, then navigate to
-    Settings via hash. Mirrors the pattern used in the other Settings
-    E2Es — initial boot from the directory route avoids a race where
-    settings renders before the worker is ready."""
+    """Boot to the directory, wait for the two-phase load to *complete*,
+    then navigate to Settings via hash. Waiting only for the worker
+    provider isn't enough: the boot's getList and getFull completions
+    each call route() (app.js lines ~10640 and ~10671), and the late
+    getFull-triggered route() re-renders the settings page if we've
+    navigated there in the meantime. That re-render tears down the
+    preamble <dialog> DOM mid-test and surfaces as flaky
+    "element was detached from the DOM" / "element is not visible"
+    errors on whichever dialog control the test was about to click.
+    """
     page.goto(base_url + "/", wait_until="domcontentloaded")
     page.wait_for_function(
         "() => window.__dataProvider && window.__dataProvider.kind === 'worker'",
+        timeout=15000,
+    )
+    # Boot phase mark `get_full_done` is set after the phase-2 route()
+    # call fires; once it's present we know no further boot-driven
+    # re-render will land on the settings page we're about to open.
+    page.wait_for_function(
+        "() => window.__bootMarks && window.__bootMarks.get_full_done != null",
         timeout=15000,
     )
     page.evaluate("location.hash = '#/settings'")
