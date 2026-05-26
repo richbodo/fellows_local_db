@@ -332,8 +332,11 @@ current state of your data:
   to re-grant access.
 - **Last save failed — Change folder to re-pick** (yellow) — the
   most recent write threw an error (disk full, permissions changed
-  mid-write). The change is still safe in the browser; click
-  *Change folder…* and re-pick to retry.
+  mid-write, *or another browser window of this app has the same
+  folder open*). The change is still safe in the browser; close any
+  other window pointed at the same folder, then make any small edit
+  to retry — the next save will succeed automatically. If the cause
+  isn't another window, click *Change folder…* and re-pick.
 - **Browser-only — this browser doesn't support saving to a folder**
   (yellow) — Safari, Firefox, iOS, and Android Chrome don't ship the
   File System Access API. Use *Download my private data* (below) for
