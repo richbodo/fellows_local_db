@@ -236,6 +236,22 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass  # quiet by default; override to log
 
+    def handle_one_request(self):
+        # When Playwright tears down a page or the browser cancels an
+        # in-flight asset fetch (common for the per-fellow image
+        # requests this server fires off), the socket closes mid-
+        # response and any subsequent `wfile.write(...)` raises
+        # BrokenPipeError / ConnectionResetError. socketserver's
+        # default `handle_error` then prints a full traceback to
+        # stderr — which clutters every `just test` run and obscures
+        # real failures. Caddy absorbs the same noise upstream in
+        # production. Catch it here, mark the connection as closed
+        # (the underlying socket is already gone) and return cleanly.
+        try:
+            super().handle_one_request()
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
+
     def end_headers(self):
         # Cross-origin isolation. sqlite3-wasm's OPFS-SAH-Pool VFS gates
         # SharedArrayBuffer / Atomics on this; without crossOriginIsolated
