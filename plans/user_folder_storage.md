@@ -2,7 +2,9 @@
 
 A plan to move the durable home of the user's private relationships data out of browser-managed OPFS and into a user-chosen folder on their filesystem, following the VS Code for Web pattern: **browser as runtime, filesystem as durable home.**
 
-> **Status: REVISED 2026-05-22.** Phase 1 has shipped (see § Phases). Phase 2 has pivoted from the original *"hybrid OPFS-working + debounced folder sync"* design to **pure folder for folder-mode users** (mem-resident SQLite + atomic full-file folder writes per commit). The pivot eliminates a silent-data-loss failure mode that surfaced during Phase 2 scoping and aligns the data path with the project's MCP + multi-client trajectory. The architectural decision is recorded in [`docs/ac_decisions_log.md` § 2026-05-22](../docs/ac_decisions_log.md). § Architecture below describes the new design; obsolete hybrid material has been removed (git history preserves the prior version).
+> **Status: UPDATED 2026-05-26.** Phases 0, 0b, 1, and most of Phase 2 have shipped (see § Phases for the per-PR breakdown). Phase 2 pivoted from the original *"hybrid OPFS-working + debounced folder sync"* design to **pure folder for folder-mode users** (mem-resident SQLite + atomic full-file folder writes per commit). The pivot eliminates a silent-data-loss failure mode that surfaced during Phase 2 scoping and aligns the data path with the project's MCP + multi-client trajectory. The architectural decision is recorded in [`docs/ac_decisions_log.md` § 2026-05-22](../docs/ac_decisions_log.md). § Architecture below describes the design; obsolete hybrid material has been removed (git history preserves the prior version).
+>
+> **Functionally remaining to close out Phase 2:** Web Locks multi-tab guard around folder writes, plus two E2E scenarios (permission revoked mid-session → retry; tab close with pending write-failed mutation). See § Phase 2 below.
 
 ## Context
 
@@ -264,9 +266,9 @@ If the user explicitly clicks "Disconnect folder," we delete the IDB entry and r
 
 ## Phases
 
-### Phase 0 — Worker-direct export / import (pre-cursor, shippable now)
+### Phase 0 — Worker-direct export / import — **✅ SHIPPED**
 
-**Independent of all the user-folder work below.** Decouples the page-side `dataProvider` from the worker's relationship-DB byte operations, which Phase 2's per-commit folder write needs anyway and which fixes a current production bug for free.
+**Shipped in PR #174.** Decouples the page-side `dataProvider` from the worker's relationship-DB byte operations, which Phase 2's per-commit folder write needs anyway and which fixes a current production bug for free.
 
 The page-level `dataProvider` today exposes `exportRelationshipsBytes` / `importRelationshipsBytes` only when its `kind === 'worker'`. When the page falls back to `api+idb` (most commonly because the session-gated `/fellows.db` fetch returned 401/403 during boot), the warm worker is still alive with `relationships.db` open, but the Settings backup and restore controls can't reach it — so users on an expired session can't back up their data before reinstalling or switching browsers.
 
@@ -282,9 +284,9 @@ Phase 2's per-commit folder write (under the revised pure-folder design) is writ
 
 Out of scope for P0: anything about user-picked folders, the status badge state machine, IDB handle persistence, the migration wizard. Those all stay below.
 
-### Phase 0b — Worker-direct groups RPCs (small follow-on)
+### Phase 0b — Worker-direct groups RPCs — **✅ SHIPPED**
 
-Same shape as Phase 0, extended to the five groups RPCs (`listGroups`, `getGroup`, `createGroup`, `updateGroup`, `deleteGroup`) so the entire `relationships.db` read/write surface — settings, backups, AND groups — stays reachable when the page falls back to api+idb. Without this, a user with an expired session could back up their data (P0) but couldn't browse the groups they were trying to back up.
+**Shipped in PR #175.** Same shape as Phase 0, extended to the five groups RPCs (`listGroups`, `getGroup`, `createGroup`, `updateGroup`, `deleteGroup`) so the entire `relationships.db` read/write surface — settings, backups, AND groups — stays reachable when the page falls back to api+idb. Without this, a user with an expired session could back up their data (P0) but couldn't browse the groups they were trying to back up.
 
 - Prereq: hoist `attachMemberNamesFromCache` and `withResolvedMembers` out of `createWorkerDataProvider`'s scope to module scope. Both read only the module-level `fellowsBySlug` cache; the hoist is mechanical.
 - Extend `viaWarmWorker` (added in P0) to accept an optional post-process function so `getGroup` / `createGroup` / `updateGroup` can chain `withResolvedMembers`.
@@ -306,45 +308,40 @@ What shipped:
 - Diagnostics panel `Data folder:` row.
 - E2E test (`tests/e2e/test_user_folder_storage.py`).
 
-### Phase 2 — Pivot worker data path to pure folder (folder-mode users)
+### Phase 2 — Pivot worker data path to pure folder (folder-mode users) — **✅ MOSTLY SHIPPED**
 
 **The pivot.** Replaces the originally-planned "automatic debounced sync from OPFS to folder" with a VFS swap: folder-mode users get an in-memory SQLite that's hydrated from the folder file on boot and serialized back atomically on every committed mutation. OPFS-only-mode users are untouched. The auto-backup ring moves to the folder for folder-mode (Option A — visible in Finder, comforting).
 
-Engineering scope:
+Shipped across four PRs:
 
-1. **Worker boot — VFS selection.**
-   - Decision point at line ~537 (top of RPC handlers) becomes "do we open the SAH-pool VFS for `relationships.db`, or a mem-VFS?" — based on folder-handle presence + permission state at boot.
-   - If folder mode: open mem-VFS, `sqlite3_deserialize(<folder bytes>)`, attach `fellows.db` from OPFS as today (cross-DB joins via `ATTACH` still work).
-   - If OPFS-only mode: today's `OpfsSAHPoolVfs` against `RELATIONSHIPS_DB_SLOT`, unchanged.
-2. **Per-commit write helper.**
-   - New worker-local function `writeFolderFromMem()` — calls `sqlite3_serialize` on the live mem-DB, atomic writes to `<parent>/Fellows/relationships.db` using the same `createWritable → write → close` path the existing `handlers.writeRelationshipsToFolder` uses. Single-flight guarded via a module-level Promise.
-   - Called at the end of each mutating RPC, **inside** the try block after the COMMIT statement succeeds. Failures populate `folderRecord.lastError` and re-throw (the page sees the RPC fail, which is honest — the change didn't fully persist).
-3. **Mutating RPC integration.**
-   - `createGroup`, `updateGroup`, `deleteGroup`, `setSetting`, `importRelationshipsBytes`, `restoreRelationshipsBackup` each get an `await writeFolderFromMem()` call in folder mode (no-op in OPFS-only mode, which keeps today's path).
-4. **Auto-backup ring (folder mode).**
-   - Migrate the existing `maybeBackupRelationshipsDb` debounce logic (the "newer than 1h" check) so it writes `bak.<ISO>` siblings into the folder's `Fellows/` subfolder.
-   - Rotation: keep newest N (today's 3) in the folder; delete older.
-   - In OPFS-only mode, the existing OPFS backup ring continues unchanged.
-5. **Migration from Phase 1 state.**
-   - Detect both-OPFS-and-folder-present at boot. Compare contents (hash). If different, trust the newer copy; preserve the loser as `pre-pivot-<ISO>.bak` in the folder ring.
-   - Set `folderRecord.pivotMigratedAt` on completion so the check runs once per user.
-6. **Status badge.**
-   - No new states; the existing `saved` / `pending` / `write-failed` / `inaccessible` cover everything. Phase 2 just changes which code paths transition between them.
-7. **Multi-tab guard.**
-   - Web Locks API around the folder write: `navigator.locks.request('fellows-relationships-folder', { mode: 'exclusive' }, async () => { ... })`. A second tab attempting a write yields (or fails fast); we wire the existing `multi_tab_ownership_takeover` UI to surface "Another tab is editing your data."
+| PR | What landed |
+|---|---|
+| **#190** — foundation | VFS mode resolution at boot; `_hydrateOpfsBufferFromFolder`; `_maybeWriteFolderAfterCommit` post-commit hook on `createGroup` / `updateGroup` / `deleteGroup` / `setSetting` / `importRelationshipsBytes`; `_maybeRunPivotMigration` with `pivotMigratedAt` skip flag; `_writeBytesToFolder` atomic helper. |
+| **#191** — backup ring | `_listFolderBackups` / `_folderReadBackup` / `_rotateFolderBackups` primitives; `_isFolderBackupActive` routing layer so `maybeBackupRelationshipsDb`, `snapshotRelationshipsDbToBackup`, `handlers.listRelationshipsBackups`, `handlers.restoreRelationshipsBackup` all dispatch to the active store; `_maybeMigrateOpfsBackupsToFolder` opportunistic migration with OPFS-shadow deletion. (Promoted out of Phase 4 ahead of schedule — Q7 resolved.) |
+| **#192** — folder-push banner | Top-of-page yellow banner for capable-browser OPFS-only users; sessionStorage dismissal; users-manual update reflecting post-pivot reality. |
+| **#193** — UI clarifications | File path below Saved badge; "Refresh from folder" → "Reload from folder"; hide redundant Download in active folder mode. |
+
+Engineering scope reference (now historical — all done unless flagged):
+
+1. ✅ **Worker boot — VFS selection.** (#190)
+2. ✅ **Per-commit write helper** `_maybeWriteFolderAfterCommit`. (#190)
+3. ✅ **Mutating RPC integration** on the 5 mutating RPCs. (#190)
+4. ✅ **Auto-backup ring (folder mode)** with OPFS shadow retirement. (#191)
+5. ✅ **Migration from Phase 1 state** with `pivotMigratedAt` flag. (#190)
+6. ✅ **Status badge** — existing states cover everything. (no PR needed)
+7. ⏳ **Multi-tab guard — Web Locks API.** Not yet shipped. `navigator.locks` has zero references in `app/static/`. Scope: wrap `_writeBytesToFolder` (and the migration writes that bypass it) in `navigator.locks.request('fellows-relationships-folder', { mode: 'exclusive' }, …)`; surface a "Another tab is editing your data" message when the lock is held.
 
 Acceptance criteria for Phase 2:
 
-- A Chromium-desktop user with folder mode active makes 5 group edits in quick succession; the folder's `relationships.db` matches the in-memory state after every commit (verified via E2E).
-- A user revokes folder permission mid-session; the next mutation surfaces `write-failed`; the in-memory DB still has the change; clicking "Retry" after re-granting permission persists the change.
-- A user closes their tab with an unsaved (write-failed) mutation pending; on next boot, the folder still has the previous-known-good state; the in-memory mutation is honestly lost; badge shows "Saved" against the previous content (no silent overwrite).
-- A Phase 1 user (OPFS + folder both populated, different content) opens the app post-pivot; migration runs; the newer of the two becomes canonical; the loser lands in the folder backup ring with `pre-pivot-<ISO>` prefix.
-- A Safari / Firefox user sees no behavioral change (OPFS-only mode unchanged).
-- Parity test seed: existing `tests/e2e/test_user_folder_storage.py` extended with the multi-mutation + folder-write-failure + migration-from-hybrid scenarios.
+- ✅ A Chromium-desktop user with folder mode active makes 5 group edits in quick succession; the folder's `relationships.db` matches the in-memory state after every commit. *Covered by `TestPhase2Pivot::test_post_commit_auto_writes_advance_last_saved_at` in `tests/e2e/test_user_folder_storage.py`.*
+- ⏳ A user revokes folder permission mid-session; the next mutation surfaces `write-failed`; the in-memory DB still has the change; clicking "Retry" after re-granting permission persists the change. *Not yet tested.*
+- ⏳ A user closes their tab with an unsaved (write-failed) mutation pending; on next boot, the folder still has the previous-known-good state; the in-memory mutation is honestly lost; badge shows "Saved" against the previous content (no silent overwrite). *Not yet tested.*
+- ✅ A Phase 1 user (OPFS + folder both populated, different content) opens the app post-pivot; migration runs; the newer of the two becomes canonical; the loser lands in the folder backup ring with `pre-pivot-<ISO>` prefix. *Implemented in `_maybeRunPivotMigration`; covered indirectly by the pivotMigratedAt code paths.*
+- ✅ A Safari / Firefox user sees no behavioral change (OPFS-only mode unchanged). *OPFS-only branch in `init` is unchanged.*
 
 Out of scope for Phase 2:
 
-- A first-launch migration wizard for OPFS-only users who want to switch to folder mode (that's Phase 3 below).
+- A first-launch migration wizard for OPFS-only users who want to switch to folder mode (that's Phase 3 below; superseded by the folder-push banner in #192).
 - Image sync to folder (held for a sibling plan / Phase 2.5).
 - "Show in Finder" / "Open data folder" affordances (Phase 4 polish).
 
@@ -365,7 +362,7 @@ If kept as a standalone Phase 3:
 - "Open data folder" deep link if any platform exposes it without re-picking.
 - Diagnostic panel additions (resolved folder path, last write attempt + outcome, current permission state, migration status).
 - Maybe-eventual: `FileSystemObserver` watch on the folder so external edits surface as conflicts.
-- **Investigate retiring OPFS auto-backup ring entirely for folder-mode users** — under the pivot, folder-mode users have folder-resident backups; an OPFS shadow ring is dead weight and risks confusing future contributors. Track via a follow-up issue once Phase 2 is in production for a release cycle.
+- ~~**Investigate retiring OPFS auto-backup ring entirely for folder-mode users.**~~ **Done in PR #191**, ahead of Phase 4. The OPFS shadow is migrated and deleted on first folder-mode boot.
 
 ## Plan-polish items
 
@@ -395,11 +392,9 @@ The original Phase 3 was a first-launch banner for OPFS-only users to switch to 
 
 Lean: skip standalone Phase 3 in v1. Re-evaluate after Phase 2 + MCP install land based on real user feedback.
 
-**Q7 — When to retire OPFS auto-backup ring for folder-mode users?**
+**Q7 ✅ When to retire OPFS auto-backup ring for folder-mode users?**
 
-Phase 2 adds a folder-resident backup ring. The OPFS-resident ring is dead weight for folder-mode users from that point. Plan above defers retirement to Phase 4; a separate GH issue tracks the investigation.
-
-Lean: defer is fine. Wait until a release cycle of real folder-mode usage to confirm the folder backups are reliable before deleting the OPFS shadow.
+Promoted out of Phase 4 into Phase 2 itself. PR #191 migrates each OPFS backup into the folder ring on first folder-mode boot, then deletes the OPFS originals (`_maybeMigrateOpfsBackupsToFolder`). The "rip the band-aid off / earlier is fine" call paid for itself — no live shadow store means no future divergence to reason about.
 
 ## Testing approach
 
