@@ -116,6 +116,36 @@ _STUB_DIRECTORY_PICKER = """
       req.onsuccess = req.onerror = req.onblocked = function () { resolve(true); };
     });
   };
+  // Test affordance: hold the folder-write Web Lock indefinitely from
+  // the page side. The worker calls navigator.locks.request(...) with
+  // ifAvailable:true around _writeBytesToFolder; same agent-cluster,
+  // same lock namespace, so holding from page JS makes that request
+  // see the lock as held and fail fast with folder_locked_by_another_tab.
+  // The unresolved promise inside the request keeps the lock alive
+  // until __releaseFolderLock() is called (or the page closes — Web
+  // Locks auto-release on agent termination).
+  // Lock name MUST match FOLDER_WRITE_LOCK_NAME in vendor/sqlite-worker.js.
+  var _holdRelease = null;
+  window.__holdFolderLockForever = function () {
+    return new Promise(function (outerResolve, outerReject) {
+      try {
+        navigator.locks.request(
+          'fellows-relationships-folder-write',
+          { mode: 'exclusive' },
+          function (lock) {
+            return new Promise(function (release) {
+              _holdRelease = release;
+              outerResolve({ held: true });
+            });
+          }
+        ).catch(outerReject);
+      } catch (e) { outerReject(e); }
+    });
+  };
+  window.__releaseFolderLock = function () {
+    if (_holdRelease) { _holdRelease(); _holdRelease = null; return true; }
+    return false;
+  };
 })();
 """
 
@@ -607,3 +637,337 @@ class TestPhase2Pivot:
         assert probe["hasFellows"] is False, (
             "no folder mode → no Fellows/ subfolder should exist"
         )
+
+
+class TestPhase2WriteLock:
+    """Web Locks guard around folder writes per plans/user_folder_storage.md
+    § Phase 2 — Multi-tab guard. Covers the two acceptance criteria for
+    failure-mode honesty (mutation that can't reach disk surfaces as
+    write-failed; retry recovers; tab close with pending failure does
+    not corrupt the on-disk state) and the cross-tab lock-serialization
+    story that becomes load-bearing when the multi-tab takeover plan
+    ships.
+
+    Mechanism: hold the 'fellows-relationships-folder-write' lock from
+    page JS via __holdFolderLockForever(). Page + worker share the same
+    agent-cluster lock namespace, so the worker's
+    navigator.locks.request(..., ifAvailable: true) sees null and
+    _writeBytesToFolder throws folder_locked_by_another_tab. The
+    per-commit hook catches the throw, populates folderRecord.lastError,
+    and does NOT re-throw — the OPFS commit succeeded, the user just
+    has to make another change once the lock is free.
+    """
+
+    def _pick_folder_and_seed_group_a(self, folder_page, base_url):
+        """Common setup: pick folder, create group A, wait until folder
+        contains group A. Returns (group_a_id, baseline_saved_at,
+        baseline_rel_size).
+
+        Robust to the full-suite case where the OPFS-stub folder's
+        Fellows/ subfolder lingers from a prior test (the recursive
+        removeEntry in __resetE2EUserFolder swallows errors silently
+        if a SAH on a nested file hasn't been released yet by the
+        prior page's terminating worker). If that happens the picker
+        sees existing data and the collision dialog opens — we
+        proceed via 'Open existing data', same baseline outcome.
+        """
+        _open_settings(folder_page, base_url)
+        folder_page.locator("#settings-folder-choose").click()
+        badge_text = folder_page.locator("#settings-folder-badge .settings-folder-badge-text")
+        # Either the badge flips to Saved within a beat (clean folder),
+        # or the collision dialog opens (folder had prior content).
+        dialog = folder_page.locator("#settings-folder-collision-dialog")
+        try:
+            dialog.wait_for(state="visible", timeout=2000)
+            # Open existing — adopt the prior content; we'll overwrite
+            # it with our test mutations anyway, and the badge flips
+            # to Saved as soon as the open completes.
+            folder_page.locator(
+                "#settings-folder-collision-dialog button[value=open-existing]"
+            ).click()
+        except Exception:
+            # No dialog — clean pick path; nothing to do.
+            pass
+        expect(badge_text).to_contain_text("Saved to", timeout=15000)
+        full = folder_page.evaluate("() => window.__dataProvider.getFull()")
+        rids = [f["record_id"] for f in full[:3]]
+        before = folder_page.evaluate(
+            "() => window.__dataProvider._getFolderState().then(s => s.lastSavedAt)"
+        )
+        folder_page.evaluate(
+            "(rids) => window.__dataProvider.createGroup({"
+            "name: 'Lock test A', note: '', fellow_record_ids: rids})",
+            rids,
+        )
+        folder_page.wait_for_function(
+            "(before) => window.__dataProvider._getFolderState()"
+            "  .then(s => s.lastSavedAt && s.lastSavedAt !== before)",
+            arg=before,
+            timeout=5000,
+        )
+        groups = folder_page.evaluate("() => window.__dataProvider.listGroups()")
+        gid = next(g["id"] for g in groups if g["name"] == "Lock test A")
+        state = folder_page.evaluate(
+            "() => window.__dataProvider._getFolderState()"
+        )
+        probe = folder_page.evaluate("() => window.__probeE2EUserFolder()")
+        return gid, state["lastSavedAt"], probe["relSize"]
+
+    def test_lock_held_during_write_surfaces_failure_then_recovers(
+        self, folder_page, base_url_fixture
+    ):
+        """Phase 2 AC #2 — mutation that can't reach disk surfaces as
+        write-failed, retry via fresh mutation recovers.
+
+        Hold the folder-write lock from page JS. Create group B → the
+        worker's post-commit folder write sees the lock as held and
+        throws folder_locked_by_another_tab; folderRecord.lastError is
+        populated; lastSavedAt does NOT advance; folder file is
+        unchanged on disk. In-memory DB still has both A and B
+        (the OPFS commit succeeded).
+
+        Release the lock. The next mutating RPC (setSetting here)
+        re-attempts the folder write; this time the lock is free,
+        the write succeeds with all the in-memory state including B,
+        lastError clears and lastSavedAt advances.
+        """
+        gid_a, baseline_saved_at, baseline_rel_size = (
+            self._pick_folder_and_seed_group_a(folder_page, base_url_fixture)
+        )
+        # Hold the lock from the page side. Same agent cluster as the
+        # worker, so the worker's ifAvailable:true request will see null.
+        folder_page.evaluate("() => window.__holdFolderLockForever()")
+        # Create group B. The OPFS commit succeeds (mutation lands in
+        # the live DB), but the post-commit folder write fails fast on
+        # the lock contention. The RPC itself does NOT throw (the
+        # per-commit hook swallows the folder-write failure and just
+        # populates lastError) — surface is via the badge state.
+        full = folder_page.evaluate("() => window.__dataProvider.getFull()")
+        rids_b = [f["record_id"] for f in full[3:6]]
+        folder_page.evaluate(
+            "(rids) => window.__dataProvider.createGroup({"
+            "name: 'Lock test B', note: '', fellow_record_ids: rids})",
+            rids_b,
+        )
+        # Poll until the lastError shows up — the post-commit hook is
+        # async relative to the createGroup return.
+        folder_page.wait_for_function(
+            "() => window.__dataProvider._getFolderState()"
+            "  .then(s => s.lastError && s.lastError.reason)",
+            timeout=5000,
+        )
+        state_after_b = folder_page.evaluate(
+            "() => window.__dataProvider._getFolderState()"
+        )
+        assert state_after_b["lastError"] is not None, (
+            f"lastError should be populated after a lock-blocked write; "
+            f"state={state_after_b!r}"
+        )
+        assert "Another window" in state_after_b["lastError"]["reason"], (
+            f"lock-held lastError should carry the actionable copy; "
+            f"got {state_after_b['lastError']['reason']!r}"
+        )
+        # lastSavedAt did NOT advance — folder is still at A only.
+        assert state_after_b["lastSavedAt"] == baseline_saved_at, (
+            f"lastSavedAt should NOT advance when the write was blocked; "
+            f"baseline={baseline_saved_at!r} after_b={state_after_b['lastSavedAt']!r}"
+        )
+        # In-memory DB still has both groups — OPFS commit succeeded.
+        groups_in_mem = folder_page.evaluate("() => window.__dataProvider.listGroups()")
+        names = sorted(g["name"] for g in groups_in_mem)
+        assert names == ["Lock test A", "Lock test B"], (
+            f"in-memory should have both A and B; got {names!r}"
+        )
+        # Folder file size unchanged — B is not on disk.
+        probe_after_b = folder_page.evaluate("() => window.__probeE2EUserFolder()")
+        assert probe_after_b["relSize"] == baseline_rel_size, (
+            f"folder relSize should be unchanged when write was blocked; "
+            f"baseline={baseline_rel_size!r} after_b={probe_after_b['relSize']!r}"
+        )
+        # Release the lock; next mutation retries the write.
+        released = folder_page.evaluate("() => window.__releaseFolderLock()")
+        assert released is True, "lock should have been held to be released"
+        # Trigger retry via a fresh mutating RPC. setSetting is the
+        # cheapest one; the post-commit hook fires the same way.
+        folder_page.evaluate(
+            "() => window.__dataProvider.setSetting('e2e_lock_retry', 'recovered')"
+        )
+        folder_page.wait_for_function(
+            "(before) => window.__dataProvider._getFolderState()"
+            "  .then(s => s.lastSavedAt && s.lastSavedAt !== before "
+            "             && (s.lastError === null || s.lastError === undefined))",
+            arg=baseline_saved_at,
+            timeout=5000,
+        )
+        state_after_retry = folder_page.evaluate(
+            "() => window.__dataProvider._getFolderState()"
+        )
+        assert state_after_retry["lastError"] in (None,), (
+            f"lastError should clear on successful retry; got {state_after_retry['lastError']!r}"
+        )
+        assert state_after_retry["lastSavedAt"] != baseline_saved_at, (
+            f"lastSavedAt should advance on retry; "
+            f"baseline={baseline_saved_at!r} after_retry={state_after_retry['lastSavedAt']!r}"
+        )
+
+    def test_tab_close_with_pending_write_failure_preserves_folder_state(
+        self, folder_page, base_url_fixture, context
+    ):
+        """Phase 2 AC #3 — honest mutation loss on tab close.
+
+        Set up folder with group A. Hold the write lock from page JS.
+        Create group B → write fails (mem has A+B, folder has A only).
+        Close the page (Web Locks auto-release on agent termination,
+        but the in-memory mutation B is gone too — that's the honest
+        loss the badge warned the user about). Reopen in the same
+        browser context (IDB-stored handle persists). Worker boots
+        in folder mode, hydrates relationships.db from the folder
+        bytes (still A-only). Assert: listGroups returns only A;
+        folder file is bytewise unchanged from baseline.
+        """
+        gid_a, baseline_saved_at, baseline_rel_size = (
+            self._pick_folder_and_seed_group_a(folder_page, base_url_fixture)
+        )
+        folder_page.evaluate("() => window.__holdFolderLockForever()")
+        # Create group B; write fails. We don't bother waiting for the
+        # lastError here — the close will fire the failure path either
+        # way and the next-boot assertion is what matters.
+        full = folder_page.evaluate("() => window.__dataProvider.getFull()")
+        rids_b = [f["record_id"] for f in full[3:6]]
+        folder_page.evaluate(
+            "(rids) => window.__dataProvider.createGroup({"
+            "name: 'Lock test B (will be lost)', note: '', fellow_record_ids: rids})",
+            rids_b,
+        )
+        # Sanity: in-memory has A+B before close.
+        groups_pre_close = folder_page.evaluate(
+            "() => window.__dataProvider.listGroups()"
+        )
+        names_pre_close = sorted(g["name"] for g in groups_pre_close)
+        assert "Lock test B (will be lost)" in names_pre_close, (
+            f"sanity: in-mem should have B before close; got {names_pre_close!r}"
+        )
+        # Sanity: folder file still A-only.
+        probe_pre_close = folder_page.evaluate("() => window.__probeE2EUserFolder()")
+        assert probe_pre_close["relSize"] == baseline_rel_size, (
+            f"sanity: folder should be unchanged before close; "
+            f"baseline={baseline_rel_size!r} pre_close={probe_pre_close['relSize']!r}"
+        )
+        # Close the page WITHOUT releasing the lock. Web Locks
+        # auto-release on agent termination; the lock dies with the
+        # page. The in-memory worker dies too — B is honestly lost.
+        url = folder_page.url
+        folder_page.close()
+        # Reopen in the same browser context — IDB persists, so the
+        # folder handle is still there.
+        new_page = context.new_page()
+        new_page.add_init_script(_STUB_DIRECTORY_PICKER)
+        try:
+            new_page.goto(url, wait_until="domcontentloaded")
+            new_page.wait_for_function(
+                "() => window.__dataProvider && typeof window.__dataProvider.listGroups === 'function'",
+                timeout=10000,
+            )
+            # Folder-mode boot: hydrate OPFS buffer from folder bytes.
+            # The folder still has A-only, so in-memory should reflect
+            # only A (B was honestly lost).
+            groups_post_reboot = new_page.evaluate(
+                "() => window.__dataProvider.listGroups()"
+            )
+            names_post = sorted(g["name"] for g in groups_post_reboot)
+            assert names_post == ["Lock test A"], (
+                f"after honest loss, only A should remain; got {names_post!r}"
+            )
+            # Folder file is unchanged from the baseline (no silent
+            # overwrite of A by stale B).
+            probe_post = new_page.evaluate("() => window.__probeE2EUserFolder()")
+            assert probe_post["relSize"] == baseline_rel_size, (
+                f"folder bytes should be unchanged across the failed-write+close cycle; "
+                f"baseline={baseline_rel_size!r} post={probe_post['relSize']!r}"
+            )
+        finally:
+            try:
+                new_page.evaluate("() => window.__resetE2EUserFolder()")
+            except Exception:
+                pass
+            new_page.close()
+
+    def test_lock_held_by_second_page_blocks_first_page_write(
+        self, folder_page, base_url_fixture, context
+    ):
+        """Cross-page lock serialization. A second page in the same
+        browser context holds the folder-write lock from its page JS;
+        the first page's worker mutation fails fast with the same
+        write-failed badge state as the same-page case. Once the
+        second page releases (or closes), the first page's next
+        mutation recovers.
+
+        Verifies the Web Locks namespace is shared across same-origin
+        agents in the same context — which is the cross-tab story the
+        multi-tab takeover plan eventually leans on. Until then, the
+        OPFS SAH-pool exclusivity prevents two workers from both
+        opening relationships.db, so the cross-tab story is exercised
+        with page-side lock holders rather than two competing workers.
+        """
+        gid_a, baseline_saved_at, baseline_rel_size = (
+            self._pick_folder_and_seed_group_a(folder_page, base_url_fixture)
+        )
+        # Open a second page in the same context. Its worker will fail
+        # to acquire the OPFS pool (existing single-writer behavior),
+        # but its page-side JS can still run the lock-hold helper —
+        # which is all this test needs.
+        url = folder_page.url
+        second_page = context.new_page()
+        second_page.add_init_script(_STUB_DIRECTORY_PICKER)
+        try:
+            second_page.goto(url, wait_until="domcontentloaded")
+            # Don't wait for __dataProvider — the second tab's worker
+            # boot is expected to hit ownership conflict. We just need
+            # the page-side helpers from the init script.
+            second_page.wait_for_function(
+                "() => typeof window.__holdFolderLockForever === 'function'",
+                timeout=10000,
+            )
+            second_page.evaluate("() => window.__holdFolderLockForever()")
+            # First page attempts a mutation; write fails on the lock.
+            full = folder_page.evaluate("() => window.__dataProvider.getFull()")
+            rids_b = [f["record_id"] for f in full[3:6]]
+            folder_page.evaluate(
+                "(rids) => window.__dataProvider.createGroup({"
+                "name: 'Cross-tab lock test B', note: '', fellow_record_ids: rids})",
+                rids_b,
+            )
+            folder_page.wait_for_function(
+                "() => window.__dataProvider._getFolderState()"
+                "  .then(s => s.lastError && s.lastError.reason)",
+                timeout=5000,
+            )
+            state_blocked = folder_page.evaluate(
+                "() => window.__dataProvider._getFolderState()"
+            )
+            assert "Another window" in state_blocked["lastError"]["reason"], (
+                f"cross-tab block should carry the actionable copy; "
+                f"got {state_blocked['lastError']['reason']!r}"
+            )
+            assert state_blocked["lastSavedAt"] == baseline_saved_at, (
+                f"lastSavedAt should NOT advance when blocked by second tab"
+            )
+            # Release from the second page. First page's next mutation
+            # recovers — same retry path as the same-page test.
+            second_page.evaluate("() => window.__releaseFolderLock()")
+            folder_page.evaluate(
+                "() => window.__dataProvider.setSetting('e2e_cross_tab_retry', 'recovered')"
+            )
+            folder_page.wait_for_function(
+                "(before) => window.__dataProvider._getFolderState()"
+                "  .then(s => s.lastSavedAt && s.lastSavedAt !== before "
+                "             && (s.lastError === null || s.lastError === undefined))",
+                arg=baseline_saved_at,
+                timeout=5000,
+            )
+        finally:
+            try:
+                second_page.evaluate("() => window.__releaseFolderLock()")
+            except Exception:
+                pass
+            second_page.close()

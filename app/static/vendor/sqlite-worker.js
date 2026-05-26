@@ -1737,6 +1737,11 @@ var FOLDER_IDB_STORE = 'handles';
 var FOLDER_IDB_KEY = 'relationships-folder';
 var FOLDER_SUBFOLDER_DEFAULT = 'Fellows';
 var FOLDER_RELATIONSHIPS_FILE = 'relationships.db';
+// Web Locks name guarding folder writes. Lock is scoped per-origin
+// per-browser-profile; agents in the same context (this worker + its
+// page) share the namespace, so a page-side test or future takeover-
+// handoff window cannot race the worker's _writeBytesToFolder.
+var FOLDER_WRITE_LOCK_NAME = 'fellows-relationships-folder-write';
 
 // In-memory mirror of what's persisted in IDB. Reloaded on init, mutated
 // alongside every IDB write. Shape: see _emptyFolderRecord().
@@ -2181,17 +2186,44 @@ async function _maybeRunPivotMigration() {
 // Atomic folder-file write helper. Used by the pivot migration and by
 // the per-commit hook. Default filename is the live relationships.db;
 // caller can override for backup writes. Updates folderRecord.lastSavedAt
-// on success / lastError on failure. Single-flight is guarded by the
-// caller (handlers.writeRelationshipsToFolder serializes its own calls;
-// the per-commit hook is awaited from inside each mutating RPC handler,
-// and the worker is single-threaded so handler invocations don't overlap
-// at the JS level).
+// on success / lastError on failure.
+//
+// Serialized via the Web Locks API on the name FOLDER_WRITE_LOCK_NAME.
+// Same-tab JS callers are already serial (single-threaded worker), but
+// the lock matters across agents in the same browser context — both
+// for defense-in-depth against future code paths that bypass the OPFS
+// SAH-pool exclusivity, and as the load-bearing serialization point
+// when the multi-tab takeover plan ships (graceful handoff window
+// where two workers briefly coexist). `ifAvailable: true` fails fast
+// rather than queueing — a stuck writer must surface as a visible
+// error, not a hung mutation. Callers translate the resulting
+// FOLDER_LOCKED error code into the write-failed badge state.
 async function _writeBytesToFolder(bytes, filename) {
   if (!folderRecord.parentHandle || !folderRecord.subfolderName) {
     var ne = new Error('no folder configured');
     ne.code = 'no_folder';
     throw ne;
   }
+  return await navigator.locks.request(
+    FOLDER_WRITE_LOCK_NAME,
+    { mode: 'exclusive', ifAvailable: true },
+    async function (lock) {
+      if (!lock) {
+        folderRecord.lastError = {
+          at: new Date().toISOString(),
+          reason: 'folder write blocked: another tab or window is editing this folder'
+        };
+        await _folderRecordPersist();
+        var le = new Error('Folder write blocked by another agent holding ' + FOLDER_WRITE_LOCK_NAME);
+        le.code = 'folder_locked_by_another_tab';
+        throw le;
+      }
+      return await _writeBytesToFolderUnlocked(bytes, filename);
+    }
+  );
+}
+
+async function _writeBytesToFolderUnlocked(bytes, filename) {
   var sub;
   try {
     sub = await folderRecord.parentHandle.getDirectoryHandle(folderRecord.subfolderName, { create: true });
@@ -2329,7 +2361,16 @@ async function _maybeWriteFolderAfterCommit() {
   } catch (e) {
     // lastError already populated by the helper. Don't rethrow — the
     // OPFS commit is the user's data; they need to retry the folder
-    // write, not redo the mutation.
+    // write, not redo the mutation. Override the message for the
+    // lock-held case so the badge tells the user something actionable
+    // ("close the other window") instead of a raw exception string.
+    if (e && e.code === 'folder_locked_by_another_tab') {
+      folderRecord.lastError = {
+        at: new Date().toISOString(),
+        reason: 'Another window has this folder open — close it, then make any change to retry the save.'
+      };
+      await _folderRecordPersist();
+    }
     trace('folder: post-commit folder write failed: ' + ((e && e.message) || e));
   }
 }
