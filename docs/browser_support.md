@@ -61,6 +61,32 @@ The only fix on iOS is to upgrade iOS itself. iPhone 8 and newer
 support iOS 16.4+; iPhone 7 and older do not. The unsupported-browser
 panel says this explicitly when it detects iOS.
 
+## Folder-mode capability (additive — not required to run the app)
+
+Folder mode (`relationships.db` lives in a user-picked folder on disk,
+visible in Finder, durable across browser-data wipes) requires the
+**File System Access API** on top of the OPFS floor:
+
+| API | Floor | Browsers |
+|---|---|---|
+| `window.showDirectoryPicker` | Chromium-based, desktop | Chrome, Edge, Brave, Arc, Opera (desktop) |
+| Persistent handle via IndexedDB | Same | Same |
+
+Safari, Firefox, all iOS browsers, and Android Chrome (as of 2026)
+fall back to **OPFS-only mode** — `relationships.db` lives in OPFS
+and the maintainer-facing data-folder UI shows the *"Browser-only —
+this browser doesn't support saving to a folder"* badge. Everything
+else in the app (directory, search, groups, settings) works
+identically. Capability-detection: `'showDirectoryPicker' in window`
+inside the page (no separate worker probe — page-side gesture is
+required anyway).
+
+This is **additive**, not a new floor. A browser that supports OPFS
+but not `showDirectoryPicker` is fully supported; folder mode is just
+an opt-in upgrade for the browsers that do support it. See
+[`../plans/user_folder_storage.md`](../plans/user_folder_storage.md)
+§ Browser compatibility matrix for the per-flavor breakdown.
+
 ## How a user without OPFS reaches the panel
 
 Capability detection happens in the worker, not the main thread —

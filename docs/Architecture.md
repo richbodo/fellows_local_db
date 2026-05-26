@@ -203,6 +203,8 @@ CREATE TABLE settings (
 
 **Durability (per PR-4):** `relationships.db` is gitignored, per-user, never replaced on app update, survives Clear App Cache, and is wiped only by Reset Everything (the workspace's explicit-user-choice nuclear path). Auto-backup, restore, and the OPFS-vs-IndexedDB-vs-cookie state-survival matrix live in [`./persistence_and_upgrades.md`](./persistence_and_upgrades.md).
 
+**Substrate (two modes, single source of truth per session).** Folder mode (Chromium desktop with a user-picked `FileSystemDirectoryHandle`) treats the user's folder file as canonical: the OPFS slot is a transient mem-VFS buffer hydrated from folder bytes on boot, serialized back atomically on every committed mutation, and guarded across agents by a Web Lock on `'fellows-relationships-folder-write'`. OPFS-only mode (Safari / Firefox / mobile, or Chromium users who declined the picker) treats the OPFS-resident slot as canonical. No hybrid — boot resolves to exactly one mode per session. Full architecture (mode resolution, pivot migration, per-commit write path, backup ring location, Web Lock semantics) in [`../plans/user_folder_storage.md`](../plans/user_folder_storage.md). The state-survival matrix in `persistence_and_upgrades.md` enumerates the per-substrate storage layers.
+
 ---
 
 ## Worker constants (fellows's version-handshake values)

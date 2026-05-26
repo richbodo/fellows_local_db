@@ -161,6 +161,10 @@ The UI requests `/api/fellows` first (instant list), then fetches `/api/fellows?
 
 This is about manual QA — driving the running app in a browser to verify a change. For the pytest / Playwright suite see [Testing](#testing) below.
 
+**Before each ship: walk [`docs/pre_ship_test_plan.md`](docs/pre_ship_test_plan.md).** Two-phase manual checklist — Phase 1 against the local staging server ([`docs/local_staging.md`](docs/local_staging.md)) covers auth flow + MCPB routes + folder mode + Web Locks + cross-browser silos without touching prod; Phase 2 is the irreducible real-device / real-Postmark smoke after the deploy lands.
+
+The scenarios below are the older lower-level recipes that the pre-ship plan composes — useful when you want to drive one specific path interactively.
+
 The trap is **stale state**. The PWA's service worker, OPFS (`relationships.db`, `fellows.db`), IndexedDB, the `fellows_session` HttpOnly cookie, and the `fellows_authenticated_once` localStorage marker all persist by design. DevTools' "Clear site data" misses several layers, and the in-app **Clear App Cache** button intentionally preserves OPFS + the auth-once marker. Below is what actually works for each scenario.
 
 ### 1. Local Dev — See The Latest `main`
@@ -186,7 +190,7 @@ What persists across this flow on localhost (intentionally):
 just gate                 # opens http://localhost:8765/?gate=1
 ```
 
-The gate UI renders, but the dev server has **no `/api/send-unlock`** — submitting the form fails. To exercise the actual magic-link round-trip, either run the e2e suite (`just test-e2e -- -k email_gate`, which spins up `deploy/server.py` in-process with a fake Postmark) or test against prod (scenarios 3 / 4).
+The gate UI renders, but the dev server has **no `/api/send-unlock`** — submitting the form fails. To exercise the actual magic-link round-trip, the cleanest path is now `just serve-prod` (see [`docs/local_staging.md`](docs/local_staging.md)) — runs `deploy/server.py` on `http://127.0.0.1:8766` with auth on and Postmark stubbed to a file. Or run the e2e suite (`just test-e2e -- -k email_gate`, which spins the same server up in-process). Falling back to scenarios 3 / 4 on prod is the last resort for tests you can't reproduce locally.
 
 ### 3. Prod — First-Time Visitor Simulation
 
