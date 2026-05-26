@@ -11,56 +11,40 @@ screenshot smoke test (`tests/e2e/mobile/test_routes.py`).
 """
 from __future__ import annotations
 
-import json
 import re
-import urllib.error
-import urllib.request
 
-import pytest
 from playwright.sync_api import expect
 
 
-@pytest.fixture
-def edit_target_group(base_url_fixture):
-    """Create a throwaway group; yield its id; delete after test."""
-    body = json.dumps(
-        {
-            "name": "Mobile edit-mode regression",
-            "note": "Created by tests/e2e/mobile/test_edit_mode_layout.py.",
-            "fellow_record_ids": [],
-        }
-    ).encode("utf-8")
-    req = urllib.request.Request(
-        base_url_fixture + "/api/groups",
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=5) as r:
-            payload = json.loads(r.read().decode("utf-8"))
-    except urllib.error.URLError as exc:
-        pytest.skip(f"dev server unreachable for group creation: {exc}")
-    gid = int(payload["id"])
-    yield gid
-    try:
-        del_req = urllib.request.Request(
-            f"{base_url_fixture}/api/groups/{gid}", method="DELETE"
-        )
-        urllib.request.urlopen(del_req, timeout=5).read()
-    except urllib.error.URLError:
-        pass
-
-
 def test_edit_mode_keeps_rails_visible_on_mobile(
-    mobile_page, base_url_fixture, edit_target_group
+    mobile_page, base_url_fixture
 ):
     """On `#/edit/<id>` at mobile widths, the fellow-picker and editing rail
     must both be visible. Without them the page is blank and edit mode is
-    unusable (PR #75 regression)."""
+    unusable (PR #75 regression).
+
+    Test group is seeded via window.__dataProvider — Phase 1 of
+    plans/local_first_worker_architecture.md retired the dev server's
+    /api/groups route, so the HTTP-fixture approach this test originally
+    used now silently pytest.skips. OPFS is per-origin per-context, so
+    the group survives the second goto inside the same mobile_page
+    fixture."""
     page = mobile_page
+    page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+    page.wait_for_function(
+        "() => window.__dataProvider && window.__dataProvider.kind === 'worker'",
+        timeout=15000,
+    )
+    record = page.evaluate(
+        """() => window.__dataProvider.createGroup({
+            name: 'Mobile edit-mode regression',
+            note: 'Created by tests/e2e/mobile/test_edit_mode_layout.py.',
+            fellow_record_ids: [],
+        })"""
+    )
+    gid = int(record["id"])
     page.goto(
-        f"{base_url_fixture}/#/edit/{edit_target_group}",
+        f"{base_url_fixture}/#/edit/{gid}",
         wait_until="domcontentloaded",
     )
     page.locator("#loading").wait_for(state="hidden", timeout=10000)

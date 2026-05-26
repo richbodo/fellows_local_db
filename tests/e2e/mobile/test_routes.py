@@ -18,9 +18,6 @@ Run with ``just test-mobile``.
 """
 from __future__ import annotations
 
-import json
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 import pytest
@@ -64,28 +61,26 @@ def _wait_for_app_boot(page, timeout: int = 10000) -> None:
     page.wait_for_timeout(400)
 
 
-@pytest.fixture(scope="session")
-def screenshot_group(base_url_fixture) -> int:
-    """Create a single test group via the API; reused across all group routes."""
-    body = json.dumps(
-        {
-            "name": "Mobile Screenshot Group",
-            "note": "Created by tests/e2e/mobile/test_routes.py — safe to delete.",
-            "fellow_record_ids": [],
-        }
-    ).encode("utf-8")
-    req = urllib.request.Request(
-        base_url_fixture + "/api/groups",
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
+def _create_screenshot_group_via_worker(page) -> int:
+    """Create a test group via the page's worker provider and return its id.
+
+    Phase 1 of plans/local_first_worker_architecture.md retired the dev
+    server's /api/groups route — relationships data lives in the
+    worker-owned OPFS relationships.db. Test setup goes through the
+    same window.__dataProvider RPC the real app uses. The previous
+    HTTP-based fixture silently skipped these tests after that cutover.
+
+    Caller must have navigated the page and waited for the worker
+    provider to be ready.
+    """
+    record = page.evaluate(
+        """() => window.__dataProvider.createGroup({
+            name: 'Mobile Screenshot Group',
+            note: 'Created by tests/e2e/mobile/test_routes.py.',
+            fellow_record_ids: [],
+        })"""
     )
-    try:
-        with urllib.request.urlopen(req, timeout=5) as r:
-            payload = json.loads(r.read().decode("utf-8"))
-    except urllib.error.URLError as exc:
-        pytest.skip(f"dev server unreachable for group creation: {exc}")
-    return int(payload["id"])
+    return int(record["id"])
 
 
 @pytest.mark.parametrize("hash_route,label", STATIC_ROUTES)
@@ -106,13 +101,24 @@ def test_screenshot_group_route(
     mobile_page,
     device_name,
     base_url_fixture,
-    screenshot_group,
     template,
     label,
 ):
-    """Snap each group-scoped route (uses the session-scoped test group)."""
+    """Snap each group-scoped route (creates a fresh group per test via
+    the worker; OPFS persists across the second goto inside the same
+    browser context, so the group is still there after navigation)."""
     page = mobile_page
-    hash_route = template.format(gid=screenshot_group)
+    # First navigate to / so the worker provider boots and we can
+    # seed a group via __dataProvider; then navigate to the target
+    # group-scoped route. OPFS is per-origin per-context; the group
+    # survives the second goto.
+    page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+    page.wait_for_function(
+        "() => window.__dataProvider && window.__dataProvider.kind === 'worker'",
+        timeout=15000,
+    )
+    gid = _create_screenshot_group_via_worker(page)
+    hash_route = template.format(gid=gid)
     page.goto(base_url_fixture + "/" + hash_route, wait_until="domcontentloaded")
     _wait_for_app_boot(page)
     out = OUT_DIR / f"{label}--{_device_slug(device_name)}.png"
