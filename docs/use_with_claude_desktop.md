@@ -5,6 +5,8 @@ up, you can ask **Claude Desktop** questions about the directory and
 your saved groups, and have it draft outreach emails for you to
 review and send.
 
+It's beta, works for me, and is super handy when it does, but the entire environment around integration with apps like claude desktop feels super immature and scary.
+
 Example things you can ask:
 
 - *"How many fellows are based in Aotearoa?"*
@@ -46,7 +48,7 @@ depends on.
 below. It works but needs a few extra steps.
 
 **Already installed the Fellows app in two browsers on the same Mac?**
-Each browser has its own data store; see *[Multiple installs on the
+Each browser has its own data store; If you haven't created groups yet, you just install on the second browser.  If you have groups that youy need to save, then see *[Multiple installs on the
 same device](users_manual.md#multiple-installs-on-the-same-device)*
 to consolidate before you set up Claude Desktop integration.
 
@@ -71,23 +73,12 @@ the warning banner Claude Desktop will show during install (see
 *[About that red warning banner](#about-that-red-warning-banner)*
 below).
 
-### Step 2 — Read the preamble, click Continue
+### Step 2 — Read the preamble dialog, click Continue
 
-The dialog covers three extensions:
+The dialog explains that you will install three extensions to claude code - you probably want all three.
 
-- **Fellows directory (Shared)** — Claude reads the public fellows
-  directory (names, bios, contact info).
-- **Your saved groups (Private)** — Claude reads your saved groups
-  and notes. *Privacy note*: this data is private to you and never
-  leaves your device through the Fellows app — but when Claude reads
-  it, it goes to Claude's servers. If that's not OK for you, skip
-  this extension and Claude will only have access to the directory.
-- **Email staging (Communications)** — Claude prepares draft emails
-  and hands them back to your mail app. Claude never sends mail
-  itself.
-
-When you click **Continue**, three `.mcpb` installer files download
-into your Downloads folder:
+When you click **Continue**, three files download
+into your Downloads folder - you need to find these files:
 
 - `shared_data_ops.mcpb`
 - `private_data_ops.mcpb`
@@ -95,9 +86,11 @@ into your Downloads folder:
 
 ### Step 3 — Open each .mcpb, approve in Claude Desktop, restart
 
+Note: Claude desktop will issue a scary warning for each file install, saying "This will grant access to every file on your computer!!!"  That's, um, hyperbolic and ass-covering, but not true.  The reason they did this is that they are not going to bother to check what the mcpb file contains, or even what operating system you are on.  This is a single-dev repo that doesn't accept outside contributions and I read all the important code - no one is changing these MCP servers to access any files other than the ones containing your fellows data.  But, it's early days and Anthropic have adopted what we call a CYA (cover your assets) security posture.  Fine. Ignore.
+
 For each of the three files:
 
-1. **Open the file** (Finder → double-click, or `Downloads → open`).
+1. **Open the file** (On mac: Finder → double-click, or `Downloads → open`).
    Claude Desktop pops up an Install dialog.
 2. **For `private_data_ops.mcpb` only**: the install dialog asks you
    to pick a file. Navigate to your **data folder → Fellows →
@@ -117,7 +110,7 @@ If you get a count back, you're set up.
 
 ---
 
-## About that red warning banner
+## More about that red warning banner
 
 When you click **Install** in Claude Desktop, you'll see a red banner
 that says:
