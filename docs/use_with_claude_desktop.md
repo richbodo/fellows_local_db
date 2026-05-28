@@ -24,6 +24,8 @@ window in your mail app — you always click Send.
 
 This is optional. The Fellows app works perfectly well without it.
 
+The end game here is to build a native app with local AI capabilities, but that is not yet even on the roadmap.
+
 ---
 
 ## Before you start
