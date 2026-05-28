@@ -5,7 +5,7 @@ up, you can ask **Claude Desktop** questions about the directory and
 your saved groups, and have it draft outreach emails for you to
 review and send.
 
-It's beta, works for me, and is super handy when it does, but the entire environment around integration with apps like claude desktop feels super immature and scary.
+It's beta, works for me, and is super handy, but the entire environment around integration with apps like claude desktop feels super immature and scary, even though it normally isn't.
 
 Example things you can ask:
 
