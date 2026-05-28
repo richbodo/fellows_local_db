@@ -152,14 +152,41 @@ navigator.locks.request(
 
 ### 5. Honest mutation loss on tab close
 
-- [ ] **5.1** Open a new incognito window. Sign in. Pick the same data
-      folder (open-existing path). Confirm group "Test G1" is visible.
+**Incognito session lifecycle matters here.** Chrome's incognito mode
+keeps OPFS, IndexedDB, cookies, and SW state alive across all tabs in
+the same incognito *session*, and only wipes them when **every
+incognito window of that session is closed**. Closing a single tab
+isn't enough — if you have any other incognito tab in the same session
+still open, the OPFS state survives, and §5.6 will fail spuriously
+("Lost" appears to still be there because it's in the surviving
+in-memory state, not because the folder write magically succeeded).
+
+The crisp way to run §5 cleanly: **close every incognito window before
+§5.5**, then open a brand-new one. Confirm freshness by checking the
+About page — the **install codename** must differ from the §5.1–§5.4
+window's codename (the codename is generated on first launch and
+persists in OPFS, so a stale session shows the same codename).
+
+Every "sign in" below means a full magic-link round-trip: submit the
+test email, fetch the unlock URL with `just serve-prod-link`, paste it
+into the new window, land on the install landing → *Use the directory
+in this tab*. The session cookie is per-incognito-session, so this
+must be redone in every fresh window.
+
+- [ ] **5.1** Open a new incognito window. Sign in (full magic-link
+      round-trip). Pick the same data folder (open-existing path).
+      Confirm group "Test G1" is visible.
 - [ ] **5.2** Create group "Doomed". Hold the lock in DevTools (same
       snippet as §4).
 - [ ] **5.3** Create group "Lost". Badge says "Last save failed."
-- [ ] **5.4** **Close the window without releasing the lock.**
-- [ ] **5.5** Open a fresh incognito window. Sign in. Pick the same
-      folder.
+- [ ] **5.4** **Close every incognito window of this session without
+      releasing the lock.** ("Close the tab" is not enough — any
+      sibling incognito tab keeps OPFS alive and turns this into a
+      false-pass test in §5.6.)
+- [ ] **5.5** Open a brand-new incognito window. Sign in. Pick the
+      same folder. **Sanity check:** About page shows a *different*
+      install codename than §5.1's; if it's the same codename, the
+      prior session is still alive — close everything and try again.
 - [ ] **5.6** Confirm "Test G1" and "Doomed" are visible; **"Lost" is
       gone**. (This is the honest mutation loss the badge warned about
       — verified end-to-end.)
