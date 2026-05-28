@@ -42,7 +42,7 @@ Edge, Brave, Arc) running on macOS Sonoma 14 or newer. This is the
 combination that supports the data-folder feature the integration
 depends on.
 
-**Safari and Firefox:** keep reading — there's a [secondary path](#secondary-path-safari-firefox-and-other-browsers)
+**Safari and Firefox:** If you are not very technical, it is unlikely that you will be able to interface with claude desktop using these other browsers.  If you must get this going, please download and use Chrome, Edge, Brave, or Arc for this app.  If you still want to try - there's a [secondary path](#secondary-path-safari-firefox-and-other-browsers)
 below. It works but needs a few extra steps.
 
 **Already installed the Fellows app in two browsers on the same Mac?**
