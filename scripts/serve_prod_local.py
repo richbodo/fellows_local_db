@@ -95,6 +95,12 @@ def _build_dist(force: bool) -> None:
     )
     build_pwa.write_bundle_manifest(DIST_DIR, label)
 
+    # Mirror build_pwa.main()'s image copy so /images/<slug>.{jpg,png}
+    # work on the staging server. Without this every fellow detail /
+    # visual directory render fires ~1000 console 404s, which makes
+    # staging look broken even though the app shell is fine.
+    build_pwa.copy_images_to_dist(DIST_DIR)
+
     # Sign the manifest with the dev key. Same key tests/conftest.py uses;
     # the SW verify path runs in full but the origin check renders this
     # key inert on the real prod hostname, so leaking it doesn't matter.

@@ -317,6 +317,38 @@ def write_bundle_manifest(dist_dir: Path, build_label: str) -> Path:
     return out
 
 
+def copy_images_to_dist(dist_dir: Path) -> int:
+    """Copy profile images into `<dist_dir>/images/`.
+
+    Prefers `app/fellow_profile_images_by_name/` and falls back to
+    `final_fellows_set/fellow_profile_images_by_name/`. Returns the
+    count of files copied (0 if neither source dir exists).
+
+    Shared by main() (production build), scripts/serve_prod_local.py
+    (manual staging launcher), and tests/conftest.py:deploy_server
+    (e2e fixture) so all three paths produce a dist with working
+    `/images/<slug>.{jpg,png}` routes. The launcher and the test
+    fixture were silently skipping this step until 2026-05; missing
+    images surfaced as ~1000 console 404s on the maintainer's About
+    page during a Phase 1 walk-through.
+    """
+    img_src = (
+        IMAGES_SRC
+        if IMAGES_SRC.is_dir()
+        else (IMAGES_FALLBACK if IMAGES_FALLBACK.is_dir() else None)
+    )
+    if not img_src:
+        return 0
+    dest = dist_dir / "images"
+    dest.mkdir(parents=True, exist_ok=True)
+    n = 0
+    for p in img_src.iterdir():
+        if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png", ".gif", ".webp"):
+            shutil.copy2(p, dest / p.name)
+            n += 1
+    return n
+
+
 def main() -> int:
     if not STATIC_DIR.is_dir():
         print(f"Missing static directory: {STATIC_DIR}", file=sys.stderr)
@@ -339,13 +371,7 @@ def main() -> int:
         shutil.copy2(DB_SRC, DIST_DIR / "fellows.db")
     else:
         print(f"Warning: no database at {DB_SRC} — run build/restore_from_knack_scrapefile.py", file=sys.stderr)
-    img_src = IMAGES_SRC if IMAGES_SRC.is_dir() else (IMAGES_FALLBACK if IMAGES_FALLBACK.is_dir() else None)
-    if img_src:
-        dest = DIST_DIR / "images"
-        dest.mkdir(parents=True, exist_ok=True)
-        for p in img_src.iterdir():
-            if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png", ".gif", ".webp"):
-                shutil.copy2(p, dest / p.name)
+    copy_images_to_dist(DIST_DIR)
     nfiles = sum(1 for p in DIST_DIR.rglob("*") if p.is_file())
     print(f"Wrote {DIST_DIR} ({nfiles} files)  build_label={label}")
     return 0
