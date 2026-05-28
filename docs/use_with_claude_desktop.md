@@ -20,7 +20,7 @@ Example things you can ask:
 
 Claude reads your **local** copy of the directory to answer. For the
 email demo, it hands the draft back to you as a pre-filled compose
-window in your mail app — you always click Send.
+window in your mail app.
 
 This is optional. The Fellows app works perfectly well without it.
 
