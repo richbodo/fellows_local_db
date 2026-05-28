@@ -240,6 +240,8 @@ correlate.
 
 ### I'm not sure which install of the Fellows app I'm using
 
+If you installed more than one version on different browsers, then you will want to know which one you are looking at so you can debug and move your data to the version you want to use.
+
 Check the **About** page — it shows the install name
 (`giraffe-gorilla-mouse` or similar). See *[Install name](users_manual.md#install-name)*.
 
@@ -263,9 +265,6 @@ For the curious (or for cleanup):
   Uninstalling Claude Desktop doesn't touch this file — it's yours.
 - `fellows.db` ships **inside** `shared_data_ops.mcpb` (~3 MB).
   Uninstalling that extension removes it.
-- No environment variables, no Terminal commands, no
-  hand-edited config files. The `claude_desktop_config.json` flow
-  the previous version of this doc used is gone.
 
 ---
 
