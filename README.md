@@ -1,6 +1,6 @@
 # EHF Fellows Local Directory
 
-Local web app to quickly browse Edmund Hillary Fellowship fellow profiles, organize them into saved groups, and export sub-directories — and to run experiments. (data only available to EHF fellows).  This app is a [home-cooked meal in the tradition of barefoot software developers](https://maggieappleton.com/home-cooked-software) - a simple act of gratitude and love for one of my communities.
+Local web app to quickly browse Edmund Hillary Fellowship fellow profiles, organize them into saved groups, and export sub-directories — and to run experiments. (data only available to EHF fellows).  This app is a [home-cooked meal in the tradition of barefoot software developers](https://maggieappleton.com/home-cooked-software) - a simple act of gratitude and love for one of my communities alone.
 
 Data and assets are local-first (SQLite + static files), served by Python stdlib. User-authored data (groups, notes, settings) lives in a separate per-user SQLite file (`app/relationships.db`) that's durable across app updates.
 
