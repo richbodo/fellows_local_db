@@ -160,7 +160,7 @@ Run only after the deploy has landed.
 just ship                              # build + test + deploy + smoke
 just whats-running                     # confirm prod git_sha matches HEAD
 just drift                             # SHA-aligned 3-line view (local / origin / prod)
-just smoke                             # HTTPS health + manifest + diagnostics probe
+just smoke                             # HTTPS health + manifest + diagnostics + COOP/COEP/HSTS headers
 ```
 
 ### 1. First-time-visitor smoke (real Postmark)
@@ -197,40 +197,24 @@ just smoke                             # HTTPS health + manifest + diagnostics p
 - [ ] **3.1** Same flow as iOS, but Chrome shows an "Add to Home Screen" prompt instead
       of Safari's share sheet.
 
-### 4. Caddy header preservation
+### 4. Real MCPB install *(if you tested it in Phase 1)*
 
-> Not covered by `just smoke` (it checks health/manifest/diagnostics, not these
-> headers). _(Automation candidate: add these greps to `scripts/smoke_prod.sh`, then
-> delete this section.)_
-
-```bash
-curl -sI https://fellows.globaldonut.com/ | grep -iE "strict-transport|cross-origin"
-```
-
-- [ ] **4.1** `Strict-Transport-Security: max-age=31536000; includeSubDomains; preload`
-- [ ] **4.2** `Cross-Origin-Opener-Policy: same-origin`
-- [ ] **4.3** `Cross-Origin-Embedder-Policy: require-corp`
-
-If any are missing, Caddy config drifted — see [`DevOps.md`](DevOps.md) § Architecture.
-
-### 5. Real MCPB install *(if you tested it in Phase 1)*
-
-- [ ] **5.1** On prod, download a `.mcpb` from Settings → Claude Desktop integration.
-- [ ] **5.2** Confirm it installs into Claude Desktop as in Phase 1 §3.
-- [ ] **5.3** Quick query: "How many fellows are in the directory?" — count matches the
+- [ ] **4.1** On prod, download a `.mcpb` from Settings → Claude Desktop integration.
+- [ ] **4.2** Confirm it installs into Claude Desktop as in Phase 1 §3.
+- [ ] **4.3** Quick query: "How many fellows are in the directory?" — count matches the
       build's `fellows.db`.
 
-### 6. Update flow on a real install
+### 5. Update flow on a real install
 
 > The drift→banner *logic* is covered by `just test` (`test_update_check.py`). What
 > stays manual: the **real SW update** on a **really-installed** PWA — drivable on
 > real Chrome via chrome-devtools-mcp ([`debugging.md`](debugging.md)).
 
-- [ ] **6.1** Open your existing installed PWA (phone or laptop).
-- [ ] **6.2** Within ~30 s the "New version available — Reload" banner appears.
-- [ ] **6.3** Click Reload → fresh shell loads → About shows the new build label.
+- [ ] **5.1** Open your existing installed PWA (phone or laptop).
+- [ ] **5.2** Within ~30 s the "New version available — Reload" banner appears.
+- [ ] **5.3** Click Reload → fresh shell loads → About shows the new build label.
 
-### 7. Worst-case rollback (don't run unless needed)
+### 6. Worst-case rollback (don't run unless needed)
 
 ```bash
 git revert <bad-merge-commit>          # or git revert --no-commit <range>
