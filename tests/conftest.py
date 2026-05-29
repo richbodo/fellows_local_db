@@ -167,6 +167,15 @@ def deploy_server(tmp_path_factory):
     )
     _build_pwa.write_bundle_manifest(dist_dir, label)
 
+    # Mirror build_pwa.main()'s image copy so /images/<slug>.{jpg,png}
+    # work in e2e tests that hit the deploy server. No test currently
+    # asserts on image bytes, but keeping the fixture's dist symmetric
+    # with `scripts/serve_prod_local.py` (the manual staging launcher
+    # that copy-pastes this recipe) means a future image-related e2e
+    # doesn't have to track down "why does staging behave differently
+    # from the test fixture."
+    _build_pwa.copy_images_to_dist(dist_dir)
+
     # Sign the manifest with the committed dev test key (same key the
     # dev server uses on the fly). The SW's verify path will run in
     # full against e2e tests; an SRI / manifest / signing bug surfaces
