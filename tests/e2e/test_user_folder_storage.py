@@ -775,6 +775,11 @@ class TestPhase2WriteLock:
         re-attempts the folder write; this time the lock is free,
         the write succeeds with all the in-memory state including B,
         lastError clears and lastSavedAt advances.
+
+        Also pins the user-facing Settings badge: "Last save failed"
+        + the "Another window…" detail line while blocked, and back to
+        "Saved to …" after recovery — the surface the pre-ship checklist
+        used to verify by hand.
         """
         gid_a, baseline_saved_at, baseline_rel_size = (
             self._pick_folder_and_seed_group_a(folder_page, base_url_fixture)
@@ -812,6 +817,23 @@ class TestPhase2WriteLock:
             f"lock-held lastError should carry the actionable copy; "
             f"got {state_after_b['lastError']['reason']!r}"
         )
+        # The blocked write surfaces in the Settings folder badge — the
+        # user-facing signal the pre-ship checklist used to verify by hand.
+        # Re-render the settings route IN-PAGE (hash bounce, NOT a reload:
+        # a reload would re-boot the worker and drop the in-memory
+        # lastError) so renderFolderSection repaints from the failed state.
+        folder_page.evaluate("() => { location.hash = '#/'; }")
+        folder_page.evaluate("() => { location.hash = '#/settings'; }")
+        folder_page.locator("#settings-folder-section").wait_for(
+            state="visible", timeout=5000
+        )
+        badge_text = folder_page.locator(
+            "#settings-folder-badge .settings-folder-badge-text"
+        )
+        expect(badge_text).to_contain_text("Last save failed", timeout=5000)
+        expect(
+            folder_page.locator("#settings-folder-detail")
+        ).to_contain_text("Another window")
         # lastSavedAt did NOT advance — folder is still at A only.
         assert state_after_b["lastSavedAt"] == baseline_saved_at, (
             f"lastSavedAt should NOT advance when the write was blocked; "
@@ -854,6 +876,18 @@ class TestPhase2WriteLock:
             f"lastSavedAt should advance on retry; "
             f"baseline={baseline_saved_at!r} after_retry={state_after_retry['lastSavedAt']!r}"
         )
+        # Badge UI recovers to Saved after the successful retry (the other
+        # half of the pre-ship badge check). Same in-page re-render trick.
+        folder_page.evaluate("() => { location.hash = '#/'; }")
+        folder_page.evaluate("() => { location.hash = '#/settings'; }")
+        folder_page.locator("#settings-folder-section").wait_for(
+            state="visible", timeout=5000
+        )
+        expect(
+            folder_page.locator(
+                "#settings-folder-badge .settings-folder-badge-text"
+            )
+        ).to_contain_text("Saved to", timeout=5000)
 
     def test_tab_close_with_pending_write_failure_preserves_folder_state(
         self, folder_page, base_url_fixture, context

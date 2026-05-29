@@ -100,62 +100,7 @@ Settings → **Choose data folder…** → pick `~/Documents/local-staging/` (or
 - [ ] **2.4** Settings → **⬇ Download my private data** → a real `.db` blob lands in
       `~/Downloads`.
 
-### 3. Folder Web Lock — manual verification
-
-> _(Automation candidate: the `window.__holdFolderLockForever()` /
-> `__releaseFolderLock()` seams already exist; a single-context e2e can assert the
-> badge flip. Delete this section when that test lands.)_
-
-Must run on the **same `127.0.0.1:8766` tab** as §2. Open `#/settings` in a second tab
-so you can watch the badge. In DevTools console:
-
-```js
-navigator.locks.request(
-  'fellows-relationships-folder-write',
-  { mode: 'exclusive' },
-  () => new Promise(() => {})   // holds forever
-);
-```
-
-- [ ] **3.1** Create another group from the directory rail. The OPFS commit succeeds
-      (group appears in-memory) but the post-commit folder write hits the lock and
-      fails fast.
-- [ ] **3.2** The Private data folder badge flips to **"Last save failed — Change
-      folder to re-pick"** within a second.
-- [ ] **3.3** Hover the badge / check diagnostics → reason reads *"Another window has
-      this folder open — close it, then make any change to retry the save."*
-- [ ] **3.4** Reload the tab (releases the lock — Web Locks auto-release on agent
-      termination).
-- [ ] **3.5** Make a fresh mutation → badge returns to Saved; the folder file now
-      contains the previously-failed mutation too.
-
-### 4. Honest mutation loss on tab close
-
-> _(Automation candidate: the in-memory-lost-on-close logic is modelable with a fresh
-> Playwright context boundary against the deploy_server lane. The real
-> incognito-session OPFS lifecycle below is the residue that may stay manual.)_
-
-**Incognito session lifecycle matters.** Chrome keeps OPFS/IndexedDB/cookies/SW alive
-across all tabs in one incognito *session* and wipes them only when **every** incognito
-window of that session closes. Confirm freshness via the About page **install codename**
-(persisted in OPFS): a stale session shows the same codename.
-
-Every "sign in" = a full magic-link round-trip (the session cookie is per-incognito-session).
-
-- [ ] **4.1** New incognito window. Sign in. Pick the same data folder (open-existing).
-      Confirm a prior group is visible.
-- [ ] **4.2** Create group "Doomed". Hold the lock (same snippet as §3).
-- [ ] **4.3** Create group "Lost". Badge says "Last save failed."
-- [ ] **4.4** **Close every incognito window of this session without releasing the
-      lock.** (Closing one tab is not enough — a sibling tab keeps OPFS alive and
-      false-passes §4.6.)
-- [ ] **4.5** Brand-new incognito window. Sign in. Pick the same folder. **Sanity:**
-      About shows a *different* install codename than §4.1; if it matches, the prior
-      session is still alive — close everything and retry.
-- [ ] **4.6** Confirm the saved groups + "Doomed" are visible; **"Lost" is gone** —
-      the honest mutation loss the badge warned about, verified end-to-end.
-
-### 5. Claude Desktop end-to-end *(only with Claude Desktop on macOS)*
+### 3. Claude Desktop end-to-end *(only with Claude Desktop on macOS)*
 
 > The MCPB **Settings UI** flow (preamble, three-bundle list, warning banner, cancel,
 > continue-dispatches-three-downloads, button relabel, localStorage persistence) and
@@ -165,46 +110,37 @@ Every "sign in" = a full magic-link round-trip (the session cookie is per-incogn
 > `test_comms.py`, `test_mcpb_parity.py`. What stays manual: the native Claude Desktop
 > install handshake and a live AI query — neither tool reaches Claude Desktop.
 
-- [ ] **5.1** Settings → **Set up Claude Desktop integration** → **Continue** → three
+- [ ] **3.1** Settings → **Set up Claude Desktop integration** → **Continue** → three
       real `.mcpb` files (~3–4 MB each; needs `just build-mcpb`) land in `~/Downloads`.
-- [ ] **5.2** Drag each `.mcpb` into Claude Desktop → install dialog → **Install**
+- [ ] **3.2** Drag each `.mcpb` into Claude Desktop → install dialog → **Install**
       (approve the red banner).
-- [ ] **5.3** `private_data_ops.mcpb` asks for a file → navigate to
+- [ ] **3.3** `private_data_ops.mcpb` asks for a file → navigate to
       `<your-data-folder>/Fellows/relationships.db` (the folder picked in §2).
-- [ ] **5.4** **Quit Claude Desktop (⌘Q) and reopen.**
-- [ ] **5.5** Ask *"How many fellows are in the directory?"* → expect a number.
-- [ ] **5.6** Ask *"List my saved groups"* → expect the groups (or "none yet").
-- [ ] **5.7** Ask *"Draft an invite email to my [group] group, don't send"* → a
+- [ ] **3.4** **Quit Claude Desktop (⌘Q) and reopen.**
+- [ ] **3.5** Ask *"How many fellows are in the directory?"* → expect a number.
+- [ ] **3.6** Ask *"List my saved groups"* → expect the groups (or "none yet").
+- [ ] **3.7** Ask *"Draft an invite email to my [group] group, don't send"* → a
       mail-compose window opens with To/Subject/Body pre-filled.
 
 (The AI-query path is local-only — Claude Desktop ↔ local MCP subprocesses ↔ local
 SQLite. No server contact.)
 
-### 6. Cross-browser data silos
+### 4. Cross-browser data silos
 
 > _(Automation candidate: the silo concept + export/import migration are modelable
 > with two Playwright contexts. The **real Safari** install path below is the residue.)_
 
-- [ ] **6.1** Open `http://127.0.0.1:8766/` in **Chrome** AND **Safari**; sign in to both.
-- [ ] **6.2** About page in each → different install codenames.
-- [ ] **6.3** Create a group in Chrome → open Safari → no groups (silo confirmed;
+- [ ] **4.1** Open `http://127.0.0.1:8766/` in **Chrome** AND **Safari**; sign in to both.
+- [ ] **4.2** About page in each → different install codenames.
+- [ ] **4.3** Create a group in Chrome → open Safari → no groups (silo confirmed;
       Safari uses OPFS-only fallback, no `showDirectoryPicker`).
-- [ ] **6.4** Migrate: Chrome → ⬇ Download my private data; Safari → ⬆ Restore from a
+- [ ] **4.4** Migrate: Chrome → ⬇ Download my private data; Safari → ⬆ Restore from a
       file → the Chrome group appears in Safari.
 
 *Note: Safari "Add to Dock" on localhost may refuse — the silo behavior still tests
 fine in a regular Safari window. Real Safari install is Phase 2.*
 
-### 7. App-basics manual residue
-
-> _(Automation candidates pending Step-2 assertions: directory search results,
-> group edit/delete, group visual-directory portraits. Delete each when its test lands.)_
-
-- [ ] **7.1** Directory search returns results.
-- [ ] **7.2** Groups index → edit a group, delete a group.
-- [ ] **7.3** Visual directory route for a group renders portraits.
-
-### 8. Shutdown
+### 5. Shutdown
 
 ```bash
 # Ctrl-C in the serve-prod terminal, or:
@@ -280,7 +216,7 @@ If any are missing, Caddy config drifted — see [`DevOps.md`](DevOps.md) § Arc
 ### 5. Real MCPB install *(if you tested it in Phase 1)*
 
 - [ ] **5.1** On prod, download a `.mcpb` from Settings → Claude Desktop integration.
-- [ ] **5.2** Confirm it installs into Claude Desktop as in Phase 1 §5.
+- [ ] **5.2** Confirm it installs into Claude Desktop as in Phase 1 §3.
 - [ ] **5.3** Quick query: "How many fellows are in the directory?" — count matches the
       build's `fellows.db`.
 
