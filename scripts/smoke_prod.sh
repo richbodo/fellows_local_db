@@ -61,3 +61,30 @@ print("diagnostics OK (authActive=%s)" % d.get("authActive"))
   exit 1
 fi
 rm -f /tmp/fellows_smoke_diag.txt
+
+# Security headers the edge MUST preserve. COOP/COEP are load-bearing:
+# the OPFS-SAH-Pool VFS that holds relationships.db + fellows.db refuses
+# to install without crossOriginIsolated=true, and a reverse-proxy that
+# strips them is a silent "Settings has no backup/restore" failure
+# (docs/DevOps.md § Architecture). HSTS is part of the prod TLS contract
+# (Caddy sets it; the Python server does not) — only asserted for https
+# targets so this stays valid against the plain-http local-staging server.
+# Use GET with header dump (-D -) rather than HEAD: the stdlib server
+# implements do_GET, not do_HEAD.
+echo "GET ${BASE}/ (security headers)"
+hdrs=$(curl -sS -D - -o /dev/null "${BASE}/" || true)
+missing=""
+echo "$hdrs" | grep -qiE '^cross-origin-opener-policy:[[:space:]]*same-origin' \
+  || missing="${missing} Cross-Origin-Opener-Policy"
+echo "$hdrs" | grep -qiE '^cross-origin-embedder-policy:[[:space:]]*require-corp' \
+  || missing="${missing} Cross-Origin-Embedder-Policy"
+if [[ "$BASE" == https://* ]]; then
+  echo "$hdrs" | grep -qiE '^strict-transport-security:.*max-age=' \
+    || missing="${missing} Strict-Transport-Security"
+fi
+if [[ -n "$missing" ]]; then
+  echo "FAIL: missing/unexpected security headers:${missing}"
+  echo "$hdrs" | grep -iE 'strict-transport|cross-origin' || echo "(none present)"
+  exit 1
+fi
+echo "OK security headers (COOP + COEP$([[ "$BASE" == https://* ]] && echo ' + HSTS'))"

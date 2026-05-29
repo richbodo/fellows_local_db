@@ -61,3 +61,79 @@ just ship-fast          # if deploy/dist/ is already current, just re-push + smo
 Under the hood: `just drift` curls `https://fellows.globaldonut.com/build-meta.json` for prod's git SHA and `built_at`, then formats it next to `git log -1 HEAD` and `git log -1 origin/main`. All three lines have the same shape — `<sha> <iso-timestamp> <subject>` — so a glance tells you whether prod, your laptop, and the remote are in sync. Production has shipped with stale `deploy/dist/` before; if prod's SHA trails origin/main, run `just deploy` (or `./scripts/deploy_pwa.sh --ask-become-pass`).
 
 Other production debug entry points (service logs, Postmark send flow, Diagnostics panel) live in [`docs/email_system_management.md`](email_system_management.md) and [`docs/DevOps.md`](DevOps.md).
+
+## Pre-ship assist recipes (chrome-devtools-mcp)
+
+A handful of [`pre_ship_test_plan.md`](pre_ship_test_plan.md) steps can't be CI-gated
+under `just test` — they need a **real** Chrome with real service-worker / OPFS /
+installed-PWA state, or the real launcher. They stay manual, but you don't have to
+click through them by hand: attach Claude Code to a real Chrome (see *Attaching to your
+running Chrome* above) and hand off the matching recipe below. Each recipe is an
+attach-and-assert prompt — Claude drives the browser and reports pass/fail. None of
+them remove the **irreducible** part of the step (real inbox receipt, real device,
+the native Claude Desktop handshake); they automate the browser-observable part.
+
+Selectors/signals these lean on (all real, used by the e2e suite too): `#sw-update-banner`
+(the "New version available — Reload" banner), `#install-gate-private` (email gate),
+`window.__dataProvider.kind` (`'worker'` on the happy path), `window.__bootMarks`,
+`navigator.serviceWorker.controller`, `/api/auth/status`, `/build-meta.json`, and the
+`#/about` build badge. If served JS still contains the literal `__FELLOWS_UI_DIAG__`
+or `__CACHE_VERSION__`, the build-label substitution didn't run — that's a bug.
+
+### Recipe A — first-visit smoke on prod (Phase 2 §1, browser portion)
+
+Use **isolated mode** (throwaway profile) so it's a true first-time visitor.
+
+> *"Attach to a fresh isolated Chrome, open `https://fellows.globaldonut.com/`, and
+> report: (1) `GET /api/auth/status` returns `authEnabled:true, authenticated:false`;
+> (2) `#install-gate-private` is visible and `#directory` is not; (3) no console errors
+> and no failed network requests on load; (4) the served `app.js` contains neither
+> `__FELLOWS_UI_DIAG__` nor `__CACHE_VERSION__`. Do NOT submit an email — the real
+> inbox receipt (steps 1.2–1.6) is mine to do by hand."*
+
+Replaces the eyeball of 1.1; leaves the real Postmark round-trip (1.2–1.6) manual.
+
+### Recipe B — update banner on a real installed PWA (Phase 2 §5)
+
+Use **real-profile mode** (your normal `--user-data-dir`) so the actually-installed PWA
+and its registered SW are in scope. Re-read the **privacy caveat** above first — every
+tab in that Chrome is visible to Claude for the session.
+
+> *"Attach to my running Chrome (port 9222, my real profile). Open the installed Fellows
+> PWA (or `https://fellows.globaldonut.com/`). Report the current `#/about` build label
+> and `GET /build-meta.json` `git_sha`. Then wait for me to say 'deployed'; on that
+> signal, reload-poll for up to 60s and confirm: `#sw-update-banner` becomes visible,
+> then click its Reload control and confirm `navigator.serviceWorker.controller` changed
+> and the `#/about` build label now matches the new `/build-meta.json` `git_sha`."*
+
+Pinned in `just test` only as drift→banner *logic* (`test_update_check.py`); this recipe
+exercises the **real SW update** on a really-installed app.
+
+### Recipe C — real `serve-prod` launcher SW/precache pass (Phase 1 §1 caveat)
+
+The one gap the in-process `deploy_server` fixture can't cover: the real launcher's
+dist-build + SW-precache + build-label-stamp path. Run `just serve-prod` first.
+
+> *"Attach to a fresh isolated Chrome, open `http://127.0.0.1:8766/`, and report:
+> (1) the served `app.js` and `sw.js` contain neither `__FELLOWS_UI_DIAG__` nor
+> `__CACHE_VERSION__` (stamp ran); (2) `window.__dataProvider.kind === 'worker'` and
+> `window.__bootMarks.get_full_done` is set (clean boot); (3) the `#/about` build badge
+> shows my current `git rev-parse --short HEAD`. Then I'll run
+> `just serve-prod-reset && just serve-prod` to bump the build label — reload and confirm
+> `#sw-update-banner` appears (the SW noticed the new shell)."*
+
+### Recipe D — real Android Chrome over adb (Phase 2 §3, optional)
+
+For a tethered Android device with USB debugging on:
+
+```bash
+adb forward tcp:9222 localabstract:chrome_devtools_remote
+# then point chrome-devtools-mcp at --browser-url http://127.0.0.1:9222
+```
+
+> *"Attach to the Android Chrome on port 9222, open `https://fellows.globaldonut.com/`,
+> drive the magic-link round-trip (I'll paste the link), and confirm the directory loads,
+> a fellow detail opens, and selecting a fellow reveals the composer FAB."*
+
+The Add-to-Home-Screen install gesture itself stays manual (the OS install prompt is
+outside the page).
