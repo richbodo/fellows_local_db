@@ -70,7 +70,8 @@ visitor sees — gate appears because `authEnabled: true`, which is the prod pos
 > `test_install_landing.py`). This manual pass exists only to exercise the **real
 > `just serve-prod` launcher** end-to-end — the in-process test fixture can't catch
 > launcher-level SW/precache/build-stamp drift, and the e2e suite mocks
-> `/api/auth/status` rather than driving the real auth path.
+> `/api/auth/status` rather than driving the real auth path. The browser-observable
+> half can be driven with chrome-devtools-mcp ([`debugging.md`](debugging.md) § Recipe C).
 
 - [ ] **1.1** Email gate renders in the fresh incognito window (you're not auto-authed).
 - [ ] **1.2** Paste the test email → **Send link** → "Check your email…" appears.
@@ -166,8 +167,8 @@ just smoke                             # HTTPS health + manifest + diagnostics +
 ### 1. First-time-visitor smoke (real Postmark)
 
 > The browser-side gate→landing flow can be driven on real Chrome via
-> chrome-devtools-mcp ([`debugging.md`](debugging.md)). The **real inbox receipt**
-> below is irreducible.
+> chrome-devtools-mcp ([`debugging.md`](debugging.md) § Recipe A). The **real inbox
+> receipt** below is irreducible.
 
 - [ ] **1.1** New incognito window at `https://fellows.globaldonut.com/` → gate appears.
 - [ ] **1.2** Submit your real email (one Postmark can deliver to).
@@ -192,7 +193,7 @@ just smoke                             # HTTPS health + manifest + diagnostics +
 ### 3. Real Android Chrome install *(if you have an Android device)*
 
 > _(Optional assist: tether the device and drive it via chrome-devtools-mcp over
-> `adb forward` + `--browser-url` — see [`debugging.md`](debugging.md).)_
+> `adb forward` + `--browser-url` — see [`debugging.md`](debugging.md) § Recipe D.)_
 
 - [ ] **3.1** Same flow as iOS, but Chrome shows an "Add to Home Screen" prompt instead
       of Safari's share sheet.
@@ -208,7 +209,7 @@ just smoke                             # HTTPS health + manifest + diagnostics +
 
 > The drift→banner *logic* is covered by `just test` (`test_update_check.py`). What
 > stays manual: the **real SW update** on a **really-installed** PWA — drivable on
-> real Chrome via chrome-devtools-mcp ([`debugging.md`](debugging.md)).
+> real Chrome via chrome-devtools-mcp ([`debugging.md`](debugging.md) § Recipe B).
 
 - [ ] **5.1** Open your existing installed PWA (phone or laptop).
 - [ ] **5.2** Within ~30 s the "New version available — Reload" banner appears.
