@@ -372,7 +372,7 @@ All three should match. Mismatch on any pair = stop installing and report.
 
 CAA is **hierarchical**: the most-specific CAA record set found walking up from a name is authoritative, and it does *not* merge with ancestor records. That matters here — the `globaldonut.com` zone is **not** Let's-Encrypt-only. Other subdomains legitimately use other CAs (e.g. `pitch.globaldonut.com` → Google Trust Services), and the apex itself has appeared with a Sectigo cert. So a Let's-Encrypt-only CAA on the **apex** would forbid those CAs and break their renewals.
 
-**Scope the records to `fellows.globaldonut.com`**, not the apex. A record at the subdomain overrides the (absent or different) apex policy for that name only, protecting the app's cert without touching the rest of the zone. In Cloudflare (DNS for `globaldonut.com`), add three CAA records on **name `fellows`**:
+**Scope the records to `fellows.globaldonut.com`**, not the apex. A record at the subdomain overrides the (absent or different) apex policy for that name only, protecting the app's cert without touching the rest of the zone. In RFC 8659 zone-file form:
 
 ```
 fellows.globaldonut.com.  CAA  0 issue "letsencrypt.org"
@@ -380,7 +380,15 @@ fellows.globaldonut.com.  CAA  0 issuewild ";"
 fellows.globaldonut.com.  CAA  0 iodef "mailto:richbodo@gmail.com"
 ```
 
-In the Cloudflare dashboard each is: Type **CAA**, Name `fellows`, Tag (`issue` / `issuewild` / `iodef`), and the value (`letsencrypt.org` / `;` / `mailto:richbodo@gmail.com`).
+In the **Cloudflare** dashboard (DNS → Records → Add record), each is **Type `CAA`**, **Name `fellows`** (Cloudflare appends `.globaldonut.com`), **TTL Auto**. Selecting `CAA` reveals a **Flags** field, a **Tag** dropdown, and a value field:
+
+| Tag (raw) | Cloudflare dropdown label | Flags | Value field |
+|---|---|---|---|
+| `issue` | "Only allow specific hostnames" | `0` | CA domain name: `letsencrypt.org` |
+| `issuewild` | "Only allow wildcards" | `0` | CA domain name: `;` (a single semicolon = no CA may issue a wildcard) |
+| `iodef` | "Send violation reports to URL" | `0` | Value: `mailto:richbodo@gmail.com` |
+
+Notes: CAA is a DNS-only record type, so **no proxy toggle appears** (expected). The `issuewild ";"` row is optional hardening — Caddy only ever requests the exact name; if the UI rejects a bare `;`, omit that row and wildcard issuance simply follows the `issue` rule (Let's Encrypt only).
 
 Tells every CA: "Only Let's Encrypt may issue certificates for `fellows.globaldonut.com`. Wildcard certs are forbidden. Report attempted misissuance to this mailbox." A rogue CA (or one tricked by a phishing-style domain-validation attack) is required by RFC 8659 to refuse — this raises the bar substantially against a fraudulent-cert MITM at first install.
 
