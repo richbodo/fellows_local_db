@@ -317,19 +317,26 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if path == "/api/debug/diagnostics":
+            # Unauthenticated by design: scripts/smoke_prod.sh probes this
+            # to catch a silently-broken send path (authActive but a secret
+            # unconfigured). Because it's public, the body is kept to
+            # config-presence booleans only — no exact roster size
+            # (allowlist count) and no internal filesystem path (distRoot),
+            # which are pure reconnaissance for an attacker and read by no
+            # tooling. `allowlistConfigured` is a boolean so the smoke check
+            # and operators can still tell auth is wired without disclosing N.
             sec = ml.session_secret_bytes()
             hkey = ml.allowlist_hmac_key()
             postmark = bool(os.environ.get("FELLOWS_POSTMARK_TOKEN", "").strip())
             self.send_json(
                 {
                     "authActive": AUTH_ACTIVE,
-                    "allowlistHashCount": len(ALLOWLIST),
+                    "allowlistConfigured": bool(ALLOWLIST),
                     "sessionSecretConfigured": bool(sec),
                     "allowlistHmacKeyConfigured": bool(hkey),
                     "postmarkTokenConfigured": postmark,
                     "fellowsDbPresent": DB_PATH.is_file(),
                     "build": BUILD_META,
-                    "distRoot": str(DIST_DIR),
                 }
             )
             return
@@ -541,7 +548,28 @@ class Handler(SimpleHTTPRequestHandler):
                         "result": "sent",
                         "email_hash_prefix": h[:12],
                         "token_prefix": token[:12],
-                        "postmark": meta,
+                        # `meta` carries the full Postmark response, which
+                        # includes the raw recipient address (meta["to"] and
+                        # meta["raw"]["To"]). journald is the only persistence
+                        # for this event and is readable by every operator /
+                        # adm / systemd-journal member — logging the raw email
+                        # would build a plaintext list of everyone who ever
+                        # requested a link, defeating the email_hash_prefix
+                        # scheme used everywhere else. Log a PII-free subset;
+                        # the recipient stays recoverable out-of-band from
+                        # email_hash_prefix + fellows.db (`prod_stats
+                        # --include-emails`) or the Postmark API
+                        # (`just email-debug --postmark`) when triage needs it.
+                        "postmark": {
+                            k: meta.get(k)
+                            for k in (
+                                "status",
+                                "message_id",
+                                "error_code",
+                                "message",
+                                "submitted_at",
+                            )
+                        },
                     }
                 ),
                 file=sys.stderr,
