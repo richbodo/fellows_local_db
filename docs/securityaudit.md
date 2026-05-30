@@ -42,7 +42,7 @@ sensitive asset class (`fellows.db`) and three secrets; there is no
 **not the app** — it's whoever holds the operator SSH key (see B2). The auth
 gate, header regime, and secret-handling all verified correct in production.
 
-### Fixed in this pass (2026-05-30 hardening PR)
+### Fixed in this pass (2026-05-30 hardening — PR #224)
 
 - ✅ **C1 — Raw recipient email removed from journald.** The `send_unlock_email`
   event logged the full Postmark response, including the raw recipient address
