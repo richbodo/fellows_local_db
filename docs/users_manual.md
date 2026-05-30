@@ -336,7 +336,10 @@ current state of your data:
   folder open*). The change is still safe in the browser; close any
   other window pointed at the same folder, then make any small edit
   to retry — the next save will succeed automatically. If the cause
-  isn't another window, click *Change folder…* and re-pick.
+  isn't another window, click *Change folder…* and re-pick. So you
+  don't miss this while working away from Settings, a red banner also
+  appears across the top of the app — *"Your latest change wasn't
+  saved."* — and clears itself the moment the next save succeeds.
 - **Browser-only — this browser doesn't support saving to a folder**
   (yellow) — Safari, Firefox, iOS, and Android Chrome don't ship the
   File System Access API. Use *Download my private data* (below) for

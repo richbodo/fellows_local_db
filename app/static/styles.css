@@ -1565,6 +1565,21 @@ h1 {
   color: #6b4500;
 }
 
+/* Urgent variant (#221): the most recent folder write failed. Red palette
+   to distinguish from the cream set-up-folder nag; the dismiss button is
+   hidden in this state (JS sets dismissEl.hidden) so the warning persists
+   until the next successful write clears it. */
+.folder-push-banner--error {
+  background: #fdecea;
+  color: #8a1c1c;
+  border-color: #f1b0b0;
+}
+
+.folder-push-banner--error .folder-push-cta {
+  border-color: #8a1c1c;
+  background: #8a1c1c;
+}
+
 .about-support {
   margin-top: 1rem;
   font-size: 0.95rem;

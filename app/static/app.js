@@ -3824,15 +3824,15 @@
       },
       createGroup: function (data) {
         return refuseIfVersionSkew('createGroup') ||
-          rpc.call('createGroup', data).then(withResolvedMembers);
+          rpc.call('createGroup', data).then(withResolvedMembers).then(afterFolderMutation);
       },
       updateGroup: function (id, patch) {
         return refuseIfVersionSkew('updateGroup') ||
-          rpc.call('updateGroup', { id: id, patch: patch }).then(withResolvedMembers);
+          rpc.call('updateGroup', { id: id, patch: patch }).then(withResolvedMembers).then(afterFolderMutation);
       },
       deleteGroup: function (id) {
         return refuseIfVersionSkew('deleteGroup') ||
-          rpc.call('deleteGroup', { id: id });
+          rpc.call('deleteGroup', { id: id }).then(afterFolderMutation);
       },
       getSetting: function (key) {
         return rpc.call('getSetting', { key: key });
@@ -3841,6 +3841,13 @@
         return rpc.call('getSettings');
       },
       setSetting: function (key, value) {
+        // Not wrapped with afterFolderMutation on purpose: setSetting fires
+        // during boot-time reconciles (has_email_only / self_email), and a
+        // banner refresh there would surface the folder nag before the
+        // directory has settled. User-facing settings saves happen on the
+        // Settings page, whose renderState cascade already refreshes the
+        // banner. Group mutations (the #221 brainstorm-edit scenario) are
+        // the ones that need the post-mutation refresh.
         return refuseIfVersionSkew('setSetting') ||
           rpc.call('setSetting', { key: key, value: value });
       },
@@ -8522,28 +8529,110 @@
     catch (e) { return false; }
   }
 
+  // Render the top-of-app folder banner in one of two modes and reveal it:
+  //   'browser-only'  — cream nag pushing OPFS-only users to pick a folder.
+  //   'write-failed'  — urgent (amber/red) warning that the most recent
+  //                     folder write failed (#221).
+  function renderFolderPushBanner(bannerEl, mode, state) {
+    var leadEl = bannerEl.querySelector('.folder-push-banner-lead');
+    var detailEl = bannerEl.querySelector('.folder-push-banner-detail');
+    var ctaEl = document.getElementById('folder-push-cta');
+    var dismissEl = document.getElementById('folder-push-dismiss');
+    if (mode === 'write-failed') {
+      bannerEl.classList.add('folder-push-banner--error');
+      bannerEl.setAttribute('role', 'alert');
+      if (leadEl) leadEl.textContent = '⚠️ Your latest change wasn’t saved.';
+      // Prefer the worker's actionable reason for non-lock causes
+      // (permission revoked, subfolder gone, disk full); fall back to the
+      // Web-Lock contention copy — the dominant real-world cause (a second
+      // tab/window or a sync agent holding the file).
+      var reason = state && state.lastError && state.lastError.reason;
+      var lockCase = !reason ||
+        /lock|another (tab|window)|open access handle|NoModificationAllowed/i.test(reason);
+      if (detailEl) {
+        detailEl.textContent = lockCase
+          ? 'Another window has your data folder open — close it, then make any change to save.'
+          : reason;
+      }
+      if (ctaEl) ctaEl.textContent = 'Open Settings';
+      // The warning must persist until the next write succeeds — don't let
+      // the user dismiss away an unsaved-data warning.
+      if (dismissEl) dismissEl.hidden = true;
+    } else {
+      bannerEl.classList.remove('folder-push-banner--error');
+      bannerEl.setAttribute('role', 'status');
+      if (leadEl) leadEl.textContent = 'Save your fellows data to disk.';
+      if (detailEl) {
+        detailEl.textContent =
+          'Your groups and notes are only in browser storage right now. Pick a folder for durable storage.';
+      }
+      if (ctaEl) ctaEl.textContent = 'Set up data folder';
+      if (dismissEl) dismissEl.hidden = false;
+    }
+    bannerEl.classList.remove('hidden');
+  }
+
   function refreshFolderPushBanner() {
     var bannerEl = document.getElementById('folder-push-banner');
     if (!bannerEl) return;
-    if (isFolderPushDismissed()) {
-      bannerEl.classList.add('hidden');
-      return;
-    }
     if (!FOLDER_CONTROLLER) {
       bannerEl.classList.add('hidden');
       return;
     }
+    // Gate out the install landing (#218). The dedicated SQLite worker
+    // boots — and reports workerAvailable:true — before the user is past
+    // the install landing, so worker-readiness alone wrongly fired this
+    // banner there: pitching "your groups and notes are only in browser
+    // storage" to a user who has no groups yet and whose CTA lands on a
+    // Settings page labelled "Choose folder…", not "Set up data folder".
+    // window.__dataProvider is only assigned once bootDirectoryAsApp has
+    // run, so its presence is the "user is inside the directory app"
+    // signal. On the install landing it's unset, so both banner variants
+    // stay hidden there. (Re-evaluation cadence is unchanged from before
+    // this fix: the 1500ms boot-time safety-net timer, the Settings-render
+    // cascade, and — for the write-failed variant — afterFolderMutation.)
+    var inApp = !!(window.__dataProvider && window.__dataProvider.kind);
+    if (!inApp) {
+      bannerEl.classList.add('hidden');
+      return;
+    }
     FOLDER_CONTROLLER.getState().then(function (state) {
-      // Hide for: incapable browser, worker not yet ready (avoids flash),
-      // or folder already picked. Show otherwise (i.e., capable + OPFS-only).
-      if (!state.supported || !state.workerAvailable || state.hasHandle) {
+      var badge = FOLDER_CONTROLLER.badge(state);
+      // #221: a failed folder write previously only surfaced as a pill
+      // inside Settings → Private data folder — which a user mid-edit has
+      // no reason to open, so the warning never reached them and a lost
+      // last edit went unnoticed. Promote it to the top-of-app banner
+      // (urgent variant) so they learn before closing the tab. Shown
+      // regardless of the nag's session-dismiss flag — a prior "Not now"
+      // on the set-up-folder nag must not suppress an unsaved-data warning.
+      // Auto-clears the next time a write succeeds (badge leaves
+      // 'write-failed' → falls through to the hidden branch below).
+      if (badge === 'write-failed') {
+        renderFolderPushBanner(bannerEl, 'write-failed', state);
+        return;
+      }
+      // Nag variant: in-app, capable browser, OPFS-only (no folder picked),
+      // and not dismissed for this session.
+      if (isFolderPushDismissed() || !state.supported ||
+          !state.workerAvailable || state.hasHandle) {
         bannerEl.classList.add('hidden');
         return;
       }
-      bannerEl.classList.remove('hidden');
+      renderFolderPushBanner(bannerEl, 'browser-only', state);
     }).catch(function () {
       bannerEl.classList.add('hidden');
     });
+  }
+
+  // After a relationships mutation the worker has attempted its post-commit
+  // folder write (folder mode); the write can fail without rejecting the
+  // mutation (the worker records folderRecord.lastError, doesn't throw — see
+  // sqlite-worker.js _maybeWriteFolderAfterCommit). Re-evaluate the banner so
+  // a failed write surfaces immediately and a recovered one clears it, even
+  // when the user never opens Settings (#221). Pass-through: returns its arg.
+  function afterFolderMutation(result) {
+    try { refreshFolderPushBanner(); } catch (e) {}
+    return result;
   }
 
   (function bindFolderPushBanner() {
