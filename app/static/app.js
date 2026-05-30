@@ -9396,6 +9396,16 @@
       continueBtn.disabled = !(consentCheckbox && consentCheckbox.checked);
     }
 
+    // Re-evaluate the (non-)scrollable a11y fallback on resize/zoom — a
+    // wider viewport may make the agreement fit without scrolling. This
+    // is the one listener bound to `window` (which persists across
+    // Settings re-renders), so it's added on dialog open and removed on
+    // close rather than once per wireMcpbSection() call — otherwise a
+    // stale closure would accumulate on every visit to Settings.
+    function onWindowResize() {
+      if (dialog && dialog.open) syncConsentScrollState();
+    }
+
     function openPreamble() {
       if (!dialog) return;
       // FULL GATE vs REMINDER: a recorded `consentAt` means the user has
@@ -9452,6 +9462,7 @@
         // unlocked immediately) on first paint.
         syncConsentScrollState();
         syncContinueEnabled();
+        window.addEventListener('resize', onWindowResize);
       }
       catch (e) {
         // Fallback for browsers without <dialog> support — surface as
@@ -9518,17 +9529,15 @@
     if (agreementEl) {
       agreementEl.addEventListener('scroll', syncConsentScrollState);
     }
-    // Re-evaluate the (non-)scrollable a11y fallback on resize/zoom —
-    // a wider viewport may make the agreement fit without scrolling.
-    window.addEventListener('resize', function () {
-      if (dialog && dialog.open) syncConsentScrollState();
-    });
     // Checking the accept box is what enables Continue.
     if (consentCheckbox) {
       consentCheckbox.addEventListener('change', syncContinueEnabled);
     }
     if (dialog) {
       dialog.addEventListener('close', function () {
+        // Tear down the open-scoped resize listener (see onWindowResize)
+        // on every close, regardless of how the dialog was dismissed.
+        window.removeEventListener('resize', onWindowResize);
         // <dialog>'s close event fires for any submit (including the
         // primary "Continue" button). returnValue carries the button's
         // value attribute — "continue" / "cancel" / empty (Esc).
