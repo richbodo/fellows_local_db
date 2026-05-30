@@ -85,6 +85,26 @@ def _captured_clicks(page) -> list[str]:
     return page.evaluate("window.__capturedMcpbClicks || []")
 
 
+def _satisfy_consent_gate(page) -> None:
+    """First-setup helper: scroll the consent agreement to the bottom
+    (unlocks the accept checkbox) and check it (enables Continue). The
+    agreement scrolls inside its own region; jump scrollTop to the end
+    and dispatch a scroll event so the JS sync handler fires. Safe to
+    call even when the region isn't scrollable — the a11y fallback has
+    already unlocked the checkbox in that case.
+    """
+    page.evaluate(
+        """() => {
+          const a = document.getElementById('settings-mcpb-agreement');
+          if (a) {
+            a.scrollTop = a.scrollHeight;
+            a.dispatchEvent(new Event('scroll'));
+          }
+        }"""
+    )
+    page.check("#settings-mcpb-consent-checkbox")
+
+
 class TestMcpbSection:
     def test_section_renders_with_intro_and_setup_button(self, standalone_page, base_url_fixture):
         page = standalone_page
@@ -206,6 +226,7 @@ class TestPreambleActions:
         _install_anchor_intercept(page)
         _boot_to_settings(page, base_url_fixture)
         page.click("#settings-mcpb-setup")
+        _satisfy_consent_gate(page)
         page.click("#settings-mcpb-preamble-continue")
 
         # downloadFromUrl uses a 250ms inter-anchor delay; three downloads
@@ -232,6 +253,7 @@ class TestPostSetupState:
         _install_anchor_intercept(page)
         _boot_to_settings(page, base_url_fixture)
         page.click("#settings-mcpb-setup")
+        _satisfy_consent_gate(page)
         page.click("#settings-mcpb-preamble-continue")
         page.wait_for_function(
             """() => {
@@ -251,6 +273,7 @@ class TestPostSetupState:
         _install_anchor_intercept(page)
         _boot_to_settings(page, base_url_fixture)
         page.click("#settings-mcpb-setup")
+        _satisfy_consent_gate(page)
         page.click("#settings-mcpb-preamble-continue")
         page.wait_for_function(
             """() => {
@@ -272,3 +295,120 @@ class TestPostSetupState:
     # section to the About page (paintDataRow surfaces it inline with
     # the directory-data check result). New coverage lives in
     # test_directory_data_update_flow.py.
+
+
+class TestCloudConsentGate:
+    """Issue #156 — one-time informed-consent gate before wiring the
+    directory to a cloud LLM (Claude Desktop). First setup shows a
+    scroll-then-accept agreement; later re-downloads show a one-line
+    reminder and skip the gate.
+    """
+
+    def test_first_setup_continue_disabled_until_scrolled_and_checked(
+        self, standalone_page, base_url_fixture
+    ):
+        page = standalone_page
+        _install_anchor_intercept(page)
+        _boot_to_settings(page, base_url_fixture)
+        page.click("#settings-mcpb-setup")
+        # Full-gate mode: agreement region + checkbox visible, reminder
+        # hidden.
+        expect(page.locator("#settings-mcpb-consent-gate")).to_be_visible()
+        expect(page.locator("#settings-mcpb-consent-reminder")).to_be_hidden()
+        continue_btn = page.locator("#settings-mcpb-preamble-continue")
+        checkbox = page.locator("#settings-mcpb-consent-checkbox")
+        # Continue starts disabled.
+        expect(continue_btn).to_be_disabled()
+        # Scroll the agreement to the end → checkbox becomes enabled.
+        page.evaluate(
+            """() => {
+              const a = document.getElementById('settings-mcpb-agreement');
+              a.scrollTop = a.scrollHeight;
+              a.dispatchEvent(new Event('scroll'));
+            }"""
+        )
+        expect(checkbox).to_be_enabled()
+        # Checkbox still unchecked → Continue still disabled.
+        expect(continue_btn).to_be_disabled()
+        # Check it → Continue enabled.
+        checkbox.check()
+        expect(continue_btn).to_be_enabled()
+
+    def test_cancel_records_no_consent_and_regates(
+        self, standalone_page, base_url_fixture
+    ):
+        page = standalone_page
+        _install_anchor_intercept(page)
+        _boot_to_settings(page, base_url_fixture)
+        page.click("#settings-mcpb-setup")
+        _satisfy_consent_gate(page)
+        # Cancel instead of Continue.
+        page.locator(
+            "#settings-mcpb-preamble-dialog .settings-folder-dialog-cancel"
+        ).click()
+        expect(page.locator("#settings-mcpb-preamble-dialog")).not_to_be_visible()
+        # No consent recorded.
+        raw = page.evaluate("localStorage.getItem('fellows_mcpb_setup')")
+        if raw:
+            import json as _json
+
+            assert _json.loads(raw).get("consentAt") is None
+        # Re-opening still shows the FULL gate, not the reminder.
+        page.click("#settings-mcpb-setup")
+        expect(page.locator("#settings-mcpb-consent-gate")).to_be_visible()
+        expect(page.locator("#settings-mcpb-consent-reminder")).to_be_hidden()
+        # And Continue is disabled again (checkbox reset).
+        expect(
+            page.locator("#settings-mcpb-preamble-continue")
+        ).to_be_disabled()
+
+    def test_consent_recorded_on_accept_before_downloads(
+        self, standalone_page, base_url_fixture
+    ):
+        page = standalone_page
+        _install_anchor_intercept(page)
+        _boot_to_settings(page, base_url_fixture)
+        page.click("#settings-mcpb-setup")
+        _satisfy_consent_gate(page)
+        page.click("#settings-mcpb-preamble-continue")
+        page.wait_for_function(
+            """() => {
+              const s = document.getElementById('settings-mcpb-status');
+              return s && /Downloads triggered/.test(s.textContent || '');
+            }""",
+            timeout=5000,
+        )
+        raw = page.evaluate("localStorage.getItem('fellows_mcpb_setup')")
+        assert raw is not None
+        import json as _json
+
+        assert _json.loads(raw).get("consentAt"), "consentAt should be recorded"
+
+    def test_after_accept_reopen_shows_reminder_and_continue_enabled(
+        self, standalone_page, base_url_fixture
+    ):
+        page = standalone_page
+        _install_anchor_intercept(page)
+        _boot_to_settings(page, base_url_fixture)
+        page.click("#settings-mcpb-setup")
+        _satisfy_consent_gate(page)
+        page.click("#settings-mcpb-preamble-continue")
+        page.wait_for_function(
+            """() => {
+              const s = document.getElementById('settings-mcpb-status');
+              return s && /Downloads triggered/.test(s.textContent || '');
+            }""",
+            timeout=5000,
+        )
+        # Re-open: REMINDER mode — gate hidden, reminder shown, Continue
+        # enabled immediately with no scroll required.
+        page.click("#settings-mcpb-setup")
+        expect(page.locator("#settings-mcpb-preamble-dialog")).to_be_visible()
+        expect(page.locator("#settings-mcpb-consent-reminder")).to_be_visible()
+        expect(page.locator("#settings-mcpb-consent-gate")).to_be_hidden()
+        expect(
+            page.locator("#settings-mcpb-preamble-continue")
+        ).to_be_enabled()
+        # The "Review full terms" toggle re-reveals the agreement copy.
+        terms = page.locator("#settings-mcpb-consent-reminder-terms")
+        expect(terms).to_contain_text("leaving the local-only model")

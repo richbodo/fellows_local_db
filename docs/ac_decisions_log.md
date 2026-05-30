@@ -18,6 +18,41 @@ link to the newer entry. Newest first.
 
 ---
 
+## 2026-05-30 — Cloud-LLM integration is allowed but treated as a named, reversible "exception" that exits PNA mode, not forbidden and not silent
+
+**Why this is worth recording.** The PNA definition is "local-only,
+never as SaaS," and AC-MCP-A wants cloud-AI access to private data gated.
+A future contributor seeing the Claude Desktop integration ship will
+reasonably ask: *"doesn't wiring a cloud LLM to the directory just
+violate the whole premise?"* It does — deliberately. Our ~500-fellow
+user base wants Claude Desktop on the hosted model, and local AI isn't
+realistic for them (see [`architectural_findings.md`](architectural_findings.md)).
+Rather than forbid the feature or allow it silently, we model the
+violation as a first-class **exception** (`EX-CLOUD-LLM`): accepting the
+consent gate **raises** it and takes the app out of *PNA mode*; the
+handler is the persistent "Going rogue — not a PNA" banner, the in-app
+`#/exception/<id>` explainer, and a **reversible** "Return to PNA mode"
+control.
+
+**The constraint that shaped the code.** Conformance is reframed from
+"never deviates" to "catches and handles every deviation honestly." So
+the code does *not* hide the state: it stamps `data-pna-mode` /
+`data-pna-exceptions` on `<body>` (a greppable marker a conformance check
+can catch), surfaces the banner unmissably, and makes the exit path real.
+Reversibility is **mode-only** — returning to PNA mode stops future
+sharing but does not recall data already sent; the UI says so rather than
+implying an undo. Without the exception framing, the natural default
+would have been a buried README caveat (the prior state — see
+`mcp_servers/README.md`) and an app that quietly stopped being a PNA.
+
+**Upstream.** This is staged as a Personal Network Toolkit contribution
+(a new `spec/exceptions.md`, a `lint-spec-ids.py` extension for `EX-*` /
+`Relaxes:` / `Reversible:`, and the validation-not-certification framing)
+in [`../plans/pna_toolkit_exceptions_contribution.md`](../plans/pna_toolkit_exceptions_contribution.md);
+fellows_local_db is the demonstrating reference design. Not yet filed.
+
+---
+
 ## 2026-05-22 — MCP easy install is Chromium-desktop-first; Safari / Firefox get a documented secondary path; cross-browser-on-one-device data silos are accepted, not engineered around
 
 **Why this is worth recording.** A future contributor reading

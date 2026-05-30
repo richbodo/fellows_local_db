@@ -1580,6 +1580,112 @@ h1 {
   background: #8a1c1c;
 }
 
+/* "Going rogue — not a PNA" banner — the catch-and-handle surface for an
+   active PNA exception (EX-CLOUD-LLM). Loud red palette by design: leaving
+   PNA mode should feel conspicuous, not routine. Dismissable, but dismissal
+   only hides the banner; it does not clear the exception. */
+.not-a-pna-banner {
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+  background: #fdecea;
+  color: #8a1c1c;
+  border: 1px solid #e0a3a3;
+  border-left: 4px solid #8a1c1c;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.not-a-pna-banner.hidden { display: none; }
+
+.not-a-pna-banner-text { flex: 1 1 280px; min-width: 0; }
+.not-a-pna-banner-lead { font-weight: 700; margin-right: 0.35rem; }
+.not-a-pna-banner-detail { font-weight: 400; }
+
+.not-a-pna-banner-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.not-a-pna-banner-link {
+  color: #8a1c1c;
+  font-weight: 600;
+  text-decoration: underline;
+  white-space: nowrap;
+}
+
+.not-a-pna-dismiss {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  border-radius: 4px;
+  border: 1px solid #c27a7a;
+  background: transparent;
+  color: #8a1c1c;
+  cursor: pointer;
+}
+
+/* In-app exception explainer pages (#/exception/<id>, #/exceptions). */
+.exception-page {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 1rem 0.5rem 2rem;
+  line-height: 1.5;
+}
+
+.exception-title { margin: 0 0 0.75rem; }
+.exception-page h3 { margin: 1.25rem 0 0.35rem; font-size: 1rem; }
+
+.exception-status {
+  padding: 0.6rem 0.85rem;
+  border-radius: 6px;
+  margin: 0 0 0.5rem;
+}
+
+.exception-status--warn {
+  background: #fdecea;
+  color: #8a1c1c;
+  border: 1px solid #e0a3a3;
+}
+
+.exception-status--ok {
+  background: #e8f5e9;
+  color: #1b5e20;
+  border: 1px solid #a5d6a7;
+}
+
+.exception-actions { margin: 1rem 0; }
+
+.exception-return-pna {
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  border-radius: 4px;
+  border: 1px solid #1b5e20;
+  background: #1b5e20;
+  color: #fff;
+  cursor: pointer;
+}
+
+.exception-canonical,
+.exception-back { font-size: 0.85rem; color: #555; margin-top: 1rem; }
+
+/* Settings → non-PNA-mode status + reversibility control. */
+.settings-mcpb-pna-mode {
+  margin: 0.5rem 0;
+  padding: 0.6rem 0.85rem;
+  background: #fdecea;
+  border: 1px solid #e0a3a3;
+  border-radius: 6px;
+}
+
+.settings-mcpb-pna-mode[hidden] { display: none; }
+.settings-mcpb-pna-mode-line { margin: 0 0 0.5rem; color: #8a1c1c; }
+
 .about-support {
   margin-top: 1rem;
   font-size: 0.95rem;
@@ -3574,6 +3680,99 @@ a.group-action-btn--primary {
 .settings-mcpb-bundle-details ol.settings-mcpb-bundles {
   margin: 0;
   padding-left: 1.25rem;
+}
+
+/* --- Cloud-LLM informed-consent gate (issue #156) ------------------
+   One-time scroll-then-accept agreement shown before the first
+   Claude Desktop setup. The scrollable region forces the user past
+   the two risk points; the accept checkbox + Continue button stay
+   disabled until they've engaged with it. Later re-downloads show
+   the one-line reminder instead. */
+.settings-mcpb-agreement {
+  max-height: 40vh;
+  overflow-y: auto;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin: 0 0 0.75rem;
+  background: #fff;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: #334155;
+}
+
+.settings-mcpb-agreement ol.settings-mcpb-agreement-points {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.settings-mcpb-agreement ol.settings-mcpb-agreement-points li {
+  margin-bottom: 0.85rem;
+}
+
+.settings-mcpb-agreement ol.settings-mcpb-agreement-points li:last-child {
+  margin-bottom: 0;
+}
+
+.settings-mcpb-agreement-foot {
+  margin: 0.85rem 0 0;
+  padding-top: 0.75rem;
+  border-top: 1px dashed #cbd5e1;
+  color: #475569;
+}
+
+.settings-mcpb-consent-accept {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0 0 0.4rem;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text-strong, #0f172a);
+  cursor: pointer;
+}
+
+.settings-mcpb-consent-accept input[type="checkbox"] {
+  margin-top: 0.15rem;
+  flex: 0 0 auto;
+}
+
+.settings-mcpb-consent-accept input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+}
+
+.settings-mcpb-consent-scroll-hint {
+  margin: 0 0 1rem;
+  font-size: 0.82rem;
+  color: #64748b;
+}
+
+.settings-mcpb-consent-reminder {
+  margin: 0 0 1rem;
+  padding: 0.6rem 0.85rem;
+  border: 1px solid #d8d2e8;
+  border-radius: 6px;
+  background: #faf9fc;
+}
+
+.settings-mcpb-consent-reminder-line {
+  margin: 0 0 0.4rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: #334155;
+}
+
+.settings-mcpb-consent-reminder .settings-mcpb-bundle-details {
+  margin-top: 0;
+}
+
+/* Disabled Continue button — make the locked state visually obvious
+   so it doesn't read as a dead button. */
+.settings-folder-dialog-primary:disabled,
+.settings-folder-dialog-primary:disabled:hover {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: none;
 }
 
 .settings-restore-migrate-hint {

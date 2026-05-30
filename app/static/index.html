@@ -127,6 +127,25 @@
     </span>
   </div>
 
+  <!--
+    "Going rogue — not a PNA" banner — the catch-and-handle surface for an
+    active PNA exception (see PNA_EXCEPTION_CLOUD_LLM in app.js and
+    plans/pna_toolkit_exceptions_contribution.md). Shown whenever the app
+    is in non-PNA mode and the notice hasn't been dismissed. The
+    data-pna-exception attribute is the machine-readable marker a
+    conformance check / the PNT linter can catch.
+  -->
+  <div id="not-a-pna-banner" class="not-a-pna-banner hidden" role="status" aria-live="polite" data-pna-exception="EX-CLOUD-LLM">
+    <span class="not-a-pna-banner-text">
+      <strong class="not-a-pna-banner-lead">Going rogue — not a PNA.</strong>
+      <span class="not-a-pna-banner-detail">You enabled a cloud-AI exception, so this app has left local-only mode.</span>
+    </span>
+    <span class="not-a-pna-banner-actions">
+      <a href="#/exception/EX-CLOUD-LLM" class="not-a-pna-banner-link" id="not-a-pna-banner-link">What this means</a>
+      <button type="button" id="not-a-pna-dismiss" class="not-a-pna-dismiss" aria-label="Dismiss this notice">Dismiss</button>
+    </span>
+  </div>
+
   <div id="install-gate-private" class="install-landing install-gate-private hidden" aria-label="Request access">
     <div class="install-landing-inner">
       <div class="install-brand" aria-hidden="true">EHF</div>

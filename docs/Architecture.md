@@ -337,6 +337,7 @@ Architecture-adjacent docs that specialize one part of the spec or operator surf
 | [`./persistence_and_upgrades.md`](./persistence_and_upgrades.md) | Storage slot — state-survival matrix across Clear App Cache / Reset Everything / app update; auto-backup; restore. |
 | [`./browser_support.md`](./browser_support.md) | Storage slot — capability detection inside the worker, required versions, unsupported-browser surfacing (AC-12). |
 | [`./data_provenance.md`](./data_provenance.md) | Ingestion slot — column-by-column source mapping; backup/restore workflow; recovery paths. |
+| [`./architectural_findings.md`](./architectural_findings.md) | Findings that feed back into the spec — e.g. the cloud-LLM "exception" / non-PNA-mode concept (`EX-CLOUD-LLM`). |
 
 ---
 
