@@ -76,7 +76,7 @@ def load_private_key(key_path: Path, passphrase_env: str | None) -> ec.EllipticC
                     key = serialization.load_pem_private_key(raw, password=pw)
                     break
                 except (ValueError, InvalidKey):
-                    print("Wrong passphrase. Try again.", file=sys.stderr)
+                    print("Wrong passphrase. Try again. (Ctrl-C to abort)", file=sys.stderr)
             else:
                 raise SystemExit("Too many failed passphrase attempts.")
 
@@ -132,4 +132,11 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        # Clean exit on Ctrl-C (e.g. abandoning the passphrase prompt) —
+        # no Python traceback. 130 is the conventional shell code for
+        # SIGINT.
+        print("\nAborted.", file=sys.stderr)
+        raise SystemExit(130)

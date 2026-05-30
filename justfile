@@ -519,6 +519,12 @@ smoke url="":
 check-env:
     ./scripts/check_deploy_env.sh
 
+# Certificate Transparency check — list logged certs for DOMAIN (and
+# subdomains) via crt.sh, flag any issuer that isn't Let's Encrypt.
+[group('prod')]
+ct-check domain="globaldonut.com":
+    {{python}} scripts/check_ct_log.py --domain {{domain}}
+
 # Show local HEAD, the build label that the next 'just build' would
 # stamp into the bundle, prod's build-meta, and a refresh cheat-sheet
 # for the SW shell-cache gotcha.

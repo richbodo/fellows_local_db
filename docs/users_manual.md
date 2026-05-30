@@ -856,6 +856,39 @@ update iOS itself (iPhone 8 and newer support 16.4+).
 
 ---
 
+## Your device is now the directory
+
+Because the app is local-first, the full directory — every fellow's
+email and phone number — lives on **your** device after you install,
+and keeps working with no server. That's the point: it survives even
+after the distribution server is shut down. The flip side is that your
+device is now where the directory needs protecting. There is **no
+remote wipe** — if a device is lost, the copy on it can't be revoked.
+
+A few minutes of basic hygiene covers almost all of the real risk:
+
+- **Turn on full-disk encryption.** FileVault (Mac), BitLocker
+  (Windows), or the on-by-default encryption on a modern iPhone /
+  Android. This is the single biggest protection: a lost or stolen
+  device is then just a brick, not a copy of the directory.
+- **Use a screen lock** with a passcode/biometric and a short
+  auto-lock timeout.
+- **Keep your browser and OS updated.** The app's security depends on
+  the browser; updates are how that stays true over time.
+- **Retiring or selling a device?** Open the app and use **Settings →
+  Reset Everything** (see *Clearing app data* above) to wipe your
+  groups, notes, and the cached directory, then do a full factory
+  reset of the device.
+- **Lending your laptop to someone?** Lock the screen, or use a
+  separate OS user account — the installed app is visible to anyone
+  who can use your logged-in session.
+
+None of this is unusual — it's the same care any contact list on your
+phone deserves. It just matters a little more here, because this list
+belongs to the whole fellowship.
+
+---
+
 ## Privacy
 
 This app ships fellows' contact info and free-text responses. It is

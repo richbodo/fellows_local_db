@@ -370,7 +370,9 @@ All three should match. Mismatch on any pair = stop installing and report.
 
 ### Supporting DNS: CAA records
 
-Add to your DNS provider (Cloudflare for `globaldonut.com`):
+CAA is **hierarchical**: the most-specific CAA record set found walking up from a name is authoritative, and it does *not* merge with ancestor records. That matters here — the `globaldonut.com` zone is **not** Let's-Encrypt-only. Other subdomains legitimately use other CAs (e.g. `pitch.globaldonut.com` → Google Trust Services), and the apex itself has appeared with a Sectigo cert. So a Let's-Encrypt-only CAA on the **apex** would forbid those CAs and break their renewals.
+
+**Scope the records to `fellows.globaldonut.com`**, not the apex. A record at the subdomain overrides the (absent or different) apex policy for that name only, protecting the app's cert without touching the rest of the zone. In Cloudflare (DNS for `globaldonut.com`), add three CAA records on **name `fellows`**:
 
 ```
 fellows.globaldonut.com.  CAA  0 issue "letsencrypt.org"
@@ -378,30 +380,42 @@ fellows.globaldonut.com.  CAA  0 issuewild ";"
 fellows.globaldonut.com.  CAA  0 iodef "mailto:richbodo@gmail.com"
 ```
 
-Tells every CA: "Only Let's Encrypt may issue certificates for this name. Wildcard certs are forbidden. Report attempted misissuance to this mailbox." A rogue CA (or one tricked by a phishing-style domain-validation attack) is required by RFC 8659 to refuse — this raises the bar substantially against a fraudulent-cert MITM at first install.
+In the Cloudflare dashboard each is: Type **CAA**, Name `fellows`, Tag (`issue` / `issuewild` / `iodef`), and the value (`letsencrypt.org` / `;` / `mailto:richbodo@gmail.com`).
 
-Verify after publication:
+Tells every CA: "Only Let's Encrypt may issue certificates for `fellows.globaldonut.com`. Wildcard certs are forbidden. Report attempted misissuance to this mailbox." A rogue CA (or one tricked by a phishing-style domain-validation attack) is required by RFC 8659 to refuse — this raises the bar substantially against a fraudulent-cert MITM at first install.
+
+> **Cloudflare proxy caveat.** `fellows.globaldonut.com` is **DNS-only** today (grey cloud) — browsers get Caddy's Let's Encrypt cert from the droplet directly, so `issue "letsencrypt.org"` is correct. If you ever enable the orange-cloud **proxy** on the `fellows` record, Cloudflare terminates TLS at its edge with *its own* CA — you must then **also** add a CAA `issue` record for Cloudflare's issuer (e.g. `issue "pki.goog"` for Google Trust Services, whichever Cloudflare currently uses) or proxied TLS will break.
+
+> **Apex-wide alternative (only if you want it).** If you later want a single zone-wide policy, put CAA on the apex but enumerate **every** CA actually in use across the zone (`letsencrypt.org` + Google Trust's `pki.goog` + whatever issues the apex), not Let's Encrypt alone — otherwise you break `pitch.globaldonut.com` and the apex. Run `just ct-check` first to see the full issuer list before doing this.
+
+Verify after publication (`just check-env` also runs this check and warns if it's missing):
 
 ```bash
-dig +short CAA fellows.globaldonut.com
-# Expect three lines, matching the above.
+dig +short CAA fellows.globaldonut.com   # expect the three lines above
 ```
 
 ### HSTS preload submission
 
-Caddy already sets `Strict-Transport-Security: max-age=31536000; includeSubDomains; preload`. The `preload` directive is necessary but not sufficient — Chrome/Firefox/Safari only honor it for sites on their **preload list**. Submit at:
+Caddy already sets `Strict-Transport-Security: max-age=31536000; includeSubDomains; preload` on both `fellows.globaldonut.com` and the `globaldonut.com` apex. The `preload` directive is necessary but not sufficient — Chrome/Firefox/Safari only honor it for sites on their **preload list**.
+
+**Submit `fellows.globaldonut.com`, not the apex:**
 
 <https://hstspreload.org/?domain=fellows.globaldonut.com>
 
-The form runs a series of checks (HSTS header present, redirect from HTTP to HTTPS, no expired certs); pass them, click submit. Inclusion lags by one major browser release (~6–10 weeks). Once on the list, every browser refuses HTTP for `fellows.globaldonut.com` from the very first visit, closing the "first HTTP request gets MITM'd before HSTS takes effect" window entirely.
+The form runs a series of checks (HSTS header with `includeSubDomains`+`preload`, redirect from HTTP to HTTPS, no expired certs); pass them, click submit. Inclusion lags by one major browser release (~6–10 weeks). Once on the list, every browser refuses HTTP for `fellows.globaldonut.com` from the very first visit, closing the "first HTTP request gets MITM'd before HSTS takes effect" window entirely.
+
+> **Why the subdomain and not the apex.** Preloading the apex with `includeSubDomains` forces **every** current and future `*.globaldonut.com` subdomain to HTTPS-only in browsers that ship the list, and removal takes months to propagate. The zone is *not* just the Caddy sites — `just ct-check` shows third-party-hosted subdomains (e.g. `pitch.globaldonut.com`) and non–Let's-Encrypt issuers in the apex. Preloading the whole apex would bet that all of those — and anything you add later — stay HTTPS-only forever. Scoping the preload to `fellows.globaldonut.com` gets the full first-visit protection for the app while leaving the rest of the zone alone. Only preload the apex if you've confirmed every `globaldonut.com` subdomain is, and will remain, HTTPS-only.
 
 This is opt-in but free; do it once.
 
 ### Certificate Transparency monitoring (optional but recommended)
 
-Subscribe to crt.sh notifications for `fellows.globaldonut.com`. Any new cert issuance — by Let's Encrypt or anyone else — generates an email. If a cert appears that you didn't trigger (e.g. an attacker tricked a CA into issuing one despite the CAA records), you find out the same day rather than after a user reports.
+Two complementary checks:
 
-Free signup: <https://crt.sh/?domain=fellows.globaldonut.com> → click the email-monitor link.
+- **On-demand:** `just ct-check` (`scripts/check_ct_log.py`) queries crt.sh for every logged certificate covering the domain and flags any issuer that isn't Let's Encrypt. Run it any time, or wire it into a periodic job. Read-only, stdlib only.
+- **Push alerts:** subscribe to crt.sh notifications so any *new* cert issuance — by Let's Encrypt or anyone else — generates an email the same day, rather than waiting for the next `just ct-check`. Free signup: <https://crt.sh/?domain=globaldonut.com> → click the email-monitor link.
+
+If a cert appears that you didn't trigger (e.g. an attacker tricked a CA into issuing one despite the CAA records), either path surfaces it.
 
 ### What gets signed and what doesn't
 
