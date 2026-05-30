@@ -75,9 +75,41 @@ the warning banner Claude Desktop will show during install (see
 *[About that red warning banner](#about-that-red-warning-banner)*
 below).
 
-### Step 2 — Read the preamble dialog, click Continue
+### Step 2 — Accept the cloud-AI consent agreement, then Continue
 
-The dialog explains that you will install three extensions to claude code - you probably want all three.
+**The first time only**, the dialog shows a short agreement you have to
+read and accept. This exists because the rest of the Fellows app is
+**local-only** — it never talks to a server — and connecting Claude
+Desktop deliberately breaks that:
+
+- **You're leaving the local-only model.** Claude Desktop is a cloud
+  product. Connecting it sends your fellows data — potentially including
+  your private groups and notes — to a SaaS vendor (Anthropic). No one
+  can guarantee what a SaaS vendor will or won't do with data you send
+  it. You have to be OK with that to continue.
+- **MCP and LLMs are new, and can misbehave.** The extensions are
+  written to do only benign, read-only things and the code is auditable,
+  but an LLM driving them can still make mistakes. The good news: they
+  only touch two files, both recoverable — you can re-download the shared
+  directory and restore your private data (groups, notes) from a backup
+  or export, so the worst case is recoverable.
+
+To proceed: scroll the agreement to the end, tick **I understand and
+accept these risks**, then click **Continue — start downloads**. Until
+you've scrolled and ticked the box, Continue stays greyed out. (If the
+text already fits on your screen without scrolling, the checkbox is
+enabled right away.)
+
+The app records your consent **once**. The next time you click
+**Re-download all extensions**, you won't see the full agreement again —
+just a one-line reminder with a **Review full terms** link, and Continue
+works immediately.
+
+This consent agreement is *not* the same as Claude Desktop's own install
+warning (the red "can access everything on your computer" banner). That
+one is Claude Desktop's, and it's far broader than what actually happens
+— see *[About that red warning banner](#about-that-red-warning-banner)*.
+The agreement above is the accurate description of the real tradeoff.
 
 When you click **Continue**, three files download
 into your Downloads folder - you need to find these files:

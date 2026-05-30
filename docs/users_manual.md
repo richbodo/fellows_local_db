@@ -664,6 +664,40 @@ See [Use with Claude Desktop](use_with_claude_desktop.md) for the
 step-by-step setup walkthrough. Optional — the Fellows app itself
 doesn't need any of this.
 
+### One-time consent before you connect a cloud AI
+
+The first time you set this up, the app shows a short agreement you have
+to read and accept. This is deliberate. The rest of the Fellows app is
+**local-only** — it never sends your data to anyone's server. Connecting
+Claude Desktop changes that:
+
+- **You're leaving the local-only model.** Claude Desktop is a cloud
+  product. When it answers questions about your fellows, your data —
+  potentially including your private groups and notes — is sent to a SaaS
+  vendor (Anthropic). No one can guarantee what a SaaS vendor will or
+  won't do with data you send it. You have to be OK with that to
+  continue.
+- **MCP and LLMs are new, and can misbehave.** The extensions are written
+  to do only benign, read-only things, and the code is auditable — but an
+  LLM driving them can still make mistakes or hit bugs. The good news:
+  the extensions only touch two files, and both are recoverable. You can
+  re-download the shared directory at any time, and you can restore your
+  private data (groups, notes) from a backup or export. So the worst case
+  is recoverable.
+
+To proceed you scroll the agreement to the end, tick **I understand and
+accept these risks**, then click **Continue — start downloads**. The app
+records your consent once. On later **Re-download all extensions**, it
+shows only a one-line reminder (with a *Review full terms* link) and lets
+you continue right away.
+
+Separately, when you open each downloaded extension, **Claude Desktop
+shows its own scary, vague warning** that the extension "can access
+everything on your computer." That message is Claude Desktop's, not ours,
+and it's far broader than what actually happens — the extensions only
+read the two fellows files. The accurate description of the real tradeoff
+is the agreement above.
+
 ---
 
 ## Updates
