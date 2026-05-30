@@ -76,6 +76,29 @@ gate, header regime, and secret-handling all verified correct in production.
   (`backend=systemd`, jail bound to the non-standard SSH port).
   (`ansible/roles/common/`)
 
+### Fixed in the follow-up pass (2026-05-30 — PR #225)
+
+In-repo completion of the remaining checklist (operator console actions for
+CAA / HSTS / crt.sh tracked below):
+
+- ✅ **User-guide hygiene section** — "Your device is now the directory" added to
+  `docs/users_manual.md` (full-disk encryption, screen lock, browser updates,
+  retiring/lending a device, no-remote-wipe). Ships to users via the About-page
+  link.
+- ✅ **`--dump-allowlist` rewritten** for the HMAC/DB-derived model
+  (`scripts/debug_email_delivery.py`). No more `allowed_emails.json` assumption;
+  reports distinct-email count (= allowlist), fellows with no contact_email,
+  duplicate emails, and a "fellows.db newer than the running server" staleness
+  warning (the only drift that can still exist). The `--email` HIT/MISS check
+  now resolves membership against the DB email set (no HMAC key needed).
+- ✅ **`scripts/check_ct_log.py` + `just ct-check`** — on-demand Certificate
+  Transparency check via crt.sh; flags any issuer that isn't Let's Encrypt.
+- ✅ **CAA guardrail** — `just check-env` (`scripts/check_deploy_env.sh`) now
+  warns when no CAA record is effective for the host or when it doesn't
+  authorize Let's Encrypt; DevOps.md CAA/HSTS sections corrected (see finding).
+- ✅ **`sign_bundle.py` polish** — clean `Aborted.` on Ctrl-C; wrong-passphrase
+  prompt mentions Ctrl-C.
+
 ### Outstanding — ranked
 
 - ☐ **B2 — Operator SSH key / maintainer workstation hardening (highest
@@ -88,28 +111,34 @@ gate, header regime, and secret-handling all verified correct in production.
   never on the laptop in plaintext; a documented recovery path if the laptop
   holding the (encrypted) signing key is lost. *(Was Tier-3 in the prior
   tracking; promoted here because live probing confirmed it is threat #1.)*
-- ☐ **CAA DNS records** for `fellows.globaldonut.com` (`issue
-  "letsencrypt.org"`, `issuewild ";"`, `iodef "mailto:richbodo@gmail.com"`).
-  ~10 min operator task; documented in `docs/DevOps.md` § Signing keys.
-- ☐ **HSTS preload submission** at <https://hstspreload.org/?domain=fellows.globaldonut.com>.
-  The header already advertises `preload`; the registry submission is the
-  remaining step (~5 min; inclusion lags weeks).
-- ☐ **CT-log monitoring** via crt.sh alerts for the domain — early warning on a
-  mis-issued certificate. Optional, ~5 min.
-- ☐ **User-guide hygiene section** in `docs/users_manual.md`: "your device is
-  now the directory" — full-disk encryption, screen lock, retiring a device
-  (Reset Everything → factory reset). The user-facing complement to
-  `SECURITY.md` § 1; raises endpoint baseline at zero technical cost.
-- ☐ **Fix `scripts/debug_email_delivery.py --dump-allowlist`** — broken since
-  the HMAC/DB-derived allowlist landed (PR #139); the old plaintext-file
-  assumption no longer holds.
-- ☐ **`scripts/sign_bundle.py` polish** — catch `KeyboardInterrupt` for a clean
-  "Aborted." exit; have the wrong-passphrase path mention Ctrl-C.
-- ☐ **App-layer encryption of `relationships.db`** ("lock my user data"
-  toggle) — user-driven lock-on-quit with an off switch, covering OPFS backups.
-  This is a *device-side* control, not server-side; tracked here for
-  completeness. Honest threat-model copy required (file-level theft yes, live
-  malware no).
+- ☐ **CAA DNS records for `fellows.globaldonut.com`** (operator console).
+  Tooling + docs done — `just check-env` warns when CAA is missing, and
+  `docs/DevOps.md` § Supporting DNS has the exact three records. Remaining: paste
+  them into Cloudflare. **Scope to the `fellows` subdomain, not the apex** — see
+  the zone finding below.
+- ☐ **HSTS preload submission for `fellows.globaldonut.com`** (operator console)
+  at <https://hstspreload.org/?domain=fellows.globaldonut.com>. The header
+  already advertises `preload`; submit the **subdomain, not the apex** (see
+  finding). ~5 min; inclusion lags weeks.
+- ☐ **crt.sh email-alert signup** (operator console). The in-repo half is done
+  (`just ct-check`); remaining is the push-alert subscription for same-day
+  notice of any new issuance.
+- ☐ **App-layer encryption of `relationships.db`** — *owner-scheduled, deferred.*
+  Device-side "lock my user data" toggle (lock-on-quit + off switch, covers OPFS
+  backups). Honest threat-model copy required (file theft yes, live malware no).
+- ☐ **Risk-doc rewrite** — *owner-scheduled, deferred.* Evolve
+  [`local_vs_saas_risk.md`](./local_vs_saas_risk.md) into a forward-looking
+  stakeholder decision record: the accepted-risk statement weighed against the
+  cost and appetite of keeping a donation-funded SaaS directory alive.
+
+> **Zone finding (`just ct-check`, 2026-05-30):** the `globaldonut.com` zone is
+> **not** Let's-Encrypt-only — `pitch.globaldonut.com` uses Google Trust
+> Services and the apex has appeared with a Sectigo cert. Consequences (now
+> reflected in `docs/DevOps.md`): **(a)** CAA must be scoped to
+> `fellows.globaldonut.com` — an apex Let's-Encrypt-only record would break those
+> other CAs' renewals; **(b)** HSTS preload should target the `fellows` subdomain,
+> not the apex — apex + `includeSubDomains` would force every zone subdomain
+> HTTPS-only, permanently. Re-run `just ct-check` periodically.
 
 ### Deliberately not done — would need a different app
 
