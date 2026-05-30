@@ -110,6 +110,8 @@
   var backToGateLinkEl = document.getElementById('back-to-gate-link');
   var swUpdateBannerEl = document.getElementById('sw-update-banner');
   var swUpdateReloadEl = document.getElementById('sw-update-reload');
+  var notAPnaBannerEl = document.getElementById('not-a-pna-banner');
+  var notAPnaDismissEl = document.getElementById('not-a-pna-dismiss');
   var siteHeaderEl = document.getElementById('site-header');
   // Mobile shell (≤1024px): appbar + tab strip + kebab sheet. Hidden on
   // desktop via CSS, hidden during install/boot via the same .hidden
@@ -469,6 +471,96 @@
     var state = getMcpbSetupState() || {};
     if (!state.consentAt) state.consentAt = new Date().toISOString();
     persistMcpbSetupState(state);
+    // Recording consent RAISES the EX-CLOUD-LLM exception → the app
+    // enters non-PNA mode. Surface the banner immediately.
+    syncNotAPnaBanner();
+  }
+
+  // ── PNA exceptions / non-PNA mode ───────────────────────────────────
+  // An "exception" (modeled on a software exception) is a stable-ID'd
+  // condition under which this app deliberately leaves PNA mode — the
+  // PNA spec's local-only / never-SaaS guarantee. Today there is exactly
+  // one: EX-CLOUD-LLM, raised when the user consents to wiring the
+  // directory to a cloud LLM (Claude Desktop MCP). Raising it == recording
+  // consent (recordMcpbConsent); the handler is the consent gate
+  // (pre-raise) + the "Going rogue — not a PNA" banner + the
+  // #/exception/<id> explainer + the return-to-PNA control below. The ID
+  // is the single greppable marker tying gate ↔ banner ↔ route ↔ state,
+  // and is what a conformance check / the PNT spec linter catches.
+  // See plans/pna_toolkit_exceptions_contribution.md.
+  var PNA_EXCEPTION_CLOUD_LLM = 'EX-CLOUD-LLM';
+  // Canonical, app-independent definition the in-app explainer links out
+  // to. Points at the toolkit repo today; becomes the
+  // exceptions.md#ex-cloud-llm anchor once the contribution in plans/
+  // lands upstream.
+  var PNA_EXCEPTION_CANONICAL_URL = 'https://github.com/richbodo/personal_network_toolkit';
+
+  // The app is in non-PNA mode while any exception is active. Today that
+  // is exactly: the cloud-LLM consent has been recorded and not since
+  // cleared by "return to PNA mode". Reversibility lives in
+  // returnToPnaMode().
+  function isPnaExceptionActive() {
+    var state = getMcpbSetupState();
+    return !!(state && state.consentAt);
+  }
+
+  function activePnaExceptions() {
+    return isPnaExceptionActive() ? [PNA_EXCEPTION_CLOUD_LLM] : [];
+  }
+
+  // Reversibility — EX-CLOUD-LLM declares Reversible: yes (MODE only).
+  // Clearing the exception returns the app to PNA mode. This stops FUTURE
+  // sharing; it does NOT recall data already sent to the cloud provider
+  // (the explainer says so explicitly). Clearing consentAt also re-arms
+  // the full consent gate, so re-enabling is a fresh, deliberate raise.
+  function returnToPnaMode() {
+    var state = getMcpbSetupState();
+    if (!state) return;
+    delete state.consentAt;
+    delete state.pnaBannerDismissedAt;
+    persistMcpbSetupState(state);
+    syncNotAPnaBanner();
+  }
+
+  function dismissNotAPnaBanner() {
+    var state = getMcpbSetupState();
+    if (!state) return;
+    // Dismissal acknowledges; it MUST NOT clear the exception (the app is
+    // still in non-PNA mode). We just stop showing the banner.
+    if (!state.pnaBannerDismissedAt) {
+      state.pnaBannerDismissedAt = new Date().toISOString();
+      persistMcpbSetupState(state);
+    }
+    syncNotAPnaBanner();
+  }
+
+  // Show/hide the banner and stamp machine-readable markers on <body>
+  // (data-pna-mode + data-pna-exceptions) so the runtime state is
+  // greppable for tests and a future conformance check. Banner is visible
+  // iff an exception is active AND not yet dismissed.
+  function syncNotAPnaBanner() {
+    var active = isPnaExceptionActive();
+    var exceptions = activePnaExceptions();
+    if (document.body) {
+      document.body.setAttribute('data-pna-mode', active ? 'non-pna' : 'pna');
+      if (exceptions.length) {
+        document.body.setAttribute('data-pna-exceptions', exceptions.join(','));
+      } else {
+        document.body.removeAttribute('data-pna-exceptions');
+      }
+    }
+    if (!notAPnaBannerEl) return;
+    var state = getMcpbSetupState();
+    var dismissed = !!(state && state.pnaBannerDismissedAt);
+    if (active && !dismissed) notAPnaBannerEl.classList.remove('hidden');
+    else notAPnaBannerEl.classList.add('hidden');
+  }
+
+  function initNotAPnaBanner() {
+    if (notAPnaDismissEl) {
+      notAPnaDismissEl.addEventListener('click', dismissNotAPnaBanner);
+    }
+    syncNotAPnaBanner();
   }
 
   function initBuildBadge() {
@@ -6931,12 +7023,105 @@
       });
   }
 
+  // ===== PNA exception explainer pages ===================================
+  // The in-app surface an active exception's banner (and the consent gate)
+  // links to. Per the exceptions handler contract, the app — not a static
+  // GitHub page — must explain the CURRENTLY-ACTIVE exception set, because
+  // combinations are installation-specific. Each page links out to the
+  // canonical (app-independent) definition in the toolkit.
+  function renderExceptionsIndex() {
+    if (!detailEl) return;
+    var active = activePnaExceptions();
+    var html = '<div class="exception-page">';
+    html += '<h2 class="exception-title">PNA mode</h2>';
+    if (!active.length) {
+      html += '<p class="exception-status exception-status--ok">' +
+        'This app is in <strong>PNA mode</strong> — it runs local-only and talks to no ' +
+        'SaaS server beyond delivering the app and directory data. No exceptions are active.</p>';
+    } else {
+      html += '<p class="exception-status exception-status--warn">' +
+        'This app is <strong>not in PNA mode</strong>. ' + active.length + ' exception' +
+        (active.length === 1 ? '' : 's') + ' active:</p>';
+      html += '<ul class="exception-list">';
+      active.forEach(function (id) {
+        html += '<li><a href="#/exception/' + encodeURIComponent(id) + '">' +
+          escapeHtml(id) + '</a></li>';
+      });
+      html += '</ul>';
+    }
+    html += '<p class="exception-back"><a href="#/">← Back to the directory</a></p>';
+    html += '</div>';
+    detailEl.innerHTML = html;
+    detailEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function renderExceptionPage(id) {
+    if (!detailEl) return;
+    if (id !== PNA_EXCEPTION_CLOUD_LLM) {
+      detailEl.innerHTML = '<div class="exception-page">' +
+        '<h2 class="exception-title">Unknown exception</h2>' +
+        '<p>No exception is registered under <code>' + escapeHtml(id) + '</code>.</p>' +
+        '<p class="exception-back"><a href="#/exceptions">← All exceptions</a></p>' +
+        '</div>';
+      return;
+    }
+    var active = isPnaExceptionActive();
+    var statusHtml = active
+      ? '<p class="exception-status exception-status--warn">' +
+          '<strong>Active now.</strong> This app is currently <strong>not a PNA</strong> — ' +
+          'you enabled cloud-AI integration.</p>'
+      : '<p class="exception-status exception-status--ok">' +
+          '<strong>Not currently active.</strong> This is what would happen if you enable ' +
+          'cloud-AI integration. The app is in PNA mode right now.</p>';
+    var html = '<div class="exception-page" data-pna-exception="' + escapeHtml(id) + '">';
+    html += '<h2 class="exception-title">Cloud AI integration — ' + escapeHtml(id) + '</h2>';
+    html += statusHtml;
+    html += '<h3>What this exception is</h3>';
+    html += '<p>A personal-network app (PNA) runs <strong>local-only</strong> and never sends ' +
+      'your data to a SaaS server. Connecting Claude Desktop (a cloud AI) to this directory ' +
+      'deliberately breaks that promise — so it is treated as a named <em>exception</em> ' +
+      '(<code>' + escapeHtml(id) + '</code>) that takes the app out of PNA mode.</p>';
+    html += '<h3>What it relaxes</h3>';
+    html += '<p>The PNA definition (local-only / never-SaaS) and <code>AC-MCP-A</code> ' +
+      '(cloud-AI access to private data). It stresses Goal 1 — private-data sovereignty.</p>';
+    html += '<h3>What data is affected</h3>';
+    html += '<p>Whatever the AI reads flows to its provider (Anthropic): the fellows directory, ' +
+      'and — if you install the private extension — your saved groups and notes.</p>';
+    html += '<h3>Is it reversible?</h3>';
+    html += '<p><strong>Yes — the mode is reversible.</strong> You can return to PNA mode at ' +
+      'any time (below, or from Settings → Claude Desktop integration). ' +
+      '<strong>But returning to PNA mode does not recall data already sent to the cloud ' +
+      'provider</strong> — it only stops further sharing.</p>';
+    if (active) {
+      html += '<p class="exception-actions"><button type="button" id="exception-return-pna" ' +
+        'class="exception-return-pna">Return to PNA mode</button></p>';
+    } else {
+      html += '<p class="exception-actions"><a href="#/settings">Set up cloud-AI integration in Settings →</a></p>';
+    }
+    html += '<p class="exception-canonical">Canonical definition: ' +
+      '<a href="' + PNA_EXCEPTION_CANONICAL_URL + '" target="_blank" rel="noopener">Personal Network Toolkit</a>.</p>';
+    html += '<p class="exception-back"><a href="#/">← Back to the directory</a> · ' +
+      '<a href="#/exceptions">All exceptions</a></p>';
+    html += '</div>';
+    detailEl.innerHTML = html;
+    detailEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    var retBtn = document.getElementById('exception-return-pna');
+    if (retBtn) {
+      retBtn.addEventListener('click', function () {
+        returnToPnaMode();
+        renderExceptionPage(id); // re-render to reflect the now-PNA mode
+      });
+    }
+  }
+
   function route() {
     var hash = window.location.hash || '';
     var editMatch = hash.match(/^#\/edit\/(\d+)$/);
     var nextEditId = editMatch ? parseInt(editMatch[1], 10) : null;
     var directoryMatch = hash.match(/^#\/groups\/(\d+)\/directory$/);
     var groupMatch = !directoryMatch ? hash.match(/^#\/groups\/(\d+)$/) : null;
+    var exceptionMatch = hash.match(/^#\/exception\/([A-Za-z0-9_-]+)$/);
+    var exceptionsIndex = hash === '#/exceptions';
 
     // Tag <body> with the current focus mode so CSS can collapse the
     // global directory + composer rails (and, in edit mode, the central
@@ -6946,7 +7131,8 @@
     body.classList.remove(
       'route-groups-list', 'route-group-detail',
       'route-group-edit', 'route-group-directory',
-      'route-directory', 'route-about', 'route-settings', 'route-fellow'
+      'route-directory', 'route-about', 'route-settings', 'route-fellow',
+      'route-exception'
     );
     if (directoryMatch) body.classList.add('route-group-directory');
     else if (groupMatch) body.classList.add('route-group-detail');
@@ -6954,6 +7140,7 @@
     else if (hash === '#/groups') body.classList.add('route-groups-list');
     else if (hash === '#/about') body.classList.add('route-about');
     else if (hash === '#/settings') body.classList.add('route-settings');
+    else if (exceptionMatch || exceptionsIndex) body.classList.add('route-exception');
     else if (hash.indexOf('#/fellow/') === 0) body.classList.add('route-fellow');
     else body.classList.add('route-directory');
 
@@ -7003,6 +7190,7 @@
     // know a richer title (group name, fellow name) can overwrite by
     // calling setShellChrome again after their data resolves.
     if (hash === '#/about') setShellChrome('about', 'About');
+    else if (exceptionMatch || exceptionsIndex) setShellChrome('about', 'PNA mode');
     else if (hash === '#/settings') setShellChrome('settings', 'Settings');
     else if (hash === '#/groups') setShellChrome('groups', 'Groups');
     else if (groupMatch || directoryMatch || editMatch) setShellChrome('groups', 'Group');
@@ -7017,6 +7205,14 @@
     }
     if (hash === '#/about') {
       renderAboutPage();
+      return;
+    }
+    if (exceptionsIndex) {
+      renderExceptionsIndex();
+      return;
+    }
+    if (exceptionMatch) {
+      renderExceptionPage(exceptionMatch[1]);
       return;
     }
     if (hash === '#/settings') {
@@ -8789,6 +8985,18 @@
         '</div>' +
         '<p id="settings-mcpb-setup-meta" class="settings-hint settings-mcpb-meta" hidden></p>' +
         '<span id="settings-mcpb-status" class="settings-status" aria-live="polite"></span>' +
+        // Non-PNA-mode status + reversibility control. Shown only while the
+        // EX-CLOUD-LLM exception is active (wireMcpbSection toggles it).
+        '<div id="settings-mcpb-pna-mode" class="settings-mcpb-pna-mode" hidden>' +
+          '<p class="settings-mcpb-pna-mode-line">' +
+            '<strong>Not in PNA mode.</strong> Cloud-AI integration (<code>EX-CLOUD-LLM</code>) is ' +
+            'active. <a href="#/exception/EX-CLOUD-LLM">What this means</a>.' +
+          '</p>' +
+          '<button type="button" id="settings-mcpb-return-pna" class="settings-download">' +
+            'Return to PNA mode' +
+          '</button>' +
+          '<span id="settings-mcpb-return-pna-status" class="settings-status" aria-live="polite"></span>' +
+        '</div>' +
         '<div id="settings-mcpb-post-install" class="settings-mcpb-post-install" hidden>' +
           '<h4 class="settings-section-subtitle">After the downloads finish</h4>' +
           '<ol class="settings-mcpb-next-steps">' +
@@ -8866,6 +9074,12 @@
                 'and the extensions themselves only read the two fellows files.' +
               '</p>' +
             '</div>' +
+            '<p class="settings-mcpb-agreement-exception">' +
+              'Accepting raises the <code>EX-CLOUD-LLM</code> exception and takes this app ' +
+              'out of PNA (local-only) mode. ' +
+              '<a href="#/exception/EX-CLOUD-LLM" id="settings-mcpb-exception-link">Read the full explanation</a> ' +
+              '(opens the explainer and closes this dialog). It is reversible — you can return to PNA mode later.' +
+            '</p>' +
             '<label class="settings-mcpb-consent-accept">' +
               '<input type="checkbox" id="settings-mcpb-consent-checkbox" disabled>' +
               '<span>I understand and accept these risks.</span>' +
@@ -9311,10 +9525,21 @@
     var consentReminder = document.getElementById('settings-mcpb-consent-reminder');
     var consentReminderWhen = document.getElementById('settings-mcpb-consent-reminder-when');
     var consentReminderTerms = document.getElementById('settings-mcpb-consent-reminder-terms');
+    var exceptionLink = document.getElementById('settings-mcpb-exception-link');
     // Tracks the mode the currently-open dialog is in so the close
     // handler knows whether to record consent before downloading.
     var preambleMode = 'gate';
     if (!setupBtn || !dialog) return;
+
+    // The "Read the full explanation" link navigates to the in-app
+    // exception explainer. Close the dialog first (returnValue stays
+    // empty → the close handler records no consent and starts no
+    // download) so the user lands cleanly on #/exception/EX-CLOUD-LLM.
+    if (exceptionLink) {
+      exceptionLink.addEventListener('click', function () {
+        try { if (dialog.open) dialog.close(); } catch (e) {}
+      });
+    }
 
     function setStatus(text) {
       if (statusEl) statusEl.textContent = text || '';
@@ -9356,6 +9581,10 @@
         }
         if (postInstall) postInstall.hidden = true;
       }
+      // Non-PNA-mode row + reversibility control: visible iff the
+      // EX-CLOUD-LLM exception is active.
+      var pnaModeEl = document.getElementById('settings-mcpb-pna-mode');
+      if (pnaModeEl) pnaModeEl.hidden = !isPnaExceptionActive();
       // Directory-data-update affordance moved to the About page in
       // PR #205 — all "your stuff needs refreshing" signals consolidate
       // there alongside the app + directory-data version rows.
@@ -9525,6 +9754,18 @@
     }
 
     setupBtn.addEventListener('click', openPreamble);
+    // "Return to PNA mode" — reversibility for the EX-CLOUD-LLM exception.
+    // Clears the exception (stops future sharing; does not recall data
+    // already sent), hides the banner, and re-arms the full consent gate.
+    var returnPnaBtn = document.getElementById('settings-mcpb-return-pna');
+    if (returnPnaBtn) {
+      returnPnaBtn.addEventListener('click', function () {
+        returnToPnaMode();
+        var st = document.getElementById('settings-mcpb-return-pna-status');
+        if (st) st.textContent = 'Back in PNA mode. Re-enabling will ask for consent again.';
+        refreshUiFromState();
+      });
+    }
     // Scroll within the agreement region unlocks the accept checkbox.
     if (agreementEl) {
       agreementEl.addEventListener('scroll', syncConsentScrollState);
@@ -10723,6 +10964,7 @@
   }
 
   initSwReloadButton();
+  initNotAPnaBanner();
   initClearCacheButton();
   initResetEverythingButton();
   initDiagnosticsPanel();
