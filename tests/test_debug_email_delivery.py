@@ -490,62 +490,15 @@ def test_sudo_no_sudo_flag_opts_out():
     assert args.sudo is False
 
 
-def test_fetch_allowlist_from_prod_parses_and_normalises(monkeypatch):
-    class _R:
-        returncode = 0
-        stdout = '{"hashes": ["AABBCC", "ddEEff", "1234"]}'
-        stderr = ""
-
-    captured = {}
-
-    def fake_run(cmd, **kw):
-        captured["cmd"] = cmd
-        return _R()
-
-    monkeypatch.setattr(ded.subprocess, "run", fake_run)
-    allow = ded.fetch_allowlist_from_prod("h", "22", "u")
-    # lowercased for consistent comparison with sha256().hexdigest()
-    assert allow == {"aabbcc", "ddeeff", "1234"}
-    # No sudo involved — must use BatchMode=yes to fail fast on auth prompts.
-    assert "BatchMode=yes" in " ".join(captured["cmd"])
-    # And we didn't smuggle sudo into the remote command.
-    assert "sudo" not in captured["cmd"][-1]
-
-
-def test_fetch_allowlist_from_prod_raises_on_ssh_failure(monkeypatch):
-    class _R:
-        returncode = 255
-        stdout = ""
-        stderr = "Permission denied"
-
-    monkeypatch.setattr(ded.subprocess, "run", lambda *a, **kw: _R())
-    import pytest
-    with pytest.raises(RuntimeError, match="exit 255"):
-        ded.fetch_allowlist_from_prod("h", "22", "u")
-
-
-def test_fetch_allowlist_from_prod_raises_on_bad_json(monkeypatch):
-    class _R:
-        returncode = 0
-        stdout = "not json {"
-        stderr = ""
-
-    monkeypatch.setattr(ded.subprocess, "run", lambda *a, **kw: _R())
-    import pytest
-    with pytest.raises(RuntimeError, match="parse failed"):
-        ded.fetch_allowlist_from_prod("h", "22", "u")
-
-
 def test_check_allowlist_hit_and_miss():
-    allow = {
-        ded.hash_email("a@example.com"),
-        ded.hash_email("b@example.com"),
-    }
-    hit = ded.check_allowlist("a@example.com", allow)
+    # Membership is now "is this normalized email a contact_email in fellows.db?"
+    # (the server derives the allowlist from those emails) — no hash file.
+    db_emails = {"a@example.com", "b@example.com"}
+    hit = ded.check_allowlist("A@Example.com ", db_emails)  # normalize on the way in
     assert hit["hit"] is True
     assert hit["allowlist_size"] == 2
-    assert hit["hash"] == ded.hash_email("a@example.com")
-    miss = ded.check_allowlist("c@example.com", allow)
+    assert hit["normalized"] == "a@example.com"
+    miss = ded.check_allowlist("c@example.com", db_emails)
     assert miss["hit"] is False
 
 
@@ -626,59 +579,74 @@ def test_fetch_fellow_emails_from_prod_handles_empty_result(monkeypatch):
     assert ded.fetch_fellow_emails_from_prod("h", "22", "u") == []
 
 
-def test_dump_allowlist_in_sync_when_fellows_hashes_match_allowlist(monkeypatch):
+def _fresh_meta(*a, **kw):
+    # fellows.db older than the running service → in-memory allowlist is current.
+    return {"db_mtime": 1000, "service_start": 2000}
+
+
+def test_dump_allowlist_counts_distinct_emails_and_lists_missing(monkeypatch):
     fellows = [
         {"record_id": "r1", "name": "Alice", "email": "alice@example.com"},
         {"record_id": "r2", "name": "Bob", "email": "bob@example.com"},
+        {"record_id": "r3", "name": "No Email", "email": ""},
     ]
-    allow = {ded.hash_email(f["email"]) for f in fellows}
-
-    monkeypatch.setattr(ded, "fetch_allowlist_from_prod", lambda *a, **kw: allow)
     monkeypatch.setattr(ded, "fetch_fellow_emails_from_prod", lambda *a, **kw: fellows)
+    monkeypatch.setattr(ded, "fetch_db_meta_from_prod", _fresh_meta)
     summary = ded.dump_allowlist_report("h", "22", "u")
-    assert summary["in_sync"] is True
-    assert summary["allowlist_size"] == 2
+    assert summary["allowlist_size"] == 2  # distinct non-empty emails = allowlist
+    assert summary["fellows_total"] == 3
     assert summary["fellows_with_email"] == 2
-    assert summary["missing_from_allowlist"] == []
-    assert summary["orphans_in_allowlist"] == []
+    assert [f["name"] for f in summary["fellows_without_email"]] == ["No Email"]
+    assert summary["in_sync"] is True
+    report = ded.format_dump_report("fellows.example", summary)
+    assert "No Email" in report
+    assert "NO contact_email" in report
+    assert "In sync" in report
 
 
-def test_dump_allowlist_surfaces_fellow_missing_from_allowlist(monkeypatch):
-    """The exact failure mode that broke Rich's testing on Apr 20."""
+def test_dump_allowlist_flags_duplicate_emails(monkeypatch):
     fellows = [
-        {"record_id": "r1", "name": "Richard Bodo", "email": "richbodo@gmail.com"},
-        {"record_id": "r2", "name": "Bob", "email": "bob@example.com"},
+        {"record_id": "r1", "name": "Alice", "email": "shared@example.com"},
+        {"record_id": "r2", "name": "Al Ias", "email": "Shared@example.com"},  # same after normalize
     ]
-    # Only Bob's hash on the allowlist — Rich's missing.
-    allow = {ded.hash_email("bob@example.com")}
-
-    monkeypatch.setattr(ded, "fetch_allowlist_from_prod", lambda *a, **kw: allow)
     monkeypatch.setattr(ded, "fetch_fellow_emails_from_prod", lambda *a, **kw: fellows)
+    monkeypatch.setattr(ded, "fetch_db_meta_from_prod", _fresh_meta)
     summary = ded.dump_allowlist_report("h", "22", "u")
-    assert summary["in_sync"] is False
-    assert len(summary["missing_from_allowlist"]) == 1
-    assert summary["missing_from_allowlist"][0]["name"] == "Richard Bodo"
+    assert summary["allowlist_size"] == 1  # collapses to a single allowlist entry
+    assert "shared@example.com" in summary["duplicate_emails"]
+    assert sorted(summary["duplicate_emails"]["shared@example.com"]) == ["Al Ias", "Alice"]
     report = ded.format_dump_report("fellows.example", summary)
-    assert "Drift detected" in report
-    assert "Richard Bodo" in report
-    assert "richbodo@gmail.com" in report
+    assert "shared by multiple fellows" in report
 
 
-def test_dump_allowlist_surfaces_orphan_hashes(monkeypatch):
-    """Hashes on the allowlist that don't correspond to any fellow's email."""
+def test_dump_allowlist_flags_stale_db(monkeypatch):
     fellows = [{"record_id": "r1", "name": "Alice", "email": "alice@example.com"}]
-    allow = {
-        ded.hash_email("alice@example.com"),
-        ded.hash_email("stale@example.com"),  # no fellow with this email
-    }
-
-    monkeypatch.setattr(ded, "fetch_allowlist_from_prod", lambda *a, **kw: allow)
     monkeypatch.setattr(ded, "fetch_fellow_emails_from_prod", lambda *a, **kw: fellows)
+    # fellows.db newer than the running service → stale in-memory allowlist.
+    monkeypatch.setattr(
+        ded, "fetch_db_meta_from_prod",
+        lambda *a, **kw: {"db_mtime": 5000, "service_start": 1000},
+    )
     summary = ded.dump_allowlist_report("h", "22", "u")
+    assert summary["stale"] is True
     assert summary["in_sync"] is False
-    assert len(summary["orphans_in_allowlist"]) == 1
     report = ded.format_dump_report("fellows.example", summary)
-    assert "no matching fellow email (1)" in report
+    assert "STALE" in report
+    assert "restart fellows-pwa" in report
+
+
+def test_dump_allowlist_staleness_unknown_when_timestamps_missing(monkeypatch):
+    fellows = [{"record_id": "r1", "name": "Alice", "email": "alice@example.com"}]
+    monkeypatch.setattr(ded, "fetch_fellow_emails_from_prod", lambda *a, **kw: fellows)
+    monkeypatch.setattr(
+        ded, "fetch_db_meta_from_prod", lambda *a, **kw: {"db_mtime": 0, "service_start": 0}
+    )
+    summary = ded.dump_allowlist_report("h", "22", "u")
+    assert summary["staleness_known"] is False
+    assert summary["stale"] is False
+    assert summary["in_sync"] is True  # unknown is not the same as stale
+    report = ded.format_dump_report("fellows.example", summary)
+    assert "unknown" in report
 
 
 def test_fetch_postmark_token_from_prod_raises_on_ssh_failure(monkeypatch):

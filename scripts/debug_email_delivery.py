@@ -246,45 +246,24 @@ def filter_events(
 
 
 DEFAULT_ENV_FILE = "/etc/fellows/fellows-pwa.env"
-DEFAULT_ALLOWLIST_PATH = "/opt/fellows/deploy/dist/allowed_emails.json"
 
 
-def fetch_allowlist_from_prod(
-    host: str,
-    port: str,
-    user: str,
-    allowlist_path: str = DEFAULT_ALLOWLIST_PATH,
-) -> set[str]:
-    """SSH + plain `cat` the allowlist JSON; no sudo needed.
+def check_allowlist(email: str, db_emails: set[str]) -> dict:
+    """Return {email, normalized, hit, allowlist_size} for the given email.
 
-    ``/opt/fellows/deploy/dist/`` is mode 2775 owned by ``fellows:fellows``,
-    and the operator (``rsb``) is in the ``fellows`` group, so we can read it
-    directly. Returns a set of hex SHA-256 hashes.
+    Membership model (post-PR #139): there is no ``allowed_emails.json`` file
+    any more. The server builds its allowlist in memory at startup by HMAC-ing
+    every distinct, non-empty ``contact_email`` in ``fellows.db`` — so the
+    *set* of allowed addresses is exactly those emails. An email is allowed iff
+    its normalized (lower/trim) form is a contact_email in the DB; checking that
+    needs only the DB email set, not the HMAC key.
     """
-    remote_cmd = f"cat {shlex.quote(allowlist_path)}"
-    cmd = ["ssh", "-o", "BatchMode=yes", "-p", str(port), f"{user}@{host}", remote_cmd]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=30, check=False)
-    if r.returncode != 0:
-        raise RuntimeError(
-            f"ssh/cat allowlist failed (exit {r.returncode}): "
-            + (r.stderr.strip() or "no stderr")
-        )
-    try:
-        data = json.loads(r.stdout)
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"allowlist JSON parse failed: {e}")
-    hashes = data.get("hashes") or []
-    return {str(h).lower() for h in hashes if h}
-
-
-def check_allowlist(email: str, allowlist: set[str]) -> dict:
-    """Return {email, hash, hit, allowlist_size} for the given email."""
-    h = hash_email(email)
+    normalized = email.strip().lower()
     return {
         "email": email,
-        "hash": h,
-        "hit": h in allowlist,
-        "allowlist_size": len(allowlist),
+        "normalized": normalized,
+        "hit": normalized in db_emails,
+        "allowlist_size": len(db_emails),
     }
 
 
@@ -303,18 +282,20 @@ def fetch_fellow_emails_from_prod(
     always available. The ``sqlite3`` CLI binary is NOT installed (it's not a
     fellows-pwa dep) so we use Python directly — one-liner, JSON out.
 
-    Same path as the allowlist (group-readable, no sudo needed). Returns a list
-    of ``{"record_id", "name", "email"}`` dicts with email lowercased+trimmed,
-    matching the build_pwa hashing recipe.
+    Group-readable, no sudo needed. Returns a list of
+    ``{"record_id", "name", "email"}`` dicts for **all** fellows, with email
+    lowercased+trimmed (``""`` when the fellow has no contact_email). The caller
+    splits with-email from without-email; the with-email set is exactly the
+    server's allowlist after a restart.
     """
     py_code = (
         "import json, sqlite3; "
         f"c = sqlite3.connect({db_path!r}); "
         "c.row_factory = sqlite3.Row; "
         "rows = c.execute("
-        "\"SELECT record_id, name, lower(trim(contact_email)) AS email "
-        "FROM fellows WHERE contact_email IS NOT NULL "
-        "AND trim(contact_email) != ''\""
+        "\"SELECT record_id, name, "
+        "lower(trim(coalesce(contact_email, ''))) AS email "
+        "FROM fellows\""
         ").fetchall(); "
         "print(json.dumps([dict(r) for r in rows]))"
     )
@@ -335,82 +316,142 @@ def fetch_fellow_emails_from_prod(
     return data if isinstance(data, list) else []
 
 
-def dump_allowlist_report(host: str, port: str, user: str) -> dict:
-    """Cross-reference allowlist hashes against the fellows DB.
+def _safe_int(s: str) -> int:
+    try:
+        return int((s or "").strip())
+    except (ValueError, TypeError):
+        return 0
 
-    Returns a structured summary and writes a human-readable report to stdout.
-    Flags two invariants:
-      - every fellow with a contact_email should have their hash on the allowlist
-      - every hash on the allowlist should map back to at least one fellow email
-    Both should be true whenever build_pwa.py runs over the same DB. Drift
-    means the allowlist and DB were built from different sources.
+
+def fetch_db_meta_from_prod(
+    host: str,
+    port: str,
+    user: str,
+    db_path: str = DEFAULT_FELLOWS_DB,
+    unit: str = UNIT,
+) -> dict:
+    """Best-effort: fellows.db mtime vs the fellows-pwa start time (epochs).
+
+    Detects the one drift that can still exist post-PR #139: the in-memory
+    allowlist is derived from fellows.db at startup, so if the DB on disk
+    changed *after* the server started, the running allowlist is stale and a
+    restart is needed. Returns ``{"db_mtime", "service_start"}`` epochs; zeros
+    on any failure, so staleness reports as "unknown" rather than a false alarm.
+    Read-only; ``systemctl show`` and ``stat`` both work without sudo.
     """
-    allow = fetch_allowlist_from_prod(host, port, user)
-    fellows = fetch_fellow_emails_from_prod(host, port, user)
+    remote = (
+        f"echo DB_MTIME=$(stat -c %Y {shlex.quote(db_path)} 2>/dev/null || echo 0); "
+        "echo SVC_START=$(date -d "
+        f"\"$(systemctl show -p ActiveEnterTimestamp --value {shlex.quote(unit)} 2>/dev/null)\" "
+        "+%s 2>/dev/null || echo 0)"
+    )
+    cmd = ["ssh", "-o", "BatchMode=yes", "-p", str(port), f"{user}@{host}", remote]
+    out = {"db_mtime": 0, "service_start": 0}
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return out
+    if r.returncode != 0:
+        return out
+    for line in r.stdout.splitlines():
+        line = line.strip()
+        if line.startswith("DB_MTIME="):
+            out["db_mtime"] = _safe_int(line.split("=", 1)[1])
+        elif line.startswith("SVC_START="):
+            out["service_start"] = _safe_int(line.split("=", 1)[1])
+    return out
 
-    fellow_hash_to_fellow: dict[str, dict] = {}
+
+def dump_allowlist_report(host: str, port: str, user: str) -> dict:
+    """Report the allowlist's source-of-truth (fellows.db) and its health.
+
+    Post-PR #139 the allowlist is not a separate artifact — the server derives
+    it from fellows.db at startup, so the old "allowlist vs DB drift" check is
+    structurally impossible (they're the same set by construction). The
+    meaningful checks now are:
+      - how many distinct emails the allowlist covers (= addresses that can
+        receive a magic link),
+      - which fellows have NO contact_email (they can never get a link),
+      - which emails are shared by multiple fellows (collapse to one entry),
+      - whether fellows.db changed after the server started (stale in-memory
+        allowlist → restart needed).
+    """
+    fellows = fetch_fellow_emails_from_prod(host, port, user)
+    meta = fetch_db_meta_from_prod(host, port, user)
+
+    with_email: list[dict] = []
+    without_email: list[dict] = []
+    email_to_names: dict[str, list[str]] = {}
     for f in fellows:
         email = (f.get("email") or "").strip().lower()
-        if not email:
-            continue
-        fellow_hash_to_fellow.setdefault(hash_email(email), f)
+        if email:
+            with_email.append(f)
+            email_to_names.setdefault(email, []).append(f.get("name") or "?")
+        else:
+            without_email.append(
+                {"record_id": f.get("record_id"), "name": f.get("name") or "?"}
+            )
 
-    fellow_hashes = set(fellow_hash_to_fellow.keys())
+    duplicate_emails = {e: names for e, names in email_to_names.items() if len(names) > 1}
 
-    missing_from_allowlist = [
-        fellow_hash_to_fellow[h] for h in fellow_hashes if h not in allow
-    ]
-    orphans_in_allowlist = sorted(allow - fellow_hashes)
+    db_mtime = meta.get("db_mtime", 0)
+    svc_start = meta.get("service_start", 0)
+    staleness_known = bool(db_mtime and svc_start)
+    stale = bool(staleness_known and db_mtime > svc_start)
 
-    summary = {
-        "allowlist_size": len(allow),
-        "fellows_with_email": len(fellows),
-        "fellow_distinct_email_hashes": len(fellow_hashes),
-        "missing_from_allowlist": missing_from_allowlist,
-        "orphans_in_allowlist": orphans_in_allowlist,
-        "in_sync": not missing_from_allowlist and not orphans_in_allowlist,
+    return {
+        "allowlist_size": len(email_to_names),  # distinct emails = allowlist after restart
+        "fellows_total": len(fellows),
+        "fellows_with_email": len(with_email),
+        "fellows_without_email": without_email,
+        "duplicate_emails": duplicate_emails,
+        "db_mtime": db_mtime,
+        "service_start": svc_start,
+        "staleness_known": staleness_known,
+        "stale": stale,
+        "in_sync": not stale,
     }
-    return summary
 
 
 def format_dump_report(host: str, summary: dict) -> str:
     lines = [f"Allowlist state on {host}:"]
-    lines.append(f"  Allowlist hashes:             {summary['allowlist_size']}")
-    lines.append(f"  Fellows with contact_email:   {summary['fellows_with_email']}")
-    lines.append(
-        f"  Distinct email hashes from DB: {summary['fellow_distinct_email_hashes']}"
-    )
-    if summary["in_sync"]:
-        lines.append("  ✓ In sync — every email hash is on the allowlist and vice versa.")
-        return "\n".join(lines) + "\n"
+    lines.append(f"  Distinct emails (allowlist after restart): {summary['allowlist_size']}")
+    lines.append(f"  Fellows total:                             {summary['fellows_total']}")
+    lines.append(f"  Fellows with a contact_email:              {summary['fellows_with_email']}")
 
-    lines.append("  ✗ Drift detected.")
-    missing = summary["missing_from_allowlist"]
-    orphans = summary["orphans_in_allowlist"]
-    if missing:
+    without = summary.get("fellows_without_email") or []
+    if without:
         lines.append("")
         lines.append(
-            f"  Fellows with email NOT on allowlist ({len(missing)}) — they can't get magic links:"
+            f"  Fellows with NO contact_email ({len(without)}) — they can't receive a magic link:"
         )
-        for f in missing[:50]:
-            lines.append(f"    {f.get('name', '?')}  <{f.get('email', '?')}>")
-        if len(missing) > 50:
-            lines.append(f"    … {len(missing) - 50} more")
-    if orphans:
+        for f in without[:50]:
+            lines.append(f"    {f.get('name', '?')}")
+        if len(without) > 50:
+            lines.append(f"    … {len(without) - 50} more")
+
+    dups = summary.get("duplicate_emails") or {}
+    if dups:
         lines.append("")
         lines.append(
-            f"  Hashes on allowlist with no matching fellow email ({len(orphans)}):"
+            f"  Emails shared by multiple fellows ({len(dups)}) — one allowlist entry each:"
         )
-        for h in orphans[:20]:
-            lines.append(f"    {h[:16]}…")
-        if len(orphans) > 20:
-            lines.append(f"    … {len(orphans) - 20} more")
+        for email, names in list(dups.items())[:20]:
+            lines.append(f"    {email}  ←  {', '.join(names)}")
+        if len(dups) > 20:
+            lines.append(f"    … {len(dups) - 20} more")
+
     lines.append("")
-    lines.append(
-        "  Drift usually means allowed_emails.json and fellows.db were "
-        "generated from different sources. Rebuild both together via "
-        "`python build/build_pwa.py` and redeploy."
-    )
+    if not summary.get("staleness_known"):
+        lines.append(
+            "  Staleness: unknown (couldn't read fellows.db mtime / service start time)."
+        )
+    elif summary.get("stale"):
+        lines.append("  ✗ STALE: fellows.db changed AFTER the server started — the running")
+        lines.append("    in-memory allowlist is behind the DB on disk. Restart to pick it up:")
+        lines.append("      sudo systemctl restart fellows-pwa")
+    else:
+        lines.append("  ✓ In sync: the running allowlist matches the fellows.db on disk.")
     return "\n".join(lines) + "\n"
 
 
@@ -512,14 +553,13 @@ def fetch_postmark_message(message_id: str, token: str) -> dict:
 def _format_allowlist_status(chk: dict) -> list[str]:
     """Render the allowlist check block for the human-readable report."""
     out = ["Allowlist status:"]
-    hp = chk["hash"][:16]
     if chk["hit"]:
         out.append(
-            f"  HIT — {chk['email']} (hash {hp}…) is in the {chk['allowlist_size']}-entry allowlist."
+            f"  HIT — {chk['email']} is in the {chk['allowlist_size']}-entry allowlist."
         )
     else:
         out.append(
-            f"  MISS — {chk['email']} (hash {hp}…) is NOT in the {chk['allowlist_size']}-entry allowlist."
+            f"  MISS — {chk['email']} is NOT in the {chk['allowlist_size']}-entry allowlist."
         )
         out.append(
             "  The server silently returns {sent: true} for non-allowlisted emails"
@@ -722,11 +762,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--dump-allowlist",
         action="store_true",
-        help="Dump the allowlist and cross-reference against the fellows DB on "
-        "prod. Doesn't fetch journal events; doesn't need --sudo. Flags drift "
-        "(fellow emails missing from allowlist, or allowlist hashes without a "
-        "matching fellow email) — both are invariants that should never hold "
-        "if allowed_emails.json and fellows.db were built from the same DB.",
+        help="Report the allowlist source-of-truth (fellows.db) on prod: how "
+        "many distinct emails it covers, fellows with no contact_email (can't "
+        "get a link), duplicate emails, and whether fellows.db changed after "
+        "the server started (stale in-memory allowlist). Doesn't fetch journal "
+        "events; doesn't need --sudo.",
     )
     ap.add_argument(
         "--json",
@@ -793,8 +833,10 @@ def main(argv: list[str] | None = None) -> int:
     allowlist_check: dict | None = None
     if args.email:
         try:
-            allow = fetch_allowlist_from_prod(args.host, args.port, args.user)
-            allowlist_check = check_allowlist(args.email, allow)
+            fellows = fetch_fellow_emails_from_prod(args.host, args.port, args.user)
+            db_emails = {(f.get("email") or "").strip().lower() for f in fellows}
+            db_emails.discard("")
+            allowlist_check = check_allowlist(args.email, db_emails)
         except RuntimeError as e:
             sys.stderr.write(f"(allowlist check skipped: {e})\n")
 
