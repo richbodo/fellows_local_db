@@ -46,6 +46,20 @@ class TestLocalhostBrowserTab:
         expect(email_input).to_be_visible(timeout=5000)
         expect(page.locator("#app-wrap")).to_be_hidden()
 
+    def test_install_unsupported_hint_uses_plain_language(self, page, base_url_fixture):
+        """#219: the on-click install-fallback hint must lead with the action,
+        not browser-vendor jargon. The element is static markup (hidden until
+        an Install click with no `beforeinstallprompt`), so its text is in the
+        DOM regardless of route — we assert on it directly."""
+        page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+        text = (page.locator("#install-unsupported-hint").text_content() or "").lower()
+        assert "open the existing install" in text
+        assert "use the directory in this tab" in text
+        # Regression guard: the jargon lead ("install prompt", "yet",
+        # "two ways forward") must not creep back in.
+        assert "install prompt" not in text
+        assert "two ways forward" not in text
+
 
 def _issue_token(deploy_server):
     """Drive POST /api/send-unlock and return the token from the recorder."""
@@ -114,6 +128,20 @@ class TestInstallLandingEscape:
         page.wait_for_selector("#install-landing:not(.hidden)", timeout=4000)
         use_in_tab = page.locator("#install-use-in-tab")
         expect(use_in_tab).to_be_visible(timeout=2000)
+
+        # #218: the folder-push "save your data to a folder" banner must NOT
+        # show on the install landing — the user has no groups/notes to lose
+        # yet and its CTA mismatches the Settings button. It's gated on
+        # window.__dataProvider, which is only assigned once bootDirectoryAsApp
+        # has run. (The in-process deploy_server has no Caddy COOP/COEP, so the
+        # SQLite worker can't fully init here either; this pins the user-facing
+        # invariant. The worker-available-on-landing path that originally
+        # surfaced the bug is covered by Phase 1 manual QA — see
+        # plans/pre_ship_ui_fixes_2026-05-29.md.)
+        expect(page.locator("#folder-push-banner")).to_be_hidden()
+        assert page.evaluate("window.__dataProvider == null"), (
+            "boot must not have run while on the install landing"
+        )
 
         # 3. Click it. Should: (a) hide the install landing, (b) boot the
         #    directory (renderDirectory reveals #app-wrap once data lands),

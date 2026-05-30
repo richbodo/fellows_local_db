@@ -889,6 +889,75 @@ class TestPhase2WriteLock:
             )
         ).to_contain_text("Saved to", timeout=5000)
 
+    def test_write_failed_surfaces_top_of_app_banner_then_clears(
+        self, folder_page, base_url_fixture
+    ):
+        """#221 — a failed folder write must surface as the top-of-app
+        banner, not only the Settings pill. A user mid-edit who never opens
+        Settings would otherwise never learn their last change wasn't saved.
+        The banner auto-clears when the next write succeeds.
+
+        Same lock-contention mechanism as the badge test above: hold the
+        folder-write lock from page JS so the worker's post-commit write
+        fails fast; a mutation flips the banner to its error variant;
+        releasing the lock + mutating again clears it.
+        """
+        self._pick_folder_and_seed_group_a(folder_page, base_url_fixture)
+        banner = folder_page.locator("#folder-push-banner")
+        # Baseline: folder picked + last write saved → banner hidden (not
+        # write-failed, and the set-up-folder nag doesn't apply once a
+        # folder exists).
+        folder_page.wait_for_function(
+            "() => { var el = document.getElementById('folder-push-banner');"
+            "        return el && el.classList.contains('hidden'); }",
+            timeout=5000,
+        )
+        # Block the next folder write, then mutate.
+        folder_page.evaluate("() => window.__holdFolderLockForever()")
+        full = folder_page.evaluate("() => window.__dataProvider.getFull()")
+        rids_b = [f["record_id"] for f in full[3:6]]
+        folder_page.evaluate(
+            "(rids) => window.__dataProvider.createGroup({"
+            "name: 'Banner test B', note: '', fellow_record_ids: rids})",
+            rids_b,
+        )
+        # createGroup's afterFolderMutation hook re-evaluates the banner; it
+        # flips to the urgent error variant once the (awaited) post-commit
+        # write has recorded lastError.
+        folder_page.wait_for_function(
+            "() => { var el = document.getElementById('folder-push-banner');"
+            "        return el && !el.classList.contains('hidden')"
+            "               && el.classList.contains('folder-push-banner--error'); }",
+            timeout=5000,
+        )
+        expect(banner).to_be_visible()
+        expect(banner.locator(".folder-push-banner-lead")).to_contain_text(
+            "Your latest change"
+        )
+        expect(banner.locator(".folder-push-banner-detail")).to_contain_text(
+            "Another window"
+        )
+        expect(folder_page.locator("#folder-push-cta")).to_have_text("Open Settings")
+        # The unsaved-data warning must not be dismissable.
+        assert folder_page.evaluate(
+            "() => document.getElementById('folder-push-dismiss').hidden"
+        ), "dismiss button must be hidden in the write-failed banner"
+        # Recover: release the lock + a fresh group mutation re-attempts the
+        # write. (A group mutation, not setSetting — setSetting isn't wrapped
+        # with the post-mutation banner refresh; see the worker data provider.)
+        assert folder_page.evaluate("() => window.__releaseFolderLock()") is True
+        folder_page.evaluate(
+            "() => window.__dataProvider.createGroup({"
+            "name: 'Banner recovery C', note: '', fellow_record_ids: []})"
+        )
+        # Banner auto-clears once the write succeeds (badge leaves
+        # write-failed → falls through to the hidden branch).
+        folder_page.wait_for_function(
+            "() => { var el = document.getElementById('folder-push-banner');"
+            "        return el && el.classList.contains('hidden'); }",
+            timeout=5000,
+        )
+
     def test_tab_close_with_pending_write_failure_preserves_folder_state(
         self, folder_page, base_url_fixture, context
     ):
