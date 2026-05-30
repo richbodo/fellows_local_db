@@ -3576,6 +3576,99 @@ a.group-action-btn--primary {
   padding-left: 1.25rem;
 }
 
+/* --- Cloud-LLM informed-consent gate (issue #156) ------------------
+   One-time scroll-then-accept agreement shown before the first
+   Claude Desktop setup. The scrollable region forces the user past
+   the two risk points; the accept checkbox + Continue button stay
+   disabled until they've engaged with it. Later re-downloads show
+   the one-line reminder instead. */
+.settings-mcpb-agreement {
+  max-height: 40vh;
+  overflow-y: auto;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin: 0 0 0.75rem;
+  background: #fff;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: #334155;
+}
+
+.settings-mcpb-agreement ol.settings-mcpb-agreement-points {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.settings-mcpb-agreement ol.settings-mcpb-agreement-points li {
+  margin-bottom: 0.85rem;
+}
+
+.settings-mcpb-agreement ol.settings-mcpb-agreement-points li:last-child {
+  margin-bottom: 0;
+}
+
+.settings-mcpb-agreement-foot {
+  margin: 0.85rem 0 0;
+  padding-top: 0.75rem;
+  border-top: 1px dashed #cbd5e1;
+  color: #475569;
+}
+
+.settings-mcpb-consent-accept {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0 0 0.4rem;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text-strong, #0f172a);
+  cursor: pointer;
+}
+
+.settings-mcpb-consent-accept input[type="checkbox"] {
+  margin-top: 0.15rem;
+  flex: 0 0 auto;
+}
+
+.settings-mcpb-consent-accept input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+}
+
+.settings-mcpb-consent-scroll-hint {
+  margin: 0 0 1rem;
+  font-size: 0.82rem;
+  color: #64748b;
+}
+
+.settings-mcpb-consent-reminder {
+  margin: 0 0 1rem;
+  padding: 0.6rem 0.85rem;
+  border: 1px solid #d8d2e8;
+  border-radius: 6px;
+  background: #faf9fc;
+}
+
+.settings-mcpb-consent-reminder-line {
+  margin: 0 0 0.4rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: #334155;
+}
+
+.settings-mcpb-consent-reminder .settings-mcpb-bundle-details {
+  margin-top: 0;
+}
+
+/* Disabled Continue button — make the locked state visually obvious
+   so it doesn't read as a dead button. */
+.settings-folder-dialog-primary:disabled,
+.settings-folder-dialog-primary:disabled:hover {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: none;
+}
+
 .settings-restore-migrate-hint {
   font-size: 0.85rem;
   margin-top: 0.5rem;

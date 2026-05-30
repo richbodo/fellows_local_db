@@ -455,6 +455,22 @@
     persistMcpbSetupState(state);
   }
 
+  // One-time informed-consent gate for wiring the directory to a cloud
+  // LLM (Claude Desktop). Connecting the MCP servers sends fellows data
+  // — potentially including private groups/notes — to a SaaS vendor,
+  // which breaks the app's never-SaaS commitment. We record consent
+  // ONCE (a `consentAt` ISO timestamp on the existing
+  // fellows_mcpb_setup state) so the first setup shows the full
+  // scroll-then-accept agreement and later re-downloads show only a
+  // one-line reminder. Consent is recorded the moment the user accepts
+  // (before downloads start) so a user who accepts but cancels the
+  // browser download prompt still won't re-see the full gate.
+  function recordMcpbConsent() {
+    var state = getMcpbSetupState() || {};
+    if (!state.consentAt) state.consentAt = new Date().toISOString();
+    persistMcpbSetupState(state);
+  }
+
   function initBuildBadge() {
     var clientEl = document.getElementById('build-badge-client');
     if (clientEl) clientEl.textContent = 'app: ' + FELLOWS_UI_DIAG;
@@ -8803,9 +8819,65 @@
             '<strong>Your browser:</strong> the easy install works on Chrome, Edge, Brave, and Arc. ' +
             'Safari and Firefox need the manual setup linked above.' +
           '</p>' +
+          // REMINDER mode (shown only when consent was already recorded):
+          // one-line reminder + a "Review full terms" toggle that
+          // re-reveals the full agreement. Hidden by default; shown by
+          // openPreamble() when state.consentAt exists.
+          '<div id="settings-mcpb-consent-reminder" class="settings-mcpb-consent-reminder" hidden>' +
+            '<p class="settings-mcpb-consent-reminder-line">' +
+              'Connecting Claude Desktop routes your fellows data to a cloud LLM (Anthropic). ' +
+              '<span id="settings-mcpb-consent-reminder-when"></span>' +
+            '</p>' +
+            '<details class="settings-mcpb-bundle-details">' +
+              '<summary>Review full terms</summary>' +
+              '<div id="settings-mcpb-consent-reminder-terms"></div>' +
+            '</details>' +
+          '</div>' +
+          // FULL-GATE mode: the two-point agreement in a scrollable
+          // region. The user must scroll to the bottom (or the region
+          // must be short enough to not scroll) to enable the accept
+          // checkbox, which in turn enables Continue.
+          '<div id="settings-mcpb-consent-gate">' +
+            '<h5 class="settings-mcpb-section-title">Before you connect a cloud AI — please read</h5>' +
+            '<div id="settings-mcpb-agreement" class="settings-mcpb-agreement" tabindex="0">' +
+              '<ol class="settings-mcpb-agreement-points">' +
+                '<li>' +
+                  '<strong>You’re leaving the local-only model.</strong> ' +
+                  'Local AI is hard for most people to run, and Claude Desktop is the option nearly everyone actually wants. ' +
+                  'But connecting it sends your fellows data — potentially including your private groups and notes — ' +
+                  'to a SaaS vendor (Anthropic). No one can guarantee what a SaaS vendor will or won’t do with data you send it. ' +
+                  'This breaks the central promise of a personal-network app: that it never talks to a SaaS server. ' +
+                  'You have to be OK with that to continue.' +
+                '</li>' +
+                '<li>' +
+                  '<strong>MCP and LLMs are new, and can misbehave.</strong> ' +
+                  'MCP integrations are very new. We wrote these extensions to do only benign, read-only things, and the code is auditable — ' +
+                  'but an LLM driving them can still make mistakes or hit bugs. You accept the risk that something could go wrong with your fellows database. ' +
+                  'The good news: these extensions only touch two files, and both are recoverable. ' +
+                  'You can always re-download the shared directory, and you can restore your private data (groups, notes) from a backup or export. ' +
+                  'So the worst case is recoverable — but this still isn’t the spirit of a local-only app, and you have to accept that risk.' +
+                '</li>' +
+              '</ol>' +
+              '<p class="settings-mcpb-agreement-foot">' +
+                'When you open each extension, <strong>Claude Desktop will show its own scary, vague warning</strong> ' +
+                'that the extension “can access everything on your computer.” That message is Claude Desktop’s, not ours, ' +
+                'and it’s far broader than what actually happens. <strong>The accurate description is the one above:</strong> ' +
+                'the real tradeoff is your data crossing to a cloud LLM plus the newness of LLM-driven tools — ' +
+                'and the extensions themselves only read the two fellows files.' +
+              '</p>' +
+            '</div>' +
+            '<label class="settings-mcpb-consent-accept">' +
+              '<input type="checkbox" id="settings-mcpb-consent-checkbox" disabled>' +
+              '<span>I understand and accept these risks.</span>' +
+            '</label>' +
+            '<p id="settings-mcpb-consent-scroll-hint" class="settings-mcpb-consent-scroll-hint">' +
+              'Scroll to the end of the text above to enable the checkbox.' +
+            '</p>' +
+          '</div>' +
           '<div class="settings-mcpb-warning settings-mcpb-warning--banner">' +
             '<strong>Installing will grant this extension access to everything on your computer.</strong> ' +
-            'Nothing is wrong. The extensions only read fellows data. Click <strong>Install</strong> to proceed.' +
+            'That is Claude Desktop’s generic warning, not a description of what these extensions do — they only read fellows data. ' +
+            'Click <strong>Install</strong> to proceed.' +
           '</div>' +
           '<h5 class="settings-mcpb-section-title">What happens next</h5>' +
           '<ol class="settings-mcpb-steps">' +
@@ -8817,7 +8889,7 @@
             '<li>Test by asking Claude: <em>"How many fellows are in the directory?"</em></li>' +
           '</ol>' +
           '<menu class="settings-folder-dialog-actions">' +
-            '<button type="submit" value="continue" class="settings-folder-dialog-primary" id="settings-mcpb-preamble-continue">Continue — start downloads</button>' +
+            '<button type="submit" value="continue" class="settings-folder-dialog-primary" id="settings-mcpb-preamble-continue" disabled>Continue — start downloads</button>' +
             '<button type="submit" value="cancel" class="settings-folder-dialog-cancel">Cancel</button>' +
           '</menu>' +
           '<details class="settings-mcpb-bundle-details">' +
@@ -9232,6 +9304,16 @@
     var folderWarning = document.getElementById('settings-mcpb-preamble-folder-warning');
     var browserWarning = document.getElementById('settings-mcpb-preamble-browser-warning');
     var continueBtn = document.getElementById('settings-mcpb-preamble-continue');
+    var consentGate = document.getElementById('settings-mcpb-consent-gate');
+    var agreementEl = document.getElementById('settings-mcpb-agreement');
+    var consentCheckbox = document.getElementById('settings-mcpb-consent-checkbox');
+    var scrollHint = document.getElementById('settings-mcpb-consent-scroll-hint');
+    var consentReminder = document.getElementById('settings-mcpb-consent-reminder');
+    var consentReminderWhen = document.getElementById('settings-mcpb-consent-reminder-when');
+    var consentReminderTerms = document.getElementById('settings-mcpb-consent-reminder-terms');
+    // Tracks the mode the currently-open dialog is in so the close
+    // handler knows whether to record consent before downloading.
+    var preambleMode = 'gate';
     if (!setupBtn || !dialog) return;
 
     function setStatus(text) {
@@ -9279,8 +9361,67 @@
       // there alongside the app + directory-data version rows.
     }
 
+    // --- Consent gate (full-gate mode) helpers ----------------------
+    // The accept checkbox is locked until the agreement is scrolled to
+    // the bottom. ACCESSIBILITY FALLBACK: if the agreement region isn't
+    // actually scrollable (content fits, short viewport, zoom), treat
+    // the scroll condition as already satisfied so the checkbox is
+    // never permanently locked. Checked on render + on resize + on
+    // scroll.
+    function agreementScrolledToEnd() {
+      if (!agreementEl) return true;
+      // Not scrollable → nothing to scroll → condition satisfied.
+      if (agreementEl.scrollHeight <= agreementEl.clientHeight + 1) return true;
+      // Within a few px of the bottom counts as "read to the end" —
+      // sub-pixel rounding and momentum scrolling rarely land exactly.
+      return (agreementEl.scrollTop + agreementEl.clientHeight) >=
+        (agreementEl.scrollHeight - 4);
+    }
+
+    function syncConsentScrollState() {
+      if (preambleMode !== 'gate') return;
+      var atEnd = agreementScrolledToEnd();
+      if (consentCheckbox) consentCheckbox.disabled = !atEnd;
+      if (scrollHint) scrollHint.hidden = atEnd;
+    }
+
+    function syncContinueEnabled() {
+      if (!continueBtn) return;
+      if (preambleMode === 'reminder') {
+        continueBtn.disabled = false;
+        return;
+      }
+      // Full-gate mode: Continue requires the accept checkbox checked
+      // (which itself requires the agreement scrolled to the end).
+      continueBtn.disabled = !(consentCheckbox && consentCheckbox.checked);
+    }
+
     function openPreamble() {
       if (!dialog) return;
+      // FULL GATE vs REMINDER: a recorded `consentAt` means the user has
+      // already accepted the cloud-LLM tradeoff once; we don't re-gate
+      // them, just remind. No `consentAt` → full scroll-then-accept gate.
+      var state = getMcpbSetupState();
+      var hasConsent = !!(state && state.consentAt);
+      preambleMode = hasConsent ? 'reminder' : 'gate';
+      if (consentGate) consentGate.hidden = hasConsent;
+      if (consentReminder) consentReminder.hidden = !hasConsent;
+      if (hasConsent) {
+        if (consentReminderWhen) {
+          consentReminderWhen.textContent =
+            'You accepted this ' + formatRelativeTime(state.consentAt) + '.';
+        }
+        // Lift the full agreement copy into the "Review full terms"
+        // toggle so reminder-mode users can re-read it without losing
+        // the gate markup. Clone keeps a single source of truth.
+        if (consentReminderTerms && agreementEl) {
+          consentReminderTerms.innerHTML = agreementEl.innerHTML;
+        }
+      } else {
+        // Reset gate controls for a fresh first-time render.
+        if (consentCheckbox) consentCheckbox.checked = false;
+        if (agreementEl) agreementEl.scrollTop = 0;
+      }
       // Decide which warnings to surface BEFORE opening so first
       // render is correct. The folder check is async (worker RPC); the
       // browser check is sync.
@@ -9303,12 +9444,23 @@
           }, function () {});
         }
       } catch (e) {}
-      try { dialog.showModal(); }
+      try {
+        dialog.showModal();
+        // scrollHeight/clientHeight are only meaningful once the dialog
+        // is laid out, so sync the gate after showModal(). This applies
+        // the a11y fallback (short/unscrollable agreement → checkbox
+        // unlocked immediately) on first paint.
+        syncConsentScrollState();
+        syncContinueEnabled();
+      }
       catch (e) {
         // Fallback for browsers without <dialog> support — surface as
         // a confirm() so the user can at least proceed past the
-        // preamble. The actual download trigger still works.
-        if (window.confirm('Set up Claude Desktop integration — three .mcpb files will download. Proceed?')) {
+        // preamble. We still honor the consent record: in full-gate
+        // mode, accepting the confirm() counts as consent and is
+        // recorded before downloads start.
+        if (window.confirm('Connecting Claude Desktop sends your fellows data — potentially including private groups and notes — to a cloud LLM (Anthropic). This leaves the local-only model. Three .mcpb files will download. Proceed?')) {
+          if (preambleMode === 'gate') recordMcpbConsent();
           runMcpbDownloads();
         }
       }
@@ -9362,12 +9514,30 @@
     }
 
     setupBtn.addEventListener('click', openPreamble);
+    // Scroll within the agreement region unlocks the accept checkbox.
+    if (agreementEl) {
+      agreementEl.addEventListener('scroll', syncConsentScrollState);
+    }
+    // Re-evaluate the (non-)scrollable a11y fallback on resize/zoom —
+    // a wider viewport may make the agreement fit without scrolling.
+    window.addEventListener('resize', function () {
+      if (dialog && dialog.open) syncConsentScrollState();
+    });
+    // Checking the accept box is what enables Continue.
+    if (consentCheckbox) {
+      consentCheckbox.addEventListener('change', syncContinueEnabled);
+    }
     if (dialog) {
       dialog.addEventListener('close', function () {
         // <dialog>'s close event fires for any submit (including the
         // primary "Continue" button). returnValue carries the button's
         // value attribute — "continue" / "cancel" / empty (Esc).
         if (dialog.returnValue === 'continue') {
+          // Record consent BEFORE downloads start, and only when we
+          // showed the full gate. A user who accepts here but then
+          // cancels the browser's download prompt still won't re-see
+          // the full gate. Cancel/Esc records nothing.
+          if (preambleMode === 'gate') recordMcpbConsent();
           runMcpbDownloads();
         }
       });
