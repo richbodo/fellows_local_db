@@ -698,6 +698,50 @@ and it's far broader than what actually happens — the extensions only
 read the two fellows files. The accurate description of the real tradeoff
 is the agreement above.
 
+### PNA mode and the "not a PNA" banner
+
+Most of the time the Fellows app runs in **PNA mode**. PNA stands for
+*personal-network app*: the app lives entirely on your device and never
+talks to a SaaS server. That's the normal, safe state.
+
+Accepting the consent agreement and connecting Claude Desktop is a
+deliberate choice to **leave PNA mode**. Internally the app calls this
+the **EX-CLOUD-LLM exception** — a named exception to the local-only
+promise. While it's active, a persistent **red banner** sits at the top
+of the app:
+
+> **Going rogue — not a PNA.**
+
+The banner is how the app tells you which mode you're in, so you're never
+in cloud-AI mode without knowing it. It has two controls:
+
+- **What this means** opens an in-app explainer page (route
+  `#/exception/EX-CLOUD-LLM`; there's also an index at `#/exceptions`).
+  The explainer spells out what the exception relaxes — the
+  local-only / never-SaaS promise — what data is affected (the shared
+  directory, plus your private groups and notes if the private extension
+  is installed), and confirms that it's reversible.
+- **Dismiss** hides the banner. Dismissing is an **acknowledgement, not a
+  fix**: it does *not* return the app to PNA mode, and the dismissal
+  persists across reloads. You're still connected to the cloud AI — you've
+  just told the app you've seen the notice.
+
+### Returning to PNA mode
+
+Leaving PNA mode is reversible. You'll find a **Return to PNA mode**
+control in two places, shown only while the exception is active:
+
+- On the **What this means** explainer page, and
+- In **Settings → Claude Desktop integration**.
+
+Clicking it returns the app to PNA mode, removes the red banner, and
+**re-arms the consent gate** — so the next time you connect Claude
+Desktop, the app asks you to read and accept the agreement again.
+
+One honest caveat: returning to PNA mode stops *future* sharing, but it
+**cannot recall data already sent** to the cloud provider. It changes
+what happens from here on, not what's already left your device.
+
 ---
 
 ## Updates

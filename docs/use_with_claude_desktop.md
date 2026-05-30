@@ -105,6 +105,13 @@ The app records your consent **once**. The next time you click
 just a one-line reminder with a **Review full terms** link, and Continue
 works immediately.
 
+The agreement also names what you're turning on: the **EX-CLOUD-LLM
+exception**, a named exception to the app's local-only promise. The
+agreement links to an in-app explainer page (route
+`#/exception/EX-CLOUD-LLM`) that describes exactly what the exception
+relaxes, what data is affected, and how to reverse it. You don't need to
+read it to continue, but it's there if you want the full picture.
+
 This consent agreement is *not* the same as Claude Desktop's own install
 warning (the red "can access everything on your computer" banner). That
 one is Claude Desktop's, and it's far broader than what actually happens
@@ -117,6 +124,28 @@ into your Downloads folder - you need to find these files:
 - `shared_data_ops.mcpb`
 - `private_data_ops.mcpb`
 - `comms.mcpb`
+
+#### After you accept: the "Going rogue — not a PNA" banner
+
+The moment you accept the agreement, the app leaves **PNA mode** (its
+normal local-only state) by raising the **EX-CLOUD-LLM exception**. From
+then on a persistent **red banner** sits at the top of the app:
+
+> **Going rogue — not a PNA.**
+
+That's expected, not an error — it's how the app reminds you it's now
+wired to a cloud AI. The banner's **What this means** link opens the
+explainer page (route `#/exception/EX-CLOUD-LLM`). You can **Dismiss** the
+banner to hide it; dismissing is just an acknowledgement, so it stays
+gone across reloads but does *not* disconnect Claude Desktop.
+
+**This is reversible.** While the exception is active, a **Return to PNA
+mode** control appears both on the explainer page and in **Settings →
+Claude Desktop integration**. Clicking it removes the banner, puts the app
+back in local-only mode, and re-arms the consent agreement (so re-enabling
+the integration asks for consent again). The one caveat: returning to PNA
+mode stops future sharing but **cannot recall data already sent** to
+Anthropic.
 
 ### Step 3 — Open each .mcpb, approve in Claude Desktop, restart
 
