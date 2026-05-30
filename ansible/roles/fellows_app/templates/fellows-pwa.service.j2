@@ -17,6 +17,11 @@ RestartSec=3
 # reads server.py + helpers + fellows.db + static files. It never writes to
 # its own code tree. dist/ is listed in ReadWritePaths only as a safety net
 # for sqlite3 journal files; the server's query path is read-only in practice.
+# Files the service creates (sqlite WAL/journal under dist/) default to
+# world-readable without this — the one finding that drops
+# `systemd-analyze security fellows-pwa` below an otherwise-clean score.
+# 0077 makes new files owner-only.
+UMask=0077
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes

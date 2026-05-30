@@ -6,6 +6,7 @@
       - python3-venv
       - curl
       - ufw
+      - fail2ban
       - ca-certificates
       - gnupg
       - rsync
@@ -108,3 +109,35 @@
     group: root
     mode: "0644"
   notify: Restart sshd
+
+# Defence-in-depth on the SSH key (the operator key is the highest-value
+# credential — it can read fellows.db, the secrets env file, and push the
+# bundle to all users). Password auth is already off, so brute force can't
+# succeed; fail2ban's job here is to ban scanners/credential-stuffers early
+# and keep the auth log clean. backend=systemd because Ubuntu 24.04 has no
+# /var/log/auth.log by default — the sshd jail reads the journal. port binds
+# the jail to the non-standard SSH port from the inventory.
+- name: Configure fail2ban sshd jail
+  ansible.builtin.copy:
+    dest: /etc/fail2ban/jail.local
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible (roles/common). Do not edit by hand.
+      [DEFAULT]
+      backend = systemd
+      bantime = 1h
+      findtime = 10m
+      maxretry = 5
+
+      [sshd]
+      enabled = true
+      port = {{ ssh_listen_port }}
+  notify: Restart fail2ban
+
+- name: Ensure fail2ban is enabled and started
+  ansible.builtin.service:
+    name: fail2ban
+    state: started
+    enabled: true

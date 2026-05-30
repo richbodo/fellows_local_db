@@ -5,6 +5,16 @@
 #   - www.{{ globaldonut_domain }}    → 301 to apex
 {
 	email {{ caddy_admin_email }}
+	# Disable the Caddy admin API (default: localhost:2019, unauthenticated).
+	# Our config is fully static and applied by Ansible, so we never need the
+	# live admin/config API. Leaving it on gives any local process (e.g. an
+	# RCE'd app running as the `fellows` user) an unauthenticated control plane
+	# that can extract TLS private keys or rewrite routing post-foothold.
+	# Trade-off: `caddy reload` (graceful, API-driven) no longer works, so the
+	# caddy role's handler does a full `systemctl restart` instead (a brief
+	# connection blip on config change — negligible for this low-traffic,
+	# soon-to-be-retired distribution server).
+	admin off
 }
 
 {{ fellows_domain }} {
