@@ -485,15 +485,17 @@ class Handler(BaseHTTPRequestHandler):
         # so the panel renders cleanly in dev instead of showing a
         # network error. Mirrors the prod shape in `deploy/server.py`.
         if path == "/api/debug/diagnostics":
+            # Field set mirrors deploy/server.py's diagnostics body (dev/prod
+            # parity): config-presence booleans only, no exact allowlist size
+            # and no internal filesystem path.
             self.send_json(
                 {
                     "authActive": False,
-                    "allowlistHashCount": 0,
+                    "allowlistConfigured": False,
                     "sessionSecretConfigured": False,
                     "postmarkTokenConfigured": False,
                     "fellowsDbPresent": DB_PATH.is_file(),
                     "build": BUILD_META,
-                    "distRoot": str(APP_DIR),
                 }
             )
             return
