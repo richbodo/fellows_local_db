@@ -50,7 +50,7 @@ The trade-off this locks in:
 
 ### 2. "Strip sensitive fields, serve on-demand" — considered and rejected
 
-The original threat analysis (`security_review/2026-05-08_local_vs_saas_risk.md`, kept locally, gitignored) proposed stripping `contact_email` and `mobile_number` from the bundle and serving them via a new authenticated `GET /api/fellow-private/<slug>` endpoint. A device compromise would then leak the directory roster but not the contact-book.
+The original threat analysis (now published as [`docs/local_vs_saas_risk.md`](docs/local_vs_saas_risk.md)) proposed stripping `contact_email` and `mobile_number` from the bundle and serving them via a new authenticated `GET /api/fellow-private/<slug>` endpoint. A device compromise would then leak the directory roster but not the contact-book.
 
 Cut, for four reasons that compound:
 
@@ -94,7 +94,7 @@ Currently in flight or queued:
 - **Optional "lock my user data" toggle.** User-driven encryption-at-rest for `relationships.db` and its OPFS backups, surfaced as a "lock on quit?" prompt with an off-toggle. Not forced — peace-of-mind for paranoid moments (airport, lending the laptop, retiring a device).
 - **Operational hardening.** Maintainer workstation hardening doc, user-guide hygiene section ("your device is now the directory"), HSTS preload submission status check.
 
-These are tracked in `security_review/2026-05-08_local_vs_saas_risk.md` (kept locally; gitignored because it names concrete file paths and threat-model details that don't belong in the public-search index).
+The live recommendations checklist (done / outstanding / deliberately-not-done) is [`docs/securityaudit.md`](docs/securityaudit.md).
 
 ---
 
@@ -108,4 +108,4 @@ The threat model assumes:
 - Compromise of the maintainer's deploy pipeline is the worst plausible breach event by **impact** (poisoned bundle reaches all users); signed bundles are the partial answer.
 - Once distribution shuts down, "server compromise" stops being a category at all — the only remaining attack surface is the per-device installed app.
 
-For the full analysis with quantified estimates and a comparison to the SaaS alternative, see `security_review/2026-05-08_local_vs_saas_risk.md` (gitignored; ask the maintainer for a copy if you're doing security review work on this codebase).
+For the full analysis with quantified estimates and a comparison to the SaaS alternative, see [`docs/local_vs_saas_risk.md`](docs/local_vs_saas_risk.md).

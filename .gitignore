@@ -57,8 +57,3 @@ backup/*.zip
 
 # Ansible become-password temp files — never commit
 BECOME_PASS*
-
-# Security analyses, notes, and threat-model write-ups. Local-only by
-# default — these can name fields, hash schemes, and other internal
-# detail we don't want indexed publicly.
-security_review/
