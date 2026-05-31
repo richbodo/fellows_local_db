@@ -8,7 +8,7 @@ Universal PNA architecture — vocabulary, goals, the two-store ownership split,
 
 ## Spec conformance
 
-**Spec-Version:** [0.1 (draft)](https://github.com/richbodo/personal_network_toolkit/blob/main/CHANGELOG.md)
+**Toolkit-Version:** [0.1 (draft)](https://github.com/richbodo/personal_network_toolkit/blob/main/CHANGELOG.md) — the PNT version (spec + contracts + skill + lint + templates) this design was built and validated against.
 **Use case:** [Directory Archive](https://github.com/richbodo/personal_network_toolkit/blob/main/use_cases.md#directory-archive)
 
 ### Flavor — fellows's six axis picks
