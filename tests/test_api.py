@@ -36,6 +36,50 @@ def get(path, query=None):
     return r.status, ctype, raw.decode("utf-8")
 
 
+def get_headers(path):
+    """Return (status, {header: value}) for a GET, lowercasing header names."""
+    conn = HTTPConnection("127.0.0.1", PORT, timeout=5)
+    conn.request("GET", path)
+    r = conn.getresponse()
+    r.read()
+    headers = {k.lower(): v for k, v in r.getheaders()}
+    conn.close()
+    return r.status, headers
+
+
+@pytest.mark.usefixtures("app_server")
+class TestSecurityHeaders:
+    """Verifies the cross-origin isolation + CSP headers the app depends on.
+
+    AC-13 (COOP/COEP required) and the strict-CSP commitment: OPFS-SAH-Pool
+    gates SharedArrayBuffer/Atomics on crossOriginIsolated, so COOP/COEP must
+    be present on every response; the CSP is the XSS-exfil backstop. These are
+    set in app/server.py:Handler.end_headers and mirrored in deploy/server.py.
+    This test makes the AC test-backed rather than code-only, so a refactor
+    that drops a header fails loudly.
+    """
+
+    def test_coop_coep_present(self):
+        status, h = get_headers("/")
+        assert status == 200
+        assert h.get("cross-origin-opener-policy") == "same-origin"
+        assert h.get("cross-origin-embedder-policy") == "require-corp"
+
+    def test_strict_csp_present(self):
+        _, h = get_headers("/")
+        csp = h.get("content-security-policy", "")
+        assert "default-src 'self'" in csp
+        assert "script-src 'self' 'wasm-unsafe-eval'" in csp
+        assert "object-src 'none'" in csp
+        assert "frame-ancestors 'none'" in csp
+
+    def test_other_hardening_headers_present(self):
+        _, h = get_headers("/")
+        assert h.get("cross-origin-resource-policy") == "same-origin"
+        assert h.get("x-content-type-options") == "nosniff"
+        assert h.get("referrer-policy") == "strict-origin-when-cross-origin"
+
+
 @pytest.mark.usefixtures("app_server")
 class TestAPI:
     """API endpoint tests. Server started by session-scoped app_server fixture."""
