@@ -7987,6 +7987,12 @@
       return /iPad|iPhone|iPod|Android/.test(ua) ||
              (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     }
+    function isIOS() {
+      // iPadOS 13+ reports as desktop Safari (MacIntel) but exposes touch.
+      var ua = navigator.userAgent || '';
+      return /iPad|iPhone|iPod/.test(ua) ||
+             (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    }
     function triggerAnchorDownload() {
       return new Promise(function (resolve) {
         var url = URL.createObjectURL(blob);
@@ -8033,10 +8039,20 @@
       });
     }
 
-    // Mobile share sheet — only when the OS supports file shares
-    // and accepts this MIME. canShare guards both.
+    // iOS share sheet. iOS Safari historically ignores the <a download>
+    // attribute (it opens the file inline rather than saving it), so the
+    // Web Share API is the only reliable "save a file" path there.
+    //
+    // We deliberately do NOT take this branch on Android. Android's share
+    // sheet routes a .db (application/octet-stream) to Google Drive, which
+    // can't render it and shows "Couldn't load object" — the user's data
+    // never reaches local storage. On Android, navigator.canShare accepts
+    // the file (canShare returns true) so the old isMobileUA() gate sent
+    // every Android download down this dead end. Android instead falls
+    // through to the <a download> anchor below, which saves straight to
+    // the Downloads folder. canShare still guards iOS support + MIME.
     try {
-      if (isMobileUA() && navigator.canShare && typeof File === 'function') {
+      if (isIOS() && navigator.canShare && typeof File === 'function') {
         var file = new File([blob], filename, { type: blob.type || 'application/octet-stream' });
         if (navigator.canShare({ files: [file] })) {
           return navigator.share({ files: [file], title: filename })
