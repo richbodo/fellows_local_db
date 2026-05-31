@@ -15,6 +15,15 @@
 	# connection blip on config change — negligible for this low-traffic,
 	# soon-to-be-retired distribution server).
 	admin off
+	# Pin ACME to Let's Encrypt. Caddy's default is LE *plus a ZeroSSL
+	# fallback*, and ZeroSSL certs are issued by Sectigo — which the
+	# fellows.globaldonut.com CAA record (`issue "letsencrypt.org"`) forbids.
+	# So the fallback could never actually issue; pinning here makes Caddy's
+	# behaviour match the CAA, keeps issuance LE-only across every site in
+	# this file, and avoids confusing ZeroSSL-CAA-rejection log lines if LE
+	# ever has a transient hiccup. (90-day certs + ~30-day renewal runway mean
+	# a brief LE outage is not an availability risk.)
+	acme_ca https://acme-v02.api.letsencrypt.org/directory
 }
 
 {{ fellows_domain }} {

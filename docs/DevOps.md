@@ -402,19 +402,20 @@ Verify after publication (`just check-env` also runs this check and warns if it'
 dig +short CAA fellows.globaldonut.com   # expect the three lines above
 ```
 
-### HSTS preload submission
+### HSTS preload submission — considered and declined
 
-Caddy already sets `Strict-Transport-Security: max-age=31536000; includeSubDomains; preload` on both `fellows.globaldonut.com` and the `globaldonut.com` apex. The `preload` directive is necessary but not sufficient — Chrome/Firefox/Safari only honor it for sites on their **preload list**.
+Caddy already sets `Strict-Transport-Security: max-age=31536000; includeSubDomains; preload` on both `fellows.globaldonut.com` and the `globaldonut.com` apex. The header alone protects every **returning** visitor (the browser enforces HTTPS for a year after any one HTTPS visit). The `preload` directive additionally closes the **first-visit** window — but only for sites baked into the browsers' preload list, which requires a submission at <https://hstspreload.org/>.
 
-**Submit `fellows.globaldonut.com`, not the apex:**
+**Decision (2026-05-31): do not submit to the preload list. Keep the header.**
 
-<https://hstspreload.org/?domain=fellows.globaldonut.com>
+The reasoning:
 
-The form runs a series of checks (HSTS header with `includeSubDomains`+`preload`, redirect from HTTP to HTTPS, no expired certs); pass them, click submit. Inclusion lags by one major browser release (~6–10 weeks). Once on the list, every browser refuses HTTP for `fellows.globaldonut.com` from the very first visit, closing the "first HTTP request gets MITM'd before HSTS takes effect" window entirely.
+- **You cannot preload just the subdomain.** hstspreload.org rejects subdomain submissions outright ("`fellows.globaldonut.com` is a subdomain. Please preload `globaldonut.com` instead") — the list only accepts whole registrable domains. So the only available action is preloading the **entire `globaldonut.com` zone** with `includeSubDomains`.
+- **That's a permanent, zone-wide commitment for unrelated services.** `just ct-check` shows the zone hosts third-party properties the app doesn't control — `pitch.globaldonut.com` (Pitch, Google Trust certs), `notify.pitch.globaldonut.com` (delegated to `lovable.cloud`). Preloading the apex forces those, and every future subdomain, to be HTTPS-only forever; removal from the list takes months to propagate.
+- **The marginal benefit here is small.** The app's entry point is an **HTTPS** magic-link in email, modern browsers already default to HTTPS-first for typed addresses, the HSTS header already covers repeat visits, and CAA + signed bundles + the email fingerprint already defend cert mis-issuance and install integrity. Preload would only close a narrow "user manually types `http://` on a hostile network, on their very first contact, in a browser that doesn't do HTTPS-first" gap.
+- **The distribution server is temporary by design.** A preload entry on `globaldonut.com` would **outlive** the fellows app (which is meant to be wound down) and keep encumbering the apex and its other subdomains indefinitely. Encumbering the whole personal domain, semi-permanently, to harden a soon-to-retire delivery channel is a bad trade.
 
-> **Why the subdomain and not the apex.** Preloading the apex with `includeSubDomains` forces **every** current and future `*.globaldonut.com` subdomain to HTTPS-only in browsers that ship the list, and removal takes months to propagate. The zone is *not* just the Caddy sites — `just ct-check` shows third-party-hosted subdomains (e.g. `pitch.globaldonut.com`) and non–Let's-Encrypt issuers in the apex. Preloading the whole apex would bet that all of those — and anything you add later — stay HTTPS-only forever. Scoping the preload to `fellows.globaldonut.com` gets the full first-visit protection for the app while leaving the rest of the zone alone. Only preload the apex if you've confirmed every `globaldonut.com` subdomain is, and will remain, HTTPS-only.
-
-This is opt-in but free; do it once.
+The `preload` token is left in the header (it's inert without a list submission and keeps the door open). **Revisit only if** `globaldonut.com` ever becomes a single-owner, all-HTTPS zone with no third-party subdomains — then preloading the apex would be low-risk.
 
 ### Certificate Transparency monitoring (optional but recommended)
 
