@@ -159,3 +159,12 @@ def test_resolve_db_path_priority(monkeypatch, tmp_path):
     assert srv._resolve_db_path(None) == fake.resolve()
     monkeypatch.delenv("FELLOWS_DB_PATH")
     assert srv._resolve_db_path(None) == (REPO_ROOT / "app" / "fellows.db").resolve()
+
+
+def test_instructions_carry_cloud_llm_propagation_notice():
+    """EX-H7: the best-effort consent-propagation notice is surfaced to the
+    consuming client via the MCP `instructions` handshake."""
+    instr = srv.mcp.instructions or ""
+    assert "EX-CLOUD-LLM" in instr
+    assert "consent" in instr.lower()
+    assert "human" in instr.lower()

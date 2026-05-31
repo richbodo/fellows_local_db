@@ -179,3 +179,25 @@ class TestPnaExceptionMode:
         page.evaluate("location.hash = '#/exception/EX-BOGUS'")
         page.wait_for_selector(".exception-page", timeout=5000)
         expect(page.locator(".exception-page")).to_contain_text("Unknown exception")
+
+    def test_explainer_shows_per_dimension_strength_profile(
+        self, standalone_page, base_url_fixture
+    ):
+        """EX-H8: the explainer renders the per-dimension strength profile so
+        the user reads what is enforced vs best-effort vs out of our control."""
+        page = standalone_page
+        page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+        page.wait_for_function(
+            "() => window.__bootMarks && window.__bootMarks.get_full_done != null",
+            timeout=15000,
+        )
+        page.evaluate("location.hash = '#/exception/EX-CLOUD-LLM'")
+        page.wait_for_selector(".exception-strength", timeout=5000)
+        table = page.locator(".exception-strength")
+        expect(table).to_be_visible()
+        # The honest extremes must both be present: an enforced row and the
+        # "data already sent → none" row.
+        expect(table).to_contain_text("Data already sent")
+        expect(page.locator(".exception-strength .strength-enforced").first).to_be_visible()
+        expect(page.locator(".exception-strength .strength-best-effort").first).to_be_visible()
+        expect(page.locator(".exception-strength .strength-none")).to_be_visible()

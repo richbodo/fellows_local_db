@@ -1674,6 +1674,39 @@ h1 {
 .exception-canonical,
 .exception-back { font-size: 0.85rem; color: #555; margin-top: 1rem; }
 
+/* Per-dimension strength profile (EX-H8) on the exception explainer. */
+.exception-strength {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.5rem 0 1rem;
+  font-size: 0.9rem;
+}
+.exception-strength th,
+.exception-strength td {
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid #e6e6e6;
+  vertical-align: top;
+}
+.exception-strength th { font-weight: 600; color: #444; }
+
+.strength-badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+/* Green = we enforce it; blue = auditable; amber = depends on us asking /
+   only recoverable; red = outside our control / irreversible. */
+.strength-enforced { background: #e8f5e9; color: #1b5e20; }
+.strength-verifiable { background: #e7f1ff; color: #0b3d6b; }
+.strength-best-effort,
+.strength-recoverable-only { background: #fff7e6; color: #6b4500; }
+.strength-provider-asserted { background: #fde7d6; color: #8a4b1c; }
+.strength-none { background: #fdecea; color: #8a1c1c; }
+
 /* Settings → non-PNA-mode status + reversibility control. */
 .settings-mcpb-pna-mode {
   margin: 0.5rem 0;
