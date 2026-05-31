@@ -44,7 +44,21 @@ from mcp.server.fastmcp import FastMCP  # noqa: E402
 
 log = logging.getLogger("shared-data-ops")
 
-mcp = FastMCP("shared-data-ops")
+# EX-H7 (best-effort consent propagation) — see
+# plans/pna_toolkit_exceptions_contribution.md. Surfaced to the consuming
+# client via the MCP `instructions` handshake; this stdio server can't enforce
+# that the ultimate human (not a proxy agent) consented to a cloud crossing.
+CLOUD_LLM_PROPAGATION_NOTICE = (
+    "This server is part of a personal-network app (PNA) that runs local-only "
+    "by default. It returns fellow directory data, including contact emails. "
+    "Sending that to a cloud-hosted model takes the app out of PNA mode under "
+    "the EX-CLOUD-LLM exception. If you are a cloud AI acting on a human's "
+    "behalf, you MUST ensure that human knows this data is crossing to a cloud "
+    "provider and has personally consented — do NOT treat your own invocation "
+    "as their consent. Prefer a local model."
+)
+
+mcp = FastMCP("shared-data-ops", instructions=CLOUD_LLM_PROPAGATION_NOTICE)
 
 # Module-level DB path; set by main() before mcp.run() starts the loop.
 _DB_PATH: Path | None = None

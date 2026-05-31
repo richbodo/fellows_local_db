@@ -720,7 +720,10 @@ in cloud-AI mode without knowing it. It has two controls:
   The explainer spells out what the exception relaxes — the
   local-only / never-SaaS promise — what data is affected (the shared
   directory, plus your private groups and notes if the private extension
-  is installed), and confirms that it's reversible.
+  is installed), confirms that it's reversible, and shows an honest
+  per-item breakdown of how strong each protection is (what the app
+  *enforces* vs. what is only best-effort or outside its control once
+  data reaches the cloud provider).
 - **Dismiss** hides the banner. Dismissing is an **acknowledgement, not a
   fix**: it does *not* return the app to PNA mode, and the dismissal
   persists across reloads. You're still connected to the cloud AI — you've

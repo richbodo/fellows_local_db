@@ -495,6 +495,25 @@
   // lands upstream.
   var PNA_EXCEPTION_CANONICAL_URL = 'https://github.com/richbodo/personal_network_toolkit';
 
+  // Per-dimension strength profile for EX-CLOUD-LLM (handler clause EX-H8).
+  // The honest frame: once data crosses to the cloud, the app can guarantee
+  // nothing about the data itself — every real guarantee is about the
+  // *boundary* (consent, signaling, reversibility, auditability) and local
+  // recoverability. The explainer renders this so a user reads what is
+  // genuinely enforced vs best-effort vs out of our control. `cls` is one of
+  // the fixed strength classes (enforced / verifiable / best-effort /
+  // provider-asserted / recoverable-only / none).
+  var PNA_EXCEPTION_STRENGTH = [
+    { dim: 'Consent precedes turning it on', cls: 'enforced', why: 'Setup is blocked until you scroll the agreement and accept.' },
+    { dim: '“Not a PNA” signal while active', cls: 'enforced', why: 'The banner shows on every load until you return to PNA mode.' },
+    { dim: 'Reversible (return to PNA mode)', cls: 'enforced', why: 'The “Return to PNA mode” control clears the exception.' },
+    { dim: 'Extensions read-only, two files only', cls: 'verifiable', why: 'Databases opened mode=ro; auditable in the open-source code.' },
+    { dim: 'Local data damage from a bad AI step', cls: 'recoverable-only', why: 'Not prevented — but restorable from a backup or export.' },
+    { dim: 'Consent reaches you, not a proxy AI', cls: 'best-effort', why: 'We ask cloud clients to surface this; we can’t force them.' },
+    { dim: 'Provider won’t train on / keep your data', cls: 'provider-asserted', why: 'That’s the provider’s (Anthropic’s) policy — we can’t verify it.' },
+    { dim: 'Data already sent to the provider', cls: 'none', why: 'Once it has left your device it can’t be recalled.' }
+  ];
+
   // The app is in non-PNA mode while any exception is active. Today that
   // is exactly: the cloud-LLM consent has been recorded and not since
   // cleared by "return to PNA mode". Reversibility lives in
@@ -7092,6 +7111,24 @@
       'any time (below, or from Settings → Claude Desktop integration). ' +
       '<strong>But returning to PNA mode does not recall data already sent to the cloud ' +
       'provider</strong> — it only stops further sharing.</p>';
+    // Strength profile (EX-H8). Per-dimension, not a single grade: the
+    // boundary is strong, the data's fate after it crosses is not something
+    // we can guarantee. Read it so you know which is which.
+    html += '<h3>How strong is each protection?</h3>';
+    html += '<p>Once data crosses to a cloud AI, this app can’t guarantee anything about the ' +
+      'data itself. What it <em>can</em> stand behind is the boundary — consent, the signal, ' +
+      'reversibility, and that the code is auditable. Here is the honest per-item breakdown:</p>';
+    html += '<table class="exception-strength"><thead><tr>' +
+      '<th>What</th><th>How strong</th><th>Why</th></tr></thead><tbody>';
+    PNA_EXCEPTION_STRENGTH.forEach(function (row) {
+      html += '<tr>' +
+        '<td>' + escapeHtml(row.dim) + '</td>' +
+        '<td><span class="strength-badge strength-' + escapeHtml(row.cls) + '">' +
+          escapeHtml(row.cls) + '</span></td>' +
+        '<td>' + escapeHtml(row.why) + '</td>' +
+        '</tr>';
+    });
+    html += '</tbody></table>';
     if (active) {
       html += '<p class="exception-actions"><button type="button" id="exception-return-pna" ' +
         'class="exception-return-pna">Return to PNA mode</button></p>';

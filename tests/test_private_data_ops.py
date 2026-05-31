@@ -173,3 +173,13 @@ def test_read_only_enforcement():
             conn.execute("DELETE FROM f.fellows WHERE 1=1")
     finally:
         conn.close()
+
+
+def test_instructions_carry_cloud_llm_propagation_notice():
+    """EX-H7: the best-effort consent-propagation notice is surfaced to the
+    consuming client via the MCP `instructions` handshake — it names the
+    exception and tells a relaying agent the human must consent."""
+    instr = srv.mcp.instructions or ""
+    assert "EX-CLOUD-LLM" in instr
+    assert "consent" in instr.lower()
+    assert "human" in instr.lower()
