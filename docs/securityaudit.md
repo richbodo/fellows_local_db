@@ -111,15 +111,24 @@ CAA / HSTS / crt.sh tracked below):
   never on the laptop in plaintext; a documented recovery path if the laptop
   holding the (encrypted) signing key is lost. *(Was Tier-3 in the prior
   tracking; promoted here because live probing confirmed it is threat #1.)*
-- ☐ **CAA DNS records for `fellows.globaldonut.com`** (operator console).
-  Tooling + docs done — `just check-env` warns when CAA is missing, and
-  `docs/DevOps.md` § Supporting DNS has the exact three records. Remaining: paste
-  them into Cloudflare. **Scope to the `fellows` subdomain, not the apex** — see
-  the zone finding below.
-- ☐ **HSTS preload submission for `fellows.globaldonut.com`** (operator console)
-  at <https://hstspreload.org/?domain=fellows.globaldonut.com>. The header
-  already advertises `preload`; submit the **subdomain, not the apex** (see
-  finding). ~5 min; inclusion lags weeks.
+- ✅ **CAA DNS records for `fellows.globaldonut.com`** (done 2026-05-31). Three
+  records added in Cloudflare (`issue "letsencrypt.org"`, `issuewild ";"`, `iodef
+  "mailto:richbodo@gmail.com"`), scoped to the `fellows` subdomain. Verified live:
+  `dig` returns exactly those three (no Cloudflare-injected extras, since
+  `fellows` is DNS-only), apex/`pitch` CAA untouched, `just check-env` → "OK:
+  Let's Encrypt is authorized." Caddy pinned to LE to match (see below).
+- ✅ **Pin Caddy to Let's Encrypt** (in the open Caddy/HSTS PR). Caddy's default
+  is LE + a ZeroSSL (Sectigo) fallback that the new CAA would block anyway;
+  `acme_ca` now pins issuance to LE so Caddy's behaviour matches the CAA. Applies
+  via `just bootstrap`.
+- ⊘ **HSTS preload — considered and declined** (decided 2026-05-31). hstspreload.org
+  only accepts whole registrable domains, so the only option was preloading the
+  entire `globaldonut.com` zone — a permanent, zone-wide HTTPS-only commitment
+  binding third-party subdomains (`pitch`, `notify.pitch`) and outliving this
+  soon-to-retire app. Marginal benefit is small (HTTPS magic-link entry, browsers
+  default HTTPS-first, header already covers repeat visits, CAA + signed bundles
+  cover integrity). **Header retained; not submitted.** Full rationale +
+  revisit condition in `docs/DevOps.md` § HSTS preload submission.
 - ☐ **crt.sh email-alert signup** (operator console). The in-repo half is done
   (`just ct-check`); remaining is the push-alert subscription for same-day
   notice of any new issuance.
@@ -134,11 +143,12 @@ CAA / HSTS / crt.sh tracked below):
 > **Zone finding (`just ct-check`, 2026-05-30):** the `globaldonut.com` zone is
 > **not** Let's-Encrypt-only — `pitch.globaldonut.com` uses Google Trust
 > Services and the apex has appeared with a Sectigo cert. Consequences (now
-> reflected in `docs/DevOps.md`): **(a)** CAA must be scoped to
+> reflected in `docs/DevOps.md`): **(a)** CAA was scoped to
 > `fellows.globaldonut.com` — an apex Let's-Encrypt-only record would break those
-> other CAs' renewals; **(b)** HSTS preload should target the `fellows` subdomain,
-> not the apex — apex + `includeSubDomains` would force every zone subdomain
-> HTTPS-only, permanently. Re-run `just ct-check` periodically.
+> other CAs' renewals; **(b)** HSTS preload was **declined** — the list only
+> accepts the whole `globaldonut.com` apex, and apex + `includeSubDomains` would
+> force every zone subdomain (including the third-party ones) HTTPS-only,
+> permanently, for little marginal gain. Re-run `just ct-check` periodically.
 
 ### Deliberately not done — would need a different app
 
