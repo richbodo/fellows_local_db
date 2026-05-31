@@ -352,8 +352,9 @@ a portable file copy by hand:
 
 - **Download a backup.** Settings → Private data folder → *⬇ Download my
   private data*. Your browser asks you where to save it
-  (Chrome / Edge / Brave on desktop, share sheet on iOS / Android)
-  or drops it into your Downloads folder (Safari / Firefox).
+  (Chrome / Edge / Brave on desktop, share sheet on iOS)
+  or drops it straight into your Downloads folder
+  (Safari / Firefox / Android).
 - **Restore from a backup.** Settings → *Restore from backup →
   Restore from a file* → pick the `.db` file you downloaded earlier.
   The current data is captured into the auto-backup list first, so
@@ -549,8 +550,8 @@ action as the detail page.
 - **Private data folder → ⬇ Download my private data** — saves all
   your groups, notes, tags, and settings to a single `.db` file.
   Your browser opens its native save dialog (Chrome / Edge / Brave
-  on desktop) or share sheet (iOS / Android) so **you choose where
-  the file goes**; on Safari and Firefox the file lands in your
+  on desktop) or share sheet (iOS) so **you choose where the file
+  goes**; on Safari, Firefox, and Android the file lands in your
   Downloads folder. The app also auto-snapshots the same file before
   every upgrade and keeps the newest 3.
 - **Restore from backup → Restore from a file** — replace your current
