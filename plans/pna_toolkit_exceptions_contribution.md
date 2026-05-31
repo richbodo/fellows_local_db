@@ -59,8 +59,9 @@ The cloud-LLM tension then resolves into a third option:
 
 3. **Allow it as a caught, handled Exception** — `EX-CLOUD-LLM`. Consent gate before raising,
    persistent "not a PNA right now" signal while active, in-app explainer of the active exception
-   set, and a declared return-to-PNA-mode path. The app is honest, conformant *in non-PNA mode*,
-   and the user gets the feature they asked for with eyes open.
+   set, declared return-to-PNA-mode path, and **required user acceptance** (consent/signals reach the
+   human in the workspace — AI agents MUST NOT proxy-accept). The app is honest, conformant *in
+   non-PNA mode*, and the user gets the feature they asked for with eyes open.
 
 This is the same ship-and-iterate bias the project already runs on: rather than block the feature
 until local models are practical for 500 people, ship the honest non-PNA mode and refine the
@@ -85,7 +86,7 @@ accepted").
 | A condition that interrupts normal control flow | A condition under which a PNA departs from a baseline guarantee |
 | `raise` / `throw` | **Raised** by a specific user action (e.g. connecting a cloud MCP client) |
 | Uncaught exception crashes / leaks | A *silent* deviation is the failure mode — exceptions MUST be **caught** |
-| `try/except` handler | A defined **solution** (consent gate + signal + explainer + reversal path) |
+| `try/except` handler | A defined **solution** (consent gate + signal + explainer + reversal path + **required user acceptance**, not proxy acceptance) |
 | Stack trace identifies the exception | Every exception has a stable `EX-*` ID and a canonical definition |
 
 ### Raise / catch / handle
@@ -98,6 +99,34 @@ accepted").
   and a persistent signal is shown *while active*.
 - **Handle** — the app runs the exception's **solution**: the consent surface, the persistent
   signal, the active-exception explainer, and the declared reversibility path.
+
+### AI-as-proxy failure mode (required user acceptance)
+
+The first recommended solution component for less-faithful (non-PNA-mode) operation is **required
+user acceptance**: consent and ongoing exception notification MUST reach the **ultimate human user
+interface**, not be satisfied by an AI agent acting as proxy.
+
+When a cloud MCP client drives a PNA, the agent sits between the MCP servers and the human. EX-H2
+consent that lives only in the agent's chat transcript — or that the agent "accepts" on the user's
+behalf without opening the PNA workspace — is **proxy acceptance**, not the informed consent the
+handler contract requires. The same applies while an exception is active: EX-H3's persistent signal
+and EX-H4's explainer MUST be visible to the human in the workspace; an agent paraphrasing them in
+chat is not a substitute where the workspace is reachable.
+
+**Division of responsibility:**
+
+- **PNA (normative in `exceptions.md`):** consent and active-exception surfaces MUST be
+  human-reachable in the workspace; they MUST NOT be satisfiable solely by an MCP tool return value
+  or agent-side acknowledgment (EX-H7).
+- **AI agent (normative in `SKILL.md` § Principles + Evaluate flow):** when operating a PNA that
+  can raise an exception, the agent MUST propagate pre-raise consent prompts and active-exception
+  notifications to the user in the PNA workspace and MUST NOT substitute its own acceptance — where
+  viable (the workspace is installed and the user can reach it). If the agent cannot propagate
+  (headless-only install, no UI), it MUST refuse to raise or MUST surface the blocker explicitly;
+  it MUST NOT silently proceed in non-PNA mode.
+
+Future exceptions may add further solution components; **required user acceptance** is the first and
+applies to every exception whose raise or handling has a workspace UX surface.
 
 ### PNA mode vs non-PNA mode
 
@@ -169,6 +198,11 @@ is spec-conformant in non-PNA mode **iff** every active exception is handled to 
 
 PNT validates behaviors against the Goals; it does not certify. The evaluate flow detects
 exceptions and verifies how each is handled, reporting by `EX-*` ID.
+
+The first recommended solution component for exceptions with a workspace UX is **required user
+acceptance** (handler clause EX-H7): consent and active-exception notification MUST reach the
+human in the workspace; AI clients MUST NOT substitute proxy acceptance where the workspace is
+reachable.
 ```
 
 #### DRAFT — normative handler contract (RFC 2119; refined from the maintainer's brief)
@@ -200,10 +234,19 @@ For each exception it can raise, a conforming PNA:
   Reversibility refers to **MODE ONLY**: a handler MUST NOT imply that returning to PNA mode undoes
   consequences already incurred (e.g. data already disclosed to a third party).
 - **EX-H6 — Recommended solution.** SHOULD name a recommended solution in its registry entry,
-  demonstrated by a reference design.
+  demonstrated by a reference design. The first recommended solution component for exceptions with
+  a workspace UX is **required user acceptance** (EX-H7): see the registry entry's Recommended
+  solution column.
+- **EX-H7 — Required user acceptance, not proxy acceptance.** The consent surface (EX-H2) and,
+  while active, the persistent signal (EX-H3) and active-set explainer (EX-H4) MUST be reachable
+  by the human user in the workspace. They MUST NOT be satisfiable solely by an MCP tool return,
+  agent chat acknowledgment, or any proxy acting on the user's behalf. Where the workspace is
+  installed and reachable, an AI client driving the PNA MUST propagate these prompts and
+  notifications to that workspace UI; proxy acceptance MUST NOT count as consent or as
+  acknowledgment of the non-PNA-mode signal.
 ```
 
-> **Sub-contract IDs.** `EX-H1..EX-H6` follow PNT's existing sub-contract convention
+> **Sub-contract IDs.** `EX-H1..EX-H7` follow PNT's existing sub-contract convention
 > (`<prefix>-<integer>`, monotonic, never renumbered — see `PNA_Spec.md` § Sub-contracts per slot).
 > Using `EX-H*` keeps them distinct from the `EX-*` exception-registry IDs while staying in the
 > same family namespace. **Open question for the maintainer (§ 5): are sub-contract IDs wanted here,
@@ -245,7 +288,7 @@ design's handler declaration.
 
 | EX | Name | Relaxes | Stresses | Reversible | Recommended solution |
 |---|---|---|---|---|---|
-| EX-CLOUD-LLM | Cloud-hosted AI over PNA data | PNA-DEFINITION, AC-MCP-A | Goal 1 | yes (mode only) | pre-raise consent gate + persistent dismissable "not a PNA" banner + in-app active-exception explainer + return-to-PNA-mode — demonstrated by fellows_local_db |
+| EX-CLOUD-LLM | Cloud-hosted AI over PNA data | PNA-DEFINITION, AC-MCP-A | Goal 1 | yes (mode only) | required user acceptance (EX-H7) + pre-raise consent gate + persistent dismissable "not a PNA" banner + in-app active-exception explainer + return-to-PNA-mode — demonstrated by fellows_local_db |
 
 ### EX-CLOUD-LLM — Cloud-hosted AI over PNA data
 
@@ -259,11 +302,20 @@ Returning to PNA mode does NOT undo any disclosure already made to the cloud pro
 model, ChatGPT desktop) to a PNA's MCP servers that can return Private DB rows. The canonical
 trigger is the Private Data Ops server (see PNA_Spec.md § Vocabulary, MCP server).
 
-**Recommended solution:** pre-raise consent gate (EX-H2) + persistent dismissable "not a PNA right
-now" banner naming EX-CLOUD-LLM (EX-H3) + in-app active-exception explainer (EX-H4) +
-return-to-PNA-mode control (EX-H5). Demonstrated by `fellows_local_db`
-(reference_designs/fellows_local_db/).
+**Recommended solution:** required user acceptance — consent and active-exception UX MUST reach the
+human in the workspace, not proxy acceptance by the AI client (EX-H7) + pre-raise consent gate
+(EX-H2) + persistent dismissable "not a PNA right now" banner naming EX-CLOUD-LLM (EX-H3) +
+in-app active-exception explainer (EX-H4) + return-to-PNA-mode control (EX-H5). Demonstrated by
+`fellows_local_db` (reference_designs/fellows_local_db/).
 ```
+
+> **Why EX-H7 leads the solution list.** Cloud MCP is the canonical case where an AI agent can
+> interpose between the raise (Settings consent gate / MCP wiring) and the human. The workspace
+> consent gate in fellows is deliberately not an MCP tool — the human must open Settings and accept
+> there. AI agents operating the PNA MUST tell the user to do that and MUST NOT treat their own
+> tool-use approval or chat "OK" as raising the exception. Additional solution components for other
+> less-faithful modes may land in future registry entries; required user acceptance is the
+> cross-cutting first one.
 
 > **Table format and the lint.** Each registry row begins `| EX-... |`, mirroring the `| AC-X |`
 > rows the lint already scans. § 3c adds an `EX_RE` that mirrors `AC_RE` exactly.
@@ -392,7 +444,12 @@ ID. Add an exceptions pass. **Proposed wording**, inserted as a new step after t
     Architecture document's exception/handler table, or inferred from the source where undeclared):
     - **Caught & handled?** Confirm consent is obtained before the raise (EX-H2), a persistent
       non-PNA-mode signal is shown while active (EX-H3), and a runtime active-set explainer exists
-      (EX-H4). Cite the code/UX for each.
+      (EX-H4). Confirm required user acceptance (EX-H7): consent/signal/explainer are workspace-
+      reachable and not satisfiable by MCP-only or agent proxy. Cite the code/UX for each.
+    - **AI agent propagation?** When evaluating an AI-driven workflow (MCP client + PNA), confirm
+      the agent instructions / skill surface require propagating consent and active-exception
+      notification to the human workspace UI and forbid proxy acceptance where the workspace is
+      reachable. Cite SKILL.md § Principles or the candidate's operator docs.
     - **Reversibility claimed?** Read the `Reversible:` declaration. If `yes`, trace the declared
       `Reversal:` mechanism and decide whether the code/UX actually delivers a practical,
       user-reachable path back to PNA mode. Cite the control or route. Reversibility is MODE only —
@@ -409,6 +466,18 @@ grade" framing is explicit:
 ```markdown
 - **Validation, not certification.** Report findings — conformant/non-conformant/exception-handled
   — by AC or EX ID. There is no overall pass/fail grade and no badge.
+- **Required user acceptance, not proxy acceptance.** When driving or evaluating a PNA that can
+  raise an exception, propagate pre-raise consent and active-exception notifications to the human
+  in the PNA workspace; do not accept on the user's behalf where the workspace is reachable.
+```
+
+Also add one sentence to `PNA_Spec.md` § Building a PNA (alongside § 3d's validation callout).
+DRAFT:
+
+```markdown
+When an AI operates a PNA in non-PNA mode (an active Exception), it MUST propagate consent and
+active-exception notifications to the human user in the workspace and MUST NOT substitute proxy
+acceptance — see [`exceptions.md`](exceptions.md) EX-H7.
 ```
 
 The three-layer split the maintainer wants is then complete and explicit:
@@ -451,7 +520,7 @@ DRAFT row (Verification column is mandatory — see gap analysis):
 
 | EX | Handled? | Realization | Reversible | Verification | Status |
 |---|---|---|---|---|---|
-| EX-CLOUD-LLM | yes | Consent gate before a cloud MCP client can reach Private Data Ops; persistent dismissable "not a PNA right now" banner naming EX-CLOUD-LLM; in-app active-exception explainer route; "Return to PNA mode" control that disconnects the cloud client. Code: `mcp_servers/private_data_ops.py` (consent gate), `app/static/app.js` (banner + explainer route + return control). | yes (mode only) | LLM rubric: "trace the cloud-MCP code path; confirm consent precedes any Private-DB row return (EX-H2), a persistent signal naming EX-CLOUD-LLM is shown while active (EX-H3), the explainer route exists and lists the active set (EX-H4), and the return-to-PNA control disconnects the client (EX-H5)." Plus a deterministic test asserting the consent gate refuses Private-DB tools until consent is recorded. | conformant (once handler ships) / planned |
+| EX-CLOUD-LLM | yes | Required user acceptance (EX-H7): consent gate in Settings workspace UI only — not an MCP tool; persistent dismissable "not a PNA right now" banner naming EX-CLOUD-LLM; in-app active-exception explainer route; "Return to PNA mode" control that disconnects the cloud client. Code: `app/static/app.js` (consent gate + banner + explainer route + return control); MCP servers read consent state from shared storage. Operator docs: `docs/use_with_claude_desktop.md`, `mcp_servers/README.md` § Cloud LLM caveat. | yes (mode only) | LLM rubric: "trace the cloud-MCP code path; confirm consent is workspace-only and precedes any Private-DB row return (EX-H2, EX-H7 — agent chat approval does not count); a persistent signal naming EX-CLOUD-LLM is shown while active (EX-H3); the explainer route exists and lists the active set (EX-H4); the return-to-PNA control disconnects the client (EX-H5). Confirm operator docs instruct the AI to propagate consent to Settings, not proxy-accept." Plus deterministic tests: consent gate refuses Private-DB tools until consent is recorded; e2e `test_pna_exception_mode.py`. | conformant (once handler ships) / planned |
 | | | | | | |
 ```
 
@@ -563,7 +632,7 @@ plan. This document is the artifact the maintainer reviews; everything downstrea
    zero special-casing — cleaner lint, but it puts the foundational definition into the AC table,
    which may be conceptually heavier than wanted. Maintainer's call.
 
-5. **Handler clause IDs `EX-H1..EX-H6` (§ 3a).** Keep them as citable sub-contracts (recommended —
+5. **Handler clause IDs `EX-H1..EX-H7` (§ 3a).** Keep them as citable sub-contracts (recommended —
    the evaluate flow can cite "fails EX-H3") or leave the handler contract prose-only? If kept,
    confirm the `EX-H*` namespace doesn't collide with the `EX-*` registry namespace in the lint
    (the regexes in § 3c anchor registry IDs to `| EX-...` table rows, so `EX-H*` clauses in prose
@@ -583,4 +652,11 @@ plan. This document is the artifact the maintainer reviews; everything downstrea
    raised in a headless server the user isn't looking at? Worth flagging in the PR as a known
    limitation of the first handler even if fellows solves it pragmatically (e.g. the workspace polls
    or the MCP consent is recorded in a place the workspace reads).
-```
+
+8. **How far does EX-H7 reach beyond the PNA repo?** Required user acceptance splits cleanly:
+   the PNA MUST implement workspace-reachable consent (enforceable in code + e2e); the AI agent
+   MUST propagate (enforceable via SKILL.md + operator docs, verified in Evaluate flow). Should
+   PNT also add a one-line norm in `contracts/mcp-private-data-ops.schema.json` description
+   ("consent is workspace-only; MCP clients must not proxy-accept") or keep EX-H7 entirely in
+   `exceptions.md` + SKILL for v1? Recommend: `exceptions.md` + SKILL + operator docs first;
+   contract prose in a follow-on if a second exception needs it.
