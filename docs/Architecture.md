@@ -22,32 +22,68 @@ Universal PNA architecture — vocabulary, goals, the two-store ownership split,
 | [Comms transport set](https://github.com/richbodo/personal_network_toolkit/blob/main/axes.md#comms-transport-set) | `mailto-only` | `mailto:` (+ `tel:`) today; Signal planned. |
 | [MCP-exposure](https://github.com/richbodo/personal_network_toolkit/blob/main/axes.md#mcp-exposure) | `shared+private+comms` | `mcp_servers/` ships three stdio MCP servers for Claude Desktop and similar clients. |
 
+This section is fellows's **AC attestation table** — the Security Target role from the toolkit's
+[`ARCHITECTURE_TEMPLATE.md`](https://github.com/richbodo/personal_network_toolkit/blob/main/reference_designs/templates/ARCHITECTURE_TEMPLATE.md).
+Every applicable AC carries a **Realization** (how the code satisfies it), a **Verification** (the
+test, rubric, or human-review note that proves it), and a **Status**. Verification refs are
+`file::test_function` where a deterministic test exists; otherwise an LLM rubric or a human-review
+note is named (both acceptable per the template). Status is `conformant` / `partial-conformance` /
+`not-applicable`. Partial rows state honestly what is and isn't covered.
+
 ### Universal ACs
 
-All universal ACs from [PNA Spec § Universal architectural commitments](https://github.com/richbodo/personal_network_toolkit/blob/main/PNA_Spec.md#universal-architectural-commitments) apply — that's the definition of *universal*. The list (AC-1, AC-4, AC-6, AC-7, AC-9, AC-10, AC-11, AC-15, AC-16, AC-17, AC-18, AC-19, AC-PRM-A, AC-PRM-D, AC-MCP-A, AC-MCP-B) is the canonical reference.
+| AC | Realization | Verification | Status |
+|---|---|---|---|
+| AC-1 (two-store ownership split) | Two SQLite DBs: `fellows.db` (read-only contact data) + `relationships.db` (read-write, user-owned), separate OPFS files. `app/relationships.py:open_db()` ATTACHes fellows as `f` with `?mode=ro`; the worker owns the pair. | `tests/test_relationships.py::test_attach_fellows_readonly_allows_select`, `::test_attach_fellows_readonly_denies_write`; `tests/test_database.py` | conformant |
+| AC-4 (versioned cross-boundary handshake) | `WORKER_RPC_VERSION`/`RELATIONSHIPS_SCHEMA_VERSION` in `vendor/sqlite-worker.js`; `EXPECTED_WORKER_RPC_VERSION` in `app.js`; `refuseIfVersionSkew()` gates mutating RPCs on mismatch, reads still pass; build label is not the gate. | `tests/e2e/test_version_handshake.py::test_version_skew_refuses_mutations_but_allows_reads`; `tests/e2e/test_worker_rpc.py` | conformant |
+| AC-6 (always-reachable diagnostic escape) | `?gate=1` forces the email gate regardless of stuck state; Reset Everything + Clear App Cache `POST /api/logout` and reload. | `tests/e2e/test_email_gate.py`; `tests/e2e/test_reset_everything.py`; `tests/e2e/test_clear_app_cache.py` | conformant |
+| AC-7 (self-service field-debug substrate) | Build label (AC-15), `?diag=1` state-dump, sanitized error capture (`deploy/client_error_sanitizer.py`), bug-report flow, `?gate=1` escape, boot watchdog with named phase marks, slow-boot persistence. | `tests/e2e/test_diagnostics_panel.py`; `test_boot_watchdog.py`; `test_boot_error_panel.py`; `test_bug_report.py`; `test_boot_beacon.py` | conformant |
+| AC-9 (auto-backup of private data) | `vendor/sqlite-worker.js:maybeBackupRelationshipsDb()` — per-boot debounced (`BACKUP_DEBOUNCE_MS`), 5-slot rotation ring; folder mode writes the ring into the user folder. | `tests/e2e/test_user_folder_storage.py::test_snapshot_lands_in_folder_when_folder_mode_active`, `::test_opfs_to_folder_backup_migration_on_folder_boot`; restore via `tests/e2e/test_settings.py`. Debounce cadence by code inspection (LLM rubric). | conformant |
+| AC-10 (opt-in non-destructive re-imports) | About-page *Update directory data*; `previewFellowsDbSwap()`/`applyFellowsDbSwap()` preview `group_members` orphaned by the swap before commit; one-shot soft scan. | `tests/e2e/test_directory_data_update_flow.py::test_apply_with_group_impact_shows_dialog_and_can_cancel`, `::test_apply_with_group_impact_confirm_completes_swap`; `test_orphan_soft_scan.py`; `test_versioned_fellows_db.py` | conformant |
+| AC-11 (concurrent-access detection) | Worker `isOwnershipConflictError()` → `OWNERSHIP_CONFLICT` with a specific "another tab/window of this app is already open" message; Web Lock `fellows-relationships-folder-write` guards folder writes. | `tests/e2e/test_user_folder_storage.py::TestPhase2WriteLock::test_lock_held_during_write_surfaces_failure_then_recovers`; `test_worker_spawn_failure.py` | conformant |
+| AC-15 (build label tied to source revision) | `build/build_pwa.py:compute_build_label()` → `<YYYY-MM-DD>-<short-sha>`, stamped into `app.js`/`sw.js`/`vendor/sqlite-worker.js` at build time; `app/server.py` substitutes the same at serve time. | `tests/test_build_pwa.py`; `tests/e2e/test_update_check.py`; `test_bug_report.py` (asserts `app: <YYYY-MM-DD>-<sha>`); `test_boot_beacon.py` | conformant |
+| AC-16 (user-driven transport selection) | Group/fellow export surfaces `mailto:` (+ `tel:`); the user picks per outreach; no transport is hardcoded as the sole option. Axis pick is `comms-transport-set: mailto-only` (Signal planned). | `tests/e2e/test_groups_export.py`; `tests/test_comms.py` | partial-conformance (conformant to the `mailto-only` axis pick; richer transports planned) |
+| AC-17 (mirrored data is sourced) | `build/restore_from_knack_scrapefile.py` maps every column to a Knack `field_*` (raw_dump fallback); no contact data introduced beyond the configured Knack source. | `tests/test_database.py`; `build/diff_fellows_db.py` (bytewise vs `fellows.db.backup.2026-04-08`, via `just db-verify`); [`./data_provenance.md`](./data_provenance.md) (human review) | conformant |
+| AC-18 (transports cannot read message contents) | Only `mailto:` / `tel:` offered — no centralized SaaS message broker (Slack/Discord). `mailto:` hands to the user's client; MCP comms only stages a `mailto:` URL. | Architectural / human-review; `tests/test_comms.py` (stage-only, returns `mailto:` URL); `tests/test_private_data_ops.py` (`mode=ro`) | conformant |
+| AC-19 (user-visible payload before send) | Group export panel shows recipients + subject + body + merged data before launch, editable/cancelable; bulk shows recipient count + warning. | `tests/e2e/test_groups_export.py`; `tests/e2e/test_groups_compose.py` | conformant |
+| AC-PRM-A (LLM calls over user data are transports) | Cloud-LLM use is opt-in via the `EX-CLOUD-LLM` exception (consent gate → non-PNA mode); a local model is the default green path. Per-call prompt + merged-data visibility lives in the cloud client's own UI (the user drives Claude Desktop). | `tests/e2e/test_pna_exception_mode.py`; `test_mcpb_settings.py`; see Exception attestation below | partial-conformance (cloud opt-in via per-install consent; per-call prompt visibility is the cloud client's UI, not the workspace's) |
+| AC-PRM-D (re-ingestion is user-initiated) | Directory-data refresh is an explicit About-page button only; boot is install-only and never background-polls. | `tests/e2e/test_directory_data_update_flow.py`; `test_versioned_fellows_db.py::test_install_only_does_not_refetch_on_sha_mismatch` | conformant |
+| AC-MCP-A (cloud AI clients require consent for Private DB) | Realized as the `EX-CLOUD-LLM` exception: a workspace consent gate before the user wires up a cloud client + a persistent non-PNA-mode signal; `mcp_servers/private_data_ops.py` opens both DBs `mode=ro`. The stdio servers are not per-call gated by design (out-of-band from the workspace — see [`../plans/pna_toolkit_exceptions_contribution.md`](../plans/pna_toolkit_exceptions_contribution.md) open question). | `tests/e2e/test_pna_exception_mode.py`; `tests/test_private_data_ops.py` (`mode=ro`) | partial-conformance (per-session/per-install opt-in via `EX-CLOUD-LLM`; not per-call server-side gating) |
+| AC-MCP-B (MCP Communications stages; workspace launches) | `mcp_servers/comms.py:stage_email()` returns a `mailto:` URL + payload preview and never fires a transport; the user's mail client launches it. | `tests/test_comms.py::test_stage_email_basic_to`, `::test_stage_email_bcc_group_send` | conformant |
 
 ### Flavor-derived ACs triggered by fellows's picks
 
 Cross-referenced to the toolkit's [axes.md](https://github.com/richbodo/personal_network_toolkit/blob/main/axes.md):
 
-| AC | Triggered by | Fellows's realization |
-|---|---|---|
-| AC-2 (no SaaS surface) | `dist:web-bundle-with-magic-link` | `deploy/server.py` ships no per-user RW endpoints; the dev server's retired `/api/groups` and `/api/settings` were the only ones that ever existed (Phase 1 cutover). |
-| AC-3 (single OPFS owner) | `storage:opfs-sqlite-wasm` | `app/static/vendor/sqlite-worker.js` is the sole context that calls `navigator.storage.getDirectory` or opens a `FileSystemSyncAccessHandle`. |
-| AC-5 (stale session never locks users out of cache) | `dist:web-bundle-with-magic-link` (auth-gated) | Three-tier `window.__dataProvider` hot-swaps from `worker` → `api+idb` on 401/403 mid-boot; the cached directory stays readable. |
-| AC-8 (anti-enumeration + abuse-bounded analytics) | `dist:web-bundle-with-magic-link` + `debug:has-error-sink` | `deploy/server.py`'s auth endpoints return neutral payloads with per-IP rate limits; the `/api/client-errors` sink doubles as the analytics pipe via `kind=` allowlist. See [`./email_gate.md`](./email_gate.md). |
-| AC-12 (capability detection inside worker) | `storage:opfs-sqlite-wasm` | Worker `init` reports `opfsCapable`; main thread reads the field and renders the unsupported-browser panel rather than UA-sniffing. |
-| AC-13 (COOP/COEP required) | `storage:opfs-sqlite-wasm` + `dist:web-served` | Both dev and prod servers send `Cross-Origin-Opener-Policy: same-origin` + `Cross-Origin-Embedder-Policy: require-corp`. Caddy preserves them at the edge. |
-| AC-14 (SW never owns SQLite) | `dist:web-bundle-with-magic-link` (PWA) | `app/static/sw.js` is app-shell + update detection only; `/fellows.db` is explicitly bypassed in the fetch handler. |
+| AC | Triggered by | Realization | Verification | Status |
+|---|---|---|---|---|
+| AC-2 (no SaaS surface) | `dist:web-bundle-with-magic-link` | `deploy/server.py` ships no per-user RW endpoints; the dev server's retired `/api/groups` and `/api/settings` were the only ones that ever existed (Phase 1 cutover). | `tests/test_deploy_auth_round_trip.py::test_directory_api_is_403_without_session`; `test_deploy_sqlite_api.py`; `test_deploy_mcpb_routes.py` | conformant |
+| AC-3 (single OPFS owner) | `storage:opfs-sqlite-wasm` | `app/static/vendor/sqlite-worker.js` is the sole context that calls `navigator.storage.getDirectory` or opens a `FileSystemSyncAccessHandle`. | `tests/e2e/test_worker_rpc.py`; `test_worker_cold_start.py`; `test_local_first_boot.py` | conformant |
+| AC-5 (stale session never locks users out of cache) | `dist:web-bundle-with-magic-link` (auth-gated) | Three-tier `window.__dataProvider` hot-swaps `worker` → `api+idb` on 401/403 mid-boot; the cached directory stays readable. | `tests/e2e/test_offline_only_mode.py::test_returning_visit_renders_from_local_opfs_when_network_down`; `test_search_offline_fallback.py`; `test_local_first_boot.py` | conformant |
+| AC-8 (anti-enumeration + abuse-bounded analytics) | `dist:web-bundle-with-magic-link` + `debug:has-error-sink` | `deploy/server.py` auth endpoints return neutral payloads with per-IP rate limits (`deploy/magic_link_auth.py:check_rate_limit`); the `/api/client-errors` sink is sanitized (`deploy/client_error_sanitizer.py`). See [`./email_gate.md`](./email_gate.md). | `tests/test_magic_link_auth.py`; `test_deploy_auth_round_trip.py`; `test_deploy_client_errors.py`; `test_client_error_sanitizer.py` | conformant |
+| AC-12 (capability detection inside worker) | `storage:opfs-sqlite-wasm` | Worker `init` reports `opfsCapable`; the main thread reads the field and renders the unsupported-browser panel rather than UA-sniffing. | `tests/e2e/test_unsupported_browser.py::test_no_sah_falls_back_to_api_idb_provider`; `test_worker_cold_start.py` | conformant |
+| AC-13 (COOP/COEP required) | `storage:opfs-sqlite-wasm` + `dist:web-served` | Both dev (`app/server.py:Handler.end_headers`) and prod (`deploy/server.py`) send `Cross-Origin-Opener-Policy: same-origin` + `Cross-Origin-Embedder-Policy: require-corp` and a strict CSP. Caddy preserves them at the edge. | `tests/test_api.py::TestSecurityHeaders::test_coop_coep_present`, `::test_strict_csp_present`, `::test_other_hardening_headers_present` | conformant |
+| AC-14 (SW never owns SQLite) | `dist:web-bundle-with-magic-link` (PWA) | `app/static/sw.js` is app-shell + update/signature only; `/fellows.db` is explicitly bypassed in the fetch handler. | `tests/e2e/test_sw_post_caching.py`; `test_image_cache_no_bust.py` | conformant |
 
-### MCP-related ACs activated by `mcp-exposure:shared+private+comms`
+### ACs that are not applicable in fellows's flavor
 
-- **AC-MCP-A** active — the Private Data Ops server returns Private DB rows; cloud AI clients require per-call consent. See [`mcp_servers/README.md`](../mcp_servers/README.md) § Cloud LLM caveat.
-- **AC-MCP-B** active — Communications is exposed; `mcp_servers/comms.py` stages outreach (returns a `mailto:` URL) and never fires the transport directly.
+| AC | Reason |
+|---|---|
+| AC-PRM-B | Applies to `ingestion:multi-source-merge-with-dedup`; fellows is single-source (`single-source-static-mirror`). |
+| AC-PRM-C | Applies to `storage:native-sqlite-via-filesystem`; fellows uses `opfs-sqlite-wasm`. |
 
-### ACs that are vacuous in fellows's flavor
+Picks fellows did not take on other axes carry their own flavor-derived ACs in [axes.md](https://github.com/richbodo/personal_network_toolkit/blob/main/axes.md); none fire here.
 
-For a reader auditing conformance: AC-PRM-B and AC-PRM-C don't apply (fellows is single-source and uses OPFS, not native SQLite). Picks fellows did not take on other axes (e.g. `ingestion:multi-source-merge-with-dedup`, `storage:native-sqlite-via-filesystem`) carry their own flavor-derived ACs in [axes.md](https://github.com/richbodo/personal_network_toolkit/blob/main/axes.md); none fire here.
+### Exception attestation (non-PNA mode)
+
+fellows raises one PNA **Exception** — `EX-CLOUD-LLM` — when the user wires the directory to a
+cloud LLM (Claude Desktop MCP). See [`./architectural_findings.md`](./architectural_findings.md) for
+the discovery and [`../plans/pna_toolkit_exceptions_contribution.md`](../plans/pna_toolkit_exceptions_contribution.md)
+for the upstream-contribution plan (the handler contract `EX-H1..EX-H8`).
+
+| EX | Relaxes | Handled? | Realization | Verification | Status |
+|---|---|---|---|---|---|
+| EX-CLOUD-LLM | PNA-DEFINITION (local-only / never-SaaS), AC-MCP-A; stresses Goal 1 | yes; reversible (mode only) | Workspace-side handler: consent gate in Settings before the user wires up the cloud client (`recordMcpbConsent()`); persistent dismissable "Going rogue — not a PNA" banner naming the exception (`syncNotAPnaBanner()`, `index.html`); in-app explainer `#/exception/EX-CLOUD-LLM` with the per-dimension strength profile (`renderExceptionPage()`); "Return to PNA mode" control (`returnToPnaMode()`); `<body data-pna-mode/data-pna-exceptions>` machine-readable marker. Code: `app/static/app.js`, `app/static/index.html`. Servers stay `mode=ro` and are not per-call gated (EX-H7 propagation is a best-effort notice — planned). | `tests/e2e/test_pna_exception_mode.py` (`test_accepting_consent_enters_non_pna_mode_and_shows_banner`, `test_dismiss_hides_banner_but_stays_non_pna`, `test_banner_links_to_active_explainer`, `test_return_to_pna_mode_from_explainer_clears_exception`, `test_return_to_pna_mode_from_settings`, `test_explainer_route_when_inactive`, `test_unknown_exception_route`); `tests/e2e/test_mcpb_settings.py` | conformant for EX-H1–H5; EX-H7 (consent-to-human propagation) and EX-H8 (in-explainer strength profile surface) are best-effort / planned |
 
 ---
 
