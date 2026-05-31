@@ -722,6 +722,38 @@ handlers.init = async function () {
     ' (handle=' + (folderRecord.parentHandle ? 'yes' : 'no') +
     ' permission=' + folderPermission + ')');
 
+  // Mobile de-migration. The durable-folder feature is not offered on
+  // phones (see _isMobileWorker). If a folder handle survives — from a
+  // build that used to offer the picker on Android, or a desktop handle
+  // synced over — bring the worker back in line with the OPFS-only page
+  // UI rather than silently keep writing to a Downloads subfolder the UI
+  // claims doesn't exist. When the folder is readable, pull its (canonical
+  // in folder mode) bytes into the OPFS working buffer first; then retire
+  // the IDB handle and force OPFS-only for this and every future mobile
+  // session. The physical folder file is never deleted — clearFolderHandle
+  // only drops the IDB record — so it stays in Downloads as a recoverable
+  // artifact and this path cannot lose data.
+  if (_isMobileWorker() && folderRecord.parentHandle) {
+    if (folderPermission === 'granted') {
+      try {
+        await _hydrateOpfsBufferFromFolder();
+        trace('mobile de-migration: pulled folder data into OPFS before retiring handle');
+      } catch (e) {
+        trace('mobile de-migration: folder hydrate failed (' +
+          ((e && e.message) || e) +
+          '); folder file left in place, retiring handle anyway');
+      }
+    } else {
+      trace('mobile de-migration: folder permission=' + folderPermission +
+        ' — cannot read folder; retiring handle (folder file left in place)');
+    }
+    folderRecord = _emptyFolderRecord();
+    try { await _folderIdbDelete(); }
+    catch (e) { trace('mobile de-migration: folder IDB delete failed: ' + ((e && e.message) || e)); }
+    _storageMode = 'opfs';
+    folderPermission = 'no-handle';
+  }
+
   // Folder mode: one-time migration (if Phase 1 hybrid state exists)
   // for relationships.db, then OPFS→folder backup-ring migration, then
   // hydrate the OPFS working buffer from folder bytes. After this
@@ -1742,6 +1774,22 @@ var FOLDER_RELATIONSHIPS_FILE = 'relationships.db';
 // page) share the namespace, so a page-side test or future takeover-
 // handoff window cannot race the worker's _writeBytesToFolder.
 var FOLDER_WRITE_LOCK_NAME = 'fellows-relationships-folder-write';
+
+// True when this worker is running on a phone/tablet. The durable-folder
+// feature is NOT offered on mobile: Android's directory picker routes
+// through the Storage Access Framework, which forces the user into a
+// Downloads subfolder the OS can clear at will (so it fails the feature's
+// whole durability promise), and iOS has no directory picker at all. On
+// mobile the app is OPFS-only + manual backup. The page UI hides the
+// feature (see app.js isMobileDevice / folderStorageOffered); this lets the
+// worker make the same call so the two never disagree about storage mode.
+// Mirrors the UA/touch heuristic used page-side. Workers expose navigator.
+function _isMobileWorker() {
+  var ua = (self.navigator && self.navigator.userAgent) || '';
+  return /iPad|iPhone|iPod|Android/.test(ua) ||
+    (self.navigator && self.navigator.platform === 'MacIntel' &&
+     self.navigator.maxTouchPoints > 1);
+}
 
 // In-memory mirror of what's persisted in IDB. Reloaded on init, mutated
 // alongside every IDB write. Shape: see _emptyFolderRecord().

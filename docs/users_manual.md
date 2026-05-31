@@ -256,12 +256,21 @@ across clearing site data or switching browsers. The app prompts
 you to set this up via a banner at the top of the screen on first
 launch.
 
-If you skip the prompt or you're on a browser that doesn't support
-folder selection (Safari, Firefox, iOS, Android), the app falls
-back to **browser-only mode** — your data still works, but it lives
-in private browser storage that can be lost when you clear site
-data or switch browsers. Use the **Download a backup** feature
-(below) to make file copies you can save anywhere.
+If you skip the prompt, or you're on a browser without folder support
+(Safari and Firefox lack the API), or **you're on a phone or tablet**
+(the data folder is intentionally not offered on mobile — see below),
+the app runs in **browser-only mode** — your data still works, but it
+lives in private browser storage that can be lost when you clear site
+data or switch browsers. Use the **Download a backup** feature (below)
+to make file copies you can save anywhere.
+
+**On phones and tablets, browser-only is the only mode.** Android's
+folder picker can only reach a Downloads subfolder the system clears at
+will, and iOS has no picker at all — so a "data folder" there couldn't
+actually keep your data safe, and the app doesn't pretend otherwise.
+Your durability on mobile is the manual backup: **download a backup file
+and store it somewhere you trust** (your cloud drive, email it to
+yourself). See *[Backup and restore](#backup-and-restore-works-in-every-browser)*.
 
 ### Setting up a private data folder (Chrome / Edge / Brave on desktop)
 
@@ -341,9 +350,15 @@ current state of your data:
   appears across the top of the app — *"Your latest change wasn't
   saved."* — and clears itself the moment the next save succeeds.
 - **Browser-only — this browser doesn't support saving to a folder**
-  (yellow) — Safari, Firefox, iOS, and Android Chrome don't ship the
-  File System Access API. Use *Download my private data* (below) for
-  manual backup instead.
+  (yellow) — desktop **Safari** and **Firefox** don't ship the File
+  System Access API. Use *Download my private data* (below) for manual
+  backup instead.
+- **On phones, your data stays in this browser…** (yellow) — the
+  message you'll see on **any phone or tablet**. The data folder is
+  intentionally not offered on mobile (Android can only save into a
+  Downloads subfolder the system clears; iOS has no picker). The
+  *Download my private data* button right below the badge is your backup
+  path — use it and store the file somewhere you trust.
 
 ### Backup and restore (works in every browser)
 
@@ -378,8 +393,10 @@ offer to *Open existing*, and your groups / notes / tags come back.
 in Android Settings wipes everything this app has saved, including
 the auto-backups. On **iOS**, *Settings → Safari → Clear History and
 Website Data* does the same. Both bypass the app's own confirm
-dialogs — download a backup yourself before doing either. (Phones
-don't yet support the private data folder feature.)
+dialogs — download a backup yourself before doing either. (Phones run
+in browser-only mode by design — the private data folder is a
+desktop-only feature, so on a phone the downloaded backup is your only
+durable copy.)
 
 **Switching browsers or devices.** If you set up a private data
 folder inside a cloud-sync folder (Dropbox / iCloud Drive /

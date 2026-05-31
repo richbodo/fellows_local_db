@@ -1214,6 +1214,21 @@
   //     onIos: boolean,         // iPhone/iPad/iPod, including iPadOS desktop UA
   //     minVersion: number|null // floor for this browser, or null if unknown
   //   }
+  // True on phones/tablets. Used to gate the durable-folder feature, which
+  // we deliberately do NOT offer on mobile: Android's directory picker
+  // routes through the Storage Access Framework (forces a Downloads
+  // subfolder the OS can clear — failing the feature's durability promise)
+  // and iOS Safari has no directory picker at all. On mobile the app is
+  // OPFS-only + manual backup. The worker makes the same call in
+  // _isMobileWorker(); keep the two heuristics in sync. (downloadBlob has
+  // its own local isMobileUA() with the same shape — left in place to keep
+  // that self-contained function dependency-free.)
+  function isMobileDevice() {
+    var ua = (navigator && navigator.userAgent) || '';
+    return /iPad|iPhone|iPod|Android/.test(ua) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  }
+
   function detectBrowserSupport() {
     var ua = (navigator.userAgent || '');
     var onIos = /iPad|iPhone|iPod/.test(ua) ||
@@ -2849,7 +2864,9 @@
         lines.push('  (folder controller not initialized)');
       } else {
         var fState = await folderCtrl.getState();
-        lines.push('  browser supports showDirectoryPicker: ' + !!fState.supported);
+        lines.push('  showDirectoryPicker present: ' + !!fState.pickerApiPresent);
+        lines.push('  folder storage offered here: ' + !!fState.supported +
+          (fState.pickerApiPresent && !fState.supported ? ' (gated off on mobile)' : ''));
         lines.push('  worker reachable: ' + !!fState.workerAvailable);
         lines.push('  handle persisted: ' + !!fState.hasHandle);
         if (fState.hasHandle) {
@@ -8626,8 +8643,21 @@
   // Settings page consumes it through render-time callbacks.
 
   var FOLDER_CONTROLLER = (function () {
+    // Literal capability: does this browser expose the directory picker
+    // API? Kept truthful (not folded together with the mobile policy) so
+    // the diagnostics panel can report the real API presence — Android
+    // Chrome answers true here even though we don't offer the feature.
     function browserSupportsFolderPicker() {
       return typeof window.showDirectoryPicker === 'function';
+    }
+
+    // Policy: do we OFFER durable-folder storage in this environment? The
+    // API has to exist AND we're not on mobile (see isMobileDevice for the
+    // why). Everything user-facing — the Settings section, the picker, the
+    // folder-push banner, the badge — keys off this, while the worker
+    // enforces the matching OPFS-only mode in _isMobileWorker().
+    function folderStorageOffered() {
+      return browserSupportsFolderPicker() && !isMobileDevice();
     }
 
     function workerProvider() {
@@ -8657,7 +8687,8 @@
       var p = workerProvider();
       if (!p) {
         return Promise.resolve({
-          supported: browserSupportsFolderPicker(),
+          supported: folderStorageOffered(),
+          pickerApiPresent: browserSupportsFolderPicker(),
           workerAvailable: false,
           hasHandle: false,
           parentName: null,
@@ -8669,14 +8700,17 @@
         });
       }
       return p._getFolderState().then(function (raw) {
-        raw.supported = browserSupportsFolderPicker();
+        raw.supported = folderStorageOffered();
+        raw.pickerApiPresent = browserSupportsFolderPicker();
         raw.workerAvailable = true;
         return raw;
       });
     }
 
     // Compute the badge state from a state snapshot. Returns one of:
-    //   'unsupported'   — browser has no showDirectoryPicker.
+    //   'unsupported'   — folder storage isn't offered here (browser has no
+    //                     showDirectoryPicker, OR we're on mobile, where the
+    //                     feature is gated off — see folderStorageOffered).
     //   'browser-only'  — supported but no folder chosen.
     //   'saved'         — folder chosen and last write succeeded.
     //   'pending'       — folder chosen but no write yet (open-existing path).
@@ -8699,7 +8733,7 @@
     // Returns the FileSystemDirectoryHandle, or null on user-cancel /
     // unsupported.
     function pickParentFolder() {
-      if (!browserSupportsFolderPicker()) return Promise.resolve(null);
+      if (!folderStorageOffered()) return Promise.resolve(null);
       return window.showDirectoryPicker({ mode: 'readwrite', id: 'fellows-data-folder' })
         .catch(function (e) {
           // AbortError = user cancelled the picker. Treat as null, not a
@@ -8763,6 +8797,7 @@
 
     return {
       browserSupportsFolderPicker: browserSupportsFolderPicker,
+      folderStorageOffered: folderStorageOffered,
       getState: getState,
       badge: badge,
       pickParentFolder: pickParentFolder,
@@ -9901,6 +9936,18 @@
       if (!state) return;
       var b = FOLDER_CONTROLLER.badge(state);
       var copy = BADGE_COPY[b] || BADGE_COPY['browser-only'];
+      // The 'unsupported' badge serves two audiences: desktop Safari/Firefox
+      // (genuinely no directory-picker API) and phones (API may exist on
+      // Android, but we gate the feature off there). Give mobile users an
+      // accurate, actionable message instead of "this browser doesn't
+      // support it" — point them at the manual backup that IS their
+      // durability path on a phone.
+      if (b === 'unsupported' && isMobileDevice()) {
+        copy = {
+          text: 'On phones, your data stays in this browser. Use “Download my private data” below to keep a backup.',
+          cls: copy.cls
+        };
+      }
       var dotEl = badgeEl && badgeEl.querySelector('.settings-folder-badge-dot');
       var textEl = badgeEl && badgeEl.querySelector('.settings-folder-badge-text');
       if (badgeEl) {
@@ -9958,8 +10005,17 @@
       // the folder (cloud-sync conflicts, sneakernet to another machine,
       // etc., per issue #202). The renderSettingsPage init hides it
       // when localPersistenceAvailable is false.
+      //
+      // Gate this on WORKER availability, NOT on `supported` (folder
+      // offered). The two diverge wherever the folder feature is absent
+      // but the worker is alive: desktop Safari/Firefox (no picker API)
+      // and ALL mobile (gated off). In those environments the download is
+      // the only durability path the user has, so it must show — keying it
+      // off `supported` previously hid it for exactly the users who need
+      // it most.
+      var canDownload = (state.workerAvailable !== false);
       var dlBtn = document.getElementById('settings-download-userdata');
-      if (dlBtn && dlBtn.hidden && supported) {
+      if (dlBtn && dlBtn.hidden && canDownload) {
         // Only un-hide if we're not in the localPersistenceAvailable=false
         // path (which sets hidden=true on init). Heuristic: if the
         // fallback panel is shown, leave it hidden.

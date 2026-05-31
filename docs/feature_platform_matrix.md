@@ -24,7 +24,7 @@ If you're going to create groups and want a smooth experience, **install in one 
 | **Save groups, tags, notes** | yes | yes | yes | yes | yes | yes |
 | **Manual backup download** | yes | yes | yes | yes (share sheet) | yes | yes |
 | **Auto-backups** (in browser storage) | yes | yes | yes | yes | yes | yes |
-| **Private data folder** (stable file on disk for `relationships.db`) | yes | no[^3] | no[^3] | no | no | no |
+| **Private data folder** (stable file on disk for `relationships.db`) | yes | no[^3] | no[^3] | no | no[^5] | no[^5] |
 | **Claude Desktop AI integration — easy path** | yes | no | no | N/A[^4] | N/A | N/A |
 | **Claude Desktop AI integration — secondary path** | yes | yes (manual re-export per change) | yes (manual re-export per change) | N/A | N/A | N/A |
 | **Per-install codename** (debugging multi-install confusion) | yes | yes | yes | yes | yes | yes |
@@ -34,6 +34,7 @@ If you're going to create groups and want a smooth experience, **install in one 
 [^2]: Firefox dropped PWA install on desktop in 2021. You can use the app in a tab.
 [^3]: `window.showDirectoryPicker` is Chromium-only. Without it, the app uses in-browser OPFS storage with the manual backup / restore path for durability.
 [^4]: Claude Desktop is macOS / Windows / Linux only. Mobile platforms can't host MCP servers.
+[^5]: **Intentionally gated off on mobile, not an API gap.** Android Chrome *does* expose `showDirectoryPicker`, but it routes through the Storage Access Framework, which forces the file into a Downloads subfolder the OS can clear at will — so the folder can't keep the feature's core promise of *durable* storage, and offering the choice is misleading. On mobile (both Android and iOS) the app is OPFS-only; durability comes from the manual backup download. See *[The mobile contract](#the-mobile-contract)*.
 
 ## What "easy path" vs "secondary path" means
 
@@ -53,6 +54,39 @@ Browsers don't share storage. If you install the app in two
 browsers on the same device, you get two independent data stores.
 Recommended: **install in one browser only**. If you've already
 done multiple installs, see *[Migrating from another browser](users_manual.md#migrating-from-another-browser)*.
+
+## The mobile contract
+
+Phones and tablets can't provide a **stable, externally-readable file at a
+known path** — and several features are built on exactly that. So the mobile
+experience is deliberately narrower than desktop, and the line is
+architectural, not a "not yet":
+
+**What mobile does** — browse the directory, search, save groups / tags /
+notes, and **download a manual backup** of your data. That's the whole
+contract. Your `relationships.db` lives in the browser's private storage
+(OPFS); durability comes from exporting a backup file you store yourself.
+
+**What mobile can't do, and why:**
+
+- **Durable data folder** — Android's picker only reaches a Downloads
+  subfolder the OS can clear; iOS has no picker. A folder we can't trust to
+  persist would be worse than honest browser-only storage, because the
+  "saved to disk" badge would imply a safety that isn't there. Gated off on
+  both. (Footnote 5 above.)
+- **Claude Desktop / MCP integration** — Claude Desktop is desktop-only and
+  phones can't host an MCP server. (Footnote 4.)
+- **Anything that assumes external tools can read your data file** —
+  command-line `sqlite3`, a sync agent (Dropbox / iCloud / Syncthing)
+  replicating the folder, multi-client reads. All need a durable local file
+  mobile doesn't have.
+
+A note on OPFS durability on mobile: browser storage can be evicted (iOS
+notably reclaims it after long periods of non-use, and Android's *Clear
+Storage* wipes it). **The manual backup is the floor** — encourage it, and it
+must keep working. That's why the *Download my private data* button stays
+available on every mobile browser even though the data-folder feature is
+hidden.
 
 ## See also
 
