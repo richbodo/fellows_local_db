@@ -6014,13 +6014,16 @@
     }
     var slug = fellow.slug || '';
     var rid = fellow.record_id || '';
+    // EPIC PR6: phones get Email/Call CTAs near the top and no group
+    // affordance (groups have no phone UI).
+    var isPhone = isMobileDevice();
     var inDraft = !!(rid && groupDraft.members.has(rid));
     var leftTop = '';
     var leftRest = '';
 
     var demo = [fellow.gender_pronouns, fellow.ethnicity].filter(Boolean).join(' | ');
     leftTop += '<h2 class="detail-name">' + escapeHtml(name);
-    if (rid) {
+    if (rid && !isPhone) {
       var addLabel = inDraft ? 'remove from group' : 'add to group';
       leftTop += ' <a href="#" class="detail-add-to-group' +
         (inDraft ? ' detail-add-to-group--on' : '') +
@@ -6053,6 +6056,35 @@
         '</div>';
     }
     if (fellow.bio_tagline) leftTop += '<p class="detail-tagline">' + escapeHtml(fellow.bio_tagline) + '</p>';
+
+    // EPIC PR6: Email/Call call-to-actions — the primary reason the app
+    // exists on a phone. Email is the headline (primary), Call is the
+    // ghost secondary. Each renders only when the field exists (same
+    // guards as the inline "How to Connect" rows below, which stay for the
+    // paste-elsewhere path). When email is absent, show the disabled "No
+    // email" state so the layout doesn't jump and the reason is explicit.
+    if (isPhone) {
+      var MAIL_ICO = '<svg class="contact-cta__ico" viewBox="0 0 24 24" width="18" height="18" '
+        + 'fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">'
+        + '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>';
+      var PHONE_ICO = '<svg class="contact-cta__ico" viewBox="0 0 24 24" width="18" height="18" '
+        + 'fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">'
+        + '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L20 13l2 5v2a2 2 0 0 1-2 2A16 16 0 0 1 4 6a2 2 0 0 1 2-2Z"/></svg>';
+      var cta = '';
+      if (fellow.contact_email) {
+        cta += '<a class="contact-cta__btn contact-cta__btn--primary" href="mailto:'
+          + escapeHtml(String(fellow.contact_email)) + '">' + MAIL_ICO + 'Email</a>';
+      } else {
+        cta += '<span class="contact-cta__btn contact-cta__btn--primary contact-cta__btn--disabled"'
+          + ' aria-disabled="true" title="No email on file">' + MAIL_ICO + 'No email</span>';
+      }
+      if (fellow.mobile_number) {
+        var ctaTel = String(fellow.mobile_number).trim().replace(/[^+\d]/g, '');
+        cta += '<a class="contact-cta__btn contact-cta__btn--ghost" href="tel:'
+          + escapeHtml(ctaTel) + '">' + PHONE_ICO + 'Call</a>';
+      }
+      leftTop += '<div class="contact-cta">' + cta + '</div>';
+    }
 
     var howRows = [];
     if (fellow.fellow_status) howRows.push(fieldRow('Fellow Status', escapeHtml(fellow.fellow_status)));

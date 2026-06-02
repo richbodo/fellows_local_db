@@ -362,3 +362,59 @@ def test_fellow_detail_renders_useful_content(
     assert text.strip(), (
         f"#detail is empty on fellow-detail route at {device_name}"
     )
+
+
+# ===== Fellow-detail Email/Call CTAs (PR6 step 4) ==========================
+
+
+def test_fellow_detail_email_and_call_ctas_on_phone(
+    mobile_interaction_page, device_name, base_url_fixture
+):
+    """A fellow with both email and phone shows an Email (mailto, primary)
+    CTA and a Call (tel, ghost) CTA near the top of the detail."""
+    page = mobile_interaction_page
+    # aaron_bird has both a contact email and a mobile number.
+    page.goto(base_url_fixture + "/#/fellow/aaron_bird", wait_until="domcontentloaded")
+    _wait_for_app_boot(page)
+    cta = page.locator("#detail .contact-cta")
+    expect(cta).to_have_count(1)
+
+    email_btn = page.locator("#detail .contact-cta__btn--primary")
+    expect(email_btn).to_have_count(1)
+    assert (email_btn.get_attribute("href") or "").startswith("mailto:"), (
+        f"Email CTA is not a mailto link at {device_name}"
+    )
+    assert "Email" in (email_btn.inner_text() or ""), "Email CTA mislabeled"
+
+    call_btn = page.locator("#detail .contact-cta__btn--ghost")
+    expect(call_btn).to_have_count(1)
+    assert (call_btn.get_attribute("href") or "").startswith("tel:"), (
+        f"Call CTA is not a tel link at {device_name}"
+    )
+
+
+def test_fellow_detail_call_cta_absent_without_phone(
+    mobile_interaction_page, device_name, base_url_fixture
+):
+    """A fellow with email but no phone shows the Email CTA and no Call
+    CTA (each button is guarded on its field)."""
+    page = mobile_interaction_page
+    # aaron_mcdonald has a contact email but no mobile number.
+    page.goto(
+        base_url_fixture + "/#/fellow/aaron_mcdonald", wait_until="domcontentloaded"
+    )
+    _wait_for_app_boot(page)
+    expect(page.locator("#detail .contact-cta")).to_have_count(1)
+    expect(page.locator("#detail .contact-cta__btn--primary")).to_have_count(1)
+    expect(page.locator("#detail .contact-cta__btn--ghost")).to_have_count(0)
+
+
+def test_fellow_detail_has_no_add_to_group_on_phone(
+    mobile_interaction_page, device_name, base_url_fixture
+):
+    """The +/− add-to-group affordance in the detail name is skipped on
+    phones (groups have no phone UI)."""
+    page = mobile_interaction_page
+    page.goto(base_url_fixture + "/#/fellow/aaron_bird", wait_until="domcontentloaded")
+    _wait_for_app_boot(page)
+    expect(page.locator("#detail .detail-add-to-group")).to_have_count(0)
