@@ -9125,6 +9125,7 @@
         '</p>' +
         '<div id="settings-folder-actions" class="settings-folder-actions">' +
           '<button type="button" id="settings-folder-choose" class="settings-download" hidden>Choose folder…</button>' +
+          '<button type="button" id="settings-folder-reconnect" class="settings-download" hidden>🔄 Reconnect your folder</button>' +
           '<button type="button" id="settings-folder-lock" class="settings-download" hidden>🔒 Lock my private data</button>' +
           '<button type="button" id="settings-download-userdata" class="settings-download" hidden>' +
             '⬇ Download my private data' +
@@ -10140,6 +10141,12 @@
       // encryption — see plans / lock-my-data.)
       var lockBtn = document.getElementById('settings-folder-lock');
       if (lockBtn) lockBtn.hidden = !(supported && state.hasHandle);
+      // "Reconnect your folder" (EPIC PR5 follow-up): shown only when a folder
+      // is attached but its permission has lapsed (badge 'inaccessible', e.g.
+      // after a browser restart). One click re-grants on the stored handle —
+      // no re-pick — and re-unlocks. Data is never lost; the file still exists.
+      var reconnectBtn = document.getElementById('settings-folder-reconnect');
+      if (reconnectBtn) reconnectBtn.hidden = (b !== 'inaccessible');
       // Download button stays visible whenever local persistence is
       // available — folder-mode users still want backup files outside
       // the folder (cloud-sync conflicts, sneakernet to another machine,
@@ -10385,6 +10392,29 @@
             // private-data gate immediately so group surfaces appear without
             // a reload (EPIC PR4). Idempotent: a failed pick re-resolves to
             // the same locked state.
+            try { updatePrivateDataGate(); } catch (e) {}
+            return refresh();
+          });
+      });
+    }
+
+    var btnReconnect = document.getElementById('settings-folder-reconnect');
+    if (btnReconnect) {
+      btnReconnect.addEventListener('click', function () {
+        btnReconnect.disabled = true;
+        flashDetail('Reconnecting…');
+        // reconnect() re-grants permission on the STORED handle (a user-gesture
+        // requestPermission) — no re-pick. On success the gate re-unlocks.
+        FOLDER_CONTROLLER.reconnect()
+          .then(function (state) {
+            var ok = state && state.permission === 'granted';
+            flashDetail(ok ? 'Reconnected.' : 'Could not reconnect — try “Change folder” to re-pick.');
+          })
+          .catch(function () {
+            flashDetail('Could not reconnect — try “Change folder” to re-pick.');
+          })
+          .then(function () {
+            btnReconnect.disabled = false;
             try { updatePrivateDataGate(); } catch (e) {}
             return refresh();
           });
