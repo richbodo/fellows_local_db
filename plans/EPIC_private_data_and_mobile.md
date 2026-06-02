@@ -1,6 +1,6 @@
 # EPIC — Private-Data Capability Gate + Mobile Rebuild (the controller)
 
-**Status:** ACTIVE controller. **Created:** 2026-06-02.
+**Status:** NEARLY COMPLETE. **Created:** 2026-06-02. All in-app work landed (gate #235, unlock/probe/chooser #237, follow-ups #239, migration #240) or open (mobile browse-only rebuild **#241**). The only remaining tail is **C4 — the upstream PNT constraints contribution** (Phase 4, maintainer-gated).
 **This file does not restate the child plans — it sequences them, declares the dependency graph and file-ownership lanes, defines integration checkpoints, and tracks status.** Read the children for the *what*; read this for the *order* and the *how-to-parallelize*.
 
 ## Children (the cluster this controls)
@@ -95,14 +95,15 @@ C4 constraints PR (+ C5 exceptions if not yet filed), sharpened by what Phase 1�
 | C1 **PR1 timing fix** | 1 | ✅ done | gate re-resolves at `provider_ready` (was stranding folder users in browse-only); diagnosed via runtime probe |
 | C1 **PR3** desktop surface gating | 2 | ✅ done | `worker_data_folder`/`folder_attached_page` fixtures + `attach_verified_folder`; group/copy suite migrated to folder; desktop entry-point + composer-rail CSS gate (`no-private-data:not(.is-phone)`); `route()` group-route redirect→Settings (desktop, gate-resolved). **Full `just test`: 636 passed / 6 skipped / 0 failed.** |
 | DOCS lane (PR7-docs) | 2 | ✅ done | 6 docs rewritten/created for the gate (pending maintainer review) |
-| C1 **PR2** same-browser migration | 1 | pending | OPFS→folder copy + identity stamp (worker RPC) |
-| C1 **PR4** unlock + probe | 2 | pending | new worker RPCs (probe/reason-codes) + unlock UI + troubleshooting page |
-| C1 **PR5** reconnect/chooser/identity | 2 | pending | new worker RPCs (scan-all-Fellows, identity stamp) |
-| C1 **PR6** mobile shell | 2 | pending | + the **phone** gating (hide on `is-phone`) and mobile group-test rewrites (the deferred phone half of PR3) |
+| C1 **PR4** + **PR5** unlock/probe/chooser/identity | 2 | ✅ done | **PR #237** (merged) — staged empirical probe + reason codes, unlock UI, "Lock my private data", content-previewed chooser, live store switching; `WORKER_RPC_VERSION` 5 |
+| C1 **PR5 follow-ups** | 2 | ✅ done | **PR #239** (merged) — self-describing export name, `HOW-TO-MOVE` marker, one-click reconnect |
+| C1 **PR2** same-browser migration | 1 | ✅ done | **PR #240** (merged) — OPFS→folder rescue prompt (migration = existing pick→writeNow) |
+| C1 **PR6** mobile browse-only rebuild | 2 | ✅ done | **PR #241** (open) — scroll shell, hamburger drawer, strip group chrome + redirect, Email/Call CTAs, reduced Settings, hero/has-email match-the-mock, baselines re-promoted. Full `just test` green |
 | PR3d has-email localStorage guard | 2 | deferred | shared-mode purity (filter bool only; churns the worker_data harness) |
-| Desktop grayed-out + "Enable on Chrome desktop →" CTA | 2 | deferred | PR3 currently *hides* desktop entry points (functionally correct); the discoverable CTA is a refinement (likely with PR4 unlock UI) |
-| Integration + re-baseline | 3 | pending | snapshots last |
-| C4/C5 upstream | 4 | pending | maintainer-gated (you authorized) |
+| Desktop grayed-out + "Enable on Chrome desktop →" CTA | 2 | deferred | PR3 currently *hides* desktop entry points (functionally correct); the discoverable CTA is a refinement |
+| Integration + re-baseline | 3 | ✅ done | folded into each PR; phone baselines promoted in #241 |
+| C4 constraints upstream | 4 | pending | **the last EPIC tail** — maintainer-gated; sharpen with PR1–6 learnings (`plans/pna_toolkit_constraints_contribution.md`) |
+| C5 exceptions upstream | 4 | ✅ done | PNT PR #8 (landed) |
 
 ### Sequencing correction discovered during PR1 (important)
 
