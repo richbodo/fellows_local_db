@@ -1,29 +1,31 @@
-"""Mobile gating of the durable data-folder feature.
+"""Mobile gating of private data — phones are browse-only.
 
-The private data folder is deliberately NOT offered on phones / tablets:
-Android's directory picker only reaches a Downloads subfolder the OS can
-clear at will (so it can't keep the feature's durability promise) and iOS
-has no picker at all. On mobile the app is OPFS-only, and the manual
-backup download is the durability path. See docs/feature_platform_matrix.md
-§ The mobile contract.
+The private data capability gate (plans/private_data_capability_gate.md)
+makes phones browse-only: groups, notes, tags, settings, and the durable
+data-folder all have NO phone UI, because a PWA can't reliably preserve
+private data off Chromium/FSA and a phone never attaches a verified folder.
+Settings on a phone is reduced to app-info + tools.
 
-These tests pin the page-side gate (app.js: isMobileDevice /
-folderStorageOffered) under a mobile UA:
+These tests pin two things:
 
-  * folderStorageOffered() is false, even though the picker API is present
-    (Chromium-under-iOS/Android-UA in Playwright) — proving the gate is a
-    policy choice, not an API-absence accident.
-  * The folder badge resolves to the 'unsupported' state with the
-    phone-specific copy; the "Choose folder…" button stays hidden; the
-    top-of-app folder-push banner never appears.
-  * CRITICAL regression guard: the "Download my private data" button stays
-    VISIBLE. It's the only durability path on mobile, and its un-hide was
-    previously coupled to folder support — gating folder off must not take
-    the backup button with it.
+  * The folder controller's policy is intact: folderStorageOffered() is
+    false on a phone even though Chromium-under-mobile-UA still exposes
+    showDirectoryPicker (the gate is a policy choice, not an API-absence
+    accident).
+  * Phone Settings does NOT render the folder section or the
+    "Download my private data" button.
+
+NOTE (supersedes the prior mobile contract): an earlier step (PR #234)
+kept a manual-backup download visible on phones as "the durability path."
+The capability-gate rebuild removes group creation on phones entirely, so
+there is no phone-authored private data to back up and the download is
+gone. A user who created OPFS groups on a phone *before* this rebuild
+keeps that data in OPFS but has no phone UI to reach or export it — see the
+PR description.
 
 Note on the harness: Playwright emulates iOS/Android via UA + viewport but
-the engine is Chromium, which ships showDirectoryPicker. That's why we can
-assert pickerApiPresent is true while folderStorageOffered() is false — the
+the engine is Chromium, which ships showDirectoryPicker. That's why
+pickerApiPresent can be true while folderStorageOffered() is false — the
 exact distinction the gate encodes.
 """
 from __future__ import annotations
@@ -49,9 +51,9 @@ _GATE_INIT = _STANDALONE_DISPLAY_INIT + """
 _MOBILE_DEVICES = ("Pixel 5", "iPhone 13")
 
 
-def _seeded_settings_page(playwright, browser, device, base_url):
-    """Open a mobile-emulated page, seed a group, land on #/settings.
-    Returns (context, page); caller closes the context."""
+def _mobile_settings_page(playwright, browser, device, base_url):
+    """Open a mobile-emulated page, land on #/settings (the reduced phone
+    view). Returns (context, page); caller closes the context."""
     context = browser.new_context(**dict(playwright.devices[device]))
     page = context.new_page()
     page.add_init_script(_GATE_INIT)
@@ -60,18 +62,16 @@ def _seeded_settings_page(playwright, browser, device, base_url):
         context.close()
         pytest.skip("worker provider unavailable in this environment")
     helper.wipe_relationships()
-    helper.create_group("folder gate test")
     page.evaluate("() => { location.hash = '#/settings'; }")
-    # The download button is the load-bearing element on mobile; wait for
-    # the settings page to have rendered the folder section.
-    page.locator("#settings-download-userdata").wait_for(state="visible", timeout=10000)
+    # The reduced phone Settings renders app-info stat lines.
+    page.locator(".settings-statlines").wait_for(state="visible", timeout=10000)
     return context, page
 
 
 @pytest.mark.parametrize("device", _MOBILE_DEVICES)
 def test_folder_storage_not_offered_but_api_present(playwright, browser, base_url_fixture, device):
     """The feature is gated off as policy, not because the API is missing."""
-    context, page = _seeded_settings_page(playwright, browser, device, base_url_fixture)
+    context, page = _mobile_settings_page(playwright, browser, device, base_url_fixture)
     try:
         offered = page.evaluate("() => window.__folderController.folderStorageOffered()")
         assert offered is False, f"{device}: folder storage should not be offered on mobile"
@@ -87,25 +87,21 @@ def test_folder_storage_not_offered_but_api_present(playwright, browser, base_ur
 
 
 @pytest.mark.parametrize("device", _MOBILE_DEVICES)
-def test_folder_ui_hidden_with_phone_copy(playwright, browser, base_url_fixture, device):
-    """Choose-folder button hidden, folder-push banner absent, badge shows
-    the phone-specific message."""
-    context, page = _seeded_settings_page(playwright, browser, device, base_url_fixture)
+def test_folder_section_and_download_absent_on_phone(playwright, browser, base_url_fixture, device):
+    """Phone Settings is browse-only: no folder section, no choose-folder
+    button, no folder-push banner, and no "Download my private data"
+    button (there is no phone-authored private data to download)."""
+    context, page = _mobile_settings_page(playwright, browser, device, base_url_fixture)
     try:
-        expect(page.locator("#settings-folder-choose")).to_be_hidden()
+        assert page.locator("#settings-folder-section").count() == 0, (
+            f"{device}: folder section should not render in phone Settings"
+        )
+        assert page.locator("#settings-folder-choose").count() == 0, (
+            f"{device}: choose-folder button should not render on a phone"
+        )
+        assert page.locator("#settings-download-userdata").count() == 0, (
+            f"{device}: download button should not render on a phone (browse-only)"
+        )
         expect(page.locator("#folder-push-banner")).to_be_hidden()
-        badge = page.locator("#settings-folder-badge .settings-folder-badge-text")
-        expect(badge).to_contain_text("On phones", timeout=10000)
-    finally:
-        context.close()
-
-
-@pytest.mark.parametrize("device", _MOBILE_DEVICES)
-def test_download_button_stays_visible_on_mobile(playwright, browser, base_url_fixture, device):
-    """Regression guard: gating folder off mobile must NOT hide the backup
-    button — it's the only durability path on a phone."""
-    context, page = _seeded_settings_page(playwright, browser, device, base_url_fixture)
-    try:
-        expect(page.locator("#settings-download-userdata")).to_be_visible()
     finally:
         context.close()

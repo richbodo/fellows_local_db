@@ -148,40 +148,19 @@ def test_group_route_redirects_to_directory_on_phone(
     expect(page.locator("#directory")).to_be_visible()
 
 
-# ===== Kebab menu (app-bar) ================================================
+# ===== App-bar kebab retired on phones (PR6 step 5) ========================
 
 
-def test_kebab_menu_opens_and_dismisses(
+def test_appbar_kebab_hidden_on_phone(
     mobile_interaction_page, device_name, base_url_fixture
 ):
-    """Top-right kebab button should open the bottom sheet; close
-    button (or scrim tap) should dismiss it."""
+    """The tools kebab is retired on phones — its actions moved into
+    Settings → Tools. The hamburger is the only appbar menu control."""
     page = mobile_interaction_page
     page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
     _wait_for_app_boot(page)
-    kebab = page.locator(".appbar__kebab").first
-    expect(kebab).to_be_visible(timeout=5000)
-    kebab.click()
-    # The kebab sheet has id="kebab-sheet" or similar — look for the
-    # generic .sheet that becomes visible after the click. Use whichever
-    # of the known kebab sheet ids exists in the DOM.
-    sheet_visible = page.evaluate(
-        """
-        () => {
-          const sheets = document.querySelectorAll('.sheet');
-          for (const s of sheets) {
-            if (!s.classList.contains('hidden')
-                && getComputedStyle(s).display !== 'none') {
-              return {id: s.id, cls: s.className};
-            }
-          }
-          return null;
-        }
-        """
-    )
-    assert sheet_visible is not None, (
-        f"kebab tap did not open any .sheet at {device_name}"
-    )
+    expect(page.locator("#appbar-kebab")).to_be_hidden()
+    expect(page.locator("#appbar-hamburger")).to_be_visible()
 
 
 # ===== Hamburger nav drawer (PR6 step 2) ===================================
@@ -287,33 +266,54 @@ def test_about_check_application_updates_button_taps(
     )
 
 
-# ===== Settings page (post-#205 private-data-folder layout) ================
+# ===== Reduced mobile Settings (PR6 step 5) ================================
 
 
-def test_settings_email_field_saves(
-    mobile_worker_data, device_name, base_url_fixture
+def test_mobile_settings_reduced_to_app_info_and_tools(
+    mobile_interaction_page, device_name, base_url_fixture
 ):
-    """Settings → Your email saves to relationships.db via the worker.
-    Catches mobile-keyboard-covers-the-input + tap-the-save-button
-    failures at narrow widths."""
-    helper = mobile_worker_data
-    page = helper.page
-    page.evaluate("location.hash = '#/settings'")
+    """Phone Settings shows App info + Tools only. The private-data
+    surfaces — email field, folder section, download, restore, and the
+    Claude-Desktop/MCPB section — are all gated off (browse-only)."""
+    page = mobile_interaction_page
+    page.goto(base_url_fixture + "/#/settings", wait_until="domcontentloaded")
     _wait_for_app_boot(page)
-    email_input = page.locator("#settings-self-email")
-    expect(email_input).to_be_visible()
-    email_input.fill(f"mobile-{device_name.replace(' ', '-').lower()}@example.com")
-    page.locator(".settings-save").click()
-    # The setting lands via worker RPC.
-    page.wait_for_function(
-        f"() => window.__dataProvider.getSetting('self_email')"
-        f"  .then(v => v && v.indexOf('mobile-') === 0)",
-        timeout=5000,
-    )
-    saved = helper.get_setting("self_email")
-    assert saved and saved.startswith("mobile-"), (
-        f"settings did not persist via mobile UI at {device_name}; got {saved!r}"
-    )
+
+    # Present: app-info stat lines + the four tool buttons.
+    expect(page.locator(".settings-statlines")).to_have_count(1)
+    for tool_id in (
+        "#settings-phone-diagnostics",
+        "#settings-phone-bug-report",
+        "#settings-phone-clear-cache",
+        "#settings-phone-reset",
+    ):
+        expect(page.locator(tool_id)).to_be_visible()
+
+    # Absent: every private-data settings surface.
+    for gone in (
+        "#settings-self-email",
+        "#settings-folder-section",
+        "#settings-download-userdata",
+        "#settings-restore-section",
+        "#settings-mcpb-section",
+    ):
+        assert page.locator(gone).count() == 0, (
+            f"{gone} should not render in phone Settings at {device_name}"
+        )
+
+
+def test_mobile_settings_diagnostics_tool_opens_panel(
+    mobile_interaction_page, device_name, base_url_fixture
+):
+    """A Tools button proxies to the existing handler: tapping
+    Diagnostics opens the diagnostics panel (the same as the retired
+    kebab action did)."""
+    page = mobile_interaction_page
+    page.goto(base_url_fixture + "/#/settings", wait_until="domcontentloaded")
+    _wait_for_app_boot(page)
+    expect(page.locator("#diag-panel")).to_be_hidden()
+    page.locator("#settings-phone-diagnostics").click()
+    expect(page.locator("#diag-panel")).to_be_visible(timeout=3000)
 
 
 # ===== Fellow detail =======================================================

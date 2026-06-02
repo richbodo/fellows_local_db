@@ -9231,8 +9231,88 @@
 
   // ===== Settings page (PR 5) ==============================================
 
+  // EPIC PR6: phones get a reduced Settings — app info + tools only. The
+  // email field, private-data folder, download, restore, and Claude-Desktop
+  // (MCPB) sections are all gated off (private data has no phone UI). The
+  // Tools block absorbs what used to live in the appbar kebab (retired on
+  // phones), proxying to the same hidden desktop handlers.
+  function renderMobileSettingsPage() {
+    if (!detailEl) return;
+    if (window.location.hash.indexOf('#/settings') === 0) {
+      setShellChrome('settings', 'Settings');
+    }
+    var serverLabel = (bootBuildMeta && bootBuildMeta.git_sha)
+      ? bootBuildMeta.git_sha
+      : ((bootBuildMeta && bootBuildMeta.built_at) || 'unknown');
+    var fellowCount = (Array.isArray(list) && list.length)
+      ? String(list.length) : '—';
+    var html = '<div class="settings-page settings-page--phone">' +
+      '<h2 class="settings-title">Settings</h2>' +
+      '<div class="settings-section">' +
+        '<h3 class="settings-section-title">App info</h3>' +
+        '<div class="settings-statlines">' +
+          '<div class="settings-statline"><span class="settings-statline-label">App build</span>' +
+            '<span class="settings-statline-value">' + escapeHtml(FELLOWS_UI_DIAG) + '</span></div>' +
+          '<div class="settings-statline"><span class="settings-statline-label">Server build</span>' +
+            '<span class="settings-statline-value">' + escapeHtml(serverLabel) + '</span></div>' +
+          '<div class="settings-statline"><span class="settings-statline-label">Fellows loaded</span>' +
+            '<span class="settings-statline-value">' + escapeHtml(fellowCount) + '</span></div>' +
+          '<div class="settings-statline"><span class="settings-statline-label">Directory data</span>' +
+            '<span class="settings-statline-value" id="settings-phone-last-update">Checking…</span></div>' +
+        '</div>' +
+        '<p class="settings-hint">Full version details and update checks are on the ' +
+          '<a href="#/about">About page</a>.</p>' +
+      '</div>' +
+      '<div class="settings-section">' +
+        '<h3 class="settings-section-title">Tools</h3>' +
+        '<div class="settings-phone-tools">' +
+          '<button type="button" class="settings-download" id="settings-phone-diagnostics">Diagnostics…</button>' +
+          '<button type="button" class="settings-download" id="settings-phone-bug-report">Report a bug…</button>' +
+          '<button type="button" class="settings-download settings-phone-tool--danger" id="settings-phone-clear-cache">Clear app cache &amp; reload</button>' +
+          '<button type="button" class="settings-download settings-phone-tool--danger" id="settings-phone-reset">Reset everything (lose groups &amp; settings)</button>' +
+        '</div>' +
+      '</div>' +
+      '</div>';
+    detailEl.innerHTML = html;
+    detailEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    // Tools proxy to the existing hidden desktop controls — same code path
+    // the kebab sheet used before it was retired on phones.
+    var proxy = function (btnId, targetId) {
+      var btn = document.getElementById(btnId);
+      if (!btn) return;
+      btn.addEventListener('click', function () {
+        var target = document.getElementById(targetId);
+        if (target) target.click();
+      });
+    };
+    proxy('settings-phone-diagnostics', 'diag-toggle');
+    proxy('settings-phone-bug-report', 'bug-report-button');
+    proxy('settings-phone-clear-cache', 'clear-app-cache-button');
+    proxy('settings-phone-reset', 'reset-everything-button');
+
+    // Last directory-data update — same source as the About page.
+    var luEl = document.getElementById('settings-phone-last-update');
+    if (luEl && dataProvider && typeof dataProvider._getFellowsDbMeta === 'function') {
+      Promise.resolve(dataProvider._getFellowsDbMeta()).then(function (meta) {
+        if (!meta || (!meta.fetched_at && !meta.last_failure_at)) {
+          luEl.textContent = 'no update checks yet';
+          return;
+        }
+        var fetchedTs = meta.fetched_at ? new Date(meta.fetched_at).getTime() : 0;
+        var failedTs = meta.last_failure_at ? new Date(meta.last_failure_at).getTime() : 0;
+        luEl.textContent = (failedTs > fetchedTs)
+          ? (meta.last_failure_at + ' (failed)')
+          : (meta.fetched_at || 'unknown');
+      }).catch(function () { luEl.textContent = '—'; });
+    } else if (luEl) {
+      luEl.textContent = '—';
+    }
+  }
+
   function renderSettingsPage() {
     if (!detailEl) return;
+    if (isMobileDevice()) { renderMobileSettingsPage(); return; }
     var html = '<div class="settings-page">' +
       '<h2 class="settings-title">Settings</h2>' +
       '<p class="settings-intro">' +

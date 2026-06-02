@@ -5265,3 +5265,51 @@ body.is-phone .contact-cta__btn--disabled {
 body.is-phone .contact-cta__ico {
   flex-shrink: 0;
 }
+
+/* =========================================================================
+ * PR6 / mobile-PR5: reduced mobile Settings (app-info + tools) and retire
+ * the appbar kebab on phones (its actions moved into Settings → Tools).
+ * ========================================================================= */
+body.is-phone #appbar-kebab {
+  display: none;
+}
+body.is-phone .settings-statlines {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 8px;
+}
+body.is-phone .settings-statline {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 15px;
+}
+body.is-phone .settings-statline:last-child {
+  border-bottom: 0;
+}
+body.is-phone .settings-statline-label {
+  color: var(--subink);
+}
+body.is-phone .settings-statline-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-deep);
+  text-align: right;
+  word-break: break-word;
+}
+body.is-phone .settings-phone-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+body.is-phone .settings-phone-tools .settings-download {
+  width: 100%;
+}
+body.is-phone .settings-phone-tool--danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
