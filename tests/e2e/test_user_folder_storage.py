@@ -244,11 +244,11 @@ class TestUserFolderStorage:
         self, folder_page, base_url_fixture
     ):
         _open_settings(folder_page, base_url_fixture)
-        # On a fresh state, badge says "Browser-only" and the single
-        # Choose folder… button is visible (Save now / Reload from
-        # folder / Reconnect / Disconnect removed in PR #205).
+        # On a fresh state the badge says private data isn't connected (the
+        # capability-gate framing — was "Browser-only" before the gate) and
+        # the single Choose folder… button is visible.
         badge_text = folder_page.locator("#settings-folder-badge .settings-folder-badge-text")
-        expect(badge_text).to_contain_text("Browser-only")
+        expect(badge_text).to_contain_text("isn’t connected")
         choose = folder_page.locator("#settings-folder-choose")
         expect(choose).to_be_visible()
         expect(choose).to_have_text("Choose folder…")
@@ -289,20 +289,88 @@ class TestUserFolderStorage:
         folder_page.locator("#settings-folder-choose").click()
         badge_text = folder_page.locator("#settings-folder-badge .settings-folder-badge-text")
         expect(badge_text).to_contain_text("Saved to", timeout=10000)
-        # Click Change folder and re-pick the same parent. The worker
-        # probes, finds Fellows/ already with a relationships.db, returns
-        # requiresChoice → the collision dialog opens. Post-PR-#205 the
-        # "disconnect first, then pick" flow is gone; users now hit
-        # collision by re-picking via Change folder directly.
+        # Re-pick the same parent. The content-previewed chooser (EPIC PR5,
+        # which supersedes the old binary collision dialog) lists the existing
+        # Fellows store by content; choosing "Save to a new store" → Fellows 2.
         folder_page.locator("#settings-folder-choose").click()
-        dialog = folder_page.locator("#settings-folder-collision-dialog")
-        expect(dialog).to_be_visible(timeout=5000)
-        # Click "Create Fellows 2".
-        folder_page.locator("#settings-folder-collision-create").click()
+        chooser = folder_page.locator("#settings-folder-chooser-dialog")
+        expect(chooser).to_be_visible(timeout=5000)
+        expect(
+            folder_page.locator("#settings-folder-chooser-list .settings-folder-chooser-item")
+        ).to_contain_text("Fellows")
+        folder_page.locator(
+            "#settings-folder-chooser-dialog button[value='__create_new__']"
+        ).click()
         expect(badge_text).to_contain_text("Saved to", timeout=10000)
         probe = folder_page.evaluate("() => window.__probeE2EUserFolder()")
         assert probe["hasFellows"] is True, "original Fellows/ should be untouched"
         assert probe["hasFellows2"] is True, "Fellows 2/ should have been created"
+
+    def test_switching_stores_via_chooser_loads_that_stores_groups(
+        self, folder_page, base_url_fixture
+    ):
+        """EPIC PR5: two stores in one parent — the chooser lets you pick by
+        content, and opening one loads ITS groups (the 'switch folders →
+        groups change' the old binary collision dialog couldn't do)."""
+        _open_settings(folder_page, base_url_fixture)
+        badge_text = folder_page.locator("#settings-folder-badge .settings-folder-badge-text")
+        # Store "Fellows": attach + 1 group.
+        folder_page.locator("#settings-folder-choose").click()
+        expect(badge_text).to_contain_text("Saved to", timeout=10000)
+        rid = folder_page.evaluate("() => window.__dataProvider.getFull().then(f => f[0].record_id)")
+        folder_page.evaluate(
+            "(rid) => window.__dataProvider.createGroup({name:'F1 only', note:'', fellow_record_ids:[rid]})",
+            rid,
+        )
+        # Store "Fellows 2": re-pick → chooser → new store; then add a 2nd group.
+        folder_page.locator("#settings-folder-choose").click()
+        folder_page.locator(
+            "#settings-folder-chooser-dialog button[value='__create_new__']"
+        ).click()
+        # Wait for the switch to Fellows 2 to COMPLETE before adding a group:
+        # the badge can still read the stale "Saved to Fellows" for a moment,
+        # so gate on the live subfolder, not the badge (else g2 races into the
+        # old store).
+        folder_page.wait_for_function(
+            "async () => { const s = await window.__folderController.getState();"
+            " return s.subfolderName === 'Fellows 2'; }",
+            timeout=10000,
+        )
+        folder_page.evaluate(
+            "() => window.__dataProvider.createGroup({name:'F2 extra', note:'', fellow_record_ids:[]})"
+        )
+        assert folder_page.evaluate(
+            "() => window.__dataProvider.listGroups().then(g => g.length)"
+        ) == 2
+        scan_dump = folder_page.evaluate(
+            """async () => {
+                const root = await navigator.storage.getDirectory();
+                const parent = await root.getDirectoryHandle('__e2e_user_folder__');
+                const s = await window.__folderController.scanCandidates(parent);
+                return s.candidates.map(c => c.subfolderName + '=' + c.groups);
+            }"""
+        )
+        assert sorted(scan_dump) == ["Fellows 2=2", "Fellows=1"], f"per-store counts: {scan_dump}"
+        # Switch back to "Fellows" via the chooser → loads its 1 group.
+        folder_page.locator("#settings-folder-choose").click()
+        expect(folder_page.locator("#settings-folder-chooser-dialog")).to_be_visible(timeout=5000)
+        folder_page.locator(
+            "#settings-folder-chooser-dialog button[value='Fellows']"
+        ).click()
+        expect(folder_page.locator("#settings-folder-detail")).to_contain_text(
+            "Loaded", timeout=10000
+        )
+        detail = folder_page.locator("#settings-folder-detail").inner_text()
+        sub = folder_page.evaluate(
+            "() => window.__folderController.getState().then(s => s.subfolderName)"
+        )
+        count = folder_page.evaluate(
+            "() => window.__dataProvider.listGroups().then(g => g.length)"
+        )
+        assert count == 1, (
+            f"expected Fellows's 1 group after switch, got {count}; "
+            f"active subfolder={sub!r}; detail={detail!r}"
+        )
 
     # test_open_existing_loads_data_back was removed in PR #205. It
     # used Disconnect (now removed) to break the OPFS→folder auto-save

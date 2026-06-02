@@ -37,7 +37,7 @@
   // app/static/vendor/sqlite-worker.js (`WORKER_RPC_VERSION`,
   // `RELATIONSHIPS_SCHEMA_VERSION`). See plans/local_first_worker_architecture.md
   // §"Why build label is not the gate".
-  var EXPECTED_WORKER_RPC_VERSION = 3;
+  var EXPECTED_WORKER_RPC_VERSION = 5;
   var EXPECTED_RELATIONSHIPS_SCHEMA_VERSION = 1;
 
   // Thrown by mutating dataProvider methods when the worker reports a
@@ -4062,11 +4062,21 @@
         return refuseIfVersionSkew('setFolderHandle') ||
           rpc.call('setFolderHandle', args);
       },
+      // EPIC PR4 unlock probe: setFolderHandle + empirical write/read-back
+      // durability check. Mutating (persists the handle) → version-gated.
+      _probeFolderWritable: function (args) {
+        return refuseIfVersionSkew('probeFolderWritable') ||
+          rpc.call('probeFolderWritable', args);
+      },
       _clearFolderHandle: function () {
         return refuseIfVersionSkew('clearFolderHandle') ||
           rpc.call('clearFolderHandle');
       },
       _checkFolderPermission: function () { return rpc.call('checkFolderPermission'); },
+      // Read-only scan of all Fellows* stores in a parent (EPIC PR5 chooser).
+      // Version-tolerant — it's a read, and the chooser must work to let a
+      // stale page recover/pick a store.
+      _scanFellowsCandidates: function (args) { return rpc.call('scanFellowsCandidates', args); },
       _getFolderHandleForReconnect: function () { return rpc.call('getFolderHandleForReconnect'); },
       _writeRelationshipsToFolder: function () {
         return refuseIfVersionSkew('writeRelationshipsToFolder') ||
@@ -8686,6 +8696,8 @@
           kind: 'worker-warm',
           _getFolderState: function () { return warmWorker.rpc.call('getFolderState'); },
           _setFolderHandle: function (a) { return warmWorker.rpc.call('setFolderHandle', a); },
+          _probeFolderWritable: function (a) { return warmWorker.rpc.call('probeFolderWritable', a); },
+          _scanFellowsCandidates: function (a) { return warmWorker.rpc.call('scanFellowsCandidates', a); },
           _clearFolderHandle: function () { return warmWorker.rpc.call('clearFolderHandle'); },
           _checkFolderPermission: function () { return warmWorker.rpc.call('checkFolderPermission'); },
           _getFolderHandleForReconnect: function () { return warmWorker.rpc.call('getFolderHandleForReconnect'); },
@@ -8766,6 +8778,31 @@
       return p._setFolderHandle({ handle: handle, mode: mode || 'auto' });
     }
 
+    // Like setHandle, but runs the empirical durability probe (write a
+    // sentinel + read it back) before committing — the unlock path (EPIC
+    // PR4). Resolves to { ok, requiresChoice, ... } like setHandle on the
+    // happy/collision paths; REJECTS with err.code = a reason code
+    // (subfolder_create_failed / write_failed / readback_mismatch /
+    // permission_not_persisted / picker_cancelled) on probe failure, and
+    // persists nothing in that case (never half-unlock).
+    function probeHandle(handle, mode, subfolderName) {
+      var p = workerProvider();
+      if (!p) return Promise.reject(new Error('worker provider unavailable'));
+      return p._probeFolderWritable({
+        handle: handle, mode: mode || 'auto', subfolderName: subfolderName
+      });
+    }
+
+    // Scan a chosen parent for all Fellows* stores + their contents (EPIC PR5
+    // chooser). Read-only. Returns { candidates, recommended }.
+    function scanCandidates(handle) {
+      var p = workerProvider();
+      if (!p || typeof p._scanFellowsCandidates !== 'function') {
+        return Promise.reject(new Error('worker provider unavailable'));
+      }
+      return p._scanFellowsCandidates({ handle: handle });
+    }
+
     function clearHandle() {
       var p = workerProvider();
       if (!p) return Promise.reject(new Error('worker provider unavailable'));
@@ -8815,6 +8852,8 @@
       badge: badge,
       pickParentFolder: pickParentFolder,
       setHandle: setHandle,
+      probeHandle: probeHandle,
+      scanCandidates: scanCandidates,
       clearHandle: clearHandle,
       writeNow: writeNow,
       readNow: readNow,
@@ -8929,10 +8968,10 @@
     } else {
       bannerEl.classList.remove('folder-push-banner--error');
       bannerEl.setAttribute('role', 'status');
-      if (leadEl) leadEl.textContent = 'Save your fellows data to disk.';
+      if (leadEl) leadEl.textContent = 'Saved groups need a data folder.';
       if (detailEl) {
         detailEl.textContent =
-          'Your groups and notes are only in browser storage right now. Pick a folder for durable storage.';
+          'Choose a local private data folder to use group features.';
       }
       if (ctaEl) ctaEl.textContent = 'Set up data folder';
       if (dismissEl) dismissEl.hidden = false;
@@ -9084,6 +9123,7 @@
         '</p>' +
         '<div id="settings-folder-actions" class="settings-folder-actions">' +
           '<button type="button" id="settings-folder-choose" class="settings-download" hidden>Choose folder…</button>' +
+          '<button type="button" id="settings-folder-lock" class="settings-download" hidden>🔒 Lock my private data</button>' +
           '<button type="button" id="settings-download-userdata" class="settings-download" hidden>' +
             '⬇ Download my private data' +
           '</button>' +
@@ -9099,6 +9139,27 @@
           '<menu class="settings-folder-dialog-actions">' +
             '<button type="submit" value="create-new" class="settings-folder-dialog-primary" id="settings-folder-collision-create"></button>' +
             '<button type="submit" value="open-existing" class="settings-folder-dialog-secondary">Open existing data</button>' +
+            '<button type="submit" value="cancel" class="settings-folder-dialog-cancel">Cancel</button>' +
+          '</menu>' +
+        '</form>' +
+      '</dialog>' +
+      '<dialog id="settings-folder-error-dialog" class="settings-folder-dialog">' +
+        '<form method="dialog">' +
+          '<h4 id="settings-folder-error-title">Couldn’t use that folder</h4>' +
+          '<p id="settings-folder-error-body"></p>' +
+          '<p id="settings-folder-error-more" class="settings-hint" hidden></p>' +
+          '<menu class="settings-folder-dialog-actions">' +
+            '<button type="submit" value="close" class="settings-folder-dialog-primary">OK</button>' +
+          '</menu>' +
+        '</form>' +
+      '</dialog>' +
+      '<dialog id="settings-folder-chooser-dialog" class="settings-folder-dialog">' +
+        '<form method="dialog">' +
+          '<h4>Choose your data store</h4>' +
+          '<p class="settings-hint">This folder has saved data. Pick which store to use, or save to a new one.</p>' +
+          '<div id="settings-folder-chooser-list"></div>' +
+          '<menu class="settings-folder-dialog-actions">' +
+            '<button type="submit" value="__create_new__" class="settings-folder-dialog-secondary">Save to a new store</button>' +
             '<button type="submit" value="cancel" class="settings-folder-dialog-cancel">Cancel</button>' +
           '</menu>' +
         '</form>' +
@@ -9976,11 +10037,11 @@
 
     var BADGE_COPY = {
       'unsupported': {
-        text: 'Browser-only — this browser doesn\'t support saving to a folder',
+        text: 'Private data (groups, notes) isn’t available in this browser — use a Chromium desktop browser',
         cls: 'settings-folder-badge--warning'
       },
       'browser-only': {
-        text: 'Browser-only — your data is not yet saved to a folder',
+        text: 'Private data (groups, notes) isn’t connected — pick a folder to enable it',
         cls: 'settings-folder-badge--warning'
       },
       'saved': {
@@ -10069,6 +10130,12 @@
         btnChoose.hidden = !supported;
         btnChoose.textContent = state.hasHandle ? 'Change folder…' : 'Choose folder…';
       }
+      // "Lock my private data" (EPIC PR4): the user-friendly disconnect —
+      // shown only when a folder is connected. Returns to browse-only; the
+      // data stays safe in the folder file. (Future: combine with at-rest
+      // encryption — see plans / lock-my-data.)
+      var lockBtn = document.getElementById('settings-folder-lock');
+      if (lockBtn) lockBtn.hidden = !(supported && state.hasHandle);
       // Download button stays visible whenever local persistence is
       // available — folder-mode users still want backup files outside
       // the folder (cloud-sync conflicts, sneakernet to another machine,
@@ -10110,6 +10177,37 @@
       if (!detailEl2) return;
       detailEl2.textContent = msg;
       detailEl2.hidden = false;
+    }
+
+    // Prominent, plain-language folder-error dialog (EPIC PR4). The "why" is
+    // explained INLINE so it resolves without leaving the app; a supplementary
+    // troubleshooting link is included. Probe reason codes refine the cause;
+    // uncoded errors (e.g. a NoModificationAllowedError from a cloud-synced
+    // folder, which throws before the sentinel step) get the generic cloud/
+    // read-only cause — the most common real reason.
+    function showFolderError(code, rawMessage) {
+      var CAUSES = {
+        readback_mismatch: 'This looks like a cloud-only or virtual folder (Google Drive, OneDrive, or iCloud set to “online only”). Those can’t reliably hold a live database. Pick a folder on your local disk whose files are fully downloaded.',
+        write_failed: 'The app couldn’t write to that folder — it may be read-only, permission was denied, or it’s a cloud-synced location. Pick a folder on your local disk.',
+        subfolder_create_failed: 'The app couldn’t create its data folder there. The location may be read-only or cloud-synced. Pick a folder on your local disk you can write to.',
+        permission_not_persisted: 'Your browser won’t remember access to that folder. Make sure site data isn’t cleared on exit, or pick another folder.'
+      };
+      var cause = CAUSES[code] ||
+        'That folder can’t hold your private data — it’s most likely a cloud-synced folder (Google Drive, OneDrive, iCloud) or a read-only location. Pick a folder on your local disk.';
+      var bodyEl = document.getElementById('settings-folder-error-body');
+      var moreEl = document.getElementById('settings-folder-error-more');
+      if (bodyEl) bodyEl.textContent = cause;
+      if (moreEl) {
+        var anchor = code ? ('#' + encodeURIComponent(code)) : '';
+        moreEl.innerHTML = 'More help: <a href="https://github.com/richbodo/fellows_local_db/blob/main/docs/folder_troubleshooting.md' +
+          anchor + '" target="_blank" rel="noopener">folder troubleshooting →</a>';
+        moreEl.hidden = false;
+      }
+      var dlg = document.getElementById('settings-folder-error-dialog');
+      if (dlg && typeof dlg.showModal === 'function') {
+        try { dlg.showModal(); return; } catch (e) { /* already open / unsupported */ }
+      }
+      window.alert(cause);
     }
 
     function fmtCountsSummary(c) {
@@ -10170,40 +10268,95 @@
       });
     }
 
+    // Content-previewed chooser (EPIC PR5): when a chosen parent already has
+    // saved data, list every Fellows* store with its contents so the user
+    // picks one BY CONTENT — or creates a new one. Supersedes the old binary
+    // collision dialog (askCollision) for re-pick. Resolves to
+    // { action:'open', subfolderName } | { action:'create-new' } | null.
+    function askChooser(candidates, recommended) {
+      var dlg = document.getElementById('settings-folder-chooser-dialog');
+      var listEl = document.getElementById('settings-folder-chooser-list');
+      if (!dlg || !listEl || typeof dlg.showModal !== 'function') {
+        return Promise.resolve(recommended
+          ? { action: 'open', subfolderName: recommended }
+          : { action: 'create-new' });
+      }
+      var html = '';
+      candidates.forEach(function (c) {
+        var bits = [];
+        if (c.invalid) bits.push('unreadable');
+        else {
+          bits.push(c.groups + ' group' + (c.groups === 1 ? '' : 's'));
+          if (c.members != null) bits.push(c.members + ' member' + (c.members === 1 ? '' : 's'));
+        }
+        if (c.lastModified) {
+          bits.push('changed ' + formatRelativeTime(new Date(c.lastModified).toISOString()));
+        }
+        if (c.deviceLabel) bits.push(escapeHtml(c.deviceLabel));
+        var rec = (c.subfolderName === recommended)
+          ? ' <span class="settings-folder-chooser-rec">most recent</span>' : '';
+        html += '<button type="submit" value="' + escapeHtml(c.subfolderName) +
+          '" class="settings-folder-chooser-item"' + (c.invalid ? ' disabled' : '') + '>' +
+          '<strong>' + escapeHtml(c.subfolderName) + '</strong> — ' + bits.join(' · ') + rec +
+          '</button>';
+      });
+      listEl.innerHTML = html;
+      return new Promise(function (resolve) {
+        dlg.addEventListener('close', function once() {
+          dlg.removeEventListener('close', once);
+          var v = dlg.returnValue;
+          if (v === '__create_new__') resolve({ action: 'create-new' });
+          else if (v && v !== 'cancel') resolve({ action: 'open', subfolderName: v });
+          else resolve(null);
+        });
+        try { dlg.showModal(); } catch (e) { resolve(null); }
+      });
+    }
+
     if (btnChoose) {
       btnChoose.addEventListener('click', function () {
         btnChoose.disabled = true;
         flashDetail('Pick a folder…');
+        var parent = null;
         FOLDER_CONTROLLER.pickParentFolder()
           .then(function (handle) {
-            if (!handle) {
-              flashDetail('No folder selected.');
-              return null;
+            if (!handle) { flashDetail('No folder selected.'); return null; }
+            parent = handle;
+            // Scan for existing Fellows* stores so we can offer the chooser.
+            return FOLDER_CONTROLLER.scanCandidates(handle)
+              .catch(function () { return { candidates: [] }; });
+          })
+          .then(function (scan) {
+            if (!parent) return null;
+            var cands = (scan && scan.candidates) || [];
+            if (!cands.length) {
+              // Empty parent → fresh store.
+              return FOLDER_CONTROLLER.probeHandle(parent, 'auto').then(function (res) {
+                if (res && res.requiresChoice) {
+                  // Defensive (a store exists but scan couldn't read it).
+                  return FOLDER_CONTROLLER.probeHandle(parent, 'create-new')
+                    .then(function (r) { return { picked: r, mode: 'create-new' }; });
+                }
+                return { picked: res, mode: 'auto' };
+              });
             }
-            return FOLDER_CONTROLLER.setHandle(handle, 'auto').then(function (res) {
-              if (res && res.requiresChoice) {
-                return askCollision(res.parentName, res.existing, res.suggestion).then(function (choice) {
-                  if (!choice) {
-                    flashDetail('Cancelled.');
-                    return null;
-                  }
-                  return FOLDER_CONTROLLER.setHandle(handle, choice).then(function (resolved) {
-                    return { picked: resolved, mode: choice };
-                  });
-                });
+            return askChooser(cands, scan.recommended).then(function (choice) {
+              if (!choice) { flashDetail('Cancelled.'); return null; }
+              if (choice.action === 'create-new') {
+                return FOLDER_CONTROLLER.probeHandle(parent, 'create-new')
+                  .then(function (r) { return { picked: r, mode: 'create-new' }; });
               }
-              return { picked: res, mode: 'auto' };
+              return FOLDER_CONTROLLER.probeHandle(parent, 'open-named', choice.subfolderName)
+                .then(function (r) { return { picked: r, mode: 'open-named' }; });
             });
           })
           .then(function (outcome) {
             if (!outcome || !outcome.picked || !outcome.picked.ok) return;
-            // Newly-attached folder: do an immediate save so the badge
-            // flips to "Saved" right away on create-new, and (for the
-            // happy-path "auto" case where the subfolder was empty) the
-            // file exists. open-existing skips the write and instead
-            // reads the existing data into OPFS.
-            if (outcome.mode === 'open-existing') {
-              flashDetail('Loading existing data from folder…');
+            // open-named = switching to an existing store: load ITS data into
+            // OPFS so the app shows that store's groups (EPIC PR5). Otherwise
+            // (auto / create-new) write the current data into the new store.
+            if (outcome.mode === 'open-named') {
+              flashDetail('Loading data from folder…');
               return FOLDER_CONTROLLER.readNow().then(function (result) {
                 flashDetail('Loaded ' + (result && result.counts ? fmtCountsSummary(result.counts) : '') +
                   ' from the folder.');
@@ -10213,10 +10366,47 @@
             return FOLDER_CONTROLLER.writeNow().then(function () { flashDetail('Saved.'); });
           })
           .catch(function (e) {
-            flashDetail('Could not set folder: ' + (e && e.message || String(e)));
+            // Probe/write failure. picker_cancelled (user closed the picker)
+            // is a quiet no-op; everything else gets the prominent, plain-
+            // language dialog (the jargony raw DOMException must never reach
+            // the user). EPIC PR4.
+            var code = e && e.code;
+            if (code === 'picker_cancelled') { flashDetail('No folder selected.'); return; }
+            flashDetail('Could not use that folder.');
+            showFolderError(code, e && e.message);
           })
           .then(function () {
             btnChoose.disabled = false;
+            // A successful pick attaches a verified folder → flip the
+            // private-data gate immediately so group surfaces appear without
+            // a reload (EPIC PR4). Idempotent: a failed pick re-resolves to
+            // the same locked state.
+            try { updatePrivateDataGate(); } catch (e) {}
+            return refresh();
+          });
+      });
+    }
+
+    var btnLock = document.getElementById('settings-folder-lock');
+    if (btnLock) {
+      btnLock.addEventListener('click', function () {
+        var ok = window.confirm(
+          'Lock your private data?\n\n' +
+          'This disconnects the data folder and returns the app to browse-only. ' +
+          'Your groups and notes stay safe in the folder file — unlock again ' +
+          'anytime by picking the folder. (A future update will let you ' +
+          'encrypt this file.)'
+        );
+        if (!ok) return;
+        btnLock.disabled = true;
+        FOLDER_CONTROLLER.clearHandle()
+          .catch(function () { /* already gone — still go browse-only */ })
+          .then(function () {
+            // Flip the gate live → browse-only; the data folder file is
+            // untouched, so re-picking it unlocks again.
+            try { updatePrivateDataGate(); } catch (e) {}
+            flashDetail('Locked — data folder disconnected. Pick a folder to unlock again.');
+            btnLock.disabled = false;
             return refresh();
           });
       });
