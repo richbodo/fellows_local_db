@@ -19,7 +19,7 @@ Pins:
 
 Phase 1 (plans/local_first_worker_architecture.md): setup that
 previously went through the dev server's /api/groups HTTP routes now
-drives window.__dataProvider via the worker_data fixture.
+drives window.__dataProvider via the worker_data_folder fixture.
 """
 from __future__ import annotations
 
@@ -29,12 +29,12 @@ import pytest
 from playwright.sync_api import expect
 
 
-def _real_fellows(worker_data, with_email=True):
+def _real_fellows(worker_data_folder, with_email=True):
     """Pick real (record_id, name, email) tuples from the live fellows.db
-    via worker_data.get_full_fellows(). Replaces the previous HTTP probe
+    via worker_data_folder.get_full_fellows(). Replaces the previous HTTP probe
     against /api/fellows?full=1 — the worker is the canonical local
     read source post-cutover."""
-    rows = worker_data.get_full_fellows()
+    rows = worker_data_folder.get_full_fellows()
     out = []
     for row in rows:
         rid = row.get("record_id")
@@ -62,17 +62,17 @@ def _aaron_row(page):
 
 class TestEditModeEntry:
     def test_clicking_edit_on_detail_enters_edit_mode(
-        self, worker_data, base_url_fixture
+        self, worker_data_folder, base_url_fixture
     ):
-        page = worker_data.page
-        fellows = _real_fellows(worker_data)
+        page = worker_data_folder.page
+        fellows = _real_fellows(worker_data_folder)
         chosen = fellows[:2]
-        g = worker_data.create_group(
+        g = worker_data_folder.create_group(
             "Wellington crew",
             fellow_record_ids=[f[0] for f in chosen],
         )
         page.goto(f"{base_url_fixture}/#/groups/{g['id']}", wait_until="domcontentloaded")
-        worker_data.wait()
+        worker_data_folder.wait()
         _wait_for_directory(page)
         page.locator("#group-action-edit").click()
         page.wait_for_url(lambda u: f"#/edit/{g['id']}" in u, timeout=3000)
@@ -97,16 +97,16 @@ class TestEditModeEntry:
         expect(page.locator("#group-rail-members .group-rail-member-name")).to_have_count(2)
 
     def test_groups_index_edit_row_action_also_enters_edit_mode(
-        self, worker_data, base_url_fixture
+        self, worker_data_folder, base_url_fixture
     ):
-        page = worker_data.page
-        fellows = _real_fellows(worker_data)
-        g = worker_data.create_group(
+        page = worker_data_folder.page
+        fellows = _real_fellows(worker_data_folder)
+        g = worker_data_folder.create_group(
             "Row-action edit",
             fellow_record_ids=[f[0] for f in fellows[:1]],
         )
         page.goto(f"{base_url_fixture}/#/groups", wait_until="domcontentloaded")
-        worker_data.wait()
+        worker_data_folder.wait()
         _wait_for_directory(page)
         page.locator(".groups-action-edit").click()
         page.wait_for_url(lambda u: f"#/edit/{g['id']}" in u, timeout=3000)
@@ -115,20 +115,20 @@ class TestEditModeEntry:
 
 class TestEditModeAutoSave:
     def test_toggle_in_edit_mode_patches_membership(
-        self, worker_data, base_url_fixture
+        self, worker_data_folder, base_url_fixture
     ):
-        page = worker_data.page
-        fellows = _real_fellows(worker_data)
+        page = worker_data_folder.page
+        fellows = _real_fellows(worker_data_folder)
         # Start with 1 fellow, then add one via the directory + marker.
-        g = worker_data.create_group(
+        g = worker_data_folder.create_group(
             "Auto-save",
             fellow_record_ids=[fellows[0][0]],
         )
-        before = worker_data.get_group(g["id"])
+        before = worker_data_folder.get_group(g["id"])
         assert len(before["members"]) == 1
 
         page.goto(f"{base_url_fixture}/#/edit/{g['id']}", wait_until="domcontentloaded")
-        worker_data.wait()
+        worker_data_folder.wait()
         _wait_for_directory(page)
         # Marker for fellow at index 1 (different from the pre-selected member)
         # — find their name and toggle.
@@ -144,23 +144,23 @@ class TestEditModeAutoSave:
         ).to_have_count(2, timeout=3000)
         # Verify the worker actually saved.
         page.wait_for_timeout(150)
-        after = worker_data.get_group(g["id"])
+        after = worker_data_folder.get_group(g["id"])
         ids = sorted(m["record_id"] for m in after["members"])
         assert ids == sorted([fellows[0][0], fellows[1][0]])
 
 
 class TestDoneEditing:
     def test_done_editing_navigates_back_and_exits(
-        self, worker_data, base_url_fixture
+        self, worker_data_folder, base_url_fixture
     ):
-        page = worker_data.page
-        fellows = _real_fellows(worker_data)
-        g = worker_data.create_group(
+        page = worker_data_folder.page
+        fellows = _real_fellows(worker_data_folder)
+        g = worker_data_folder.create_group(
             "Done flow",
             fellow_record_ids=[f[0] for f in fellows[:1]],
         )
         page.goto(f"{base_url_fixture}/#/edit/{g['id']}", wait_until="domcontentloaded")
-        worker_data.wait()
+        worker_data_folder.wait()
         _wait_for_directory(page)
         # The rail's primary button reads "Done editing" in edit mode.
         page.locator("#group-rail-create").click()
@@ -176,17 +176,17 @@ class TestDoneEditing:
 
 class TestCancelEdits:
     def test_cancel_edits_reverts_membership_to_snapshot(
-        self, worker_data, base_url_fixture
+        self, worker_data_folder, base_url_fixture
     ):
-        page = worker_data.page
-        fellows = _real_fellows(worker_data)
+        page = worker_data_folder.page
+        fellows = _real_fellows(worker_data_folder)
         # 2 members at entry. We'll add a third in edit mode, then revert.
-        g = worker_data.create_group(
+        g = worker_data_folder.create_group(
             "Revert test",
             fellow_record_ids=[fellows[0][0], fellows[1][0]],
         )
         page.goto(f"{base_url_fixture}/#/edit/{g['id']}", wait_until="domcontentloaded")
-        worker_data.wait()
+        worker_data_folder.wait()
         _wait_for_directory(page)
         # Add a third member.
         third_name = fellows[2][1]
@@ -198,36 +198,36 @@ class TestCancelEdits:
             page.locator("#group-rail-members .group-rail-member-name")
         ).to_have_count(3, timeout=3000)
         page.wait_for_timeout(150)
-        mid = worker_data.get_group(g["id"])
+        mid = worker_data_folder.get_group(g["id"])
         assert len(mid["members"]) == 3
         # Click cancel-edits → PATCH snapshot back, navigate.
         page.locator("#edit-mode-banner-cancel").click()
         page.wait_for_url(lambda u: f"#/groups/{g['id']}" in u, timeout=3000)
         page.wait_for_timeout(150)
-        after = worker_data.get_group(g["id"])
+        after = worker_data_folder.get_group(g["id"])
         ids = sorted(m["record_id"] for m in after["members"])
         assert ids == sorted([fellows[0][0], fellows[1][0]])
 
 
 class TestComposeDraftSurvivesEdit:
     def test_compose_draft_preserved_across_edit_detour(
-        self, worker_data, base_url_fixture
+        self, worker_data_folder, base_url_fixture
     ):
-        page = worker_data.page
-        fellows = _real_fellows(worker_data)
+        page = worker_data_folder.page
+        fellows = _real_fellows(worker_data_folder)
         # Existing group to edit.
-        g = worker_data.create_group(
+        g = worker_data_folder.create_group(
             "Existing",
             fellow_record_ids=[fellows[0][0]],
         )
-        # worker_data already navigated to /; directory should be ready.
+        # worker_data_folder already navigated to /; directory should be ready.
         _wait_for_directory(page)
         # Compose draft: pick Aaron Bird, type a title.
         _aaron_row(page).locator(".dir-mark").click()
         page.locator("#group-rail-title").fill("My in-progress group")
         # Detour into edit mode.
         page.goto(f"{base_url_fixture}/#/edit/{g['id']}", wait_until="domcontentloaded")
-        worker_data.wait()
+        worker_data_folder.wait()
         _wait_for_directory(page)
         expect(page.locator("#edit-mode-banner")).to_be_visible(timeout=3000)
         # Done editing.
@@ -235,7 +235,7 @@ class TestComposeDraftSurvivesEdit:
         page.wait_for_url(lambda u: f"#/groups/{g['id']}" in u, timeout=3000)
         # Back to directory.
         page.goto(f"{base_url_fixture}/", wait_until="domcontentloaded")
-        worker_data.wait()
+        worker_data_folder.wait()
         _wait_for_directory(page)
         # Compose draft is restored.
         expect(page.locator("#group-rail-title")).to_have_value("My in-progress group")
@@ -245,19 +245,19 @@ class TestComposeDraftSurvivesEdit:
 
 
 class TestReloadDuringEdit:
-    def test_reload_in_edit_mode_re_enters(self, worker_data, base_url_fixture):
-        page = worker_data.page
-        fellows = _real_fellows(worker_data)
-        g = worker_data.create_group(
+    def test_reload_in_edit_mode_re_enters(self, worker_data_folder, base_url_fixture):
+        page = worker_data_folder.page
+        fellows = _real_fellows(worker_data_folder)
+        g = worker_data_folder.create_group(
             "Reload test",
             fellow_record_ids=[f[0] for f in fellows[:1]],
         )
         page.goto(f"{base_url_fixture}/#/edit/{g['id']}", wait_until="domcontentloaded")
-        worker_data.wait()
+        worker_data_folder.wait()
         _wait_for_directory(page)
         expect(page.locator("#edit-mode-banner")).to_be_visible(timeout=3000)
         page.reload(wait_until="domcontentloaded")
-        worker_data.wait()
+        worker_data_folder.wait()
         _wait_for_directory(page)
         expect(page.locator("#edit-mode-banner")).to_be_visible(timeout=5000)
         expect(page.locator("#edit-mode-banner-name")).to_have_text("Reload test")

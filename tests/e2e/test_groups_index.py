@@ -8,7 +8,7 @@ Pins:
 - Delete with confirm() removes the row; cancel keeps it.
 - Top-nav "Groups" link is wired.
 
-Each test wipes the relationships DB via the worker_data fixture (which
+Each test wipes the relationships DB via the worker_data_folder fixture (which
 drives window.__dataProvider) so they're order-independent within the
 session. Tests themselves re-navigate as needed.
 """
@@ -33,26 +33,26 @@ def _aaron_row(page):
 
 
 class TestGroupsIndex:
-    def test_top_nav_groups_link_exists(self, worker_data, base_url_fixture):
-        page = worker_data.page
+    def test_top_nav_groups_link_exists(self, worker_data_folder, base_url_fixture):
+        page = worker_data_folder.page
         _wait_for_directory(page)
         nav_link = page.locator("#nav-groups-link")
         expect(nav_link).to_be_visible()
         expect(nav_link).to_have_attribute("href", "#/groups")
 
-    def test_groups_page_empty_state(self, worker_data, base_url_fixture):
-        page = worker_data.page
+    def test_groups_page_empty_state(self, worker_data_folder, base_url_fixture):
+        page = worker_data_folder.page
         page.goto(base_url_fixture + "/#/groups", wait_until="domcontentloaded")
-        worker_data.wait()
+        worker_data_folder.wait()
         _wait_for_directory(page)
         empty = page.locator(".groups-empty")
         expect(empty).to_be_visible(timeout=5000)
         expect(empty).to_contain_text("No groups yet")
 
     def test_create_from_rail_navigates_to_detail_page(
-        self, worker_data, base_url_fixture
+        self, worker_data_folder, base_url_fixture
     ):
-        page = worker_data.page
+        page = worker_data_folder.page
         _wait_for_directory(page)
         _aaron_row(page).locator(".dir-mark").click()
         page.locator("#group-rail-title").fill("Smoke group")
@@ -72,8 +72,8 @@ class TestGroupsIndex:
         expect(page.locator("#group-rail-create")).to_be_disabled()
         expect(page.locator("#group-rail-members .group-rail-member-name")).to_have_count(0)
 
-    def test_groups_index_lists_created_group(self, worker_data, base_url_fixture):
-        page = worker_data.page
+    def test_groups_index_lists_created_group(self, worker_data_folder, base_url_fixture):
+        page = worker_data_folder.page
         _wait_for_directory(page)
         _aaron_row(page).locator(".dir-mark").click()
         page.locator("#group-rail-title").fill("Listed group")
@@ -88,9 +88,9 @@ class TestGroupsIndex:
         expect(page.locator(".groups-cell-num")).to_have_text("1")
 
     def test_inline_rename_persists_across_reload(
-        self, worker_data, base_url_fixture
+        self, worker_data_folder, base_url_fixture
     ):
-        page = worker_data.page
+        page = worker_data_folder.page
         _wait_for_directory(page)
         _aaron_row(page).locator(".dir-mark").click()
         page.locator("#group-rail-title").fill("old name")
@@ -107,14 +107,14 @@ class TestGroupsIndex:
         expect(page.locator(".groups-name-link")).to_have_text("new name", timeout=3000)
         # Reload — name persists.
         page.reload(wait_until="domcontentloaded")
-        worker_data.wait()
+        worker_data_folder.wait()
         _wait_for_directory(page)
         expect(page.locator(".groups-name-link")).to_have_text("new name")
 
     def test_delete_with_confirm_removes_row_and_shows_empty_state(
-        self, worker_data, base_url_fixture
+        self, worker_data_folder, base_url_fixture
     ):
-        page = worker_data.page
+        page = worker_data_folder.page
         page.on("dialog", lambda d: d.accept())
         _wait_for_directory(page)
         _aaron_row(page).locator(".dir-mark").click()
@@ -127,8 +127,8 @@ class TestGroupsIndex:
         expect(page.locator(".groups-empty")).to_be_visible(timeout=3000)
         expect(page.locator(".groups-table")).to_have_count(0)
 
-    def test_delete_cancel_keeps_row(self, worker_data, base_url_fixture):
-        page = worker_data.page
+    def test_delete_cancel_keeps_row(self, worker_data_folder, base_url_fixture):
+        page = worker_data_folder.page
         page.on("dialog", lambda d: d.dismiss())
         _wait_for_directory(page)
         _aaron_row(page).locator(".dir-mark").click()
@@ -141,9 +141,9 @@ class TestGroupsIndex:
         expect(page.locator(".groups-name-link")).to_have_text("survivor")
 
     def test_detail_member_link_navigates_to_fellow(
-        self, worker_data, base_url_fixture
+        self, worker_data_folder, base_url_fixture
     ):
-        page = worker_data.page
+        page = worker_data_folder.page
         _wait_for_directory(page)
         _aaron_row(page).locator(".dir-mark").click()
         page.locator("#group-rail-title").fill("nav test")

@@ -13,7 +13,40 @@ The "Owner" column names the JS context that reads and writes the
 layer (per [Architecture.md § Worker-owned OPFS](Architecture.md#worker-owned-opfs)).
 "server" means an HttpOnly cookie that no JS context can see.
 
-**Storage mode.** Folder mode (PR #181/#190 — Chromium desktop with a user-picked folder) and OPFS-only mode (Safari / Firefox / mobile, or Chromium users who declined the picker) hydrate the same `relationships.db` from different substrates. The table below covers both — rows tagged *(folder mode)* only apply when a folder handle is attached and permission is granted; rows tagged *(OPFS-only)* describe the fallback. See [`../plans/user_folder_storage.md`](../plans/user_folder_storage.md) for the full architecture.
+**Storage mode (three states).** There are now **three** storage states,
+not two:
+
+- **Folder mode** (Chromium desktop with a *verified* folder attached —
+  the only state where private data exists): `relationships.db` is a real
+  file at `<folder>/Fellows/relationships.db`, hydrated into an OPFS
+  working buffer on boot and serialized back on every commit. This is the
+  only state in which groups, members, tags, notes, and group settings
+  are durably stored.
+- **Browse-only mode** (Chromium desktop with no folder, Safari, Firefox,
+  all phones — i.e. anywhere private data is gated off): there is **no
+  durable private store**. `relationships.db` is **not** opened for
+  durable data; the app does not write groups/tags/notes anywhere. The
+  only persisted state is two `localStorage` prefs (`fellows_self_email`,
+  `ehf_has_email_only`). On Chromium-desktop-no-folder the worker may do
+  one **read-only peek** of any legacy OPFS `relationships.db` (counts
+  only) to drive the migration prompt — that is a read to rescue legacy
+  data, not a durable write.
+- **Folder mode** is reached from browse-only by the unlock flow (pick a
+  folder → empirical write/readback probe → permission persists). See
+  [`../plans/private_data_capability_gate.md`](../plans/private_data_capability_gate.md)
+  for the gate decision and [`browser_support.md`](browser_support.md)
+  for the probe.
+
+The table below covers folder mode and the legacy-buffer details — rows
+tagged *(folder mode)* only apply when a verified folder is attached and
+permission is granted. In **browse-only mode** the `relationships.db`
+rows simply **do not apply** (no durable private store). For *why* these
+states differ in durability — the class-level ceiling that off-folder
+there is no private store at all — see
+[`architectural_findings.md` § 2026-06-01](architectural_findings.md)
+(`CST-PWA-*`). The prior framing called the off-folder state
+"OPFS-only mode"; that is now **browse-only mode** (off-folder there is
+**no** private store, not a degraded one).
 
 | Layer | Owner | Holds | Replaced on app update | Cleared by **Clear App Cache** button |
 |---|---|---|---|---|
@@ -23,14 +56,14 @@ layer (per [Architecture.md § Worker-owned OPFS](Architecture.md#worker-owned-o
 | IndexedDB `fellows-fs-handles` | worker | The `FileSystemDirectoryHandle` the user picked (key `relationships-folder`) — what makes folder mode "remember" the folder across browser restarts | Untouched | **No** (survives Clear App Cache); cleared by browser-level "Clear site data" |
 | OPFS `fellows.db` | worker | Imported Knack contact data | **Re-imported on user request** via the About-page *Update directory data* button when `fellows.db.meta.json:sha` differs from `build-meta.json:fellows_db_sha`. Boot path is install-only and never auto-refreshes a returning visitor (`plans/opt_in_directory_data_updates.md`). | **No** (gap; see "Open questions") |
 | OPFS `fellows.db.meta.json` | worker | `{sha, fetched_at, last_failure_at, last_failure_reason}` — the freshness sidecar that records what's locally installed. Sibling of `fellows.db` at the OPFS root, outside the SAH-pool dir, so a `relationships.db` restore can't desync it. | Updated after each successful user-driven re-import; otherwise untouched | **No** |
-| OPFS `relationships.db` *(both modes — buffer)* | worker | Groups, group members, fellow_tags, fellow_notes, settings. In folder mode this is a transient working buffer hydrated from folder bytes on boot and serialized back on every commit. In OPFS-only mode it's the canonical store. | **Never** — that's the whole point of this file | **No** |
+| OPFS `relationships.db` *(folder mode — buffer; browse-only — dormant)* | worker | Groups, group members, fellow_tags, fellow_notes, settings. In folder mode this is a transient working buffer hydrated from folder bytes on boot and serialized back on every commit. In **browse-only mode it is dormant** — not opened for durable data (one read-only legacy peek for the migration prompt is the only access). | **Never** — that's the whole point of this file | **No** |
 | `<folder>/Fellows/relationships.db` *(folder mode — canonical)* | worker | Same shape as above. After PR #190's pivot, this is the source of truth in folder mode; the OPFS slot is the working buffer. Atomic full-file write on every committed mutation, guarded by a Web Lock (PR #209). Visible in Finder / Explorer; survives browser-data wipes, browser switches, even hardware moves through a synced folder. | **Never** | **No** (it's outside browser storage entirely) |
-| OPFS `relationships.db.bak.<ISO>` *(OPFS-only mode)* | worker | Snapshots of `relationships.db`, rotated to keep newest 5. Auto-created on every boot when the most recent backup is more than 1 hour old (debounced). | Untouched | **No** (preserved alongside `relationships.db` for recovery) |
+| OPFS `relationships.db.bak.<ISO>` *(legacy / migration only)* | worker | Snapshots of `relationships.db`, rotated to keep newest 5. Auto-backup only runs when a private store exists (folder mode); any OPFS-resident bak files are legacy from before the gate and are migrated into the folder on first folder-mode boot. In browse-only mode no new backups are written (nothing durable to back up). | Untouched | **No** (preserved alongside `relationships.db` for recovery) |
 | `<folder>/Fellows/relationships.db.bak.<ISO>` *(folder mode)* | worker | Same backup ring as above, but folder-resident — visible in Finder, survives browser-data wipes. PR #191 migrates any existing OPFS-resident bak files into the folder on first folder-mode boot, then deletes the OPFS originals. | Untouched | **No** (outside browser storage) |
 | localStorage `fellows_authenticated_once` | main | "this origin has authenticated at least once" marker | Untouched | **Preserved by name** in `clearAllAppData` |
-| localStorage `ehf_has_email_only` | main | Has-email filter pref (mirrored to `relationships.settings.has_email_only` for durability across Clear App Cache) | Untouched | Cleared, but rehydrated from `relationships.settings` on next boot |
+| localStorage `ehf_has_email_only` | main | Has-email filter pref. In folder mode also mirrored to `relationships.settings.has_email_only` for durability across Clear App Cache; **in browse-only mode it is localStorage-only** (no mirror — `relationships.db` is not written). One of the only two pieces of persisted state in browse-only mode. | Untouched | Cleared; in folder mode rehydrated from `relationships.settings` on next boot |
 | localStorage `ehf.group_draft` | main | In-progress group composer state | Untouched | Cleared (acceptable: drafts are unsaved) |
-| localStorage `fellows_self_email` | main | User's "me" email for `mailto:?to=…` | Untouched | Cleared, but rehydrated from `relationships.settings` on next boot |
+| localStorage `fellows_self_email` | main | User's "me" email for `mailto:?to=…`. In folder mode also mirrored to `relationships.settings`; **in browse-only mode it is localStorage-only**. The other of the only two pieces of persisted state in browse-only mode. | Untouched | Cleared; in folder mode rehydrated from `relationships.settings` on next boot |
 | Cookie `fellows_session` (HttpOnly) | server | HMAC'd session, 7-day TTL, contains `token_issued_at` | Untouched (still valid until TTL) | Cleared via `POST /api/logout` (server sends a clearing `Set-Cookie`). `clearCookiesBestEffort()` also runs from JS as a fallback for any non-HttpOnly cookies. |
 
 Note: `last_seen_sha.txt` (the build-SHA sentinel previously used to
@@ -144,6 +177,12 @@ fires a single toast pointing the user at group detail; the
 re-toasting.
 
 ## Auto-backup of `relationships.db`
+
+**Auto-backup and restore run only when a private store exists — i.e. in
+folder mode.** In browse-only mode there is no durable private store to
+snapshot, so the auto-backup machinery is inert; the manual `.db` export
+is the only durable artifact (and the migration bridge). The rest of this
+section describes folder mode.
 
 `relationships.db` is the only local file that's neither replaced on
 upgrade (like `fellows.db`) nor easy to recover from a botched

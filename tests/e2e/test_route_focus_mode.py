@@ -31,13 +31,18 @@ class TestDesktopFocusMode:
     """
 
     def test_directory_route_keeps_directory_and_rail_visible(
-        self, page, base_url_fixture
+        self, folder_attached_page, base_url_fixture
     ):
         """Sanity: the default route is the one place focus mode does NOT
         apply. Without this assertion we can't tell whether a "rails are
         hidden everywhere" test is actually catching a regression that
         broke the directory page itself.
+
+        Uses folder_attached_page: under the capability gate the composer
+        rail only exists when a verified folder is attached
+        (privateDataEnabled()), so focus-mode behavior is tested with one.
         """
+        page = folder_attached_page
         page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
         page.locator("#loading").wait_for(state="hidden", timeout=10000)
 
@@ -57,13 +62,14 @@ class TestDesktopFocusMode:
         ],
     )
     def test_about_and_settings_hide_directory_and_rail(
-        self, page, base_url_fixture, hash_route, expected_class
+        self, folder_attached_page, base_url_fixture, hash_route, expected_class
     ):
         """The user-reported regression in #121: at desktop widths, About
         and Settings rendered the directory list + composer rail in side
         columns, squeezing the central page content. Both must be hidden
         on these routes regardless of viewport width.
         """
+        page = folder_attached_page
         page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
         page.locator("#loading").wait_for(state="hidden", timeout=10000)
 
