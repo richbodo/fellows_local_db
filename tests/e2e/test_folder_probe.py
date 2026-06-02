@@ -127,3 +127,34 @@ def test_lock_my_private_data_returns_to_browse_only(standalone_page, base_url_f
     state = page.evaluate("() => window.__folderController.getState()")
     assert state["hasHandle"] is False, state
     assert page.evaluate("() => window.__privateDataTier") == "browse-only-desktop"
+
+
+def test_workspace_identity_and_write_generation_stamp(standalone_page, base_url_fixture):
+    """EPIC PR5 foundation: relationships.db carries a workspace identity
+    (minted at bootstrap) and a write_generation that strictly increases on
+    each committed mutation in folder mode — the recency the chooser ranks by."""
+    page = standalone_page
+    _boot(page, base_url_fixture)
+    # Identity is minted when relationships.db is bootstrapped at boot.
+    uuid = page.evaluate("() => window.__dataProvider.getSetting('workspace_uuid')")
+    assert uuid, "workspace_uuid should be minted at bootstrap"
+    # Attach a folder so the post-commit folder write (which stamps) runs.
+    page.evaluate("() => window.__dataProvider._clearFolderHandle()")
+    page.evaluate("() => window.__resetE2EUserFolderMin && window.__resetE2EUserFolderMin()")
+    page.goto(base_url_fixture + "/#/settings", wait_until="domcontentloaded")
+    page.locator("#settings-folder-choose").wait_for(state="visible", timeout=5000)
+    page.locator("#settings-folder-choose").click()
+    page.wait_for_function(
+        "() => !document.body.classList.contains('no-private-data')", timeout=10000
+    )
+    rid = page.evaluate("() => window.__dataProvider.getFull().then(f => f[0].record_id)")
+    page.evaluate(
+        "(rid) => window.__dataProvider.createGroup({name:'g1', note:'', fellow_record_ids:[rid]})",
+        rid,
+    )
+    gen1 = page.evaluate("() => window.__dataProvider.getSetting('write_generation')")
+    page.evaluate(
+        "() => window.__dataProvider.createGroup({name:'g2', note:'', fellow_record_ids:[]})"
+    )
+    gen2 = page.evaluate("() => window.__dataProvider.getSetting('write_generation')")
+    assert gen1 and gen2 and int(gen2) > int(gen1), (gen1, gen2)

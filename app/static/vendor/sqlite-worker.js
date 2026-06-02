@@ -258,10 +258,65 @@ function bootstrapRelationshipsSchema(db) {
   db.exec('PRAGMA foreign_keys = ON;');
   db.exec(RELATIONSHIPS_SCHEMA_SQL);
   db.exec('PRAGMA user_version = ' + RELATIONSHIPS_SCHEMA_VERSION);
+  _ensureWorkspaceIdentity(db);
 }
 
 function nowIsoSecond() {
   return new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+}
+
+// ----- Workspace identity (EPIC PR5) ---------------------------------------
+// A few stable rows in the relationships `settings` table that travel WITH the
+// DB (and so with a folder store and any backup of it). They let the
+// content-previewed folder chooser say "created on this Chrome · last changed
+// 2 days ago" and recommend the most-recently-written store. Settings rows, not
+// a schema change — RELATIONSHIPS_SCHEMA_VERSION stays 1.
+function _identityPut(db, k, v) {
+  dbRun(db,
+    'INSERT INTO settings(key, value) VALUES (?, ?) ' +
+    'ON CONFLICT(key) DO UPDATE SET value = excluded.value', [k, v]);
+}
+
+function _deviceLabelGuess() {
+  var ua = (self.navigator && self.navigator.userAgent) || '';
+  var os = /Mac/.test(ua) ? 'Mac' : /Win/.test(ua) ? 'Windows'
+    : /CrOS/.test(ua) ? 'ChromeOS' : /Linux/.test(ua) ? 'Linux' : 'this device';
+  var br = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera'
+    : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox'
+    : /Safari\//.test(ua) ? 'Safari' : 'browser';
+  return br + ' on ' + os;
+}
+
+// Mint identity once if absent (called from bootstrap — fresh + restored DBs).
+function _ensureWorkspaceIdentity(db) {
+  try {
+    var existing = dbSelectOne(db, 'SELECT value FROM settings WHERE key = ?', ['workspace_uuid']);
+    if (existing && existing.value) return;
+    var uuid = (self.crypto && typeof self.crypto.randomUUID === 'function')
+      ? self.crypto.randomUUID()
+      : ('ws-' + Date.now() + '-' + Math.random().toString(16).slice(2));
+    var now = nowIsoSecond();
+    _identityPut(db, 'workspace_uuid', uuid);
+    _identityPut(db, 'device_label', _deviceLabelGuess());
+    _identityPut(db, 'created_at', now);
+    _identityPut(db, 'write_generation', '0');
+    _identityPut(db, 'last_written_at', now);
+  } catch (e) {
+    trace('identity: ensure failed: ' + ((e && e.message) || e));
+  }
+}
+
+// Bump the monotonic write generation + last_written_at on each committed
+// mutation, so the chooser can rank stores by recency.
+function _stampWriteGeneration(db) {
+  try {
+    var row = dbSelectOne(db, 'SELECT value FROM settings WHERE key = ?', ['write_generation']);
+    var n = (row && row.value ? (parseInt(row.value, 10) || 0) : 0) + 1;
+    _identityPut(db, 'write_generation', String(n));
+    _identityPut(db, 'last_written_at', nowIsoSecond());
+  } catch (e) {
+    trace('identity: stamp failed: ' + ((e && e.message) || e));
+  }
 }
 
 function dedupeRecordIds(ids) {
@@ -2392,6 +2447,10 @@ async function _maybeWriteFolderAfterCommit() {
     // to write — would just fail and populate lastError with noise.
     return;
   }
+  // Stamp the write generation into the live DB BEFORE exporting, so the
+  // folder copy (and any backup of it) carries the recency the chooser ranks
+  // by (EPIC PR5). Runs only in folder mode — the only stores the chooser sees.
+  if (relDb) _stampWriteGeneration(relDb);
   var bytes;
   try {
     bytes = poolUtil.exportFile(RELATIONSHIPS_DB_SLOT);
