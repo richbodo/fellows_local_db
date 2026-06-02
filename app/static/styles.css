@@ -5313,3 +5313,115 @@ body.is-phone .settings-phone-tool--danger {
   color: var(--danger);
   border-color: var(--danger);
 }
+
+/* =========================================================================
+ * PR6 / mobile visual polish (match-the-mock): fellow-detail hero + search
+ * has-email chip. Cosmetic only — no DOM/JS structure change.
+ * ========================================================================= */
+
+/* Hero ordering: photo (centered, square) → name → tagline → CTA → tags.
+   The detail-left-top column already holds these as direct children; we
+   flex+order them on phones rather than reflow the HTML (desktop unchanged). */
+body.is-phone .detail-left-top {
+  display: flex;
+  flex-direction: column;
+}
+body.is-phone .detail-left-top .profile-image-wrap {
+  order: 1;
+  align-self: center;
+  margin: 4px 0 12px;
+}
+body.is-phone .detail-left-top .detail-name {
+  order: 2;
+  font-size: 24px;
+}
+body.is-phone .detail-left-top .detail-demographics {
+  order: 3;
+}
+body.is-phone .detail-left-top .detail-tagline {
+  order: 4;
+}
+body.is-phone .detail-left-top .contact-cta {
+  order: 5;
+}
+body.is-phone .detail-left-top .tag-chips {
+  order: 6;
+}
+
+/* Square, slightly-rounded, centered photo (mock default over circular). */
+body.is-phone .profile-image-wrap {
+  width: 168px;
+  height: 168px;
+}
+body.is-phone .detail img.profile-image {
+  width: 168px;
+  height: 168px;
+  max-width: 168px;
+  border-radius: 12px;
+}
+body.is-phone .profile-image-wrap .profile-image-status {
+  border-radius: 12px;
+}
+
+/* Tag chips below the hero. */
+body.is-phone .tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+body.is-phone .tag-chip {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--accent-deeper);
+  border: 1px solid var(--border);
+}
+
+/* Detail section headers read as the mock's uppercase section-head. */
+body.is-phone .detail-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+/* has-email control → removable pill chip. The native checkbox is hidden
+   but still toggled by the wrapping label (no new JS); :has() flips the
+   pill to the active accent state with a ✕ that reads as "tap to remove".
+   Function is unchanged: it's a defeatable default, not a hard gate. */
+body.is-phone .filter-checkbox {
+  gap: 6px;
+  padding: 5px 11px;
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+body.is-phone .filter-checkbox input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+body.is-phone .filter-checkbox:has(input:checked) {
+  background: var(--accent-soft);
+  color: var(--accent-deeper);
+}
+body.is-phone .filter-checkbox:has(input:checked)::after {
+  content: "×";
+  font-size: 16px;
+  line-height: 1;
+  color: var(--accent);
+}
+body.is-phone .filter-count {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--muted);
+}

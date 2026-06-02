@@ -6084,6 +6084,19 @@
           + escapeHtml(ctaTel) + '">' + PHONE_ICO + 'Call</a>';
       }
       leftTop += '<div class="contact-cta">' + cta + '</div>';
+      // Search tags as chips below the hero (match-the-mock). The blob is
+      // CSV-ish; split, trim, cap so a long tag list can't run away. The
+      // full "Search Tags" section still renders below for completeness.
+      if (fellow.search_tags && String(fellow.search_tags).trim()) {
+        var tags = String(fellow.search_tags).split(/[,;]/).map(function (t) {
+          return t.trim();
+        }).filter(Boolean).slice(0, 10);
+        if (tags.length) {
+          leftTop += '<div class="tag-chips">' + tags.map(function (t) {
+            return '<span class="tag-chip">' + escapeHtml(t) + '</span>';
+          }).join('') + '</div>';
+        }
+      }
     }
 
     var howRows = [];

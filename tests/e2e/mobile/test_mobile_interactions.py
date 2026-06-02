@@ -418,3 +418,40 @@ def test_fellow_detail_has_no_add_to_group_on_phone(
     page.goto(base_url_fixture + "/#/fellow/aaron_bird", wait_until="domcontentloaded")
     _wait_for_app_boot(page)
     expect(page.locator("#detail .detail-add-to-group")).to_have_count(0)
+
+
+def test_fellow_detail_tag_chips_on_phone(
+    mobile_interaction_page, device_name, base_url_fixture
+):
+    """The hero renders search_tags as chips when present, and none when
+    the fellow has no tags."""
+    page = mobile_interaction_page
+    # aaron_bird: search_tags = "SaaS, AI" → 2 chips.
+    page.goto(base_url_fixture + "/#/fellow/aaron_bird", wait_until="domcontentloaded")
+    _wait_for_app_boot(page)
+    expect(page.locator("#detail .tag-chips .tag-chip")).to_have_count(2)
+
+    # aaron_mcdonald: no search_tags → no chip block.
+    page.goto(base_url_fixture + "/#/fellow/aaron_mcdonald", wait_until="domcontentloaded")
+    _wait_for_app_boot(page)
+    expect(page.locator("#detail .tag-chips")).to_have_count(0)
+
+
+def test_has_email_filter_chip_toggles_on_phone(
+    mobile_interaction_page, device_name, base_url_fixture
+):
+    """The has-email control renders as a pill chip and still toggles the
+    underlying filter (a defeatable default, not a hard gate) — the visual
+    restyle must not break the function."""
+    page = mobile_interaction_page
+    page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+    _wait_for_app_boot(page)
+    checkbox = page.locator("#has-email-filter")
+    # Default on.
+    assert checkbox.is_checked(), f"has-email should default on at {device_name}"
+    # Tapping the pill (the wrapping label) toggles the filter off.
+    page.locator(".filter-checkbox").click()
+    expect(checkbox).not_to_be_checked()
+    # And back on.
+    page.locator(".filter-checkbox").click()
+    expect(checkbox).to_be_checked()
