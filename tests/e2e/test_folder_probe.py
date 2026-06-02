@@ -17,6 +17,8 @@ pins the happy path (verify + persist) and reason-code propagation
 """
 from __future__ import annotations
 
+from playwright.sync_api import expect
+
 from tests.e2e.conftest import _FOLDER_PICKER_STUB_MIN
 
 
@@ -95,3 +97,33 @@ def test_settings_pick_unlocks_private_data_without_reload(standalone_page, base
         timeout=8000,
     )
     assert page.evaluate("() => window.__privateDataTier") == "private-folder"
+
+
+def test_lock_my_private_data_returns_to_browse_only(standalone_page, base_url_fixture):
+    """The 'Lock my private data' control disconnects the folder and flips the
+    gate back to browse-only live (no reload). The folder file is untouched —
+    re-picking unlocks again."""
+    page = standalone_page
+    _boot(page, base_url_fixture)
+    page.evaluate("() => window.__dataProvider._clearFolderHandle()")
+    page.evaluate("() => window.__resetE2EUserFolderMin && window.__resetE2EUserFolderMin()")
+    # Unlock first.
+    page.goto(base_url_fixture + "/#/settings", wait_until="domcontentloaded")
+    page.locator("#settings-folder-choose").wait_for(state="visible", timeout=5000)
+    page.locator("#settings-folder-choose").click()
+    page.wait_for_function(
+        "() => !document.body.classList.contains('no-private-data')", timeout=10000
+    )
+    # The lock control appears only when a folder is connected.
+    lock = page.locator("#settings-folder-lock")
+    expect(lock).to_be_visible()
+    # Accept the confirm() prompt, then lock.
+    page.once("dialog", lambda d: d.accept())
+    lock.click()
+    # Gate flips back to browse-only, live.
+    page.wait_for_function(
+        "() => document.body.classList.contains('no-private-data')", timeout=8000
+    )
+    state = page.evaluate("() => window.__folderController.getState()")
+    assert state["hasHandle"] is False, state
+    assert page.evaluate("() => window.__privateDataTier") == "browse-only-desktop"

@@ -9105,6 +9105,7 @@
         '</p>' +
         '<div id="settings-folder-actions" class="settings-folder-actions">' +
           '<button type="button" id="settings-folder-choose" class="settings-download" hidden>Choose folder…</button>' +
+          '<button type="button" id="settings-folder-lock" class="settings-download" hidden>🔒 Lock my private data</button>' +
           '<button type="button" id="settings-download-userdata" class="settings-download" hidden>' +
             '⬇ Download my private data' +
           '</button>' +
@@ -10100,6 +10101,12 @@
         btnChoose.hidden = !supported;
         btnChoose.textContent = state.hasHandle ? 'Change folder…' : 'Choose folder…';
       }
+      // "Lock my private data" (EPIC PR4): the user-friendly disconnect —
+      // shown only when a folder is connected. Returns to browse-only; the
+      // data stays safe in the folder file. (Future: combine with at-rest
+      // encryption — see plans / lock-my-data.)
+      var lockBtn = document.getElementById('settings-folder-lock');
+      if (lockBtn) lockBtn.hidden = !(supported && state.hasHandle);
       // Download button stays visible whenever local persistence is
       // available — folder-mode users still want backup files outside
       // the folder (cloud-sync conflicts, sneakernet to another machine,
@@ -10291,6 +10298,31 @@
             // a reload (EPIC PR4). Idempotent: a failed pick re-resolves to
             // the same locked state.
             try { updatePrivateDataGate(); } catch (e) {}
+            return refresh();
+          });
+      });
+    }
+
+    var btnLock = document.getElementById('settings-folder-lock');
+    if (btnLock) {
+      btnLock.addEventListener('click', function () {
+        var ok = window.confirm(
+          'Lock your private data?\n\n' +
+          'This disconnects the data folder and returns the app to browse-only. ' +
+          'Your groups and notes stay safe in the folder file — unlock again ' +
+          'anytime by picking the folder. (A future update will let you ' +
+          'encrypt this file.)'
+        );
+        if (!ok) return;
+        btnLock.disabled = true;
+        FOLDER_CONTROLLER.clearHandle()
+          .catch(function () { /* already gone — still go browse-only */ })
+          .then(function () {
+            // Flip the gate live → browse-only; the data folder file is
+            // untouched, so re-picking it unlocks again.
+            try { updatePrivateDataGate(); } catch (e) {}
+            flashDetail('Locked — data folder disconnected. Pick a folder to unlock again.');
+            btnLock.disabled = false;
             return refresh();
           });
       });
