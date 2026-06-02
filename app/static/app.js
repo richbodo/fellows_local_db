@@ -8950,10 +8950,10 @@
     } else {
       bannerEl.classList.remove('folder-push-banner--error');
       bannerEl.setAttribute('role', 'status');
-      if (leadEl) leadEl.textContent = 'Save your fellows data to disk.';
+      if (leadEl) leadEl.textContent = 'Saved groups need a data folder.';
       if (detailEl) {
         detailEl.textContent =
-          'Your groups and notes are only in browser storage right now. Pick a folder for durable storage.';
+          'Choose a local private data folder to use group features.';
       }
       if (ctaEl) ctaEl.textContent = 'Set up data folder';
       if (dismissEl) dismissEl.hidden = false;
@@ -10008,11 +10008,11 @@
 
     var BADGE_COPY = {
       'unsupported': {
-        text: 'Browser-only — this browser doesn\'t support saving to a folder',
+        text: 'Private data (groups, notes) isn’t available in this browser — use a Chromium desktop browser',
         cls: 'settings-folder-badge--warning'
       },
       'browser-only': {
-        text: 'Browser-only — your data is not yet saved to a folder',
+        text: 'Private data (groups, notes) isn’t connected — pick a folder to enable it',
         cls: 'settings-folder-badge--warning'
       },
       'saved': {

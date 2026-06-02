@@ -244,11 +244,11 @@ class TestUserFolderStorage:
         self, folder_page, base_url_fixture
     ):
         _open_settings(folder_page, base_url_fixture)
-        # On a fresh state, badge says "Browser-only" and the single
-        # Choose folder… button is visible (Save now / Reload from
-        # folder / Reconnect / Disconnect removed in PR #205).
+        # On a fresh state the badge says private data isn't connected (the
+        # capability-gate framing — was "Browser-only" before the gate) and
+        # the single Choose folder… button is visible.
         badge_text = folder_page.locator("#settings-folder-badge .settings-folder-badge-text")
-        expect(badge_text).to_contain_text("Browser-only")
+        expect(badge_text).to_contain_text("isn’t connected")
         choose = folder_page.locator("#settings-folder-choose")
         expect(choose).to_be_visible()
         expect(choose).to_have_text("Choose folder…")
