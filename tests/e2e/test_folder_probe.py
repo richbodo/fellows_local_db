@@ -193,3 +193,29 @@ def test_scan_fellows_candidates(standalone_page, base_url_fixture):
     assert fellows[0]["groups"] == 1, fellows[0]
     assert fellows[0]["writeGeneration"] is not None, fellows[0]
     assert result["recommended"] == "Fellows", result
+
+
+def test_folder_marker_written_on_attach(standalone_page, base_url_fixture):
+    """EPIC PR5 follow-up: a HOW-TO-MOVE-THIS-DATA.txt marker is dropped next
+    to relationships.db when a folder is attached, so the folder is
+    self-explanatory on disk."""
+    page = standalone_page
+    _boot(page, base_url_fixture)
+    page.evaluate("() => window.__dataProvider._clearFolderHandle()")
+    page.evaluate("() => window.__resetE2EUserFolderMin && window.__resetE2EUserFolderMin()")
+    page.goto(base_url_fixture + "/#/settings", wait_until="domcontentloaded")
+    page.locator("#settings-folder-choose").wait_for(state="visible", timeout=5000)
+    page.locator("#settings-folder-choose").click()
+    page.wait_for_function(
+        "() => !document.body.classList.contains('no-private-data')", timeout=10000
+    )
+    has_marker = page.evaluate(
+        """async () => {
+            const root = await navigator.storage.getDirectory();
+            const parent = await root.getDirectoryHandle('__e2e_user_folder__');
+            const fellows = await parent.getDirectoryHandle('Fellows');
+            try { await fellows.getFileHandle('HOW-TO-MOVE-THIS-DATA.txt'); return true; }
+            catch (e) { return false; }
+        }"""
+    )
+    assert has_marker is True

@@ -181,7 +181,7 @@ class TestResetEverythingBackupPrompt:
             with page.expect_download(timeout=5000) as dl_info:
                 page.click("#reset-backup-download")
             download = dl_info.value
-            assert download.suggested_filename.startswith("relationships-")
+            assert download.suggested_filename.startswith("ehf-fellows-private-data-")
             assert download.suggested_filename.endswith(".db")
 
             # After the download fires, the prompt closes and the
