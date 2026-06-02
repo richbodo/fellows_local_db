@@ -77,7 +77,7 @@ def test_android_backup_saves_to_downloads_without_share(playwright, browser, ba
         with page.expect_download(timeout=20000) as dl_info:
             page.locator("#settings-download-userdata").click()
         download = dl_info.value
-        assert download.suggested_filename.startswith("relationships-")
+        assert download.suggested_filename.startswith("ehf-fellows-private-data-")
         assert download.suggested_filename.endswith(".db")
         # The whole point: the Android share-sheet → Drive dead-end is gone.
         assert page.evaluate("() => window.__shareCalls") == 0

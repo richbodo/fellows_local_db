@@ -1834,6 +1834,21 @@ var FOLDER_IDB_STORE = 'handles';
 var FOLDER_IDB_KEY = 'relationships-folder';
 var FOLDER_SUBFOLDER_DEFAULT = 'Fellows';
 var FOLDER_RELATIONSHIPS_FILE = 'relationships.db';
+// Human-readable marker dropped next to relationships.db (EPIC PR5 follow-up)
+// so the folder is self-explanatory in Finder/Explorer and the migration path
+// is discoverable without the app.
+var FOLDER_MARKER_FILE = 'HOW-TO-MOVE-THIS-DATA.txt';
+var FOLDER_MARKER_TEXT =
+  'This folder holds your EHF Fellows private data.\n\n' +
+  '  relationships.db  — your saved groups, notes, and tags (a SQLite database).\n\n' +
+  'The Fellows app reads and writes this file. Nothing is uploaded anywhere.\n\n' +
+  'To move your data to another computer or browser:\n' +
+  '  1. In the app: Settings -> Private data folder -> "Download my private data".\n' +
+  '  2. On the new computer, install the app in a Chromium desktop browser\n' +
+  '     (Chrome / Edge / Brave / Arc), then Settings -> Restore from a file,\n' +
+  '     and pick the downloaded .db.\n' +
+  'Or just copy this whole folder to the new computer and pick it in the app.\n\n' +
+  'Keep this folder on local disk -- not a cloud-only / online-only folder.\n';
 // Web Locks name guarding folder writes. Lock is scoped per-origin
 // per-browser-profile; agents in the same context (this worker + its
 // page) share the namespace, so a page-side test or future takeover-
@@ -2578,6 +2593,19 @@ handlers.scanFellowsCandidates = async function (args) {
 // does NOT return the bytes — so feature-detecting showDirectoryPicker is
 // necessary but not sufficient for a *durable* store. Reason codes map to
 // anchors in docs/folder_troubleshooting.md.
+// Drop the human-readable "how to move this data" marker next to
+// relationships.db (idempotent overwrite; best-effort). EPIC PR5 follow-up.
+async function _writeFolderMarker(subHandle) {
+  try {
+    var fh = await subHandle.getFileHandle(FOLDER_MARKER_FILE, { create: true });
+    var w = await fh.createWritable();
+    await w.write(FOLDER_MARKER_TEXT);
+    await w.close();
+  } catch (e) {
+    trace('folder: marker write failed: ' + ((e && e.message) || e));
+  }
+}
+
 async function _probeWritableSentinel(subHandle) {
   var SENTINEL_NAME = '.fellows-probe';
   var token = 'fellows-probe-' + (
@@ -2720,6 +2748,8 @@ handlers.probeFolderWritable = async function (args) {
   }
   folderRecord.lastError = null;
   await _folderRecordPersist();
+  // Drop the human-readable marker so the folder is self-explanatory on disk.
+  await _writeFolderMarker(result.handle);
   trace('folder: probe ok parent=' + folderRecord.parentName +
     ' subfolder=' + folderRecord.subfolderName);
   return {

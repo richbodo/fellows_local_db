@@ -2425,8 +2425,10 @@
     }
     return dataProvider.exportRelationshipsBytes().then(function (bytes) {
       if (!bytes || !bytes.byteLength) return null;
-      var ts = new Date().toISOString().replace(/[:.]/g, '-');
-      var filename = 'relationships-' + ts + '.db';
+      // Self-describing name (EPIC PR5 follow-up) so a restore-a-file pile is
+      // recognizable; same-day re-exports get the browser's "(1)" suffix.
+      var ts = new Date().toISOString().slice(0, 10);
+      var filename = 'ehf-fellows-private-data-' + ts + '.db';
       var blob = new Blob([bytes], { type: 'application/octet-stream' });
       return downloadBlob(blob, filename).then(function (result) {
         return {
@@ -9395,8 +9397,10 @@
               if (downloadStatus) downloadStatus.textContent = 'No data yet to download.';
               return;
             }
-            var ts = new Date().toISOString().replace(/[:.]/g, '-');
-            var filename = 'relationships-' + ts + '.db';
+            // Self-describing name (EPIC PR5 follow-up) — recognizable in a
+            // pile of downloads; same-day re-exports get the browser's "(1)".
+            var ts = new Date().toISOString().slice(0, 10);
+            var filename = 'ehf-fellows-private-data-' + ts + '.db';
             var blob = new Blob([bytes], { type: 'application/octet-stream' });
             return downloadBlob(blob, filename).then(function (result) {
               if (!downloadStatus) return;
