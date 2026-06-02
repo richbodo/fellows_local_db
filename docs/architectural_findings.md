@@ -11,6 +11,163 @@ Newest first.
 
 ---
 
+## 2026-06-01 — A PWA can't give every platform a writable private store; "constraints" name the ceiling honestly
+
+### The finding
+
+A user's Private Data Ops MCP server stopped connecting to Claude Desktop.
+The proximate cause was mundane — the `.mcpb` extension pointed at a
+`relationships.db` export that had been relocated out of `~/Downloads` —
+but chasing *why the handoff was that fragile in the first place* surfaced
+a class-level ceiling we had been routing around without naming:
+
+> For a PNA delivered as a web app, the private-data half's writability and
+> external-readability is gated entirely by the browser's **File System
+> Access API** — which is Chromium-only. On every non-FSA browser (Safari,
+> Firefox, *all* of iOS), the private store can only live in the opaque
+> OPFS sandbox (invisible to the user and to companion tools like the app's
+> own MCP servers), is subject to silent browser eviction (Safari's
+> script-storage cap), and can escape to a real file only as a one-shot,
+> immediately-stale download snapshot. So on those browsers the private
+> half — the part that is supposed to be the user's sovereign, live,
+> manipulable, forever data — degrades to a **read-only snapshot at best**.
+
+This is a different *kind* of finding from the cloud-LLM exception below it.
+That one is a **privacy** deviation a user deliberately *raises* and the app
+*handles* honestly. This one is a **data-loss** ceiling the *platform*
+imposes — nobody raises it; it is a property of the medium. It is arguably
+the more serious of the two, because the failure mode is silent and the
+casualty is the user's own data.
+
+### Why it's the application class, not this app
+
+The ceiling falls out of the intersection `distribution:web-bundle` ×
+`storage:opfs-sqlite-wasm` × a browser-capability fact. Nothing about EHF,
+the fellows schema, or this app participates. **Any** PNA that makes those
+two axis picks inherits it — and inherits a whole family of sibling ceilings
+alongside it (eviction, no built-in sync, the single-owner OPFS architecture,
+the sandbox boundary that seals the store off from the user's other tools).
+A PNA is meant to be the *hub* the user's other tools (comms clients, LLMs,
+scripts, backups) act on; a store those tools cannot read is only half a PNA.
+That makes the sandbox boundary, not the FSA gap alone, the deepest edge here.
+
+### The resolution: constraints (the dual of exceptions)
+
+We model the ceiling as a first-class, named **constraint** — the dual of an
+[exception](#2026-05-30--users-want-a-cloud-llm-exceptions-let-a-pna-stay-honest-instead-of-forbidding-it).
+An exception is a deviation the *user* raises and the *app* catches and
+handles; a constraint is a limitation the *platform* imposes and the *app*
+must likewise catch and handle — never silently. Same "always know what mode
+you're in" philosophy, opposite origin.
+
+> A **constraint (`CST-*`)** is a platform- or substrate-imposed ceiling,
+> inherited automatically by one or more **axis picks** (raised by no one —
+> it's a property of the medium), that **removes or bounds functionality a
+> PNA would otherwise offer**. It obligates a documented **handling** —
+> typically honest capability reduction matched to what the platform can
+> actually deliver ("enough power to be useful, not enough to be
+> dangerous") — and a reference design stays conformant by handling it
+> honestly, *not* by overcoming it. Every constraint carries an explicit
+> **resolution frontier**: whether a viable workaround is known, or whether
+> (as of this version) none has been found.
+
+Each `CST-*` records: **Triggered by** (the axis pick[s]), **Ceiling** (what
+it removes/bounds), **Stresses** (the Goal/AC it bounds), **Handling** (the
+obligated response), **Frontier** (`Open` / `Mitigated` / `Solved-on-<platform>`
+/ `Inherent` — whether anyone has beaten it yet), and **Detectability** (how a
+builder knows they're under it on a given platform: clean feature-detect /
+empirical probe / **must-UA-sniff**).
+
+The **Frontier** field is the one that keeps a reference design honest. Our
+actual product decision — *drop private data on mobile and Safari, for now* —
+is the *handling*, and its frontier is **Open**: no viable workaround found as
+of Toolkit-Version 0.1, but there might be one (an encrypt-then-email-to-self
+portability pattern is a candidate, unproven). A future revision can flip a
+constraint from `Open` → worked-around and document *how*. We do not pretend
+to have solved what we have only reduced.
+
+### The ceilings we hit (the eight that earn a normative `CST-*`)
+
+| ID | Triggered by | Ceiling | Frontier |
+|---|---|---|---|
+| `CST-PWA-PRIVATE-SNAPSHOT` | web-bundle × opfs, non-FSA browser | Private store is read-only-snapshot-at-best off Chromium | **Open** (mitigated: drop private writes off Chromium; encrypted-email transport is an unproven candidate) |
+| `CST-PWA-SANDBOX-SEALED` | opfs storage | Store invisible to the user *and* unreadable by their other tools (MCP, backups, CLIs); the PWA also can't host native integration to bridge it — **the root of the MCP-handoff fragility** | Solved on Chromium via folder mode; **Open** otherwise |
+| `CST-PWA-STORAGE-EVICTABLE` | opfs / IndexedDB | Script storage is evictable; `persist()` is a request, not a guarantee; Safari caps it | **Open** (mitigated: backup ring + export discipline) |
+| `CST-PWA-NO-SYNC` | web-bundle × opfs | Origin- and device-local silos; zero built-in portability | **Open** (encrypted-email is the candidate pattern) |
+| `CST-PWA-DURABLE-SQL-ARCH` | opfs-sqlite-wasm | Durable SQL forces a worker-owned, cross-origin-isolated, single-connection architecture | **Inherent** (accepted cost; the worker-owned convention is the handling) |
+| `CST-PWA-SINGLE-OWNER` | opfs-sqlite-wasm | Multi-tab contention with no OS file lock | **Solved** (Web Locks + ownership-conflict detection) |
+| `CST-PWA-NO-BACKGROUND` | web-bundle | No reliable scheduled background execution (esp. iOS) → backups can only be opportunistic | **Open on iOS** (mitigated: per-boot debounced backup; never promise scheduled protection) |
+| `CST-PWA-SERVER-FLOOR` | web-bundle | Needs an origin + TLS + secure context; true serverless-local is unreachable | **Inherent** (handled by bounding the server to distribution/update — Never-SaaS) |
+
+Two **meta-principles** sit above the table and are more reusable than any
+single row:
+
+- **M1 — capability presence ≠ usefulness ≠ permanence.** `showDirectoryPicker
+  in window` is true on Android Chrome but only reaches an OS-clearable folder;
+  `persist()` returns true but Safari still evicts; `createSyncAccessHandle`
+  exists in a worker but not on the page. You must detect *useful, durable*
+  capability — often empirically — and distrust the obvious feature-check.
+  This is why the entry scheme carries a **Detectability** field at all.
+- **M3 — the handling pattern is per-platform capability reduction.** Match each
+  platform's *offered* features to the durability it can actually *keep*. Mobile
+  loses folder mode (it can't keep the promise; see PR #234 / `8392193`) and is
+  left with OPFS + manual backup. "Enough power to be useful, not enough to be
+  dangerous." For constraints this is the dual of the exception's "catch and
+  handle honestly."
+
+**Footgun companion (non-normative — recorded so builders don't re-derive
+them, but they don't carry a ceiling's weight):** service-worker staleness /
+"what code is actually running" ambiguity; no atomic factory reset (OPFS has no
+per-origin wipe API; the HttpOnly cookie needs a server round-trip); PWA install
++ manifest gotchas (WebAPK `related_applications`, POST `share_target`, iOS's
+hidden Add-to-Home-Screen). All navigable; none is a wall.
+
+### A note on "helpful constraints"
+
+Some platform ceilings happen to *serve* a PNA goal — a PWA can't send mail
+itself, only hand off a `mailto:` URL, which lands the app in exactly the
+"transports cannot read message contents" shape the spec wants (AC-18). These
+are real, but they are **not** builder/verifier advice in the way an adverse
+ceiling is — a builder will either already know, be pleasantly surprised, or
+harmlessly ignore one. They belong in a future *"things that worked well,
+proven true and useful"* channel, **not** the constraints registry. We park
+that channel deliberately; the registry is for ceilings that take capability
+away.
+
+### What this feeds back into the toolkit
+
+The plan to contribute this upstream — introducing **constraints** as a
+general PNA mechanism (dual to exceptions, applicable to any substrate, with
+the PWA ceilings above as the first populated set), via a new normative
+`spec/constraints.md` registry, a `lint-spec-ids.py` extension that traces
+`CST-*` / `Triggered-by:` / `Frontier:` the way it already traces `AC-*` and
+`EX-*`, axis-pick cross-references on Storage and Distribution, and
+fellows_local_db as the demonstrating reference design — will be staged in
+[`../plans/pna_toolkit_constraints_contribution.md`](../plans/pna_toolkit_constraints_contribution.md),
+mirroring the exceptions contribution. The decisions locked before drafting: the concept is a
+**general mechanism** (not a PWA-only catalog); **hard ceilings are normative,
+footguns are preserved as non-normative notes**; and the registry is
+**adverse-only** (no valence field — helpful ceilings are the separate
+channel above). Per the toolkit's reference-driven model, the spec change
+rides along with the working design that demonstrates it; this app is that
+design.
+
+The factual substrate matrix this finding generalizes already lives in
+[`browser_support.md`](browser_support.md) (capability floors; folder mode
+*required* for private data — the verified-folder gate, not an additive
+tier) and [`persistence_and_upgrades.md`](persistence_and_upgrades.md) (the
+per-substrate state-survival table; browse-only mode is localStorage-only
+with no durable private store). Both now point here for the *why /
+class-level* framing. The realization is the private-data capability gate
+([`../plans/private_data_capability_gate.md`](../plans/private_data_capability_gate.md)),
+attested in [`Architecture.md` § Constraint attestation](Architecture.md);
+the user-facing surfacing (per-platform feature availability, "Download my
+private data," browse-only on Safari/Firefox/phones) is documented in
+[`users_manual.md`](users_manual.md) and [`feature_platform_matrix.md`](feature_platform_matrix.md);
+the platform-tiering decisions are recorded in [`ac_decisions_log.md`](ac_decisions_log.md).
+
+---
+
 ## 2026-05-30 — Users want a cloud LLM; "exceptions" let a PNA stay honest instead of forbidding it
 
 ### The finding

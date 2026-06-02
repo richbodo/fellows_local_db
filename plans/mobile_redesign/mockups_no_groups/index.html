@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>EHF Mobile (no-groups) — redesign mockups</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="gallery">
+    <h1>EHF Fellows — Mobile (no-groups) redesign</h1>
+    <p class="lede">Mobile reduced to three surfaces: <b>Directory</b> · <b>Fellow</b> ·
+    <b>Settings/About</b>, navigated by a hamburger drawer. No groups, no selection, no
+    composer, no FAB. The app is: search the directory → find someone → email or call them.
+    Open this file in a narrow window (or a phone) to see each frame fill the viewport.</p>
+
+    <!-- ============================================================
+         1. DIRECTORY — default (has-email default on)
+         ============================================================ -->
+    <div class="phone-wrap">
+      <span class="phone-tag">directory · home</span>
+      <div class="phone-frame">
+        <header class="appbar">
+          <div class="appbar__title">EHF Fellows</div>
+          <button class="appbar__btn" aria-label="Open menu" aria-expanded="false">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+          </button>
+        </header>
+
+        <div class="search-region">
+          <input class="input" type="search" placeholder="Search by name, tagline, cohort…">
+          <div class="filterbar">
+            <button class="filter-btn">
+              <svg class="ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 5h18M6 12h12M10 19h4"/></svg>
+              Filters
+            </button>
+            <span class="filter-chip">has email
+              <button class="filter-chip__x" aria-label="Show fellows without email too">×</button>
+            </span>
+            <span class="filterbar__count">142 / 515</span>
+          </div>
+        </div>
+
+        <main class="content">
+          <div class="directory-list">
+            <a class="directory-row" href="#"><span class="directory-row__name">Aaron Bird</span><svg class="ico directory-row__go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg></a>
+            <a class="directory-row" href="#"><span class="directory-row__name">Aaron McDonald</span><svg class="ico directory-row__go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg></a>
+            <a class="directory-row" href="#"><span class="directory-row__name">Abraham Munoz Barbosa</span><svg class="ico directory-row__go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg></a>
+            <a class="directory-row" href="#"><span class="directory-row__name">Adam Cohen</span><svg class="ico directory-row__go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg></a>
+            <a class="directory-row" href="#"><span class="directory-row__name">Adam Grosser</span><svg class="ico directory-row__go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg></a>
+            <a class="directory-row" href="#"><span class="directory-row__name">Adel A Yulghun</span><svg class="ico directory-row__go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg></a>
+            <a class="directory-row" href="#"><span class="directory-row__name">Adrien Gheur</span><svg class="ico directory-row__go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg></a>
+            <a class="directory-row" href="#"><span class="directory-row__name">Akshay Kothari</span><svg class="ico directory-row__go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg></a>
+            <a class="directory-row" href="#"><span class="directory-row__name">Alan Guo</span><svg class="ico directory-row__go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg></a>
+            <a class="directory-row" href="#"><span class="directory-row__name">Alana Scott</span><svg class="ico directory-row__go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg></a>
+            <a class="directory-row" href="#"><span class="directory-row__name">Alanna Irving</span><svg class="ico directory-row__go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg></a>
+            <a class="directory-row" href="#"><span class="directory-row__name">Alex Bayer</span><svg class="ico directory-row__go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg></a>
+          </div>
+        </main>
+      </div>
+      <div class="phone-caption">Fixed bar + sticky search; the list is the only thing that scrolls.</div>
+    </div>
+
+    <!-- ============================================================
+         2. DIRECTORY — filters sheet open
+         ============================================================ -->
+    <div class="phone-wrap">
+      <span class="phone-tag">directory · filters sheet</span>
+      <div class="phone-frame">
+        <header class="appbar">
+          <div class="appbar__title">EHF Fellows</div>
+          <button class="appbar__btn" aria-label="Open menu">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+          </button>
+        </header>
+        <div class="search-region">
+          <input class="input" type="search" placeholder="Search by name, tagline, cohort…">
+          <div class="filterbar">
+            <button class="filter-btn" style="background:var(--accent-soft);border-color:var(--accent);">
+              <svg class="ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 5h18M6 12h12M10 19h4"/></svg>
+              Filters
+            </button>
+            <span class="filter-chip">has email <button class="filter-chip__x" aria-label="clear">×</button></span>
+            <span class="filterbar__count">142 / 515</span>
+          </div>
+        </div>
+        <main class="content"></main>
+
+        <div class="scrim"></div>
+        <div class="sheet">
+          <div class="sheet__handle"></div>
+          <div class="sheet__head"><span class="sheet__title">Filters</span>
+            <a href="#" style="font-size:13px;color:var(--accent-deeper);">Reset</a>
+          </div>
+          <div class="checkrow">
+            <input type="checkbox" id="f-email" checked>
+            <div>
+              <label for="f-email">Only fellows with an email</label>
+              <div class="hint">On by default. Turn off to include phone-only fellows.</div>
+            </div>
+          </div>
+          <div class="field">
+            <label for="f-cohort">Cohort</label>
+            <select class="select" id="f-cohort"><option>All cohorts</option><option>2020</option><option>2019</option></select>
+          </div>
+          <div class="field">
+            <label for="f-type">Fellow type</label>
+            <select class="select" id="f-type"><option>All types</option><option>Fellow</option><option>Mentor</option></select>
+          </div>
+          <button class="btn btn--primary btn--block">Show 142 fellows</button>
+        </div>
+      </div>
+      <div class="phone-caption">has-email is a defeatable default — phone-only fellows are one tap away.</div>
+    </div>
+
+    <!-- ============================================================
+         3. NAV DRAWER (over directory)
+         ============================================================ -->
+    <div class="phone-wrap">
+      <span class="phone-tag">menu drawer</span>
+      <div class="phone-frame">
+        <header class="appbar">
+          <div class="appbar__title">EHF Fellows</div>
+          <button class="appbar__btn" aria-label="Close menu" aria-expanded="true" style="background:var(--accent-soft);color:var(--accent-deeper);">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+          </button>
+        </header>
+        <div class="search-region">
+          <input class="input" type="search" placeholder="Search by name, tagline, cohort…">
+          <div class="filterbar">
+            <button class="filter-btn"><svg class="ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 5h18M6 12h12M10 19h4"/></svg> Filters</button>
+            <span class="filter-chip">has email <button class="filter-chip__x">×</button></span>
+            <span class="filterbar__count">142 / 515</span>
+          </div>
+        </div>
+        <main class="content"></main>
+
+        <div class="scrim"></div>
+        <aside class="drawer">
+          <div class="drawer__head">
+            <span class="drawer__title">Menu</span>
+            <button class="appbar__btn" aria-label="Close">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+            </button>
+          </div>
+          <nav class="drawer__nav">
+            <a class="drawer-link drawer-link--active" href="#">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+              Directory
+            </a>
+            <a class="drawer-link" href="#">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.3 1a7 7 0 0 0-1.7-1L16.5 2h-4l-.4 2.6a7 7 0 0 0-1.7 1l-2.3-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7 7 0 0 0 1.7-1l2.3 1 2-3.4-2-1.5c.07-.33.1-.66.1-1Z"/></svg>
+              Settings
+            </a>
+            <a class="drawer-link" href="#">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h0"/></svg>
+              About
+            </a>
+          </nav>
+          <div class="drawer__foot">
+            <div class="build-tag">
+              <span>app <b>2026-06-01-805acc4</b></span>
+              <span>server <b>805acc4</b></span>
+            </div>
+          </div>
+        </aside>
+      </div>
+      <div class="phone-caption">Conventional nav drawer. Three destinations + build tag. Tools live in Settings.</div>
+    </div>
+
+    <!-- ============================================================
+         4. FELLOW DETAIL — has email + phone
+         ============================================================ -->
+    <div class="phone-wrap">
+      <span class="phone-tag">fellow · email + phone</span>
+      <div class="phone-frame">
+        <header class="appbar">
+          <button class="appbar__btn" aria-label="Back">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 6-6 6 6 6"/></svg>
+          </button>
+          <div class="appbar__title">Fellow</div>
+          <button class="appbar__btn" aria-label="Open menu">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+          </button>
+        </header>
+        <main class="content padded">
+          <div class="fellow-hero">
+            <div class="fellow-photo">AG</div>
+            <div>
+              <h1 class="fellow-name">Adam Grosser</h1>
+              <p class="fellow-tagline">Investor & entrepreneur. Energy, climate, and deep-tech. Cohort 2019.</p>
+            </div>
+          </div>
+
+          <div class="contact-cta">
+            <a class="btn btn--primary" href="mailto:#">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>
+              Email
+            </a>
+            <a class="btn btn--ghost" href="tel:#">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L20 13l2 5v2a2 2 0 0 1-2 2A16 16 0 0 1 4 6a2 2 0 0 1 2-2Z"/></svg>
+              Call
+            </a>
+          </div>
+
+          <div class="tag-chips">
+            <span class="tag-chip">Climate</span><span class="tag-chip">Energy</span><span class="tag-chip">Investing</span><span class="tag-chip">Deep tech</span>
+          </div>
+
+          <div class="contact-row"><span class="contact-row__label">Email</span><span class="contact-row__value"><a href="mailto:#">adam@example.org</a></span><button class="contact-row__copy" aria-label="Copy email">⧉</button></div>
+          <div class="contact-row"><span class="contact-row__label">Phone</span><span class="contact-row__value"><a href="tel:#">+1 415 555 0142</a></span><button class="contact-row__copy" aria-label="Copy phone">⧉</button></div>
+          <div class="contact-row"><span class="contact-row__label">Based</span><span class="contact-row__value">San Francisco, USA</span></div>
+
+          <div class="prose-block">
+            <h3 class="section-head">Bio</h3>
+            <p>Adam works at the intersection of energy and climate finance, backing early-stage
+            hardware companies. Previously a general partner focused on resource efficiency.</p>
+          </div>
+        </main>
+      </div>
+      <div class="phone-caption">Email + Call are the headline action. Copy buttons stay for paste-elsewhere.</div>
+    </div>
+
+    <!-- ============================================================
+         5. FELLOW DETAIL — phone only (no email)
+         ============================================================ -->
+    <div class="phone-wrap">
+      <span class="phone-tag">fellow · phone only</span>
+      <div class="phone-frame">
+        <header class="appbar">
+          <button class="appbar__btn" aria-label="Back"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 6-6 6 6 6"/></svg></button>
+          <div class="appbar__title">Fellow</div>
+          <button class="appbar__btn" aria-label="Open menu"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg></button>
+        </header>
+        <main class="content padded">
+          <div class="fellow-hero">
+            <div class="fellow-photo">AY</div>
+            <div>
+              <h1 class="fellow-name">Adel A Yulghun</h1>
+              <p class="fellow-tagline">Community organizer. Cohort 2020.</p>
+            </div>
+          </div>
+          <div class="contact-cta">
+            <span class="btn btn--primary" aria-disabled="true" title="No email on file">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>
+              No email
+            </span>
+            <a class="btn btn--ghost" href="tel:#">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L20 13l2 5v2a2 2 0 0 1-2 2A16 16 0 0 1 4 6a2 2 0 0 1 2-2Z"/></svg>
+              Call
+            </a>
+          </div>
+          <div class="contact-row"><span class="contact-row__label">Phone</span><span class="contact-row__value"><a href="tel:#">+64 21 555 0199</a></span><button class="contact-row__copy" aria-label="Copy phone">⧉</button></div>
+          <div class="contact-row"><span class="contact-row__label">Based</span><span class="contact-row__value">Auckland, NZ</span></div>
+        </main>
+      </div>
+      <div class="phone-caption">Phone-only fellow — the reason has-email must be defeatable, not a hard gate.</div>
+    </div>
+
+    <!-- ============================================================
+         6. SETTINGS — app info + tools only
+         ============================================================ -->
+    <div class="phone-wrap">
+      <span class="phone-tag">settings</span>
+      <div class="phone-frame">
+        <header class="appbar">
+          <button class="appbar__btn" aria-label="Back"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 6-6 6 6 6"/></svg></button>
+          <div class="appbar__title">Settings</div>
+          <button class="appbar__btn" aria-label="Open menu"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg></button>
+        </header>
+        <main class="content padded">
+          <h3 class="section-head" style="margin-top:4px;">App info</h3>
+          <div class="card">
+            <div class="stat-line"><span class="stat-line__label">App build</span><span class="stat-line__value">2026-06-01-805acc4</span></div>
+            <div class="stat-line"><span class="stat-line__label">Server build</span><span class="stat-line__value">805acc4</span></div>
+            <div class="stat-line"><span class="stat-line__label">Directory data</span><span class="stat-line__value">515 fellows</span></div>
+            <div class="stat-line"><span class="stat-line__label">Last updated</span><span class="stat-line__value">2026-05-30</span></div>
+          </div>
+
+          <h3 class="section-head">Tools</h3>
+          <button class="tool-row">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h0"/></svg>
+            Diagnostics
+            <svg class="ico tool-row__go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg>
+          </button>
+          <button class="tool-row">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 5h8l-1 6h-6zM10 11v8M14 11v8M7 19h10"/></svg>
+            Report a bug
+            <svg class="ico tool-row__go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg>
+          </button>
+          <button class="tool-row tool-row--danger">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5"/></svg>
+            Clear app cache &amp; reload
+          </button>
+          <p class="hint" style="margin-top:14px;">No folder, backup, or email settings on mobile — your data
+          stays in this browser, and email uses your phone's mail app.</p>
+        </main>
+      </div>
+      <div class="phone-caption">Settings = app info + tools. No "your email", no folders, no backups.</div>
+    </div>
+
+    <!-- ============================================================
+         7. ABOUT
+         ============================================================ -->
+    <div class="phone-wrap">
+      <span class="phone-tag">about</span>
+      <div class="phone-frame">
+        <header class="appbar">
+          <button class="appbar__btn" aria-label="Back"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 6-6 6 6 6"/></svg></button>
+          <div class="appbar__title">About</div>
+          <button class="appbar__btn" aria-label="Open menu"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg></button>
+        </header>
+        <main class="content padded">
+          <h1 class="page-title">About this directory</h1>
+          <p class="page-lede">A local-only directory of Edmund Hillary Fellowship fellows. Search,
+          find someone, and reach them by email or phone. Your copy lives in this browser — never on a server.</p>
+          <div class="card">
+            <div class="stat-line"><span class="stat-line__label">Total fellows</span><span class="stat-line__value">515</span></div>
+            <div class="stat-line"><span class="stat-line__label">With email</span><span class="stat-line__value">142</span></div>
+            <div class="stat-line"><span class="stat-line__label">Cohorts</span><span class="stat-line__value">9</span></div>
+          </div>
+          <p class="hint" style="margin-top:16px;">
+            <a href="#">User guide</a> · <a href="#">Source on GitHub</a>
+          </p>
+        </main>
+      </div>
+      <div class="phone-caption">About keeps the stats; chrome it shared with Settings lives there now.</div>
+    </div>
+
+  </div>
+</body>
+</html>
