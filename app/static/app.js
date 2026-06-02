@@ -8773,6 +8773,19 @@
       return p._setFolderHandle({ handle: handle, mode: mode || 'auto' });
     }
 
+    // Like setHandle, but runs the empirical durability probe (write a
+    // sentinel + read it back) before committing — the unlock path (EPIC
+    // PR4). Resolves to { ok, requiresChoice, ... } like setHandle on the
+    // happy/collision paths; REJECTS with err.code = a reason code
+    // (subfolder_create_failed / write_failed / readback_mismatch /
+    // permission_not_persisted / picker_cancelled) on probe failure, and
+    // persists nothing in that case (never half-unlock).
+    function probeHandle(handle, mode) {
+      var p = workerProvider();
+      if (!p) return Promise.reject(new Error('worker provider unavailable'));
+      return p._probeFolderWritable({ handle: handle, mode: mode || 'auto' });
+    }
+
     function clearHandle() {
       var p = workerProvider();
       if (!p) return Promise.reject(new Error('worker provider unavailable'));
@@ -8822,6 +8835,7 @@
       badge: badge,
       pickParentFolder: pickParentFolder,
       setHandle: setHandle,
+      probeHandle: probeHandle,
       clearHandle: clearHandle,
       writeNow: writeNow,
       readNow: readNow,
@@ -10187,14 +10201,14 @@
               flashDetail('No folder selected.');
               return null;
             }
-            return FOLDER_CONTROLLER.setHandle(handle, 'auto').then(function (res) {
+            return FOLDER_CONTROLLER.probeHandle(handle, 'auto').then(function (res) {
               if (res && res.requiresChoice) {
                 return askCollision(res.parentName, res.existing, res.suggestion).then(function (choice) {
                   if (!choice) {
                     flashDetail('Cancelled.');
                     return null;
                   }
-                  return FOLDER_CONTROLLER.setHandle(handle, choice).then(function (resolved) {
+                  return FOLDER_CONTROLLER.probeHandle(handle, choice).then(function (resolved) {
                     return { picked: resolved, mode: choice };
                   });
                 });
@@ -10220,10 +10234,35 @@
             return FOLDER_CONTROLLER.writeNow().then(function () { flashDetail('Saved.'); });
           })
           .catch(function (e) {
-            flashDetail('Could not set folder: ' + (e && e.message || String(e)));
+            // Empirical-probe failures carry a stable reason code (EPIC PR4);
+            // map to a plain-language message + a link to the troubleshooting
+            // page anchored on that code. readback_mismatch is the cloud-only/
+            // virtual-folder case worth calling out.
+            var code = e && e.code;
+            var REASONS = {
+              subfolder_create_failed: 'Couldn’t create the data folder — check the folder’s permissions.',
+              write_failed: 'Couldn’t write to the folder — it may be read-only or permission was denied.',
+              readback_mismatch: 'This looks like a cloud-only or virtual folder. Pick a real local folder (one whose files are fully downloaded/available offline).',
+              permission_not_persisted: 'The browser won’t remember this folder. Make sure site data isn’t cleared on exit, or pick another folder.'
+            };
+            if (code === 'picker_cancelled') { flashDetail('No folder selected.'); return; }
+            var msg = REASONS[code] || ('Could not set folder: ' + (e && e.message || String(e)));
+            if (detailEl2) {
+              var help = code
+                ? ' <a href="https://github.com/richbodo/fellows_local_db/blob/main/docs/folder_troubleshooting.md#' +
+                  encodeURIComponent(code) + '" target="_blank" rel="noopener">Why? →</a>'
+                : '';
+              detailEl2.innerHTML = escapeHtml(msg) + help;
+              detailEl2.hidden = false;
+            }
           })
           .then(function () {
             btnChoose.disabled = false;
+            // A successful pick attaches a verified folder → flip the
+            // private-data gate immediately so group surfaces appear without
+            // a reload (EPIC PR4). Idempotent: a failed pick re-resolves to
+            // the same locked state.
+            try { updatePrivateDataGate(); } catch (e) {}
             return refresh();
           });
       });

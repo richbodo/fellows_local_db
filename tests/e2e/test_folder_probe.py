@@ -67,3 +67,31 @@ def test_probe_picker_cancelled_surfaces_reason_code(standalone_page, base_url_f
     # Nothing persisted on a failed probe — stays browse-only.
     state = page.evaluate("() => window.__folderController.getState()")
     assert state["hasHandle"] is False, state
+
+
+def test_settings_pick_unlocks_private_data_without_reload(standalone_page, base_url_fixture):
+    """The PR4b unlock UI: picking a folder in Settings runs the empirical
+    probe and flips the private-data gate IMMEDIATELY (no reload) — group
+    surfaces become available in the same session."""
+    page = standalone_page
+    _boot(page, base_url_fixture)
+    page.evaluate("() => window.__dataProvider._clearFolderHandle()")
+    page.evaluate("() => window.__resetE2EUserFolderMin && window.__resetE2EUserFolderMin()")
+    # Start locked (desktop, no folder).
+    page.goto(base_url_fixture + "/#/settings", wait_until="domcontentloaded")
+    page.locator("#settings-folder-choose").wait_for(state="visible", timeout=5000)
+    page.wait_for_function(
+        "() => document.body.classList.contains('no-private-data')", timeout=5000
+    )
+    # Pick a folder → probe runs → write → gate flips, NO reload.
+    page.locator("#settings-folder-choose").click()
+    page.wait_for_function(
+        "async () => { try { var s = await window.__folderController.getState();"
+        " return !!s.hasHandle; } catch (e) { return false; } }",
+        timeout=10000,
+    )
+    page.wait_for_function(
+        "() => document.body && !document.body.classList.contains('no-private-data')",
+        timeout=8000,
+    )
+    assert page.evaluate("() => window.__privateDataTier") == "private-folder"
