@@ -158,3 +158,38 @@ def test_workspace_identity_and_write_generation_stamp(standalone_page, base_url
     )
     gen2 = page.evaluate("() => window.__dataProvider.getSetting('write_generation')")
     assert gen1 and gen2 and int(gen2) > int(gen1), (gen1, gen2)
+
+
+def test_scan_fellows_candidates(standalone_page, base_url_fixture):
+    """EPIC PR5b: scanFellowsCandidates enumerates Fellows* stores in a parent
+    with their group counts + identity, and recommends one."""
+    page = standalone_page
+    _boot(page, base_url_fixture)
+    page.evaluate("() => window.__dataProvider._clearFolderHandle()")
+    page.evaluate("() => window.__resetE2EUserFolderMin && window.__resetE2EUserFolderMin()")
+    # Attach a folder + create a group so Fellows/relationships.db has content.
+    page.goto(base_url_fixture + "/#/settings", wait_until="domcontentloaded")
+    page.locator("#settings-folder-choose").wait_for(state="visible", timeout=5000)
+    page.locator("#settings-folder-choose").click()
+    page.wait_for_function(
+        "() => !document.body.classList.contains('no-private-data')", timeout=10000
+    )
+    rid = page.evaluate("() => window.__dataProvider.getFull().then(f => f[0].record_id)")
+    page.evaluate(
+        "(rid) => window.__dataProvider.createGroup({name:'Scan g', note:'', fellow_record_ids:[rid]})",
+        rid,
+    )
+    # Scan the same parent (the stub folder) for Fellows* stores.
+    result = page.evaluate(
+        """async () => {
+            const root = await navigator.storage.getDirectory();
+            const parent = await root.getDirectoryHandle('__e2e_user_folder__');
+            return await window.__folderController.scanCandidates(parent);
+        }"""
+    )
+    cands = result["candidates"]
+    fellows = [c for c in cands if c["subfolderName"] == "Fellows"]
+    assert fellows, result
+    assert fellows[0]["groups"] == 1, fellows[0]
+    assert fellows[0]["writeGeneration"] is not None, fellows[0]
+    assert result["recommended"] == "Fellows", result

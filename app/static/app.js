@@ -37,7 +37,7 @@
   // app/static/vendor/sqlite-worker.js (`WORKER_RPC_VERSION`,
   // `RELATIONSHIPS_SCHEMA_VERSION`). See plans/local_first_worker_architecture.md
   // §"Why build label is not the gate".
-  var EXPECTED_WORKER_RPC_VERSION = 4;
+  var EXPECTED_WORKER_RPC_VERSION = 5;
   var EXPECTED_RELATIONSHIPS_SCHEMA_VERSION = 1;
 
   // Thrown by mutating dataProvider methods when the worker reports a
@@ -4073,6 +4073,10 @@
           rpc.call('clearFolderHandle');
       },
       _checkFolderPermission: function () { return rpc.call('checkFolderPermission'); },
+      // Read-only scan of all Fellows* stores in a parent (EPIC PR5 chooser).
+      // Version-tolerant — it's a read, and the chooser must work to let a
+      // stale page recover/pick a store.
+      _scanFellowsCandidates: function (args) { return rpc.call('scanFellowsCandidates', args); },
       _getFolderHandleForReconnect: function () { return rpc.call('getFolderHandleForReconnect'); },
       _writeRelationshipsToFolder: function () {
         return refuseIfVersionSkew('writeRelationshipsToFolder') ||
@@ -8693,6 +8697,7 @@
           _getFolderState: function () { return warmWorker.rpc.call('getFolderState'); },
           _setFolderHandle: function (a) { return warmWorker.rpc.call('setFolderHandle', a); },
           _probeFolderWritable: function (a) { return warmWorker.rpc.call('probeFolderWritable', a); },
+          _scanFellowsCandidates: function (a) { return warmWorker.rpc.call('scanFellowsCandidates', a); },
           _clearFolderHandle: function () { return warmWorker.rpc.call('clearFolderHandle'); },
           _checkFolderPermission: function () { return warmWorker.rpc.call('checkFolderPermission'); },
           _getFolderHandleForReconnect: function () { return warmWorker.rpc.call('getFolderHandleForReconnect'); },
@@ -8780,10 +8785,22 @@
     // (subfolder_create_failed / write_failed / readback_mismatch /
     // permission_not_persisted / picker_cancelled) on probe failure, and
     // persists nothing in that case (never half-unlock).
-    function probeHandle(handle, mode) {
+    function probeHandle(handle, mode, subfolderName) {
       var p = workerProvider();
       if (!p) return Promise.reject(new Error('worker provider unavailable'));
-      return p._probeFolderWritable({ handle: handle, mode: mode || 'auto' });
+      return p._probeFolderWritable({
+        handle: handle, mode: mode || 'auto', subfolderName: subfolderName
+      });
+    }
+
+    // Scan a chosen parent for all Fellows* stores + their contents (EPIC PR5
+    // chooser). Read-only. Returns { candidates, recommended }.
+    function scanCandidates(handle) {
+      var p = workerProvider();
+      if (!p || typeof p._scanFellowsCandidates !== 'function') {
+        return Promise.reject(new Error('worker provider unavailable'));
+      }
+      return p._scanFellowsCandidates({ handle: handle });
     }
 
     function clearHandle() {
@@ -8836,6 +8853,7 @@
       pickParentFolder: pickParentFolder,
       setHandle: setHandle,
       probeHandle: probeHandle,
+      scanCandidates: scanCandidates,
       clearHandle: clearHandle,
       writeNow: writeNow,
       readNow: readNow,
@@ -9132,6 +9150,17 @@
           '<p id="settings-folder-error-more" class="settings-hint" hidden></p>' +
           '<menu class="settings-folder-dialog-actions">' +
             '<button type="submit" value="close" class="settings-folder-dialog-primary">OK</button>' +
+          '</menu>' +
+        '</form>' +
+      '</dialog>' +
+      '<dialog id="settings-folder-chooser-dialog" class="settings-folder-dialog">' +
+        '<form method="dialog">' +
+          '<h4>Choose your data store</h4>' +
+          '<p class="settings-hint">This folder has saved data. Pick which store to use, or save to a new one.</p>' +
+          '<div id="settings-folder-chooser-list"></div>' +
+          '<menu class="settings-folder-dialog-actions">' +
+            '<button type="submit" value="__create_new__" class="settings-folder-dialog-secondary">Save to a new store</button>' +
+            '<button type="submit" value="cancel" class="settings-folder-dialog-cancel">Cancel</button>' +
           '</menu>' +
         '</form>' +
       '</dialog>' +
@@ -10239,40 +10268,95 @@
       });
     }
 
+    // Content-previewed chooser (EPIC PR5): when a chosen parent already has
+    // saved data, list every Fellows* store with its contents so the user
+    // picks one BY CONTENT — or creates a new one. Supersedes the old binary
+    // collision dialog (askCollision) for re-pick. Resolves to
+    // { action:'open', subfolderName } | { action:'create-new' } | null.
+    function askChooser(candidates, recommended) {
+      var dlg = document.getElementById('settings-folder-chooser-dialog');
+      var listEl = document.getElementById('settings-folder-chooser-list');
+      if (!dlg || !listEl || typeof dlg.showModal !== 'function') {
+        return Promise.resolve(recommended
+          ? { action: 'open', subfolderName: recommended }
+          : { action: 'create-new' });
+      }
+      var html = '';
+      candidates.forEach(function (c) {
+        var bits = [];
+        if (c.invalid) bits.push('unreadable');
+        else {
+          bits.push(c.groups + ' group' + (c.groups === 1 ? '' : 's'));
+          if (c.members != null) bits.push(c.members + ' member' + (c.members === 1 ? '' : 's'));
+        }
+        if (c.lastModified) {
+          bits.push('changed ' + formatRelativeTime(new Date(c.lastModified).toISOString()));
+        }
+        if (c.deviceLabel) bits.push(escapeHtml(c.deviceLabel));
+        var rec = (c.subfolderName === recommended)
+          ? ' <span class="settings-folder-chooser-rec">most recent</span>' : '';
+        html += '<button type="submit" value="' + escapeHtml(c.subfolderName) +
+          '" class="settings-folder-chooser-item"' + (c.invalid ? ' disabled' : '') + '>' +
+          '<strong>' + escapeHtml(c.subfolderName) + '</strong> — ' + bits.join(' · ') + rec +
+          '</button>';
+      });
+      listEl.innerHTML = html;
+      return new Promise(function (resolve) {
+        dlg.addEventListener('close', function once() {
+          dlg.removeEventListener('close', once);
+          var v = dlg.returnValue;
+          if (v === '__create_new__') resolve({ action: 'create-new' });
+          else if (v && v !== 'cancel') resolve({ action: 'open', subfolderName: v });
+          else resolve(null);
+        });
+        try { dlg.showModal(); } catch (e) { resolve(null); }
+      });
+    }
+
     if (btnChoose) {
       btnChoose.addEventListener('click', function () {
         btnChoose.disabled = true;
         flashDetail('Pick a folder…');
+        var parent = null;
         FOLDER_CONTROLLER.pickParentFolder()
           .then(function (handle) {
-            if (!handle) {
-              flashDetail('No folder selected.');
-              return null;
+            if (!handle) { flashDetail('No folder selected.'); return null; }
+            parent = handle;
+            // Scan for existing Fellows* stores so we can offer the chooser.
+            return FOLDER_CONTROLLER.scanCandidates(handle)
+              .catch(function () { return { candidates: [] }; });
+          })
+          .then(function (scan) {
+            if (!parent) return null;
+            var cands = (scan && scan.candidates) || [];
+            if (!cands.length) {
+              // Empty parent → fresh store.
+              return FOLDER_CONTROLLER.probeHandle(parent, 'auto').then(function (res) {
+                if (res && res.requiresChoice) {
+                  // Defensive (a store exists but scan couldn't read it).
+                  return FOLDER_CONTROLLER.probeHandle(parent, 'create-new')
+                    .then(function (r) { return { picked: r, mode: 'create-new' }; });
+                }
+                return { picked: res, mode: 'auto' };
+              });
             }
-            return FOLDER_CONTROLLER.probeHandle(handle, 'auto').then(function (res) {
-              if (res && res.requiresChoice) {
-                return askCollision(res.parentName, res.existing, res.suggestion).then(function (choice) {
-                  if (!choice) {
-                    flashDetail('Cancelled.');
-                    return null;
-                  }
-                  return FOLDER_CONTROLLER.probeHandle(handle, choice).then(function (resolved) {
-                    return { picked: resolved, mode: choice };
-                  });
-                });
+            return askChooser(cands, scan.recommended).then(function (choice) {
+              if (!choice) { flashDetail('Cancelled.'); return null; }
+              if (choice.action === 'create-new') {
+                return FOLDER_CONTROLLER.probeHandle(parent, 'create-new')
+                  .then(function (r) { return { picked: r, mode: 'create-new' }; });
               }
-              return { picked: res, mode: 'auto' };
+              return FOLDER_CONTROLLER.probeHandle(parent, 'open-named', choice.subfolderName)
+                .then(function (r) { return { picked: r, mode: 'open-named' }; });
             });
           })
           .then(function (outcome) {
             if (!outcome || !outcome.picked || !outcome.picked.ok) return;
-            // Newly-attached folder: do an immediate save so the badge
-            // flips to "Saved" right away on create-new, and (for the
-            // happy-path "auto" case where the subfolder was empty) the
-            // file exists. open-existing skips the write and instead
-            // reads the existing data into OPFS.
-            if (outcome.mode === 'open-existing') {
-              flashDetail('Loading existing data from folder…');
+            // open-named = switching to an existing store: load ITS data into
+            // OPFS so the app shows that store's groups (EPIC PR5). Otherwise
+            // (auto / create-new) write the current data into the new store.
+            if (outcome.mode === 'open-named') {
+              flashDetail('Loading data from folder…');
               return FOLDER_CONTROLLER.readNow().then(function (result) {
                 flashDetail('Loaded ' + (result && result.counts ? fmtCountsSummary(result.counts) : '') +
                   ' from the folder.');

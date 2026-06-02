@@ -50,7 +50,7 @@ importScripts('./sqlite3.js');
 // are version-tolerant — the page is allowed to read folder state even
 // against a stale worker — but the mutating ops are version-gated alongside
 // the existing relationships.db writes.
-var WORKER_RPC_VERSION = 4;
+var WORKER_RPC_VERSION = 5;
 
 // Same value as relationships.db's PRAGMA user_version. Bumped only on
 // schema migrations. Mirrored from app/relationships.py:SCHEMA_VERSION.
@@ -665,6 +665,15 @@ async function inspectBytes(bytes) {
           '. Is this a relationships.db backup?'
       };
     }
+    // Workspace identity (EPIC PR5) — best-effort; absent on pre-PR5 stores.
+    var identity = {};
+    try {
+      dbSelectAll(tmp,
+        "SELECT key, value FROM settings WHERE key IN " +
+        "('workspace_uuid','device_label','created_at','write_generation','last_written_at')",
+        null
+      ).forEach(function (r) { identity[r.key] = r.value; });
+    } catch (e) { /* older store / no identity rows */ }
     return {
       valid: true,
       counts: {
@@ -673,7 +682,8 @@ async function inspectBytes(bytes) {
         tags: dbSelectOne(tmp, 'SELECT COUNT(*) AS n FROM fellow_tags', null).n,
         notes: dbSelectOne(tmp, 'SELECT COUNT(*) AS n FROM fellow_notes', null).n,
         settings: dbSelectOne(tmp, 'SELECT COUNT(*) AS n FROM settings', null).n
-      }
+      },
+      identity: identity
     };
   } catch (e) {
     return { valid: false, error: (e && e.message) || String(e) };
@@ -1966,15 +1976,29 @@ async function _hydrateFolderRecord() {
 
 // ----- Subfolder helpers ----------------------------------------------------
 
-async function _findOrCreateSubfolder(parentHandle, mode) {
+async function _findOrCreateSubfolder(parentHandle, mode, targetName) {
   // mode: 'open-existing' → must use the existing default name; throws if
   //   it doesn't exist or doesn't contain relationships.db.
+  // 'open-named' → open the specific `targetName` store the chooser picked
+  //   (EPIC PR5); throws subfolder_missing if it's gone.
   // 'create-new' → pick the lowest-numbered unused name from "Fellows",
   //   "Fellows 2", "Fellows 3", ...
   // 'auto' (or null) → if "Fellows" exists with a relationships.db,
   //   return { requiresChoice: true, ... }; otherwise behave like
   //   'create-new' picking "Fellows".
   var name = FOLDER_SUBFOLDER_DEFAULT;
+  if (mode === 'open-named') {
+    var wanted = targetName || name;
+    var picked;
+    try {
+      picked = await parentHandle.getDirectoryHandle(wanted);
+    } catch (e) {
+      var nmErr = new Error('"' + wanted + '" subfolder not found in this folder');
+      nmErr.code = 'subfolder_missing';
+      throw nmErr;
+    }
+    return { handle: picked, subfolderName: wanted };
+  }
   if (mode === 'open-existing') {
     var existing;
     try {
@@ -2046,7 +2070,7 @@ async function _suggestNextName(parentHandle) {
 // over it (without touching the live OPFS pool slot). Used both by the
 // collision probe and by readRelationshipsFromFolder.
 async function _probeSubfolder(parentHandle, subfolderName) {
-  var out = { exists: false, hasFile: false, counts: null, invalid: false, invalidReason: null, size: 0, lastModified: null };
+  var out = { exists: false, hasFile: false, counts: null, identity: null, invalid: false, invalidReason: null, size: 0, lastModified: null };
   var sub;
   try {
     sub = await parentHandle.getDirectoryHandle(subfolderName);
@@ -2069,6 +2093,7 @@ async function _probeSubfolder(parentHandle, subfolderName) {
     var inspection = await inspectBytes(bytes);
     if (inspection.valid) {
       out.counts = inspection.counts;
+      out.identity = inspection.identity || {};
     } else {
       out.invalid = true;
       out.invalidReason = inspection.error || 'unreadable';
@@ -2488,6 +2513,63 @@ handlers.getFolderState = async function () {
   return _folderStateSnapshot();
 };
 
+// Content-previewed chooser scan (EPIC PR5). Enumerate every Fellows* store in
+// a chosen parent and return each one's group/member/note counts + identity, so
+// the page can let the user pick a store BY CONTENT — instead of the picker
+// always resolving to the default "Fellows". Recommends the most-recently-
+// written valid store (highest write_generation, then file mtime). Read-only:
+// persists nothing. Sequential because inspectBytes shares one staging slot.
+handlers.scanFellowsCandidates = async function (args) {
+  var parentHandle = args && args.handle;
+  if (!parentHandle) {
+    var e0 = new Error('no folder selected'); e0.code = 'picker_cancelled'; throw e0;
+  }
+  var perm = 'granted';
+  if (typeof parentHandle.queryPermission === 'function') {
+    try { perm = await parentHandle.queryPermission({ mode: 'readwrite' }); }
+    catch (e) { perm = 'denied'; }
+  }
+  if (perm !== 'granted') {
+    var pe = new Error('folder permission not granted (' + perm + ')');
+    pe.code = 'permission_required'; throw pe;
+  }
+  var names = [];
+  try {
+    for await (var entry of parentHandle.values()) {
+      if (entry.kind === 'directory' && /^Fellows( \d+)?$/.test(entry.name)) {
+        names.push(entry.name);
+      }
+    }
+  } catch (e) { trace('scan: enumerate failed: ' + ((e && e.message) || e)); }
+  names.sort();
+  var candidates = [];
+  for (var i = 0; i < names.length; i++) {
+    var probed = await _probeSubfolder(parentHandle, names[i]);
+    if (!probed.hasFile) continue;
+    var id = probed.identity || {};
+    candidates.push({
+      subfolderName: names[i],
+      groups: probed.counts ? probed.counts.groups : null,
+      members: probed.counts ? probed.counts.members : null,
+      notes: probed.counts ? probed.counts.notes : null,
+      lastModified: probed.lastModified,
+      deviceLabel: id.device_label || null,
+      writeGeneration: (id.write_generation != null) ? (parseInt(id.write_generation, 10) || 0) : null,
+      invalid: probed.invalid,
+      invalidReason: probed.invalidReason
+    });
+  }
+  var recommended = null, best = -1;
+  candidates.forEach(function (c) {
+    if (c.invalid) return;
+    // write_generation dominates; file mtime breaks ties (and ranks pre-PR5
+    // stores that have no generation).
+    var rank = (c.writeGeneration != null ? c.writeGeneration : 0) * 1e15 + (c.lastModified || 0);
+    if (rank > best) { best = rank; recommended = c.subfolderName; }
+  });
+  return { candidates: candidates, recommended: recommended };
+};
+
 // Empirical durability probe (EPIC PR4). Write a unique sentinel file into
 // `subHandle`, read it back, verify the bytes match, then delete it. Returns
 // null on success or a staged reason-code string on failure. The read-back
@@ -2611,7 +2693,7 @@ handlers.probeFolderWritable = async function (args) {
     throw pe;
   }
   var mode = (args && args.mode) || 'auto';
-  var result = await _findOrCreateSubfolder(parentHandle, mode);
+  var result = await _findOrCreateSubfolder(parentHandle, mode, args && args.subfolderName);
   if (result.requiresChoice) {
     // Existing data present — let the page choose adopt vs create-new; don't
     // probe or persist yet (it re-invokes with open-existing / create-new).
