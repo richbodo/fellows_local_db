@@ -4969,3 +4969,70 @@ body.no-private-data:not(.is-phone) #group-rail {
   font-weight: 600;
   color: var(--accent, #2a6);
 }
+
+/* =========================================================================
+ * PR6 / mobile-PR1: is-phone scroll-container shell (the headline fix).
+ *
+ * Turn the page into a fixed-height flex column where the appbar/tabs stay
+ * put and the single visible content child (#directory on the list route,
+ * #detail elsewhere) is the only scroller. Keyed on body.is-phone (UA), not
+ * viewport width, so a narrow desktop window keeps normal document scroll.
+ * Appended last so it wins source-order ties against the
+ * @media(max-width:1024px) bleed/sticky rules above. Match-the-mock styling
+ * lands in PR3/PR4 — this PR is structural only.
+ * ========================================================================= */
+body.is-phone {
+  height: 100vh;          /* fallback for browsers without dvh */
+  height: 100dvh;
+  overflow: hidden;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Fixed bars: drop the sticky + negative-margin bleed (body padding is 0
+   now, so they reach the edges as plain flex items). */
+body.is-phone .appbar {
+  flex: 0 0 48px;
+  position: static;
+  margin: 0;
+}
+body.is-phone .tabs {
+  flex: 0 0 auto;
+  position: static;
+  margin: 0;
+}
+body.is-phone #site-header {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+/* Content region fills the remaining height; its one visible child scrolls.
+   min-height:0 is the load-bearing line — without it the flex child refuses
+   to shrink and the scroll never appears. align-items:stretch (overriding
+   #app-wrap's flex-start) lets the child take the full column height. */
+body.is-phone #app-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 0;
+  gap: 0;
+  align-items: stretch;
+}
+body.is-phone #directory,
+body.is-phone #detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+/* Directory rows lost their left inset when body padding went to 0
+   (#directory a has no horizontal padding of its own); restore it so the
+   list reads unchanged. #detail keeps its own 1rem padding. */
+body.is-phone #directory {
+  box-sizing: border-box;
+  padding: 0 0.75rem;
+}
