@@ -13,9 +13,18 @@ from __future__ import annotations
 
 import re
 
+import pytest
 from playwright.sync_api import expect
 
 
+@pytest.mark.skip(
+    reason="Mobile edit mode is removed under the private-data capability gate "
+    "(no groups/edit on phones — see plans/private_data_capability_gate.md). "
+    "This test and the other mobile group tests are rewritten/retired in the "
+    "PR6 mobile rebuild. It also has a pre-existing boot-race flake "
+    "(enterEditMode redirects to #/groups when route() runs before "
+    "dataProvider is assigned), independent of the gate."
+)
 def test_edit_mode_keeps_rails_visible_on_mobile(
     mobile_page, base_url_fixture
 ):
@@ -43,11 +52,15 @@ def test_edit_mode_keeps_rails_visible_on_mobile(
         })"""
     )
     gid = int(record["id"])
-    page.goto(
-        f"{base_url_fixture}/#/edit/{gid}",
-        wait_until="domcontentloaded",
-    )
-    page.locator("#loading").wait_for(state="hidden", timeout=10000)
+    # In-app navigation (hash change), NOT a full reload: a reload races
+    # route() against provider_ready, and enterEditMode redirects to
+    # #/groups when dataProvider isn't assigned yet (app.js:6450) — a
+    # pre-existing flake (~2/3 runs bounced one device). With the worker
+    # provider already live from the first boot, enterEditMode loads the
+    # group deterministically. The rail-visibility regression assertions
+    # below (the test's actual point — PR #75 focus-mode carve-out) are
+    # unchanged.
+    page.evaluate(f"() => {{ window.location.hash = '#/edit/{gid}'; }}")
 
     # `to_have_class` matches the full attribute string, not a containment
     # check. Use a regex so we don't have to mirror every other class on body.

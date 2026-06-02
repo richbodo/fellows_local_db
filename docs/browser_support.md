@@ -12,15 +12,24 @@ policy so we react consistently when that happens.
 ## Stance
 
 1. **Local-first.** User-authored data (groups, per-fellow notes,
-   per-fellow tags, settings) lives in the browser's OPFS-backed
-   `relationships.db`, not on a server. That gives us per-device
-   privacy and offline-by-default — at the cost of needing a browser
-   that supports OPFS + `FileSystemSyncAccessHandle`.
+   per-fellow tags, settings) lives in `relationships.db`, not on a
+   server. That gives us per-device privacy and offline-by-default. But
+   that store is only **durable** when it is backed by a verified folder
+   on disk (Chromium desktop) — so private data is gated on that folder,
+   not merely on OPFS. Off-folder the app runs **browse-only** (directory
+   + search + open a fellow + email/call), with no durable private store.
+   See *[Folder mode — required for private data](#folder-mode--required-for-private-data)*.
 2. **Capability-detect, don't UA-sniff for gating.** We test the
    capability (`navigator.storage.getDirectory`,
    `globalThis.sqlite3InitModule`, `globalThis.isSecureContext`).
    UA strings are used **only** to render a more helpful unsupported
-   message — never to allow/deny features.
+   message — never to allow/deny features. **Nuance (the two gates):**
+   the *layout* gate (`body.is-phone`) may be UA-based, because it is
+   cosmetic only — a phone shell vs. a desktop shell, never a data-loss
+   decision. The *feature* gate (`body.no-private-data`) is the
+   verified-folder probe below (feature-detect **plus** an empirical
+   write/readback). **No data-loss consequence ever rides on the UA
+   signal**; it rides on the probe.
 3. **Be specific in the message.** "Your browser doesn't support this"
    is unactionable. "You're on Safari 15.6; this needs Safari 16.4 or
    newer; here's how to upgrade or which browser to switch to"
@@ -61,31 +70,126 @@ The only fix on iOS is to upgrade iOS itself. iPhone 8 and newer
 support iOS 16.4+; iPhone 7 and older do not. The unsupported-browser
 panel says this explicitly when it detects iOS.
 
-## Folder-mode capability (additive — not required to run the app)
+## Folder mode — required for private data
 
-Folder mode (`relationships.db` lives in a user-picked folder on disk,
-visible in Finder, durable across browser-data wipes) requires the
-**File System Access API** on top of the OPFS floor:
+A verified folder on disk is **not an opt-in upgrade — it is the gate**
+for all private data (groups, group members, fellow tags, fellow notes,
+group-related settings, and MCP). Without it the app runs **browse-only**:
+directory + search + open a fellow + email/call, and a manual `.db`
+export as the portability bridge. Off-folder there is **no durable
+private store** (not a degraded one) — the app does not write private
+data anywhere it can't prove will survive.
+
+Folder mode requires the **File System Access API** on top of the OPFS
+floor:
 
 | API | Floor | Browsers |
 |---|---|---|
 | `window.showDirectoryPicker` | Chromium-based, desktop | Chrome, Edge, Brave, Arc, Opera (desktop) |
 | Persistent handle via IndexedDB | Same | Same |
 
-Safari, Firefox, all iOS browsers, and Android Chrome (as of 2026)
-fall back to **OPFS-only mode** — `relationships.db` lives in OPFS
-and the maintainer-facing data-folder UI shows the *"Browser-only —
-this browser doesn't support saving to a folder"* badge. Everything
-else in the app (directory, search, groups, settings) works
-identically. Capability-detection: `'showDirectoryPicker' in window`
-inside the page (no separate worker probe — page-side gesture is
-required anyway).
+### `'showDirectoryPicker' in window` is necessary but NOT sufficient
 
-This is **additive**, not a new floor. A browser that supports OPFS
-but not `showDirectoryPicker` is fully supported; folder mode is just
-an opt-in upgrade for the browsers that do support it. See
+Per **M1** (capability presence ≠ usefulness ≠ permanence), having the
+API does not mean a *durable* folder is reachable. A cloud-only /
+online-only placeholder folder (OneDrive Files-On-Demand, Dropbox
+online-only, a virtual mount) can satisfy the feature-detect yet fail
+to durably store bytes. So the feature gate is **feature-detect plus an
+empirical probe**: on folder pick the app writes a sentinel file and
+**reads it back**; if the bytes don't match (`readback_mismatch`), the
+folder is rejected and the install stays browse-only. The full staged
+probe — and the stable `reason` code each stage emits — is:
+
+| Stage | Reason on failure | Meaning |
+|---|---|---|
+| Picker returns a handle | `picker_cancelled` | user dismissed the picker |
+| `getDirectoryHandle({create:true})` for `Fellows/` | `subfolder_create_failed` | couldn't create the data subfolder |
+| Write a sentinel file | `write_failed` | read-only folder, denied permission, or disk full |
+| Read the sentinel back, bytes match | `readback_mismatch` | **cloud-only / virtual folder — pick a real local folder** (the durability proof) |
+| Permission persists / re-query `granted` | `permission_not_persisted` | the browser won't remember this folder |
+
+Each reason maps to an anchor in
+[`folder_troubleshooting.md`](folder_troubleshooting.md). Only when
+**every** stage passes does `privateDataEnabled()` flip true and the
+private store go live; any failure leaves browse-only mode with a
+reasoned message and the help link.
+
+### Off-Chromium and phones = browse-only
+
+Safari, Firefox, all iOS browsers, and Android (Chrome's SAF-routed
+picker can't keep the durable promise — `readback_mismatch`-class
+failures are the norm there) cannot reach a verified folder, so they run
+**browse-only**:
+
+- **Desktop without a verified folder** (Chromium-no-folder, Safari,
+  Firefox): private surfaces render **grayed out** with an **"Enable on
+  Chrome desktop →"** affordance. On Chromium this opens the folder
+  picker; on Safari / Firefox it routes to the help page (no API to
+  invoke).
+- **Phones** (Android + iOS): private surfaces are **hidden** entirely —
+  there is no action the user can take to unlock on that device, so a
+  grayed control would be noise. The screen is reclaimed.
+
+Capability-detection for the *offer*: `'showDirectoryPicker' in window`
++ `!isMobileDevice()` inside the page (no separate worker probe — a
+page-side gesture is required anyway). Capability-decision for the
+*feature*: the verified-folder probe above.
+
+### Migration path off-Chromium
+
+There is no in-app unlock on Safari / Firefox / phones. The documented
+path to private data is:
+
+1. **Back up** — download your `.db` export (works everywhere).
+2. **Install Chrome** (or any Chromium desktop browser).
+3. **Restore** the `.db` into a new verified folder there.
+
+This is the same shipped backup/restore machinery; the self-describing
+export name (`ehf-fellows-private-data-<date>.db`) and the restore
+preview's row-count delta make the right file recognizable.
+
+The *why* behind this gate — that the File System Access gap is a
+class-level architectural ceiling for web-distributed PNAs, not a
+fellows quirk, and that off-folder there is **no** private store at all
+(not a read-only snapshot of one) — is captured as a lesson-learned in
+[`architectural_findings.md` § 2026-06-01](architectural_findings.md)
+(the `CST-PWA-*` constraints). See also
 [`../plans/user_folder_storage.md`](../plans/user_folder_storage.md)
-§ Browser compatibility matrix for the per-flavor breakdown.
+§ Browser compatibility matrix and
+[`../plans/private_data_capability_gate.md`](../plans/private_data_capability_gate.md)
+for the gate decision.
+
+### Pre-install recommendation (not a blocklist)
+
+Consistent with *capability-detect, don't UA-sniff*, we do not block any
+browser. The honest recommendation, surfaced before install: **for saved
+groups you control as a real file (and for Claude Desktop integration),
+use a Chromium desktop browser and attach a folder; on Safari / Firefox /
+phones the app is browse-and-contact.** Every browser still gets the full
+directory, search, and contact flows.
+
+## Two distinct "can't do private data" states — don't conflate them
+
+There are now two different reasons a browser shows reduced private-data
+capability, and they surface differently:
+
+- **OPFS-incapable** (older Safari < 16.4, Chrome/Edge < 102, Firefox <
+  111, insecure context, missing `FileSystemSyncAccessHandle`): the
+  browser can't run `relationships.db` *at all*. This is the
+  **unsupported-browser panel** (`renderLocalDataUnavailablePanel`) —
+  named browser, version floor, what to upgrade or switch to.
+- **OPFS-capable but no verified folder** (Chromium desktop that hasn't
+  picked a folder; Safari / Firefox desktop; all phones): the browser
+  *can* run, but there is no durable folder backing a private store, so
+  private data is gated off. This is **not** the unsupported panel — it's
+  the gate state: **grayed + "Enable on Chrome desktop →"** on desktop,
+  **hidden** on phones. The directory, search, and contact flows work
+  fully.
+
+The unsupported panel is about *the browser being too old to run at all*;
+the gate state is about *durability not being achievable here* on a
+perfectly capable browser. Different cause, different message, different
+recovery.
 
 ## How a user without OPFS reaches the panel
 

@@ -7257,6 +7257,19 @@
     if (isEditing() && nextEditId !== groupDraft.editingGroupId) {
       exitEditMode();
     }
+    // EPIC PR3: private-data routes need a verified folder. On desktop
+    // without one, redirect to Settings (the unlock entry). Phones are
+    // always browse-only and are gated by the mobile rebuild (PR6), so this
+    // is scoped :not phone to avoid redirecting the mobile group-route
+    // tests before that rewrite. Reads of cached directory data are
+    // unaffected (only #/groups* and #/edit/* are gated).
+    if (privateDataGateResolved && !privateDataEnabled() && !isMobileDevice() &&
+        (groupMatch || directoryMatch || editMatch || hash === '#/groups')) {
+      if (hash !== '#/settings') {
+        window.location.replace('#/settings');
+        return;
+      }
+    }
     if (hash === '#/about') {
       renderAboutPage();
       return;
@@ -8811,6 +8824,61 @@
   // Exposed for tests + diag panel.
   window.__folderController = FOLDER_CONTROLLER;
 
+  // ===== Private-data capability gate (EPIC PR1 — foundation only) =========
+  // Private data (groups, notes, tags, group-settings, MCP) is durable only
+  // when a verified, attached folder backs a real file on disk. Everywhere
+  // else the app is "browse-only" (directory + search + email/call). See
+  // plans/private_data_capability_gate.md + plans/EPIC_private_data_and_mobile.md.
+  //
+  // This PR establishes the gate PLUMBING only — privateDataEnabled(), the
+  // body.is-phone (layout) / body.no-private-data (feature) classes, and
+  // window.__privateDataTier — and is deliberately INERT: nothing hides or
+  // grays a surface on these classes yet (that's PR3), and shared-mode's
+  // localStorage-only enforcement lands together with the folder-attached
+  // test fixture, so the existing suite stays green. Tiers:
+  //   'private-folder'      — verified folder attached + permission granted.
+  //   'browse-only-desktop' — FSA-capable desktop, no verified folder (yet).
+  //   'browse-only-phone'   — a phone (no in-app unlock path on the device).
+  var _privateDataEnabled = false;
+  // True once the gate has resolved against a READY worker provider. Until
+  // then route() must NOT redirect group routes: the folder handle hydrates
+  // during worker init, so an early resolve reads "locked" and would bounce
+  // a folder user off their own group page on reload / deep-link.
+  var privateDataGateResolved = false;
+  function privateDataEnabled() { return _privateDataEnabled; }
+  function computePrivateDataTier(state) {
+    if (state && state.hasHandle && state.permission === 'granted') {
+      return 'private-folder';
+    }
+    return isMobileDevice() ? 'browse-only-phone' : 'browse-only-desktop';
+  }
+  function applyPrivateDataTier(tier) {
+    _privateDataEnabled = (tier === 'private-folder');
+    window.__privateDataTier = tier;
+    if (document.body) {
+      document.body.classList.toggle('no-private-data', !_privateDataEnabled);
+    }
+    return tier;
+  }
+  function updatePrivateDataGate() {
+    var fallback = isMobileDevice() ? 'browse-only-phone' : 'browse-only-desktop';
+    if (!FOLDER_CONTROLLER) {
+      return Promise.resolve(applyPrivateDataTier(fallback));
+    }
+    return FOLDER_CONTROLLER.getState().then(function (state) {
+      // Only mark resolved once a worker provider actually answered — the
+      // pre-provider boot call returns workerAvailable:false and must not
+      // arm the route() redirect.
+      if (state && state.workerAvailable) privateDataGateResolved = true;
+      return applyPrivateDataTier(computePrivateDataTier(state));
+    }).catch(function () {
+      return applyPrivateDataTier(fallback);
+    });
+  }
+  // Conservative default before the first async resolve: locked.
+  window.__privateDataTier = isMobileDevice() ? 'browse-only-phone' : 'browse-only-desktop';
+  window.__privateDataEnabled = privateDataEnabled;
+
   // ===== Folder-push banner (Phase 2 PR 3) =================================
   // Top-of-page banner that surfaces to capable browsers in OPFS-only mode,
   // pushing the user to pick a data folder. Hidden when:
@@ -8932,6 +9000,7 @@
   // when the user never opens Settings (#221). Pass-through: returns its arg.
   function afterFolderMutation(result) {
     try { refreshFolderPushBanner(); } catch (e) {}
+    try { updatePrivateDataGate(); } catch (e) {}
     return result;
   }
 
@@ -11098,6 +11167,18 @@
     directoryBootAttempted = true;
     bootDebugLines.length = 0;
     setShellVisible(true);
+    // EPIC PR1: layout gate (is-phone, UA-based) is cosmetic; feature gate
+    // (no-private-data) carries the data-loss consequences and resolves from
+    // folder state. Both classes are inert until PR3 — see the private-data
+    // gate block near window.__folderController.
+    if (document.body) {
+      document.body.classList.toggle('is-phone', isMobileDevice());
+      // Locked by default until the gate resolves authoritatively at
+      // provider_ready (the folder handle hydrates during worker init).
+      // Set synchronously so private surfaces never flash pre-resolve and
+      // so we don't fire an extra getState() RPC during early boot.
+      document.body.classList.add('no-private-data');
+    }
     if (loadingPanelEl) {
       loadingPanelEl.classList.remove('hidden');
     }
@@ -11191,6 +11272,22 @@
         dataProvider = provider;
         bootMark('provider_ready');
         bootDebugPush('provider ready kind=' + provider.kind);
+        // EPIC PR1 fix: re-resolve the private-data gate now that the
+        // worker (and its IDB-hydrated folder handle) is ready. The
+        // earlier call in bootDirectoryAsApp runs before hydration, so it
+        // computes the locked default; this is the authoritative resolve
+        // once getState() can see an attached folder. Without it a folder
+        // user stays wrongly in browse-only mode for the whole session.
+        updatePrivateDataGate().then(function () {
+          // If the authoritative resolve is locked and we're on a gated
+          // route (desktop deep-link / reload onto #/groups before the gate
+          // resolved), apply the redirect now.
+          var h = window.location.hash || '';
+          if (privateDataGateResolved && !privateDataEnabled() &&
+              !isMobileDevice() && /^#\/(groups|edit)\b/.test(h)) {
+            route();
+          }
+        });
         // Defensive shell-cache audit. Cheap (one caches.keys()) and
         // silent on the happy path; logs + deletes any stale shell
         // caches the SW activate prune missed. See the 2026-05-05

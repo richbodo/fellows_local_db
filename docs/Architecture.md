@@ -85,6 +85,40 @@ for the upstream-contribution plan (the handler contract `EX-H1..EX-H8`).
 |---|---|---|---|---|---|
 | EX-CLOUD-LLM | PNA-DEFINITION (local-only / never-SaaS), AC-MCP-A; stresses Goal 1 | yes; reversible (mode only) | Workspace-side handler: consent gate in Settings before the user wires up the cloud client (`recordMcpbConsent()`); persistent dismissable "Going rogue — not a PNA" banner naming the exception (`syncNotAPnaBanner()`, `index.html`); in-app explainer `#/exception/EX-CLOUD-LLM` rendering the **per-dimension strength profile** (`PNA_EXCEPTION_STRENGTH` → `renderExceptionPage()`, EX-H8); "Return to PNA mode" control (`returnToPnaMode()`); `<body data-pna-mode/data-pna-exceptions>` machine-readable marker. **EX-H7** consent-to-human propagation is surfaced best-effort via the MCP `instructions` handshake on the data-returning servers (`CLOUD_LLM_PROPAGATION_NOTICE` in `mcp_servers/private_data_ops.py` + `mcp_servers/shared_data_ops.py`); servers stay `mode=ro`, not per-call gated. Code: `app/static/app.js`, `app/static/index.html`, `mcp_servers/`. | `tests/e2e/test_pna_exception_mode.py` (raise/dismiss/persist, banner→explainer, return-to-PNA from explainer + Settings, explainer active/inactive/unknown, `test_explainer_shows_per_dimension_strength_profile`); `tests/e2e/test_mcpb_settings.py`; `tests/test_private_data_ops.py::test_instructions_carry_cloud_llm_propagation_notice`; `tests/test_shared_data_ops.py::test_instructions_carry_cloud_llm_propagation_notice` | conformant for EX-H1–H6 and EX-H8; EX-H7 (consent-to-human) surfaced best-effort via MCP `instructions` |
 
+### Constraint attestation
+
+A **constraint** (`CST-*`) is the dual of an exception: a platform-imposed
+ceiling, inherited automatically by one or more axis picks, that the app
+must catch and handle honestly via capability reduction — never silently.
+See [`./architectural_findings.md` § 2026-06-01](./architectural_findings.md)
+for the discovery and [`../plans/pna_toolkit_constraints_contribution.md`](../plans/pna_toolkit_constraints_contribution.md)
+for the upstream-contribution plan. The realization below is the
+**private-data capability gate** ([`../plans/private_data_capability_gate.md`](../plans/private_data_capability_gate.md)):
+private data (groups, members, fellow tags, fellow notes, group-related
+settings, MCP) is live **only** when a verified folder is attached;
+off-folder the app is **browse-only** (directory + search + open a fellow
++ email/call) with no durable private store.
+
+| CST | Inherited by | Handling (capability reduction) | Frontier | Verification | Status |
+|---|---|---|---|---|---|
+| CST-PWA-PRIVATE-SNAPSHOT | web-bundle × opfs, non-FSA browser | Private store **requires** a verified real file; absent one there is **no** private store (browse-only, not a degraded store). The timestamped `.db` export (`ehf-fellows-private-data-<date>.db`) is the honest **portability bridge** between installs, not a live store. | **Open** (the real fix is a durable cross-platform private store — a future-version architecture change; the gate is the honest handling, not a solution) | `tests/e2e/` gate suite (locked-default; unlock happy path; `#/groups` redirect/lock); `browser_support.md` probe; `feature_platform_matrix.md` matrix | conformant: no false durability — off-folder the app declares browse-only and stores nothing private |
+| CST-PWA-SANDBOX-SEALED | opfs storage | A verified folder dissolves the sandbox boundary — the store is a real file the user's other tools (MCP, backups, CLIs) can read. Off-folder there is no store to seal *or* read, so MCP is **hidden** (nothing to expose). | **Solved-on-chromium** (folder mode); browse-only elsewhere | folder-mode MCP e2e; `use_with_claude_desktop.md` | conformant: MCP gated on the same verified folder as the store it reads |
+| CST-PWA-STORAGE-EVICTABLE | opfs / IndexedDB | **Avoided** for private data — nothing durable lives in evictable OPFS in the first place (browse-only is localStorage-only; folder mode's canonical file is on disk, outside browser storage). Stronger than *mitigated*. | **Avoided** (for private data) | `persistence_and_upgrades.md` state-survival table (browse-only = localStorage-only) | conformant: no private data rides on evictable storage |
+| CST-PWA-NO-SYNC | web-bundle × opfs | Origin/device-local silos, no built-in portability. The in-db **workspace identity** (`workspace_uuid` + monotonic `write_generation` + `device_label` in the `settings` table) answers "which copy is canonical?" for the content-previewed re-pick chooser; the `.db` export is the manual cross-device bridge. | **Open** (identity stamp + export discipline; no automatic sync) | reconnect/chooser e2e; identity-stamp test | conformant: canonical-copy disambiguation shipped; sync explicitly out of scope |
+| CST-PWA-DURABLE-SQL-ARCH | opfs-sqlite-wasm | Durable SQL forces a worker-owned, cross-origin-isolated, single-connection architecture — accepted; the worker-owned-OPFS convention is the handling. | **Inherent** (accepted cost) | `Architecture.md` § Worker-owned OPFS; RPC contract | conformant by architecture |
+| CST-PWA-SINGLE-OWNER | opfs-sqlite-wasm | Multi-tab contention with no OS file lock → Web Locks + ownership-conflict detection guard the canonical folder write. | **Solved-on-chromium** (Web Locks) | folder-write lock test (PR #209) | conformant |
+| CST-PWA-NO-BACKGROUND | web-bundle | No reliable scheduled background execution (esp. iOS) → backups are opportunistic: a per-boot debounced snapshot in folder mode, never a scheduled promise. | **Mitigated** (per-boot debounced; never promise scheduled protection) | auto-backup debounce test; `persistence_and_upgrades.md` § Auto-backup | conformant: opportunistic-only, honestly framed |
+| CST-PWA-SERVER-FLOOR | web-bundle | Needs an origin + TLS + secure context; true serverless-local is unreachable. Bounded to distribution/update only (Never-SaaS) — no per-user RW state on the server. | **Inherent** (bounded to distribution; Never-SaaS) | `never-saas.md`; `email_gate.md` | conformant by bounding |
+
+**Honest frontiers note.** The **Frontier** column is what keeps this
+attestation truthful: `Open` rows (`CST-PWA-PRIVATE-SNAPSHOT`,
+`CST-PWA-NO-SYNC`) are *not solved* — the gate and the identity stamp are
+honest *handlings*, and the underlying ceilings stand until a future
+version beats them and documents *how*. We claim only what we have done
+(capability reduction, avoidance, bounding), never that we overcame a
+ceiling we merely reduced — over-reach (false durability) would itself be
+a silent conformance failure, which this gate exists to prevent.
+
 ---
 
 ## HTTP API
@@ -373,7 +407,7 @@ Architecture-adjacent docs that specialize one part of the spec or operator surf
 | [`./persistence_and_upgrades.md`](./persistence_and_upgrades.md) | Storage slot — state-survival matrix across Clear App Cache / Reset Everything / app update; auto-backup; restore. |
 | [`./browser_support.md`](./browser_support.md) | Storage slot — capability detection inside the worker, required versions, unsupported-browser surfacing (AC-12). |
 | [`./data_provenance.md`](./data_provenance.md) | Ingestion slot — column-by-column source mapping; backup/restore workflow; recovery paths. |
-| [`./architectural_findings.md`](./architectural_findings.md) | Findings that feed back into the spec — e.g. the cloud-LLM "exception" / non-PNA-mode concept (`EX-CLOUD-LLM`). |
+| [`./architectural_findings.md`](./architectural_findings.md) | Findings that feed back into the spec — the cloud-LLM "exception" / non-PNA-mode concept (`EX-CLOUD-LLM`) and the platform-ceiling **constraints** (`CST-*`) realized by the private-data capability gate (see *Constraint attestation* above). |
 
 ---
 

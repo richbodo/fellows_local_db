@@ -11,12 +11,23 @@ from __future__ import annotations
 
 from playwright.sync_api import expect
 
-from conftest import _STANDALONE_DISPLAY_INIT
+# Fully-qualified import (not the bare ``from conftest import``): with the
+# mobile tree collected, a bare ``conftest`` resolves to
+# tests/e2e/mobile/conftest.py, which lacks these e2e-suite symbols. The
+# mobile conftest itself uses this same fully-qualified form.
+from tests.e2e.conftest import (
+    _STANDALONE_DISPLAY_INIT,
+    _FOLDER_PICKER_STUB_MIN,
+    attach_verified_folder,
+)
 
 
 def _make_standalone_page(context):
     page = context.new_page()
     page.add_init_script(_STANDALONE_DISPLAY_INIT)
+    # Folder-picker stub so group-exercising tests can attach a verified
+    # folder (privateDataEnabled()); harmless/unused for the toast test.
+    page.add_init_script(_FOLDER_PICKER_STUB_MIN)
     return page
 
 
@@ -138,6 +149,9 @@ def test_unresolved_member_shows_hint_in_rail_and_visual_directory(
     try:
         page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
         _wait_for_worker_ready(page)
+        # Groups/edit/rail require a verified folder under the capability gate.
+        attach_verified_folder(page, base_url_fixture)
+        _wait_for_worker_ready(page)
 
         _seed_orphan_group(
             page,
@@ -191,6 +205,9 @@ def test_orphan_row_renders_with_remove_affordance(context, base_url_fixture):
     page = _make_standalone_page(context)
     try:
         page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+        _wait_for_worker_ready(page)
+        # Groups/detail require a verified folder under the capability gate.
+        attach_verified_folder(page, base_url_fixture)
         _wait_for_worker_ready(page)
 
         _seed_orphan_group(

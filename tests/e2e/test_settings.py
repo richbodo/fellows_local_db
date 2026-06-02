@@ -53,9 +53,11 @@ class TestSettingsPage:
         expect(page.locator("#settings-self-email")).to_have_value("rich@example.com")
 
     def test_self_email_surfaces_in_export_input(
-        self, worker_data, base_url_fixture
+        self, worker_data_folder, base_url_fixture
     ):
-        page = worker_data.page
+        # Group export requires a verified folder under the capability gate,
+        # so this test boots with one attached (worker_data_folder).
+        page = worker_data_folder.page
         # Set the email via the UI so the test exercises the same code
         # path the user does (settings UI → setSetting RPC).
         page.goto(f"{base_url_fixture}/#/settings", wait_until="domcontentloaded")
@@ -65,12 +67,12 @@ class TestSettingsPage:
         expect(page.locator("#settings-status")).to_have_text("Saved.")
         # Now create a group via the worker (the test doesn't care about
         # the create-group UI; just needs a group to land on).
-        full = worker_data.get_full_fellows()
+        full = worker_data_folder.get_full_fellows()
         rid = full[0]["record_id"]
-        group = worker_data.create_group("Prefill check", fellow_record_ids=[rid])
+        group = worker_data_folder.create_group("Prefill check", fellow_record_ids=[rid])
         gid = group["id"]
         page.goto(f"{base_url_fixture}/#/groups/{gid}", wait_until="domcontentloaded")
-        worker_data.wait()
+        worker_data_folder.wait()
         _wait_for_directory(page)
         page.locator("#group-action-export").click()
         addr = page.locator("#export-self-email-addr")

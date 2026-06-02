@@ -14,15 +14,24 @@ screenshots inside the fellowship.
 
 ## Recommended platform
 
-**Chrome (or any Chromium browser) on desktop, plus Claude Desktop
-for AI integration.** That combination gets every feature — local
-data folder on your disk, MCP integration, the works. The app runs
-fine in any modern browser (Safari, Firefox, mobile) but some
-features are limited there; check the
-[feature ↔ platform matrix](feature_platform_matrix.md) for the
-breakdown. Also: **install in one browser per device** — browsers
-don't share storage, so two installs = two separate sets of groups
-that can't auto-sync.
+**Chrome (or any Chromium browser) on desktop, with a data folder
+attached, plus Claude Desktop for AI integration.** That combination
+gets every feature — your private data (saved groups, tags, notes) as a
+real file on your disk, MCP integration, the works.
+
+**Saved groups need a folder.** Private data is only available once you
+attach a folder the app can verify it can write to — on a Chromium
+desktop browser. Everywhere else (Safari, Firefox, phones), and on
+Chrome before you've picked a folder, the app runs in **browse-only
+mode**: browse the directory, search, open a fellow, and email or call
+them. You can turn private data on at any time on Chromium desktop (see
+*[Turning on saved groups](#turning-on-saved-groups-private-data)*).
+Check the [feature ↔ platform matrix](feature_platform_matrix.md) for the
+full breakdown.
+
+Also: **install in one Chromium desktop browser per device and attach one
+folder** — browsers don't share storage, so two installs = two separate
+sets of groups that can't auto-sync.
 
 ---
 
@@ -161,7 +170,7 @@ If you've accumulated copies and want to keep just one:
    name (and so does the window title).
 2. Identify the copy with the data you want to keep (groups
    visible, notes intact).
-3. From the copy you're keeping, **Settings → Private data folder →
+3. From the copy you're keeping, **Settings → Private data →
    Choose folder…**, and pick a folder under your home
    directory. This creates a stable file you can later re-attach
    from any new install. (Folder mode also makes
@@ -214,28 +223,40 @@ Bringing your data across is a two-step copy:
 
 1. Open the app **in the browser where your data currently lives**
    (Safari, in this example).
-2. **Settings → Private data folder → ⬇ Download my private data**. Save the `relationships.db`
-   file somewhere stable on your disk — `~/Documents/` works well,
-   or anywhere you can find again. **Don't put it in Downloads** if
-   you regularly empty that folder.
+2. **Settings → Private data → ⬇ Download my private data**. The file
+   is named so you can recognize it later —
+   `ehf-fellows-private-data-<date>.db`. Save it somewhere stable on your
+   disk — `~/Documents/` works well, or anywhere you can find again.
+   **Don't put it in Downloads** if you regularly empty that folder.
 
 ### Step 2 — Import into the new browser
 
 1. Open the app **in the new browser** (Chrome, in this example). If
-   you haven't installed there yet, do that first.
-2. *(Recommended, Chromium browsers only)* **Settings → Private data folder →
-   Choose folder…**. Pick a folder under your home directory.
-   This sets up the new browser to keep its `relationships.db` at a
-   stable path on your disk — which makes the Claude Desktop
-   integration much easier and survives clearing site data.
+   you haven't installed there yet, do that first. Chrome (or any
+   Chromium desktop browser) is required — it's the only place private
+   data can be turned on.
+2. **Settings → Private data → Choose folder…**. Pick a real local folder
+   under your home directory and let the app verify it (see *[Turning on
+   saved groups](#turning-on-saved-groups-private-data)*). This is what
+   makes private data work at all in the new browser, keeps your
+   `relationships.db` at a stable path on disk, makes the Claude Desktop
+   integration possible, and survives clearing site data.
 3. **Settings → ⬆ Restore from a file…**, then pick the
-   `relationships.db` you saved in Step 1.
+   `ehf-fellows-private-data-<date>.db` you saved in Step 1.
 
 That's it. Your groups, notes, and tags are now visible in the new
 browser. The source browser still has its copy — you can keep both
 in sync by re-exporting / re-importing, but it's usually simpler to
 [uninstall the source copy](#uninstall-a-copy) once you're confident
 the new one is working.
+
+**Finding the right file later.** Inside your data folder the app leaves
+a plain-text `HOW-TO-MOVE-THIS-DATA.txt` marker explaining that the folder
+is your EHF private data and that copying the whole folder (or the
+`relationships.db` inside it) is how you move it between computers. The
+self-describing export name and the restore preview's row-count summary
+("4 groups, 12 notes → 7 groups, 23 notes") help you recognize the right
+file in a pile of downloads.
 
 **A note for the future.** Doing this two-step migration regularly
 is a sign you should pick one browser and stay there. PWAs don't
@@ -247,65 +268,102 @@ the other as a backup.
 
 ## Where your data is stored
 
-Your groups, notes, and settings live **on your device only** —
-never sent to any server, never visible to other apps or websites.
+Your groups, notes, tags, and settings — your **private data** — live
+**on your device only**, never sent to any server, never visible to other
+apps or websites. And they live in **a real folder on your disk that you
+pick**: a file visible in Finder/Explorer, durable across clearing site
+data or switching browsers.
 
-**The recommended setup is a private data folder on your disk** —
-a real file at a path you pick, visible in Finder/Explorer, durable
-across clearing site data or switching browsers. The app prompts
-you to set this up via a banner at the top of the screen on first
-launch.
+**Private data requires that folder.** This isn't an optional upgrade —
+it's the gate. Until you attach a folder the app has verified it can write
+to (and read back from), the app runs in **browse-only mode**: you can
+browse the directory, search, open a fellow, and email or call them, but
+there are no saved groups, tags, or notes. There is no hidden,
+losable copy in browser storage — off-folder, the app simply doesn't
+store private data, so there's nothing to lose.
 
-If you skip the prompt, or you're on a browser without folder support
-(Safari and Firefox lack the API), or **you're on a phone or tablet**
-(the data folder is intentionally not offered on mobile — see below),
-the app runs in **browser-only mode** — your data still works, but it
-lives in private browser storage that can be lost when you clear site
-data or switch browsers. Use the **Download a backup** feature (below)
-to make file copies you can save anywhere.
+You turn private data on by attaching a folder, on a **Chromium desktop
+browser** (Chrome, Edge, Brave, Arc, Opera). See *[Turning on saved
+groups](#turning-on-saved-groups-private-data)* below.
 
-**On phones and tablets, browser-only is the only mode.** Android's
-folder picker can only reach a Downloads subfolder the system clears at
-will, and iOS has no picker at all — so a "data folder" there couldn't
-actually keep your data safe, and the app doesn't pretend otherwise.
-Your durability on mobile is the manual backup: **download a backup file
-and store it somewhere you trust** (your cloud drive, email it to
-yourself). See *[Backup and restore](#backup-and-restore-works-in-every-browser)*.
+**On Safari, Firefox, and phones, browse-only is the only mode.** Safari
+and Firefox don't have the folder API; Android's folder picker can only
+reach a Downloads subfolder the system clears at will, and iOS has no
+picker at all — so a verified, durable folder isn't reachable there. On
+**desktop Safari / Firefox** the private controls appear **grayed out**
+with an **"Enable on Chrome desktop"** link; on **phones and tablets**
+they're **hidden** entirely (there's no action you could take on the phone
+to turn them on). To get private data on those devices, migrate to Chrome
+— see *[Migrating from another browser](#migrating-from-another-browser)*.
 
-### Setting up a private data folder (Chrome / Edge / Brave on desktop)
+### Turning on saved groups (private data)
 
-1. Click **Set up data folder** on the banner at the top of the app
-   (or go to **Settings → Private data folder** → **Choose folder…**).
-2. Your OS pops a folder picker. Pick any folder you like —
-   `Documents`, a Dropbox / iCloud / Syncthing folder, anywhere.
-3. The app creates a `Fellows/` subfolder inside it and saves
-   `relationships.db` there.
+On a **Chromium desktop browser** (Chrome / Edge / Brave / Arc / Opera),
+turning on private data is one short flow:
 
-The badge at the top of the section flips to **Saved** with the
-path and a timestamp, and your data is now a real file you can
-browse to. The banner at the top of the screen disappears. Once a
-folder is connected, the button relabels to **Change folder…** so
-you can re-pick (moving to a synced folder, re-granting permission
-after the browser idle-revokes, switching machines).
+1. **Start the unlock.** Either **tap any grayed-out private control**
+   (for example **Create group**) or go to **Settings → Private data →
+   Choose folder…**. The app explains that saved groups live in a folder
+   on your computer.
+2. **Pick a folder.** Your OS pops a folder picker. Pick a real, local
+   folder you own — your **Documents** folder is the safe default. (You
+   *can* pick a sync folder like Dropbox / iCloud / OneDrive, but only if
+   it's set to keep files on this device — see the readback note below.)
+3. **The app verifies it.** Before turning anything on, the app creates a
+   `Fellows/` subfolder, writes a small test file, **reads it back to
+   confirm it matches**, and checks the browser will remember the folder.
+   Only if every step passes do your saved groups light up.
+4. **Done.** The badge flips to **Saved** with the path and a timestamp,
+   the private controls become active, and from now on **every change is
+   automatically saved to the folder** — no Save button.
+
+**If verification fails**, the app stays in browse-only mode and shows a
+short reason — most often that you picked a **cloud-only / online-only
+folder** (OneDrive Files-On-Demand, Dropbox online-only) that doesn't
+actually keep files on this machine. Pick a real local folder instead.
+Each reason is explained, with the fix, on the
+[folder troubleshooting page](folder_troubleshooting.md) —
+[cloud-only folder](folder_troubleshooting.md#readback_mismatch),
+[couldn't write](folder_troubleshooting.md#write_failed),
+[browser won't remember it](folder_troubleshooting.md#permission_not_persisted).
+
+**On Safari / Firefox desktop and on phones** there's no folder API, so
+this flow isn't available — the controls are grayed (desktop) or hidden
+(phone). See *[Migrating from another browser](#migrating-from-another-browser)*
+to bring private data to Chrome.
 
 **If `Fellows/` already exists in the folder you picked**, the app
-asks before doing anything: open the existing data (the typical
-case — reinstalling, or pointing a second browser at a synced
-folder), or save your current data into a new `Fellows 2/`
-subfolder (the safe choice when you don't recognize what's there).
-Cancel leaves both untouched.
-
-After setup, **every change you make is automatically saved to the
-folder** — no Save button to remember. You'll see the badge update
-each time. If a save fails (badge flips to *Last save failed*), or
-the OS revokes permission (badge flips to *Folder set but
-unreachable*), click **Change folder…** and re-pick the same folder
-— that re-grants permission and triggers a fresh save.
+asks before doing anything: open the existing data (the typical case —
+reinstalling, or pointing a second browser at a synced folder), or save
+into a new `Fellows 2/` subfolder (the safe choice when you don't
+recognize what's there). The app defaults to **using the existing data**,
+since a second store is almost never what you want. Cancel leaves both
+untouched.
 
 Backups (the `relationships.db.bak.<timestamp>` files in the same
-`Fellows/` subfolder) are also automatic — the app keeps the most
-recent few alongside the live file. Visible in Finder so you can
-copy them out if you want extra safety.
+`Fellows/` subfolder) are also automatic — the app keeps the most recent
+few alongside the live file. Visible in Finder so you can copy them out if
+you want extra safety.
+
+### Reconnecting vs. re-picking your folder
+
+Sometimes the app loses access to your folder — usually after a browser
+restart or an idle timeout revokes permission. **Your data is never
+hidden or deleted when this happens** — the file is still on your disk.
+
+- **Reconnect (the common case).** The app still remembers *which* folder
+  it was using, so it shows **"Reconnect your folder to use groups"** and
+  re-grants the **same folder in one click**. No folder-picking, no
+  guessing. Your groups come right back.
+- **Re-pick (rarer).** If the app has lost track of which folder it was —
+  after clearing site data, a fresh install, or moving to a new computer
+  — you choose a folder again. To stop you grabbing the wrong one, the
+  chooser **previews the contents** of each `Fellows*` folder it finds
+  (groups · members · notes · last changed · which device created it) and
+  recommends the newest. **Pick by content, not by filename.**
+
+See the [folder troubleshooting page](folder_troubleshooting.md#reconnecting-vs-re-picking)
+for more.
 
 ### Where is my data file?
 
@@ -323,42 +381,43 @@ from web apps, so the badge can only show a relative location
 
 ### Badge states
 
-The badge at the top of *Private data folder* always tells you the
-current state of your data:
+The badge at the top of *Private data* always tells you the current
+state:
 
-- **Saved** (green) — your data is in the folder and the last save
-  succeeded.
-- **Folder selected — no save yet** (blue) — you've picked a folder
-  but the first save hasn't completed yet (rare; usually flips to
-  *Saved* within a second).
-- **Browser-only — your data is not yet saved to a folder** (yellow)
-  — default state on a fresh install. Working fine, but not yet
-  durable across browser-data clears.
-- **Folder set but unreachable — Change folder to re-pick** (yellow)
-  — the OS revoked permission to the folder (you moved it, denied
-  on session start, or the browser idle-revoked). Your data is fine
-  in the browser; click *Change folder…* and re-pick the same folder
-  to re-grant access.
-- **Last save failed — Change folder to re-pick** (yellow) — the
-  most recent write threw an error (disk full, permissions changed
-  mid-write, *or another browser window of this app has the same
-  folder open*). The change is still safe in the browser; close any
-  other window pointed at the same folder, then make any small edit
-  to retry — the next save will succeed automatically. If the cause
-  isn't another window, click *Change folder…* and re-pick. So you
-  don't miss this while working away from Settings, a red banner also
-  appears across the top of the app — *"Your latest change wasn't
-  saved."* — and clears itself the moment the next save succeeds.
-- **Browser-only — this browser doesn't support saving to a folder**
-  (yellow) — desktop **Safari** and **Firefox** don't ship the File
-  System Access API. Use *Download my private data* (below) for manual
-  backup instead.
-- **On phones, your data stays in this browser…** (yellow) — the
-  message you'll see on **any phone or tablet**. The data folder is
-  intentionally not offered on mobile (Android can only save into a
-  Downloads subfolder the system clears; iOS has no picker). The
-  *Download my private data* button right below the badge is your backup
-  path — use it and store the file somewhere you trust.
+- **Saved** (green) — private data is on, your data is in the folder, and
+  the last save succeeded.
+- **Folder selected — no save yet** (blue) — you've picked a folder but
+  the first save hasn't completed yet (rare; usually flips to *Saved*
+  within a second).
+- **Browse-only — no folder attached yet** (yellow) — default on a fresh
+  Chromium-desktop install. Private data is off until you attach a folder;
+  nothing private is stored yet. Click **Choose folder…** to turn it on
+  (see *[Turning on saved groups](#turning-on-saved-groups-private-data)*).
+- **Reconnect your folder to use groups** (yellow) — the OS revoked
+  permission to your folder (you moved it, denied on session start, or the
+  browser idle-revoked). **Your data is safe in the folder**; click
+  **Reconnect** to re-grant the same folder in one click. (See
+  *[Reconnecting vs. re-picking](#reconnecting-vs-re-picking-your-folder)*.)
+- **Last save failed — Reconnect to re-pick** (yellow) — the most recent
+  write threw an error (disk full, permissions changed mid-write, *or
+  another browser window of this app has the same folder open*). Your data
+  is safe; close any other window pointed at the same folder, then make a
+  small edit to retry — the next save succeeds automatically. So you don't
+  miss this while working away from Settings, a red banner also appears
+  across the top of the app — *"Your latest change wasn't saved."* — and
+  clears itself the moment the next save succeeds. If verification of a
+  newly picked folder fails (e.g. a cloud-only folder), the badge points
+  to the [folder troubleshooting page](folder_troubleshooting.md).
+- **Browse-only — Enable on Chrome desktop** (yellow) — desktop **Safari**
+  and **Firefox** don't ship the File System Access API, so private data
+  can't be turned on here. The controls are grayed out; the link routes to
+  the [migration steps](#migrating-from-another-browser). Use *Download my
+  private data* (below) on the browser that has your data.
+- **On phones, private data isn't available here** — on **any phone or
+  tablet** the private controls are hidden entirely (Android can only save
+  into a Downloads subfolder the system clears; iOS has no picker), so a
+  durable folder isn't reachable. Private data lives on a Chromium desktop
+  browser; on the phone you browse, search, and contact fellows.
 
 ### Backup and restore (works in every browser)
 
@@ -389,14 +448,11 @@ file lives on your disk and is yours to keep or remove.
 is still on disk**, choose the same folder again — the dialog will
 offer to *Open existing*, and your groups / notes / tags come back.
 
-**Phone gotchas.** On **Android**, *Clear Storage* for the browser
-in Android Settings wipes everything this app has saved, including
-the auto-backups. On **iOS**, *Settings → Safari → Clear History and
-Website Data* does the same. Both bypass the app's own confirm
-dialogs — download a backup yourself before doing either. (Phones run
-in browser-only mode by design — the private data folder is a
-desktop-only feature, so on a phone the downloaded backup is your only
-durable copy.)
+**Phones run in browse-only mode** — private data (saved groups, tags,
+notes) isn't available on a phone or tablet at all, so there's nothing
+private stored there to clear. (*Clear Storage* on Android or *Clear
+History and Website Data* on iOS still clears the app's browser state,
+but your private data lives on a Chromium desktop browser, not the phone.)
 
 **Switching browsers or devices.** If you set up a private data
 folder inside a cloud-sync folder (Dropbox / iCloud Drive /
@@ -561,10 +617,13 @@ action as the detail page.
 - **Your email ("me" email)** — used by export "Email it to me" and any
   other place the app addresses something *to you*. Auto-captured from
   your magic link, so most people never need to touch this.
-- **Private data folder** — shows where on disk your `relationships.db`
-  is being kept (or *Browser-only* if you haven't picked a folder yet).
-  See *[Where is my data file?](#where-is-my-data-file)*.
-- **Private data folder → ⬇ Download my private data** — saves all
+- **Private data** — shows where on disk your `relationships.db`
+  is being kept (or *Browse-only* if no folder is attached, *Enable on
+  Chrome desktop* on Safari / Firefox, or hidden entirely on phones).
+  On a Chromium desktop browser this is where you turn private data on —
+  see *[Turning on saved groups](#turning-on-saved-groups-private-data)*
+  and *[Where is my data file?](#where-is-my-data-file)*.
+- **Private data → ⬇ Download my private data** — saves all
   your groups, notes, tags, and settings to a single `.db` file.
   Your browser opens its native save dialog (Chrome / Edge / Brave
   on desktop) or share sheet (iOS) so **you choose where the file
@@ -929,16 +988,23 @@ link.
 
 ## Supported browsers
 
-Saved groups and settings need OPFS (a recent browser storage API).
+**Browsing, search, and contacting fellows work on every modern browser**
+(desktop and mobile). The minimum versions, for the storage the app runs
+on:
 
 - **Chrome / Edge** 102+ (May 2022)
 - **Safari** 16.4+ on macOS 13.3+ / iOS 16.4+ (March 2023)
 - **Firefox** 111+ (March 2023)
 
-Older browsers can still browse the directory and read profiles;
-creating groups will show a panel explaining what to do. Every browser
-on iOS uses Safari's engine, so Chrome / Firefox on iPhone won't help —
-update iOS itself (iPhone 8 and newer support 16.4+).
+**Saved groups (private data) additionally need a verified folder on
+disk**, which today is only possible on a **Chromium desktop browser**
+(Chrome, Edge, Brave, Arc, Opera). On Safari / Firefox desktop the private
+controls are grayed with an "Enable on Chrome desktop" link; on phones
+they're hidden. See *[Where your data is stored](#where-your-data-is-stored)*.
+
+Older browsers can still browse the directory and read profiles. Every
+browser on iOS uses Safari's engine, so Chrome / Firefox on iPhone won't
+help — update iOS itself (iPhone 8 and newer support 16.4+).
 
 ---
 

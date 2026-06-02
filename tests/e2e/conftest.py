@@ -254,3 +254,143 @@ def worker_data(standalone_page, base_url_fixture):
             helper.wipe_relationships()
         except Exception:
             pass
+
+
+# Minimal showDirectoryPicker stub for fixtures that need a VERIFIED folder
+# attached so privateDataEnabled() is true. (The full-featured stub with
+# probe/seed/lock affordances lives in test_user_folder_storage.py; this is
+# the lean version conftest needs to attach a folder via the real UI path.)
+_FOLDER_PICKER_STUB_MIN = """
+(function () {
+  var STUB = '__e2e_user_folder__';
+  window.showDirectoryPicker = async function () {
+    var root = await navigator.storage.getDirectory();
+    return await root.getDirectoryHandle(STUB, { create: true });
+  };
+  window.__resetE2EUserFolderMin = async function () {
+    var root = await navigator.storage.getDirectory();
+    try { await root.removeEntry(STUB, { recursive: true }); } catch (e) {}
+  };
+})();
+"""
+
+
+@pytest.fixture
+def worker_data_folder(standalone_page, base_url_fixture):
+    """Like ``worker_data`` but with a VERIFIED data folder attached, so
+    ``privateDataEnabled()`` is true and ``body`` carries no
+    ``no-private-data`` class.
+
+    Under the private-data capability gate
+    (plans/private_data_capability_gate.md) the group / notes / private-
+    settings surfaces are only available when a real durable folder backs
+    the store. Tests that exercise those surfaces must boot with a folder
+    attached — this fixture is their precondition. It attaches via the same
+    Settings UI path real users take (``#settings-folder-choose`` → "Saved
+    to"), so it exercises the production attach, not a private back door.
+
+    Drop-in for ``worker_data``: yields a ``WorkerDataHelper`` with the same
+    API (``.page``, ``wipe_relationships``, ``create_group``, ``set_setting``).
+    Skips (does not fail) when the worker provider is unavailable, matching
+    ``folder_page``.
+    """
+    page = standalone_page
+    page.add_init_script(_FOLDER_PICKER_STUB_MIN)
+    helper = make_worker_data(page, base_url_fixture)
+    if page.evaluate("() => !!(window.__dataProvider && window.__dataProvider.kind === 'worker')") is not True:
+        pytest.skip("folder-gated tests need the worker provider")
+    # Clean folder + relationships state for an order-independent baseline.
+    page.evaluate("() => window.__dataProvider._clearFolderHandle()")
+    page.evaluate("() => window.__resetE2EUserFolderMin()")
+    helper.wipe_relationships()
+    # Attach a verified folder via the real Settings UI path.
+    page.goto(base_url_fixture + "/#/settings", wait_until="domcontentloaded")
+    page.locator("#settings-folder-choose").wait_for(state="visible", timeout=5000)
+    page.locator("#settings-folder-choose").click()
+    # Wait for the attach to actually PERSIST the handle before leaving the
+    # page — the badge text is present from the start, so badge-visibility
+    # is not a completion signal; folder state's hasHandle is.
+    page.wait_for_function(
+        "async () => { try { var s = await window.__folderController.getState();"
+        " return !!s.hasHandle; } catch (e) { return false; } }",
+        timeout=10000,
+    )
+    # Re-boot the directory so the gate re-resolves with the folder present
+    # (updatePrivateDataGate runs on boot + after mutations); wait for the
+    # gate to flip open.
+    page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+    helper.wait()
+    page.wait_for_function(
+        "() => document.body && !document.body.classList.contains('no-private-data')",
+        timeout=8000,
+    )
+    try:
+        yield helper
+    finally:
+        try:
+            helper.wipe_relationships()
+            page.evaluate("() => window.__resetE2EUserFolderMin()")
+        except Exception:
+            pass
+
+
+def attach_verified_folder(page, base_url):
+    """Attach a verified data folder via the real Settings UI path so
+    ``privateDataEnabled()`` flips true (``body`` loses ``.no-private-data``).
+
+    Precondition: ``_FOLDER_PICKER_STUB_MIN`` installed via
+    ``add_init_script`` before the page's first navigation, the worker
+    provider live, and relationships state already wiped by the caller.
+    Reusable from both fixtures and page-based tests.
+    """
+    page.evaluate("() => window.__dataProvider._clearFolderHandle()")
+    page.evaluate("() => window.__resetE2EUserFolderMin && window.__resetE2EUserFolderMin()")
+    page.goto(base_url + "/#/settings", wait_until="domcontentloaded")
+    page.locator("#settings-folder-choose").wait_for(state="visible", timeout=5000)
+    page.locator("#settings-folder-choose").click()
+    page.wait_for_function(
+        "async () => { try { var s = await window.__folderController.getState();"
+        " return !!s.hasHandle; } catch (e) { return false; } }",
+        timeout=10000,
+    )
+    page.goto(base_url + "/", wait_until="domcontentloaded")
+    page.wait_for_function(
+        "() => window.__dataProvider && typeof window.__dataProvider.listGroups === 'function'",
+        timeout=10000,
+    )
+    page.wait_for_function(
+        "() => document.body && !document.body.classList.contains('no-private-data')",
+        timeout=8000,
+    )
+
+
+@pytest.fixture
+def folder_attached_page(page, base_url_fixture):
+    """A Playwright ``page`` with a VERIFIED folder attached
+    (``privateDataEnabled()`` true). For page-based tests that exercise
+    group / composer-rail surfaces which, under the capability gate, require
+    a folder. Yields the page; the attached folder persists across the
+    test's own re-navigations (the handle lives in IndexedDB)."""
+    page.add_init_script(_FOLDER_PICKER_STUB_MIN)
+    page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+    page.wait_for_function(
+        "() => window.__dataProvider && typeof window.__dataProvider.listGroups === 'function'",
+        timeout=10000,
+    )
+    if page.evaluate(
+        "() => !!(window.__dataProvider && window.__dataProvider.kind === 'worker')"
+    ) is not True:
+        pytest.skip("folder-gated tests need the worker provider")
+    page.evaluate(
+        "async () => { var dp = window.__dataProvider; var gs = await dp.listGroups();"
+        " for (var i=0;i<gs.length;i++){ try{ await dp.deleteGroup(gs[i].id); }catch(e){} }"
+        " var bag = await dp.getSettings(); for (var k in bag){ try{ await dp.setSetting(k,''); }catch(e){} } }"
+    )
+    attach_verified_folder(page, base_url_fixture)
+    try:
+        yield page
+    finally:
+        try:
+            page.evaluate("() => window.__resetE2EUserFolderMin()")
+        except Exception:
+            pass

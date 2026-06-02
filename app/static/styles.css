@@ -4918,3 +4918,21 @@ body.screenshot-mode .detail-section-body:not(:has(table)):not(:has(.work-block)
   filter: blur(6px);
   user-select: none;
 }
+
+/* ===== Private-data capability gate (EPIC PR3 — desktop entry points) =====
+   Private data (groups/notes/tags) is only available with a verified data
+   folder (privateDataEnabled() → body has NO .no-private-data). Without one,
+   a DESKTOP user cannot start a group flow: the per-row select control, the
+   fellow-detail "add to group" link, the top-nav Groups link, and the bulk-
+   select bar are hidden. Scoped :not(.is-phone) because phones are always
+   no-private-data and are handled separately by the mobile rebuild (PR6),
+   which deletes this chrome wholesale. The composer rail and group-route
+   redirects land in PR3c alongside their test conversions. See
+   plans/private_data_capability_gate.md + plans/EPIC_private_data_and_mobile.md. */
+body.no-private-data:not(.is-phone) #directory .dir-mark,
+body.no-private-data:not(.is-phone) .detail-add-to-group,
+body.no-private-data:not(.is-phone) #nav-groups-link,
+body.no-private-data:not(.is-phone) #bulk-select-bar,
+body.no-private-data:not(.is-phone) #group-rail {
+  display: none !important;
+}

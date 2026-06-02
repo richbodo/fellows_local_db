@@ -12,7 +12,7 @@ Pins the user-visible contract:
 - Bulk-select bar shows only when filtered and toggles all visible
   fellows in the draft.
 
-Phase 1 (plans/local_first_worker_architecture.md): the worker_data
+Phase 1 (plans/local_first_worker_architecture.md): the worker_data_folder
 fixture wipes relationships state on entry/exit so settings written by
 one test (e.g. has_email_only) don't leak into the next.
 """
@@ -37,16 +37,16 @@ def _aaron_row(page):
 
 
 class TestGroupComposer:
-    def test_right_rail_is_visible(self, worker_data, base_url_fixture):
-        page = worker_data.page
+    def test_right_rail_is_visible(self, worker_data_folder, base_url_fixture):
+        page = worker_data_folder.page
         _wait_for_directory(page)
         rail = page.locator("#group-rail")
         expect(rail).to_be_visible()
         expect(page.locator("#group-rail-eyebrow")).to_have_text("add to a group")
         expect(page.locator("#group-rail-create")).to_be_disabled()
 
-    def test_marker_toggles_glyph_and_adds_chip(self, worker_data, base_url_fixture):
-        page = worker_data.page
+    def test_marker_toggles_glyph_and_adds_chip(self, worker_data_folder, base_url_fixture):
+        page = worker_data_folder.page
         _wait_for_directory(page)
         row = _aaron_row(page)
         mark = row.locator(".dir-mark")
@@ -60,9 +60,9 @@ class TestGroupComposer:
         expect(chip).to_have_text("Aaron Bird")
         expect(page.locator("#group-rail-create")).to_be_enabled()
 
-    def test_marker_click_does_not_navigate_row(self, worker_data, base_url_fixture):
+    def test_marker_click_does_not_navigate_row(self, worker_data_folder, base_url_fixture):
         """The +/✕ click is intercepted via stopPropagation; URL hash stays put."""
-        page = worker_data.page
+        page = worker_data_folder.page
         _wait_for_directory(page)
         starting_url = page.url
         _aaron_row(page).locator(".dir-mark").click()
@@ -70,8 +70,8 @@ class TestGroupComposer:
         # No navigation happened.
         assert page.url == starting_url, f"Expected URL unchanged, got {page.url}"
 
-    def test_chip_remove_button_round_trips(self, worker_data, base_url_fixture):
-        page = worker_data.page
+    def test_chip_remove_button_round_trips(self, worker_data_folder, base_url_fixture):
+        page = worker_data_folder.page
         _wait_for_directory(page)
         row = _aaron_row(page)
         mark = row.locator(".dir-mark")
@@ -83,9 +83,9 @@ class TestGroupComposer:
         expect(page.locator("#group-rail-create")).to_be_disabled()
 
     def test_title_auto_follows_search_then_flips_on_user_type(
-        self, worker_data, base_url_fixture
+        self, worker_data_folder, base_url_fixture
     ):
-        page = worker_data.page
+        page = worker_data_folder.page
         _wait_for_directory(page)
         title = page.locator("#group-rail-title")
         expect(title).to_have_class(re.compile(r"\bgroup-rail-title--auto\b"))
@@ -103,15 +103,15 @@ class TestGroupComposer:
         page.locator("#search-input").fill("anything")
         expect(title).to_have_value("My climate group")
 
-    def test_draft_persists_across_reload(self, worker_data, base_url_fixture):
-        page = worker_data.page
+    def test_draft_persists_across_reload(self, worker_data_folder, base_url_fixture):
+        page = worker_data_folder.page
         _wait_for_directory(page)
         _aaron_row(page).locator(".dir-mark").click()
         expect(page.locator("#group-rail-members .group-rail-member-name").first).to_have_text(
             "Aaron Bird"
         )
         page.reload(wait_until="domcontentloaded")
-        worker_data.wait()
+        worker_data_folder.wait()
         _wait_for_directory(page)
         # Marker comes up already on; chip restored from localStorage.
         expect(_aaron_row(page).locator(".dir-mark")).to_have_text("✕")
@@ -120,14 +120,14 @@ class TestGroupComposer:
         )
 
     def test_hash_tag_search_filters_to_climate_fellows(
-        self, worker_data, base_url_fixture
+        self, worker_data_folder, base_url_fixture
     ):
         """#climate routes through search_tags (FTS5 column-scoped) and
         returns only fellows whose tags include 'climate'. We assert a
         known climate fellow appears (Aliza Napartivaumnuay, Andy Sack,
         Barry Neal — chosen because their search_tags column reliably
         contains 'climate' in the canonical 2026-04-08 dataset)."""
-        page = worker_data.page
+        page = worker_data_folder.page
         _wait_for_directory(page)
         # Disable the has-email filter so we don't accidentally suppress
         # anyone in the small expected set.
@@ -139,20 +139,20 @@ class TestGroupComposer:
         expect(link).to_be_visible()
 
     def test_bulk_select_bar_visibility_tracks_filtered_state(
-        self, worker_data, base_url_fixture
+        self, worker_data_folder, base_url_fixture
     ):
         """Per the design spec: the bar shows when results are filtered
         (search query OR has-email checked) and hides when the unfiltered
         list is showing — "too easy to mis-click" otherwise."""
-        page = worker_data.page
+        page = worker_data_folder.page
         # Reset has_email_only state from prior tests in this session by
         # writing through the worker (worker is the canonical store
         # post-cutover; the previous fetch('/api/settings/...') route
         # was retired in Phase 1).
-        worker_data.set_setting("has_email_only", "1")
+        worker_data_folder.set_setting("has_email_only", "1")
         page.evaluate("() => localStorage.setItem('ehf_has_email_only', '1')")
         page.reload()
-        worker_data.wait()
+        worker_data_folder.wait()
         _wait_for_directory(page)
         bar = page.locator("#bulk-select-bar")
         # has-email is on by default → bar is visible from boot.
@@ -168,9 +168,9 @@ class TestGroupComposer:
         expect(bar).to_be_visible()
 
     def test_bulk_select_toggles_all_visible_into_draft(
-        self, worker_data, base_url_fixture
+        self, worker_data_folder, base_url_fixture
     ):
-        page = worker_data.page
+        page = worker_data_folder.page
         _wait_for_directory(page)
         page.locator("#search-input").fill("Aaron")
         page.wait_for_timeout(700)
