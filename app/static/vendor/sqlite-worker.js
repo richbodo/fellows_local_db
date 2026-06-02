@@ -50,7 +50,7 @@ importScripts('./sqlite3.js');
 // are version-tolerant — the page is allowed to read folder state even
 // against a stale worker — but the mutating ops are version-gated alongside
 // the existing relationships.db writes.
-var WORKER_RPC_VERSION = 3;
+var WORKER_RPC_VERSION = 4;
 
 // Same value as relationships.db's PRAGMA user_version. Bumped only on
 // schema migrations. Mirrored from app/relationships.py:SCHEMA_VERSION.
@@ -2429,6 +2429,48 @@ handlers.getFolderState = async function () {
   return _folderStateSnapshot();
 };
 
+// Empirical durability probe (EPIC PR4). Write a unique sentinel file into
+// `subHandle`, read it back, verify the bytes match, then delete it. Returns
+// null on success or a staged reason-code string on failure. The read-back
+// match is the load-bearing check: a cloud-only / virtual placeholder folder
+// (OneDrive/iCloud "online only", a streamed location) accepts the write but
+// does NOT return the bytes — so feature-detecting showDirectoryPicker is
+// necessary but not sufficient for a *durable* store. Reason codes map to
+// anchors in docs/folder_troubleshooting.md.
+async function _probeWritableSentinel(subHandle) {
+  var SENTINEL_NAME = '.fellows-probe';
+  var token = 'fellows-probe-' + (
+    (self.crypto && typeof self.crypto.randomUUID === 'function')
+      ? self.crypto.randomUUID()
+      : (String(Date.now()) + '-' + Math.random())
+  );
+  var bytes = new TextEncoder().encode(token);
+  var fh;
+  try {
+    fh = await subHandle.getFileHandle(SENTINEL_NAME, { create: true });
+  } catch (e) {
+    return 'subfolder_create_failed';
+  }
+  try {
+    var w = await fh.createWritable();
+    await w.write(bytes);
+    await w.close();
+  } catch (e) {
+    return 'write_failed';
+  }
+  try {
+    var rf = await subHandle.getFileHandle(SENTINEL_NAME);
+    var back = await (await rf.getFile()).text();
+    if (back !== token) return 'readback_mismatch';
+  } catch (e) {
+    return 'readback_mismatch';
+  }
+  // Best-effort cleanup; a leftover sentinel is non-fatal (read-back already
+  // succeeded, so a delete failure can't mask a mismatch).
+  try { await subHandle.removeEntry(SENTINEL_NAME); } catch (e) {}
+  return null;
+}
+
 // Step one of the picker flow. Page passes the handle returned by
 // window.showDirectoryPicker. `mode` controls the collision policy:
 //   - undefined / 'auto' — happy path; if the default subfolder already
@@ -2482,6 +2524,69 @@ handlers.setFolderHandle = async function (args) {
     ok: true,
     parentName: folderRecord.parentName,
     subfolderName: folderRecord.subfolderName
+  };
+};
+
+// Unlock probe (EPIC PR4). Like setFolderHandle (permission check + subfolder
+// resolution + collision handling + persist), but inserts the empirical
+// write→read-back→verify durability probe before committing. Staged failures
+// surface a stable reason code (picker_cancelled / subfolder_create_failed /
+// write_failed / readback_mismatch / permission_not_persisted) → the page
+// links each to docs/folder_troubleshooting.md. On any probe failure NOTHING
+// is persisted — the app stays browse-only ("never half-unlock").
+handlers.probeFolderWritable = async function (args) {
+  var parentHandle = args && args.handle;
+  if (!parentHandle) {
+    var e0 = new Error('no folder selected');
+    e0.code = 'picker_cancelled';
+    throw e0;
+  }
+  var perm = 'granted';
+  if (typeof parentHandle.queryPermission === 'function') {
+    try { perm = await parentHandle.queryPermission({ mode: 'readwrite' }); }
+    catch (e) { perm = 'denied'; }
+  }
+  if (perm !== 'granted') {
+    var pe = new Error('folder permission not persisted (' + perm + ')');
+    pe.code = 'permission_not_persisted';
+    throw pe;
+  }
+  var mode = (args && args.mode) || 'auto';
+  var result = await _findOrCreateSubfolder(parentHandle, mode);
+  if (result.requiresChoice) {
+    // Existing data present — let the page choose adopt vs create-new; don't
+    // probe or persist yet (it re-invokes with open-existing / create-new).
+    return {
+      ok: false,
+      requiresChoice: true,
+      parentName: parentHandle.name || null,
+      existing: result.existing,
+      suggestion: result.suggestion
+    };
+  }
+  var reason = await _probeWritableSentinel(result.handle);
+  if (reason) {
+    var re = new Error('folder probe failed: ' + reason);
+    re.code = reason;
+    throw re;
+  }
+  // Probe passed → commit (same persistence as setFolderHandle).
+  folderRecord.parentHandle = parentHandle;
+  folderRecord.parentName = parentHandle.name || null;
+  folderRecord.subfolderName = result.subfolderName;
+  if (mode === 'create-new' || folderRecord.lastSavedAt === undefined) {
+    folderRecord.lastSavedAt = null;
+  }
+  folderRecord.lastError = null;
+  await _folderRecordPersist();
+  trace('folder: probe ok parent=' + folderRecord.parentName +
+    ' subfolder=' + folderRecord.subfolderName);
+  return {
+    ok: true,
+    parentName: folderRecord.parentName,
+    subfolderName: folderRecord.subfolderName,
+    sentinelVerified: true,
+    permissionPersisted: true
   };
 };
 

@@ -37,7 +37,7 @@
   // app/static/vendor/sqlite-worker.js (`WORKER_RPC_VERSION`,
   // `RELATIONSHIPS_SCHEMA_VERSION`). See plans/local_first_worker_architecture.md
   // §"Why build label is not the gate".
-  var EXPECTED_WORKER_RPC_VERSION = 3;
+  var EXPECTED_WORKER_RPC_VERSION = 4;
   var EXPECTED_RELATIONSHIPS_SCHEMA_VERSION = 1;
 
   // Thrown by mutating dataProvider methods when the worker reports a
@@ -4061,6 +4061,12 @@
       _setFolderHandle: function (args) {
         return refuseIfVersionSkew('setFolderHandle') ||
           rpc.call('setFolderHandle', args);
+      },
+      // EPIC PR4 unlock probe: setFolderHandle + empirical write/read-back
+      // durability check. Mutating (persists the handle) → version-gated.
+      _probeFolderWritable: function (args) {
+        return refuseIfVersionSkew('probeFolderWritable') ||
+          rpc.call('probeFolderWritable', args);
       },
       _clearFolderHandle: function () {
         return refuseIfVersionSkew('clearFolderHandle') ||
@@ -8686,6 +8692,7 @@
           kind: 'worker-warm',
           _getFolderState: function () { return warmWorker.rpc.call('getFolderState'); },
           _setFolderHandle: function (a) { return warmWorker.rpc.call('setFolderHandle', a); },
+          _probeFolderWritable: function (a) { return warmWorker.rpc.call('probeFolderWritable', a); },
           _clearFolderHandle: function () { return warmWorker.rpc.call('clearFolderHandle'); },
           _checkFolderPermission: function () { return warmWorker.rpc.call('checkFolderPermission'); },
           _getFolderHandleForReconnect: function () { return warmWorker.rpc.call('getFolderHandleForReconnect'); },
