@@ -4936,3 +4936,36 @@ body.no-private-data:not(.is-phone) #bulk-select-bar,
 body.no-private-data:not(.is-phone) #group-rail {
   display: none !important;
 }
+
+/* ===== Folder store chooser (EPIC PR5) ===================================
+   Pick which Fellows* store to use, by its contents. Each candidate is a
+   full-width button listing groups / members / recency / device. */
+#settings-folder-chooser-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+}
+.settings-folder-chooser-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--border, #ccc);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  cursor: pointer;
+  font: inherit;
+}
+.settings-folder-chooser-item:hover:not([disabled]) {
+  border-color: var(--accent, #2a6);
+  background: var(--surface-hover, #f5f7f6);
+}
+.settings-folder-chooser-item[disabled] { opacity: 0.55; cursor: default; }
+.settings-folder-chooser-rec {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 0.8em;
+  font-weight: 600;
+  color: var(--accent, #2a6);
+}

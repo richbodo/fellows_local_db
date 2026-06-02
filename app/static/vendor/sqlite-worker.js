@@ -50,7 +50,7 @@ importScripts('./sqlite3.js');
 // are version-tolerant — the page is allowed to read folder state even
 // against a stale worker — but the mutating ops are version-gated alongside
 // the existing relationships.db writes.
-var WORKER_RPC_VERSION = 3;
+var WORKER_RPC_VERSION = 5;
 
 // Same value as relationships.db's PRAGMA user_version. Bumped only on
 // schema migrations. Mirrored from app/relationships.py:SCHEMA_VERSION.
@@ -258,10 +258,65 @@ function bootstrapRelationshipsSchema(db) {
   db.exec('PRAGMA foreign_keys = ON;');
   db.exec(RELATIONSHIPS_SCHEMA_SQL);
   db.exec('PRAGMA user_version = ' + RELATIONSHIPS_SCHEMA_VERSION);
+  _ensureWorkspaceIdentity(db);
 }
 
 function nowIsoSecond() {
   return new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+}
+
+// ----- Workspace identity (EPIC PR5) ---------------------------------------
+// A few stable rows in the relationships `settings` table that travel WITH the
+// DB (and so with a folder store and any backup of it). They let the
+// content-previewed folder chooser say "created on this Chrome · last changed
+// 2 days ago" and recommend the most-recently-written store. Settings rows, not
+// a schema change — RELATIONSHIPS_SCHEMA_VERSION stays 1.
+function _identityPut(db, k, v) {
+  dbRun(db,
+    'INSERT INTO settings(key, value) VALUES (?, ?) ' +
+    'ON CONFLICT(key) DO UPDATE SET value = excluded.value', [k, v]);
+}
+
+function _deviceLabelGuess() {
+  var ua = (self.navigator && self.navigator.userAgent) || '';
+  var os = /Mac/.test(ua) ? 'Mac' : /Win/.test(ua) ? 'Windows'
+    : /CrOS/.test(ua) ? 'ChromeOS' : /Linux/.test(ua) ? 'Linux' : 'this device';
+  var br = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera'
+    : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox'
+    : /Safari\//.test(ua) ? 'Safari' : 'browser';
+  return br + ' on ' + os;
+}
+
+// Mint identity once if absent (called from bootstrap — fresh + restored DBs).
+function _ensureWorkspaceIdentity(db) {
+  try {
+    var existing = dbSelectOne(db, 'SELECT value FROM settings WHERE key = ?', ['workspace_uuid']);
+    if (existing && existing.value) return;
+    var uuid = (self.crypto && typeof self.crypto.randomUUID === 'function')
+      ? self.crypto.randomUUID()
+      : ('ws-' + Date.now() + '-' + Math.random().toString(16).slice(2));
+    var now = nowIsoSecond();
+    _identityPut(db, 'workspace_uuid', uuid);
+    _identityPut(db, 'device_label', _deviceLabelGuess());
+    _identityPut(db, 'created_at', now);
+    _identityPut(db, 'write_generation', '0');
+    _identityPut(db, 'last_written_at', now);
+  } catch (e) {
+    trace('identity: ensure failed: ' + ((e && e.message) || e));
+  }
+}
+
+// Bump the monotonic write generation + last_written_at on each committed
+// mutation, so the chooser can rank stores by recency.
+function _stampWriteGeneration(db) {
+  try {
+    var row = dbSelectOne(db, 'SELECT value FROM settings WHERE key = ?', ['write_generation']);
+    var n = (row && row.value ? (parseInt(row.value, 10) || 0) : 0) + 1;
+    _identityPut(db, 'write_generation', String(n));
+    _identityPut(db, 'last_written_at', nowIsoSecond());
+  } catch (e) {
+    trace('identity: stamp failed: ' + ((e && e.message) || e));
+  }
 }
 
 function dedupeRecordIds(ids) {
@@ -610,6 +665,15 @@ async function inspectBytes(bytes) {
           '. Is this a relationships.db backup?'
       };
     }
+    // Workspace identity (EPIC PR5) — best-effort; absent on pre-PR5 stores.
+    var identity = {};
+    try {
+      dbSelectAll(tmp,
+        "SELECT key, value FROM settings WHERE key IN " +
+        "('workspace_uuid','device_label','created_at','write_generation','last_written_at')",
+        null
+      ).forEach(function (r) { identity[r.key] = r.value; });
+    } catch (e) { /* older store / no identity rows */ }
     return {
       valid: true,
       counts: {
@@ -618,7 +682,8 @@ async function inspectBytes(bytes) {
         tags: dbSelectOne(tmp, 'SELECT COUNT(*) AS n FROM fellow_tags', null).n,
         notes: dbSelectOne(tmp, 'SELECT COUNT(*) AS n FROM fellow_notes', null).n,
         settings: dbSelectOne(tmp, 'SELECT COUNT(*) AS n FROM settings', null).n
-      }
+      },
+      identity: identity
     };
   } catch (e) {
     return { valid: false, error: (e && e.message) || String(e) };
@@ -1911,15 +1976,29 @@ async function _hydrateFolderRecord() {
 
 // ----- Subfolder helpers ----------------------------------------------------
 
-async function _findOrCreateSubfolder(parentHandle, mode) {
+async function _findOrCreateSubfolder(parentHandle, mode, targetName) {
   // mode: 'open-existing' → must use the existing default name; throws if
   //   it doesn't exist or doesn't contain relationships.db.
+  // 'open-named' → open the specific `targetName` store the chooser picked
+  //   (EPIC PR5); throws subfolder_missing if it's gone.
   // 'create-new' → pick the lowest-numbered unused name from "Fellows",
   //   "Fellows 2", "Fellows 3", ...
   // 'auto' (or null) → if "Fellows" exists with a relationships.db,
   //   return { requiresChoice: true, ... }; otherwise behave like
   //   'create-new' picking "Fellows".
   var name = FOLDER_SUBFOLDER_DEFAULT;
+  if (mode === 'open-named') {
+    var wanted = targetName || name;
+    var picked;
+    try {
+      picked = await parentHandle.getDirectoryHandle(wanted);
+    } catch (e) {
+      var nmErr = new Error('"' + wanted + '" subfolder not found in this folder');
+      nmErr.code = 'subfolder_missing';
+      throw nmErr;
+    }
+    return { handle: picked, subfolderName: wanted };
+  }
   if (mode === 'open-existing') {
     var existing;
     try {
@@ -1991,7 +2070,7 @@ async function _suggestNextName(parentHandle) {
 // over it (without touching the live OPFS pool slot). Used both by the
 // collision probe and by readRelationshipsFromFolder.
 async function _probeSubfolder(parentHandle, subfolderName) {
-  var out = { exists: false, hasFile: false, counts: null, invalid: false, invalidReason: null, size: 0, lastModified: null };
+  var out = { exists: false, hasFile: false, counts: null, identity: null, invalid: false, invalidReason: null, size: 0, lastModified: null };
   var sub;
   try {
     sub = await parentHandle.getDirectoryHandle(subfolderName);
@@ -2014,6 +2093,7 @@ async function _probeSubfolder(parentHandle, subfolderName) {
     var inspection = await inspectBytes(bytes);
     if (inspection.valid) {
       out.counts = inspection.counts;
+      out.identity = inspection.identity || {};
     } else {
       out.invalid = true;
       out.invalidReason = inspection.error || 'unreadable';
@@ -2392,6 +2472,10 @@ async function _maybeWriteFolderAfterCommit() {
     // to write — would just fail and populate lastError with noise.
     return;
   }
+  // Stamp the write generation into the live DB BEFORE exporting, so the
+  // folder copy (and any backup of it) carries the recency the chooser ranks
+  // by (EPIC PR5). Runs only in folder mode — the only stores the chooser sees.
+  if (relDb) _stampWriteGeneration(relDb);
   var bytes;
   try {
     bytes = poolUtil.exportFile(RELATIONSHIPS_DB_SLOT);
@@ -2428,6 +2512,105 @@ async function _maybeWriteFolderAfterCommit() {
 handlers.getFolderState = async function () {
   return _folderStateSnapshot();
 };
+
+// Content-previewed chooser scan (EPIC PR5). Enumerate every Fellows* store in
+// a chosen parent and return each one's group/member/note counts + identity, so
+// the page can let the user pick a store BY CONTENT — instead of the picker
+// always resolving to the default "Fellows". Recommends the most-recently-
+// written valid store (highest write_generation, then file mtime). Read-only:
+// persists nothing. Sequential because inspectBytes shares one staging slot.
+handlers.scanFellowsCandidates = async function (args) {
+  var parentHandle = args && args.handle;
+  if (!parentHandle) {
+    var e0 = new Error('no folder selected'); e0.code = 'picker_cancelled'; throw e0;
+  }
+  var perm = 'granted';
+  if (typeof parentHandle.queryPermission === 'function') {
+    try { perm = await parentHandle.queryPermission({ mode: 'readwrite' }); }
+    catch (e) { perm = 'denied'; }
+  }
+  if (perm !== 'granted') {
+    var pe = new Error('folder permission not granted (' + perm + ')');
+    pe.code = 'permission_required'; throw pe;
+  }
+  var names = [];
+  try {
+    for await (var entry of parentHandle.values()) {
+      if (entry.kind === 'directory' && /^Fellows( \d+)?$/.test(entry.name)) {
+        names.push(entry.name);
+      }
+    }
+  } catch (e) { trace('scan: enumerate failed: ' + ((e && e.message) || e)); }
+  names.sort();
+  var candidates = [];
+  for (var i = 0; i < names.length; i++) {
+    var probed = await _probeSubfolder(parentHandle, names[i]);
+    if (!probed.hasFile) continue;
+    var id = probed.identity || {};
+    candidates.push({
+      subfolderName: names[i],
+      groups: probed.counts ? probed.counts.groups : null,
+      members: probed.counts ? probed.counts.members : null,
+      notes: probed.counts ? probed.counts.notes : null,
+      lastModified: probed.lastModified,
+      deviceLabel: id.device_label || null,
+      writeGeneration: (id.write_generation != null) ? (parseInt(id.write_generation, 10) || 0) : null,
+      invalid: probed.invalid,
+      invalidReason: probed.invalidReason
+    });
+  }
+  var recommended = null, best = -1;
+  candidates.forEach(function (c) {
+    if (c.invalid) return;
+    // write_generation dominates; file mtime breaks ties (and ranks pre-PR5
+    // stores that have no generation).
+    var rank = (c.writeGeneration != null ? c.writeGeneration : 0) * 1e15 + (c.lastModified || 0);
+    if (rank > best) { best = rank; recommended = c.subfolderName; }
+  });
+  return { candidates: candidates, recommended: recommended };
+};
+
+// Empirical durability probe (EPIC PR4). Write a unique sentinel file into
+// `subHandle`, read it back, verify the bytes match, then delete it. Returns
+// null on success or a staged reason-code string on failure. The read-back
+// match is the load-bearing check: a cloud-only / virtual placeholder folder
+// (OneDrive/iCloud "online only", a streamed location) accepts the write but
+// does NOT return the bytes — so feature-detecting showDirectoryPicker is
+// necessary but not sufficient for a *durable* store. Reason codes map to
+// anchors in docs/folder_troubleshooting.md.
+async function _probeWritableSentinel(subHandle) {
+  var SENTINEL_NAME = '.fellows-probe';
+  var token = 'fellows-probe-' + (
+    (self.crypto && typeof self.crypto.randomUUID === 'function')
+      ? self.crypto.randomUUID()
+      : (String(Date.now()) + '-' + Math.random())
+  );
+  var bytes = new TextEncoder().encode(token);
+  var fh;
+  try {
+    fh = await subHandle.getFileHandle(SENTINEL_NAME, { create: true });
+  } catch (e) {
+    return 'subfolder_create_failed';
+  }
+  try {
+    var w = await fh.createWritable();
+    await w.write(bytes);
+    await w.close();
+  } catch (e) {
+    return 'write_failed';
+  }
+  try {
+    var rf = await subHandle.getFileHandle(SENTINEL_NAME);
+    var back = await (await rf.getFile()).text();
+    if (back !== token) return 'readback_mismatch';
+  } catch (e) {
+    return 'readback_mismatch';
+  }
+  // Best-effort cleanup; a leftover sentinel is non-fatal (read-back already
+  // succeeded, so a delete failure can't mask a mismatch).
+  try { await subHandle.removeEntry(SENTINEL_NAME); } catch (e) {}
+  return null;
+}
 
 // Step one of the picker flow. Page passes the handle returned by
 // window.showDirectoryPicker. `mode` controls the collision policy:
@@ -2482,6 +2665,69 @@ handlers.setFolderHandle = async function (args) {
     ok: true,
     parentName: folderRecord.parentName,
     subfolderName: folderRecord.subfolderName
+  };
+};
+
+// Unlock probe (EPIC PR4). Like setFolderHandle (permission check + subfolder
+// resolution + collision handling + persist), but inserts the empirical
+// write→read-back→verify durability probe before committing. Staged failures
+// surface a stable reason code (picker_cancelled / subfolder_create_failed /
+// write_failed / readback_mismatch / permission_not_persisted) → the page
+// links each to docs/folder_troubleshooting.md. On any probe failure NOTHING
+// is persisted — the app stays browse-only ("never half-unlock").
+handlers.probeFolderWritable = async function (args) {
+  var parentHandle = args && args.handle;
+  if (!parentHandle) {
+    var e0 = new Error('no folder selected');
+    e0.code = 'picker_cancelled';
+    throw e0;
+  }
+  var perm = 'granted';
+  if (typeof parentHandle.queryPermission === 'function') {
+    try { perm = await parentHandle.queryPermission({ mode: 'readwrite' }); }
+    catch (e) { perm = 'denied'; }
+  }
+  if (perm !== 'granted') {
+    var pe = new Error('folder permission not persisted (' + perm + ')');
+    pe.code = 'permission_not_persisted';
+    throw pe;
+  }
+  var mode = (args && args.mode) || 'auto';
+  var result = await _findOrCreateSubfolder(parentHandle, mode, args && args.subfolderName);
+  if (result.requiresChoice) {
+    // Existing data present — let the page choose adopt vs create-new; don't
+    // probe or persist yet (it re-invokes with open-existing / create-new).
+    return {
+      ok: false,
+      requiresChoice: true,
+      parentName: parentHandle.name || null,
+      existing: result.existing,
+      suggestion: result.suggestion
+    };
+  }
+  var reason = await _probeWritableSentinel(result.handle);
+  if (reason) {
+    var re = new Error('folder probe failed: ' + reason);
+    re.code = reason;
+    throw re;
+  }
+  // Probe passed → commit (same persistence as setFolderHandle).
+  folderRecord.parentHandle = parentHandle;
+  folderRecord.parentName = parentHandle.name || null;
+  folderRecord.subfolderName = result.subfolderName;
+  if (mode === 'create-new' || folderRecord.lastSavedAt === undefined) {
+    folderRecord.lastSavedAt = null;
+  }
+  folderRecord.lastError = null;
+  await _folderRecordPersist();
+  trace('folder: probe ok parent=' + folderRecord.parentName +
+    ' subfolder=' + folderRecord.subfolderName);
+  return {
+    ok: true,
+    parentName: folderRecord.parentName,
+    subfolderName: folderRecord.subfolderName,
+    sentinelVerified: true,
+    permissionPersisted: true
   };
 };
 
