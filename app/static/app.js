@@ -122,6 +122,9 @@
   var tabsEl = document.getElementById('tabs');
   var kebabSheetEl = document.getElementById('kebab-sheet');
   var kebabScrimEl = document.getElementById('kebab-scrim');
+  var appbarHamburgerEl = document.getElementById('appbar-hamburger');
+  var navDrawerEl = document.getElementById('nav-drawer');
+  var navScrimEl = document.getElementById('nav-scrim');
   // PR 2 of the mobile redesign: FAB-driven composer sheet + per-card
   // kebab on the groups index + group-detail action-bar overflow sheet.
   // All three reuse the .sheet / .sheet-scrim CSS pattern landed in PR 1.
@@ -3581,6 +3584,90 @@
         if (isKebabSheetOpen()) closeKebabSheet();
       });
     }
+  }
+
+  // ----- Hamburger nav drawer (phones; PR6 step 2) ---------------------
+  // Pure navigation — Directory / Settings / About + a build-tag footer.
+  // Clones the kebab-sheet open/close/scrim/Esc pattern above; the links
+  // are plain hash anchors so route() does the actual navigation and we
+  // just close the drawer on click. The tab strip is hidden on is-phone
+  // (styles.css), so this becomes the only nav on a phone.
+
+  function isNavDrawerOpen() {
+    return !!(navDrawerEl && !navDrawerEl.classList.contains('hidden'));
+  }
+
+  function populateNavDrawerBuild() {
+    var el = document.getElementById('nav-drawer-build');
+    if (!el) return;
+    // Same source the About page uses: FELLOWS_UI_DIAG (app) + the git_sha
+    // (or built_at) from bootBuildMeta (server).
+    var serverLabel = (bootBuildMeta && bootBuildMeta.git_sha)
+      ? bootBuildMeta.git_sha
+      : ((bootBuildMeta && bootBuildMeta.built_at) || 'unknown');
+    el.innerHTML = '<span>app <b>' + escapeHtml(FELLOWS_UI_DIAG) + '</b></span>'
+      + '<span>server <b>' + escapeHtml(serverLabel) + '</b></span>';
+  }
+
+  function highlightNavDrawerActive() {
+    if (!navDrawerEl) return;
+    var h = location.hash || '#/';
+    var key = 'directory';
+    if (/^#\/settings/.test(h)) key = 'settings';
+    else if (/^#\/about/.test(h)) key = 'about';
+    var links = navDrawerEl.querySelectorAll('.drawer-link');
+    for (var i = 0; i < links.length; i++) {
+      links[i].classList.toggle(
+        'drawer-link--active', links[i].getAttribute('data-nav') === key
+      );
+    }
+  }
+
+  function openNavDrawer() {
+    if (!navDrawerEl) return;
+    populateNavDrawerBuild();
+    highlightNavDrawerActive();
+    navDrawerEl.classList.remove('hidden');
+    navDrawerEl.removeAttribute('hidden');
+    if (navScrimEl) {
+      navScrimEl.classList.remove('hidden');
+      navScrimEl.removeAttribute('hidden');
+    }
+    if (appbarHamburgerEl) appbarHamburgerEl.setAttribute('aria-expanded', 'true');
+  }
+
+  function closeNavDrawer() {
+    if (!navDrawerEl) return;
+    navDrawerEl.classList.add('hidden');
+    navDrawerEl.setAttribute('hidden', '');
+    if (navScrimEl) {
+      navScrimEl.classList.add('hidden');
+      navScrimEl.setAttribute('hidden', '');
+    }
+    if (appbarHamburgerEl) appbarHamburgerEl.setAttribute('aria-expanded', 'false');
+  }
+
+  function initNavDrawer() {
+    if (!appbarHamburgerEl || !navDrawerEl) return;
+    appbarHamburgerEl.addEventListener('click', function () {
+      if (isNavDrawerOpen()) closeNavDrawer();
+      else openNavDrawer();
+    });
+    if (navScrimEl) navScrimEl.addEventListener('click', closeNavDrawer);
+    var closeBtn = document.getElementById('nav-drawer-close');
+    if (closeBtn) closeBtn.addEventListener('click', closeNavDrawer);
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && isNavDrawerOpen()) closeNavDrawer();
+    });
+    var links = navDrawerEl.querySelectorAll('.drawer-link');
+    for (var i = 0; i < links.length; i++) {
+      links[i].addEventListener('click', function () { closeNavDrawer(); });
+    }
+    // Belt-and-suspenders: any hash change (back button, redirect) closes
+    // a drawer left open.
+    window.addEventListener('hashchange', function () {
+      if (isNavDrawerOpen()) closeNavDrawer();
+    });
   }
 
   // ----- Composer FAB + sheet (PR 2) -----------------------------------
@@ -11374,6 +11461,7 @@
   initBootStuckPanelButtons();
   initBootErrorPanelButtons();
   initKebabSheet();
+  initNavDrawer();
   initComposerFab();
   initGroupCardSheet();
   initGroupActionbarSheet();

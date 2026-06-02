@@ -230,6 +230,64 @@ def test_kebab_menu_opens_and_dismisses(
     )
 
 
+# ===== Hamburger nav drawer (PR6 step 2) ===================================
+
+
+def test_nav_drawer_opens_and_navigates(
+    mobile_interaction_page, device_name, base_url_fixture
+):
+    """The appbar hamburger opens the nav drawer; tapping a destination
+    navigates and closes it. On phones the tab strip is gone, so the
+    drawer is the only nav."""
+    page = mobile_interaction_page
+    page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+    _wait_for_app_boot(page)
+
+    # The tab strip is retired on phones.
+    expect(page.locator("#tabs")).to_be_hidden()
+
+    hamburger = page.locator("#appbar-hamburger")
+    expect(hamburger).to_be_visible(timeout=5000)
+    drawer = page.locator("#nav-drawer")
+    expect(drawer).to_be_hidden()
+
+    hamburger.click()
+    expect(drawer).to_be_visible(timeout=2000)
+    assert hamburger.get_attribute("aria-expanded") == "true"
+    # Build tag populated from the same source the About page uses.
+    expect(page.locator("#nav-drawer-build")).to_contain_text("server")
+
+    # Navigate to Settings via the drawer.
+    page.locator('#nav-drawer .drawer-link[data-nav="settings"]').click()
+    expect(drawer).to_be_hidden(timeout=2000)
+    page.wait_for_function("() => location.hash.indexOf('#/settings') === 0", timeout=3000)
+    assert hamburger.get_attribute("aria-expanded") == "false"
+
+
+def test_nav_drawer_dismisses_via_scrim_and_close(
+    mobile_interaction_page, device_name, base_url_fixture
+):
+    """Scrim tap and the close (✕) button both dismiss the drawer."""
+    page = mobile_interaction_page
+    page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+    _wait_for_app_boot(page)
+    hamburger = page.locator("#appbar-hamburger")
+    drawer = page.locator("#nav-drawer")
+
+    # Close button.
+    hamburger.click()
+    expect(drawer).to_be_visible(timeout=2000)
+    page.locator("#nav-drawer-close").click()
+    expect(drawer).to_be_hidden(timeout=2000)
+
+    # Scrim tap. The drawer covers the right ~80% of the full-screen
+    # scrim, so click the exposed left strip rather than the center.
+    hamburger.click()
+    expect(drawer).to_be_visible(timeout=2000)
+    page.locator("#nav-scrim").click(position={"x": 8, "y": 200})
+    expect(drawer).to_be_hidden(timeout=2000)
+
+
 # ===== About page (post-#205 two-button layout) ============================
 
 

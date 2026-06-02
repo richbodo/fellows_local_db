@@ -240,6 +240,20 @@
   </div>
 
   <header id="appbar" class="appbar hidden" role="banner">
+    <button
+      type="button"
+      id="appbar-hamburger"
+      class="appbar__hamburger"
+      aria-label="Open menu"
+      aria-haspopup="dialog"
+      aria-expanded="false"
+      aria-controls="nav-drawer"
+    >
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"
+           fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+        <path d="M3 6h18M3 12h18M3 18h18" />
+      </svg>
+    </button>
     <h1 class="appbar__title" id="appbar-title">Directory</h1>
     <a
       id="appbar-fellow-prev"
@@ -516,6 +530,49 @@
     <button type="button" class="sheet-action" data-kebab-action="report-bug">Report a bug…</button>
     <button type="button" class="sheet-action sheet-action--danger" data-kebab-action="clear-cache">Clear app cache &amp; reload</button>
     <button type="button" class="sheet-action sheet-action--danger" data-kebab-action="reset-everything">Reset everything (lose groups &amp; settings)</button>
+  </aside>
+  <!-- Hamburger nav drawer (phones only): pure navigation — Directory /
+       Settings / About + a build-tag footer. Replaces the tab strip on
+       is-phone. Tools stay in the kebab sheet above (retired in a later
+       PR6 step). -->
+  <div id="nav-scrim" class="sheet-scrim hidden" hidden></div>
+  <aside
+    id="nav-drawer"
+    class="drawer hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Menu"
+    hidden
+  >
+    <div class="drawer__head">
+      <span class="drawer__title">Menu</span>
+      <button type="button" id="nav-drawer-close" class="appbar__kebab" aria-label="Close menu">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"
+             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M6 6l12 12M18 6 6 18" />
+        </svg>
+      </button>
+    </div>
+    <nav class="drawer__nav" aria-label="Primary">
+      <a class="drawer-link" href="#/" data-nav="directory">
+        <svg class="drawer-ico" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"
+             fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        Directory
+      </a>
+      <a class="drawer-link" href="#/settings" data-nav="settings">
+        <svg class="drawer-ico" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"
+             fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+        Settings
+      </a>
+      <a class="drawer-link" href="#/about" data-nav="about">
+        <svg class="drawer-ico" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"
+             fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h0"/></svg>
+        About
+      </a>
+    </nav>
+    <div class="drawer__foot">
+      <div class="build-tag" id="nav-drawer-build"></div>
+    </div>
   </aside>
   <div id="filter-scrim" class="sheet-scrim hidden" hidden></div>
   <aside
