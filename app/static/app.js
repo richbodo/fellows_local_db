@@ -9124,6 +9124,16 @@
           '</menu>' +
         '</form>' +
       '</dialog>' +
+      '<dialog id="settings-folder-error-dialog" class="settings-folder-dialog">' +
+        '<form method="dialog">' +
+          '<h4 id="settings-folder-error-title">Couldn’t use that folder</h4>' +
+          '<p id="settings-folder-error-body"></p>' +
+          '<p id="settings-folder-error-more" class="settings-hint" hidden></p>' +
+          '<menu class="settings-folder-dialog-actions">' +
+            '<button type="submit" value="close" class="settings-folder-dialog-primary">OK</button>' +
+          '</menu>' +
+        '</form>' +
+      '</dialog>' +
       '<div class="settings-section" id="settings-restore-section">' +
         '<h3 class="settings-section-title">Restore from backup</h3>' +
         '<p class="settings-hint">' +
@@ -10133,6 +10143,37 @@
       detailEl2.hidden = false;
     }
 
+    // Prominent, plain-language folder-error dialog (EPIC PR4). The "why" is
+    // explained INLINE so it resolves without leaving the app; a supplementary
+    // troubleshooting link is included. Probe reason codes refine the cause;
+    // uncoded errors (e.g. a NoModificationAllowedError from a cloud-synced
+    // folder, which throws before the sentinel step) get the generic cloud/
+    // read-only cause — the most common real reason.
+    function showFolderError(code, rawMessage) {
+      var CAUSES = {
+        readback_mismatch: 'This looks like a cloud-only or virtual folder (Google Drive, OneDrive, or iCloud set to “online only”). Those can’t reliably hold a live database. Pick a folder on your local disk whose files are fully downloaded.',
+        write_failed: 'The app couldn’t write to that folder — it may be read-only, permission was denied, or it’s a cloud-synced location. Pick a folder on your local disk.',
+        subfolder_create_failed: 'The app couldn’t create its data folder there. The location may be read-only or cloud-synced. Pick a folder on your local disk you can write to.',
+        permission_not_persisted: 'Your browser won’t remember access to that folder. Make sure site data isn’t cleared on exit, or pick another folder.'
+      };
+      var cause = CAUSES[code] ||
+        'That folder can’t hold your private data — it’s most likely a cloud-synced folder (Google Drive, OneDrive, iCloud) or a read-only location. Pick a folder on your local disk.';
+      var bodyEl = document.getElementById('settings-folder-error-body');
+      var moreEl = document.getElementById('settings-folder-error-more');
+      if (bodyEl) bodyEl.textContent = cause;
+      if (moreEl) {
+        var anchor = code ? ('#' + encodeURIComponent(code)) : '';
+        moreEl.innerHTML = 'More help: <a href="https://github.com/richbodo/fellows_local_db/blob/main/docs/folder_troubleshooting.md' +
+          anchor + '" target="_blank" rel="noopener">folder troubleshooting →</a>';
+        moreEl.hidden = false;
+      }
+      var dlg = document.getElementById('settings-folder-error-dialog');
+      if (dlg && typeof dlg.showModal === 'function') {
+        try { dlg.showModal(); return; } catch (e) { /* already open / unsupported */ }
+      }
+      window.alert(cause);
+    }
+
     function fmtCountsSummary(c) {
       if (!c) return '';
       return c.groups + ' group' + (c.groups === 1 ? '' : 's') +
@@ -10234,27 +10275,14 @@
             return FOLDER_CONTROLLER.writeNow().then(function () { flashDetail('Saved.'); });
           })
           .catch(function (e) {
-            // Empirical-probe failures carry a stable reason code (EPIC PR4);
-            // map to a plain-language message + a link to the troubleshooting
-            // page anchored on that code. readback_mismatch is the cloud-only/
-            // virtual-folder case worth calling out.
+            // Probe/write failure. picker_cancelled (user closed the picker)
+            // is a quiet no-op; everything else gets the prominent, plain-
+            // language dialog (the jargony raw DOMException must never reach
+            // the user). EPIC PR4.
             var code = e && e.code;
-            var REASONS = {
-              subfolder_create_failed: 'Couldn’t create the data folder — check the folder’s permissions.',
-              write_failed: 'Couldn’t write to the folder — it may be read-only or permission was denied.',
-              readback_mismatch: 'This looks like a cloud-only or virtual folder. Pick a real local folder (one whose files are fully downloaded/available offline).',
-              permission_not_persisted: 'The browser won’t remember this folder. Make sure site data isn’t cleared on exit, or pick another folder.'
-            };
             if (code === 'picker_cancelled') { flashDetail('No folder selected.'); return; }
-            var msg = REASONS[code] || ('Could not set folder: ' + (e && e.message || String(e)));
-            if (detailEl2) {
-              var help = code
-                ? ' <a href="https://github.com/richbodo/fellows_local_db/blob/main/docs/folder_troubleshooting.md#' +
-                  encodeURIComponent(code) + '" target="_blank" rel="noopener">Why? →</a>'
-                : '';
-              detailEl2.innerHTML = escapeHtml(msg) + help;
-              detailEl2.hidden = false;
-            }
+            flashDetail('Could not use that folder.');
+            showFolderError(code, e && e.message);
           })
           .then(function () {
             btnChoose.disabled = false;
