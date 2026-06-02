@@ -8942,7 +8942,7 @@
   //   'browser-only'  — cream nag pushing OPFS-only users to pick a folder.
   //   'write-failed'  — urgent (amber/red) warning that the most recent
   //                     folder write failed (#221).
-  function renderFolderPushBanner(bannerEl, mode, state) {
+  function renderFolderPushBanner(bannerEl, mode, state, count) {
     var leadEl = bannerEl.querySelector('.folder-push-banner-lead');
     var detailEl = bannerEl.querySelector('.folder-push-banner-detail');
     var ctaEl = document.getElementById('folder-push-cta');
@@ -8967,6 +8967,25 @@
       // The warning must persist until the next write succeeds — don't let
       // the user dismiss away an unsaved-data warning.
       if (dismissEl) dismissEl.hidden = true;
+    } else if (mode === 'migrate') {
+      // EPIC PR2 rescue prompt: the dormant OPFS relationships.db already holds
+      // groups (a user from before the gate / before they picked a folder).
+      // Nudge them to pick a folder so the data lands somewhere durable —
+      // picking writes the current OPFS (groups included) to the folder.
+      bannerEl.classList.remove('folder-push-banner--error');
+      bannerEl.setAttribute('role', 'status');
+      var nGroups = count || 0;
+      if (leadEl) {
+        leadEl.textContent = 'Save your ' + nGroups + ' saved group' +
+          (nGroups === 1 ? '' : 's') + ' to a folder.';
+      }
+      if (detailEl) {
+        detailEl.textContent =
+          'They live only in this browser right now and could be lost if it ' +
+          'clears its data. Pick a folder to keep them safe.';
+      }
+      if (ctaEl) ctaEl.textContent = 'Save my groups';
+      if (dismissEl) dismissEl.hidden = false;
     } else {
       bannerEl.classList.remove('folder-push-banner--error');
       bannerEl.setAttribute('role', 'status');
@@ -9025,6 +9044,19 @@
       if (isFolderPushDismissed() || !state.supported ||
           !state.workerAvailable || state.hasHandle) {
         bannerEl.classList.add('hidden');
+        return;
+      }
+      // EPIC PR2: if the dormant OPFS relationships.db already holds groups,
+      // upgrade the generic nag to a "save your N groups" rescue prompt. The
+      // count read is the §3 legacy-rescue peek; migration itself is the normal
+      // pick→writeNow (current OPFS, groups included, is written to the folder).
+      if (dataProvider && typeof dataProvider.countRelationships === 'function') {
+        dataProvider.countRelationships().then(function (counts) {
+          var n = (counts && counts.groups) || 0;
+          renderFolderPushBanner(bannerEl, n > 0 ? 'migrate' : 'browser-only', state, n);
+        }).catch(function () {
+          renderFolderPushBanner(bannerEl, 'browser-only', state);
+        });
         return;
       }
       renderFolderPushBanner(bannerEl, 'browser-only', state);

@@ -745,6 +745,68 @@ class TestPhase2Pivot:
             "no folder mode → no Fellows/ subfolder should exist"
         )
 
+    def test_opfs_groups_show_rescue_banner(self, folder_page, base_url_fixture):
+        """EPIC PR2: a user with groups in OPFS but no folder (e.g. from before
+        the gate) sees the folder-push banner upgraded to a 'save your N groups'
+        rescue prompt. The migration itself is the normal pick → writeNow (the
+        current OPFS, groups included, is written to the chosen folder), covered
+        by test_choose_folder_writes_file_and_flips_badge_to_saved.
+
+        No re-navigation (would conflict with the warm worker over OPFS):
+        createGroup fires afterFolderMutation → refreshFolderPushBanner, so the
+        banner re-evaluates with the groups present.
+        """
+        rid = folder_page.evaluate(
+            "() => window.__dataProvider.getFull().then(f => f[0].record_id)"
+        )
+        folder_page.evaluate(
+            "(rid) => window.__dataProvider.createGroup({name:'Legacy g1', note:'', fellow_record_ids:[rid]})",
+            rid,
+        )
+        folder_page.evaluate(
+            "() => window.__dataProvider.createGroup({name:'Legacy g2', note:'', fellow_record_ids:[]})"
+        )
+        banner = folder_page.locator("#folder-push-banner")
+        expect(banner).to_be_visible(timeout=8000)
+        expect(banner).to_contain_text("2 saved groups")
+        expect(banner).to_contain_text("Save my groups")
+
+    def test_picking_folder_migrates_opfs_groups(self, folder_page, base_url_fixture):
+        """EPIC PR2: picking a folder writes the existing OPFS groups into it
+        (migration) — they survive and become durable, and the gate unlocks."""
+        # Navigate first (reuse the fixture's worker — no second nav after
+        # seeding, which would race the warm worker over OPFS), then seed.
+        _open_settings(folder_page, base_url_fixture)
+        rid = folder_page.evaluate(
+            "() => window.__dataProvider.getFull().then(f => f[0].record_id)"
+        )
+        folder_page.evaluate(
+            "(rid) => window.__dataProvider.createGroup({name:'M1', note:'', fellow_record_ids:[rid]})",
+            rid,
+        )
+        folder_page.evaluate(
+            "() => window.__dataProvider.createGroup({name:'M2', note:'', fellow_record_ids:[]})"
+        )
+        folder_page.locator("#settings-folder-choose").click()
+        expect(
+            folder_page.locator("#settings-folder-badge .settings-folder-badge-text")
+        ).to_contain_text("Saved to", timeout=10000)
+        # Groups survived + the gate unlocked.
+        count = folder_page.evaluate(
+            "() => window.__dataProvider.listGroups().then(g => g.length)"
+        )
+        assert count == 2, count
+        # And the folder file holds them (not just bytes — the actual groups).
+        scan = folder_page.evaluate(
+            """async () => {
+                const root = await navigator.storage.getDirectory();
+                const parent = await root.getDirectoryHandle('__e2e_user_folder__');
+                return await window.__folderController.scanCandidates(parent);
+            }"""
+        )
+        fellows = [c for c in scan["candidates"] if c["subfolderName"] == "Fellows"]
+        assert fellows and fellows[0]["groups"] == 2, scan
+
 
 class TestPhase2WriteLock:
     """Web Locks guard around folder writes per plans/user_folder_storage.md
