@@ -5159,3 +5159,56 @@ body:not(.is-phone) #nav-scrim {
   color: var(--ink-deep);
   font-weight: 600;
 }
+
+/* =========================================================================
+ * PR6 / mobile-PR3: strip group + selection chrome on phones, and restyle
+ * the directory rows to the mock (full-width tap rows + chevron, no select
+ * button). Group routes redirect to the directory in route(); these rules
+ * remove the surrounding chrome so nothing group/selection-related can
+ * surface on a phone. Keyed on is-phone (cosmetic layout gate).
+ * ========================================================================= */
+body.is-phone #bulk-select-bar,
+body.is-phone .detail-add-to-group,
+body.is-phone #composer-fab,
+body.is-phone #group-rail,
+body.is-phone #composer-scrim,
+body.is-phone #edit-mode-banner,
+body.is-phone #group-card-sheet,
+body.is-phone #group-card-scrim,
+body.is-phone #group-actionbar-sheet,
+body.is-phone #group-actionbar-scrim,
+body.is-phone .tabs__tab[data-tab="groups"] {
+  display: none !important;
+}
+
+/* Directory rows — match-the-mock: full-width tap row, ink name, trailing
+   chevron. The <li class="dir-row"> is the flex row; .dir-link is the name
+   (no marker on phones), .dir-row__go is the chevron. */
+body.is-phone #directory ul {
+  display: flex;
+  flex-direction: column;
+}
+body.is-phone #directory li.dir-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  min-height: 56px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+body.is-phone #directory li.dir-row:active {
+  background: var(--accent-soft);
+}
+body.is-phone #directory .dir-link {
+  flex: 1;
+  font-size: 16px;
+  color: var(--ink-deep);
+  text-decoration: none;
+}
+body.is-phone #directory .dir-row__go {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--muted-soft);
+}

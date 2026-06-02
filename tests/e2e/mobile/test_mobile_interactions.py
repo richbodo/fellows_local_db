@@ -76,122 +76,76 @@ def test_tap_fellow_name_navigates_to_detail(
     expect(page.locator("#detail")).to_be_visible()
 
 
-def test_selecting_fellow_reveals_fab(
+# ===== Browse-only on phones (PR6 step 3) ==================================
+#
+# Groups, selection, and the composer have NO UI on a phone — private data
+# is gated off (it lives in plans/private_data_capability_gate.md). These
+# tests replace the former mobile group-creation flow tests (the rail-driven
+# composer, FAB, and +/× markers) which guarded a path that PR6 removes.
+
+
+def test_directory_rows_have_no_group_marker_on_phone(
     mobile_interaction_page, device_name, base_url_fixture
 ):
-    """Tapping the +/× marker on a directory row should add the fellow
-    to the selection draft and reveal the composer FAB so the user has
-    a path to actually create a group on mobile.
-
-    Root of the user-reported "no way to create a group" bug — if this
-    fails, the rail-driven group-creation flow has no mobile entry
-    point at all."""
+    """Phone directory rows are plain links — no +/× group marker (it's
+    JS-skipped, not just CSS-hidden, so there's no dead tap target)."""
     page = mobile_interaction_page
     page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
     _wait_for_app_boot(page)
-    mark = page.locator("#directory li.dir-row .dir-mark").first
-    expect(mark).to_be_visible()
-    mark.click()
-    # Body picks up .has-selection once the draft is non-empty.
-    expect(page.locator("body")).to_have_class(
-        re.compile(r"\bhas-selection\b"),
-        timeout=3000,
+    rows = page.locator("#directory li.dir-row")
+    assert rows.count() > 0, f"no directory rows at {device_name}"
+    assert page.locator("#directory li.dir-row .dir-mark").count() == 0, (
+        f"group +/− marker still present on phone rows at {device_name}"
     )
-    # FAB is hidden initially via .hidden; should become visible on
-    # selection at mobile widths.
-    fab = page.locator("#composer-fab")
-    expect(fab).to_be_visible(timeout=3000)
 
 
-def test_can_open_and_close_composer_sheet(
+def test_directory_row_links_to_fellow_with_chevron(
     mobile_interaction_page, device_name, base_url_fixture
 ):
-    """Tap the FAB → composer rail slides up as a bottom sheet
-    (body.composer-open). Closing the composer should remove the
-    class and put the rail back off-screen."""
+    """Each phone row links straight to the fellow and shows a trailing
+    chevron affordance; tapping navigates to the detail route."""
     page = mobile_interaction_page
     page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
     _wait_for_app_boot(page)
-    page.locator("#directory li.dir-row .dir-mark").first.click()
-    fab = page.locator("#composer-fab")
-    expect(fab).to_be_visible(timeout=3000)
-    fab.click()
-    expect(page.locator("body")).to_have_class(
-        re.compile(r"\bcomposer-open\b"),
-        timeout=3000,
+    first = page.locator("#directory li.dir-row").first
+    link = first.locator(".dir-link")
+    expect(link).to_be_visible()
+    assert (link.get_attribute("href") or "").startswith("#/fellow/"), (
+        f"row link does not target a fellow at {device_name}"
     )
-    # The composer rail must now slide up. CSS transition is ~220ms, so
-    # poll for the transformed-on-screen state rather than measuring
-    # mid-transit. The rail's top should end up above the viewport
-    # bottom edge once translateY(0) finishes.
-    rail = page.locator("#group-rail")
-    expect(rail).to_be_visible()
+    expect(first.locator(".dir-row__go")).to_have_count(1)
+    link.click()
     page.wait_for_function(
-        """
-        () => {
-          const r = document.getElementById('group-rail').getBoundingClientRect();
-          return r.top < window.innerHeight - 10;
-        }
-        """,
-        timeout=3000,
+        "() => location.hash.indexOf('#/fellow/') === 0", timeout=3000
     )
 
 
-def test_can_create_group_from_directory_route(
-    mobile_worker_data, device_name, base_url_fixture
+def test_no_composer_fab_or_rail_on_phone(
+    mobile_interaction_page, device_name, base_url_fixture
 ):
-    """Headline test: a user at mobile should be able to create a group
-    end to end without leaving the directory route.
-
-    Flow: select one fellow → tap FAB → fill name → tap Create new
-    group → assert the group was persisted via the worker.
-
-    Failure here = the user's reported bug ("no way to create a group
-    on mobile") is reproduced."""
-    helper = mobile_worker_data
-    page = helper.page
-    # mobile_worker_data already navigated + waited; ensure we're on directory.
-    page.evaluate("location.hash = '#/'")
+    """The selection FAB and composer rail never surface on a phone."""
+    page = mobile_interaction_page
+    page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
     _wait_for_app_boot(page)
-    # Select the first fellow.
-    page.locator("#directory li.dir-row .dir-mark").first.click()
-    # Open composer.
-    fab = page.locator("#composer-fab")
-    expect(fab).to_be_visible(timeout=3000)
-    fab.click()
-    expect(page.locator("body")).to_have_class(
-        re.compile(r"\bcomposer-open\b"),
-        timeout=3000,
-    )
-    # Fill the group name. The title input is contenteditable in the
-    # current shipping rail. Fall back to typing if it's a regular input.
-    title = page.locator("#group-rail-title")
-    expect(title).to_be_visible()
-    group_name = f"Mobile created at {device_name}"
-    is_editable = page.evaluate(
-        "() => document.getElementById('group-rail-title').isContentEditable"
-    )
-    if is_editable:
-        title.click()
-        page.keyboard.type(group_name)
-    else:
-        title.fill(group_name)
-    # Submit.
-    create_btn = page.locator("#group-rail-create")
-    expect(create_btn).to_be_enabled(timeout=3000)
-    create_btn.click()
-    # Worker should now report the group exists.
-    page.wait_for_function(
-        f"() => window.__dataProvider.listGroups().then(gs => "
-        f"gs.some(g => g.name === {group_name!r}))",
-        timeout=5000,
-    )
-    groups = helper.list_groups()
-    names = [g["name"] for g in groups]
-    assert group_name in names, (
-        f"group not persisted via mobile composer at {device_name}; "
-        f"got names={names!r}"
-    )
+    expect(page.locator("#composer-fab")).to_be_hidden()
+    expect(page.locator("#group-rail")).to_be_hidden()
+    expect(page.locator("#bulk-select-bar")).to_be_hidden()
+
+
+@pytest.mark.parametrize(
+    "group_hash",
+    ["#/groups", "#/groups/1", "#/groups/1/directory", "#/edit/1"],
+)
+def test_group_route_redirects_to_directory_on_phone(
+    mobile_interaction_page, device_name, base_url_fixture, group_hash
+):
+    """Any group/edit route on a phone lands on the directory — there's no
+    group UI to show, and no unlock (that's desktop-only)."""
+    page = mobile_interaction_page
+    page.goto(base_url_fixture + "/" + group_hash, wait_until="domcontentloaded")
+    _wait_for_app_boot(page)
+    page.wait_for_function("() => location.hash === '#/'", timeout=3000)
+    expect(page.locator("#directory")).to_be_visible()
 
 
 # ===== Kebab menu (app-bar) ================================================
@@ -362,26 +316,26 @@ def test_settings_email_field_saves(
     )
 
 
-# ===== Groups index + fellow detail ========================================
+# ===== Fellow detail =======================================================
 
 
-def test_groups_index_renders_card_list_on_mobile(
+def test_groups_index_redirects_even_with_seeded_groups_on_phone(
     mobile_worker_data, device_name, base_url_fixture
 ):
-    """At mobile widths the groups index renders as cards (the
-    .groups-table is hidden). With at least one group seeded, at least
-    one card must render and be visible."""
+    """Even when groups exist in the worker store, #/groups on a phone
+    redirects to the directory — the groups index has no phone UI.
+
+    (Replaces the former card-list test: groups are browse-only-gated
+    off on phones, so there's no card list to render.)"""
     helper = mobile_worker_data
     helper.create_group(name="Mobile index card", fellow_record_ids=[])
     page = helper.page
     page.evaluate("location.hash = '#/groups'")
     _wait_for_app_boot(page)
-    # .groups-table is hidden at mobile; .groups-card-list takes over.
-    card_list = page.locator(".groups-card-list")
-    expect(card_list).to_be_visible()
-    cards = page.locator(".groups-card-list .groups-card")
-    assert cards.count() > 0, (
-        f"groups card list rendered no cards at {device_name}"
+    page.wait_for_function("() => location.hash === '#/'", timeout=3000)
+    expect(page.locator("#directory")).to_be_visible()
+    assert page.locator(".groups-card-list").count() == 0, (
+        f"groups card list rendered on a phone at {device_name}"
     )
 
 

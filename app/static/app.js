@@ -5877,32 +5877,50 @@
 
   function renderDirectoryList(items) {
     var ul = document.createElement('ul');
+    // EPIC PR6: on phones the row is a plain full-width link with a
+    // trailing chevron — no group +/− marker (groups have no UI on a
+    // phone). JS-skip rather than CSS-hide so there's no dead 44px tap
+    // target. Desktop keeps the marker.
+    var isPhone = isMobileDevice();
     items.forEach(function (f) {
       var li = document.createElement('li');
       li.className = 'dir-row';
       var rid = f.record_id || '';
-      var on = !!(rid && groupDraft.members.has(rid));
       var displayName = (f.name && String(f.name).trim()) ? f.name : 'Unknown';
-      var mark = document.createElement('button');
-      mark.type = 'button';
-      mark.className = 'dir-mark' + (on ? ' dir-mark--on' : '');
-      mark.dataset.recordId = rid;
-      mark.setAttribute('aria-pressed', on ? 'true' : 'false');
-      mark.title = on ? 'remove from group' : 'add to group';
-      mark.setAttribute('aria-label', on ? 'remove from group' : 'add to group');
-      mark.textContent = on ? '✕' : '+';
-      mark.addEventListener('click', function (ev) {
-        // Marker is inside the row but must NOT trigger row navigation.
-        ev.stopPropagation();
-        ev.preventDefault();
-        toggleDraftMember(rid, displayName);
-      });
+      if (!isPhone) {
+        var on = !!(rid && groupDraft.members.has(rid));
+        var mark = document.createElement('button');
+        mark.type = 'button';
+        mark.className = 'dir-mark' + (on ? ' dir-mark--on' : '');
+        mark.dataset.recordId = rid;
+        mark.setAttribute('aria-pressed', on ? 'true' : 'false');
+        mark.title = on ? 'remove from group' : 'add to group';
+        mark.setAttribute('aria-label', on ? 'remove from group' : 'add to group');
+        mark.textContent = on ? '✕' : '+';
+        mark.addEventListener('click', function (ev) {
+          // Marker is inside the row but must NOT trigger row navigation.
+          ev.stopPropagation();
+          ev.preventDefault();
+          toggleDraftMember(rid, displayName);
+        });
+        li.appendChild(mark);
+      }
       var a = document.createElement('a');
       a.href = '#/fellow/' + encodeURIComponent(f.slug || '');
       a.className = 'dir-link';
       a.textContent = displayName;
-      li.appendChild(mark);
       li.appendChild(a);
+      if (isPhone) {
+        // Trailing chevron affordance (decorative; the whole row links).
+        var go = document.createElement('span');
+        go.className = 'dir-row__go';
+        go.setAttribute('aria-hidden', 'true');
+        go.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" '
+          + 'fill="none" stroke="currentColor" stroke-width="2" '
+          + 'stroke-linecap="round" stroke-linejoin="round">'
+          + '<path d="m9 6 6 6-6 6"/></svg>';
+        li.appendChild(go);
+      }
       ul.appendChild(li);
     });
     directoryListEl.innerHTML = '';
@@ -7356,12 +7374,24 @@
     if (isEditing() && nextEditId !== groupDraft.editingGroupId) {
       exitEditMode();
     }
+    // EPIC PR6: phones are browse-only — private data (groups, selection,
+    // edit) has no UI on a phone, so any group/edit route lands on the
+    // directory. This is the phone half of the gate; it runs ahead of the
+    // desktop unlock redirect below and doesn't depend on gate resolution
+    // (the UA signal is synchronous). Cached directory reads are unaffected.
+    if (isMobileDevice() &&
+        (groupMatch || directoryMatch || editMatch || hash === '#/groups')) {
+      if (hash !== '#/') {
+        window.location.replace('#/');
+        return;
+      }
+    }
     // EPIC PR3: private-data routes need a verified folder. On desktop
     // without one, redirect to Settings (the unlock entry). Phones are
-    // always browse-only and are gated by the mobile rebuild (PR6), so this
-    // is scoped :not phone to avoid redirecting the mobile group-route
-    // tests before that rewrite. Reads of cached directory data are
-    // unaffected (only #/groups* and #/edit/* are gated).
+    // handled by the browse-only redirect just above (they go to the
+    // directory, not Settings — there's no unlock on a phone). Reads of
+    // cached directory data are unaffected (only #/groups* and #/edit/* are
+    // gated).
     if (privateDataGateResolved && !privateDataEnabled() && !isMobileDevice() &&
         (groupMatch || directoryMatch || editMatch || hash === '#/groups')) {
       if (hash !== '#/settings') {
