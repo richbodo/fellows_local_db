@@ -1,6 +1,6 @@
 # EPIC — Private-Data Capability Gate + Mobile Rebuild (the controller)
 
-**Status:** NEARLY COMPLETE. **Created:** 2026-06-02. All in-app work landed: gate #235, unlock/probe/chooser #237, follow-ups #239, migration #240, mobile browse-only rebuild #241, and the **private-data enforcement** detour #244 (`d2706a9`) that closed the deferred data-layer write-refusal gap (`tests/e2e/test_private_data_enforcement.py`; `docs/Architecture.md` CST rows reconciled to `conformant`). The only remaining tail is **C4 — the upstream PNT constraints contribution** (Phase 4, maintainer-gated).
+**Status:** NEARLY COMPLETE. **Created:** 2026-06-02. All in-app work landed: gate #235, unlock/probe/chooser #237, follow-ups #239, migration #240, mobile browse-only rebuild #241, and the **private-data enforcement** detour #244 (`d2706a9`) that closed the deferred data-layer write-refusal gap (`tests/e2e/test_private_data_enforcement.py`; `docs/Architecture.md` CST rows reconciled to `conformant`). The last tail — **C4, the upstream PNT constraints contribution** (Phase 4) — is now **filed as [PNT PR #18](https://github.com/richbodo/personal_network_toolkit/pull/18)**, pending maintainer merge. When it merges, this EPIC is complete.
 **This file does not restate the child plans — it sequences them, declares the dependency graph and file-ownership lanes, defines integration checkpoints, and tracks status.** Read the children for the *what*; read this for the *order* and the *how-to-parallelize*.
 
 ## Children (the cluster this controls)
@@ -10,7 +10,7 @@
 | C1 | [`private_data_capability_gate.md`](private_data_capability_gate.md) | **Trunk.** Folder-gated private data; browse-only everywhere else. The feature-gating lives here. | not started |
 | C2 | [`mobile_redesign/PLAN_mobile_no_groups.md`](mobile_redesign/PLAN_mobile_no_groups.md) | Phone realization of browse-only mode + the `is-phone` layout (scroll/hamburger/CTAs/settings). | not started |
 | C3 | `docs/feature_platform_matrix.md` (rewrite) | The "what works where" truth. Currently says *groups work everywhere* — the gate makes that false. Rewrite is a DOCS-lane deliverable. | stale, contradicts C1 |
-| C4 | [`pna_toolkit_constraints_contribution.md`](pna_toolkit_constraints_contribution.md) | Upstream PNT PR. **Depends on building C1 first** (implement → learn → contribute). | PLAN ONLY, maintainer-gated |
+| C4 | [`pna_toolkit_constraints_contribution.md`](pna_toolkit_constraints_contribution.md) | Upstream PNT PR. **Depends on building C1 first** (implement → learn → contribute). | **FILED — [PNT #18](https://github.com/richbodo/personal_network_toolkit/pull/18)**, pending merge |
 | C5 | [`pna_toolkit_exceptions_contribution.md`](pna_toolkit_exceptions_contribution.md) | Upstream PNT PR (in-app `EX-CLOUD-LLM` already shipped; only the contribution is pending). | PLAN ONLY, maintainer-gated |
 
 Already shipped and assumed as foundation (do not re-do): `user_folder_storage.md` (folder mode, PRs #181/#190/#191/#205/#209), `local_first_worker_architecture.md` Phases 1–5, `pre_ship_ui_fixes_2026-05-29.md` (PR #223). The pre-ship plan's #206 mobile baselines **will be redone** by C2 — expected.
@@ -102,7 +102,7 @@ C4 constraints PR (+ C5 exceptions if not yet filed), sharpened by what Phase 1�
 | PR3d has-email localStorage guard | 2 | ✅ done | resolved by the **private-data enforcement** detour — **PR #244** (`d2706a9`): prefs are localStorage-only off-folder + off-folder durable writes refused at worker + page; `tests/e2e/test_private_data_enforcement.py`. See [`private_data_enforcement.md`](private_data_enforcement.md) |
 | Desktop grayed-out + "Enable on Chrome desktop →" CTA | 2 | deferred | PR3 currently *hides* desktop entry points (functionally correct); the discoverable CTA is a refinement |
 | Integration + re-baseline | 3 | ✅ done | folded into each PR; phone baselines promoted in #241 |
-| C4 constraints upstream | 4 | pending | **the last EPIC tail** — maintainer-gated; sharpen with PR1–6 learnings (`plans/pna_toolkit_constraints_contribution.md`) |
+| C4 constraints upstream | 4 | ✅ filed | **the last EPIC tail** — **[PNT PR #18](https://github.com/richbodo/personal_network_toolkit/pull/18)** authored & filed (spec/constraints.md + lint + SKILL + reference-design attestation), sharpened with PR1–6 learnings (`plans/pna_toolkit_constraints_contribution.md`). Pending maintainer merge upstream |
 | C5 exceptions upstream | 4 | ✅ done | PNT PR #8 (landed) |
 
 ### Sequencing correction discovered during PR1 (important)
