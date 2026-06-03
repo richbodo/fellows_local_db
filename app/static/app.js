@@ -49,6 +49,17 @@
     e.name = 'VersionMismatchError';
     return e;
   }
+  // Thrown by mutating dataProvider methods when private data is gated off
+  // (browse-only: no verified data folder attached). The capability gate's
+  // durability guarantee — off-folder there is NO durable private store — is
+  // enforced here, not just in the UI. See plans/private_data_enforcement.md.
+  // Reads are never gated (the legacy migration peek must still work).
+  function BrowseOnlyError(msg) {
+    var e = new Error(msg);
+    e.name = 'BrowseOnlyError';
+    e.browseOnly = true;
+    return e;
+  }
   var groupRailEl = document.getElementById('group-rail');
   var groupRailEyebrowEl = document.getElementById('group-rail-eyebrow');
   var groupRailTitleEl = document.getElementById('group-rail-title');
@@ -4007,6 +4018,19 @@
         ' schema=' + init.schemaVersion + ' — ' + opLabel + ' refused, reload to update';
       return Promise.reject(VersionMismatchError(msg));
     }
+    // Capability gate (plans/private_data_enforcement.md): off-folder there is
+    // NO durable private store, so mutating relationships.db RPCs are refused
+    // unless private data is enabled (a verified folder is attached). Reads and
+    // the legacy migration peek still pass. Mirrors refuseIfVersionSkew — a
+    // rejected promise short-circuits the `|| rpc.call(...)` chain; null allows.
+    // This is the data-layer enforcement; the UI surface gating (PR3) is the
+    // cosmetic half on top of it.
+    function refuseIfBrowseOnly(opLabel) {
+      if (privateDataEnabled()) return null;
+      return Promise.reject(
+        BrowseOnlyError(opLabel + ' refused: browse-only mode — connect a data folder to enable saved data')
+      );
+    }
     function attachMemberNamesFromCache(members) {
       if (!Array.isArray(members)) return [];
       var out = members.map(function (m) {
@@ -4056,15 +4080,15 @@
         return rpc.call('getGroup', { id: id }).then(withResolvedMembers);
       },
       createGroup: function (data) {
-        return refuseIfVersionSkew('createGroup') ||
+        return refuseIfBrowseOnly('createGroup') || refuseIfVersionSkew('createGroup') ||
           rpc.call('createGroup', data).then(withResolvedMembers).then(afterFolderMutation);
       },
       updateGroup: function (id, patch) {
-        return refuseIfVersionSkew('updateGroup') ||
+        return refuseIfBrowseOnly('updateGroup') || refuseIfVersionSkew('updateGroup') ||
           rpc.call('updateGroup', { id: id, patch: patch }).then(withResolvedMembers).then(afterFolderMutation);
       },
       deleteGroup: function (id) {
-        return refuseIfVersionSkew('deleteGroup') ||
+        return refuseIfBrowseOnly('deleteGroup') || refuseIfVersionSkew('deleteGroup') ||
           rpc.call('deleteGroup', { id: id }).then(afterFolderMutation);
       },
       getSetting: function (key) {
@@ -4081,7 +4105,7 @@
         // Settings page, whose renderState cascade already refreshes the
         // banner. Group mutations (the #221 brainstorm-edit scenario) are
         // the ones that need the post-mutation refresh.
-        return refuseIfVersionSkew('setSetting') ||
+        return refuseIfBrowseOnly('setSetting') || refuseIfVersionSkew('setSetting') ||
           rpc.call('setSetting', { key: key, value: value });
       },
       // ----- Backup / restore. Page-side bytes get transferred to the
@@ -5347,7 +5371,11 @@
     // Mirror to relationships.settings for durability across Clear App
     // Cache. localStorage stays as the synchronous read path on boot;
     // settings is the source of truth that survives.
-    if (dataProvider && typeof dataProvider.setSetting === 'function') {
+    // localStorage is the canonical home for this pref in browse-only mode (the
+    // durable relationships.db only exists with a connected folder). Mirror to
+    // the durable store only when private data is enabled — otherwise the write
+    // would be refused by the capability gate. See private_data_enforcement.md.
+    if (privateDataEnabled() && dataProvider && typeof dataProvider.setSetting === 'function') {
       dataProvider.setSetting('has_email_only', v ? '1' : '0').catch(function () { /* ignore */ });
     }
   }
@@ -5373,8 +5401,9 @@
             try { updateDirectory(); } catch (e) {}
           }
         }
-      } else if (typeof dataProvider.setSetting === 'function') {
-        // Settings is empty — migrate from localStorage.
+      } else if (privateDataEnabled() && typeof dataProvider.setSetting === 'function') {
+        // Settings is empty — migrate localStorage → durable store. Only when
+        // private data is enabled; browse-only keeps the pref in localStorage.
         var localVal = hasEmailOnly ? '1' : '0';
         dataProvider.setSetting('has_email_only', localVal).catch(function () { /* ignore */ });
       }
@@ -9944,13 +9973,17 @@
       form.addEventListener('submit', function (ev) {
         ev.preventDefault();
         var next = (input && input.value || '').trim();
+        // localStorage is the canonical home off-folder — always write it so the
+        // pref survives reload in browse-only mode. Persist to the durable
+        // settings store only when private data is enabled (folder connected),
+        // otherwise the gate refuses the write. See private_data_enforcement.md.
+        setSelfEmailLocal(next);
         if (status) status.textContent = 'Saving…';
-        var write = (dataProvider && typeof dataProvider.setSetting === 'function')
+        var write = (privateDataEnabled() && dataProvider && typeof dataProvider.setSetting === 'function')
           ? dataProvider.setSetting('self_email', next)
           : Promise.resolve();
         write
           .then(function () {
-            setSelfEmailLocal(next);
             if (status) status.textContent = 'Saved.';
           })
           .catch(function (err) {
@@ -10725,7 +10758,9 @@
       var localVal = getSelfEmail();
       if (settingVal && !localVal) {
         setSelfEmailLocal(settingVal);
-      } else if (localVal && !settingVal && typeof dataProvider.setSetting === 'function') {
+      } else if (localVal && !settingVal && privateDataEnabled() && typeof dataProvider.setSetting === 'function') {
+        // Migrate localStorage → durable store only when private data is enabled;
+        // browse-only keeps self_email in localStorage (private_data_enforcement.md).
         dataProvider.setSetting('self_email', localVal).catch(function () { /* ignore */ });
       }
     }).catch(function () { /* ignore */ });
