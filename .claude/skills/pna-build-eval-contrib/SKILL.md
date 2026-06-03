@@ -24,7 +24,7 @@ Use when the user is starting or extending a PNA.
 4. **Pull the typed contracts.** For each axis pick, the relevant contracts live in `contracts/`. Each contract opens with a `Realizes: AC-X, AC-Y` header naming the ACs it realizes. Treat the contracts as load-bearing — do not deviate without proposing a spec change (contribute flow).
 5. **Find a reference design that shares axis picks.** Each `reference_designs/<name>/` directory has a record with the design's flavor and a Software Heritage SWHID linking the archived source. Study the design that's closest to what the user wants.
 6. **Build against the contracts.**
-7. **Fill in the AC attestation table for the design.** For every applicable AC, name (a) how the design realizes it, with code references, and (b) the specific test, LLM evaluation rubric, or human-review note that verifies it for this design. This is required for any future contribution PR.
+7. **Fill in the AC attestation table for the design.** For every applicable AC, name (a) how the design realizes it, with code references, and (b) the specific test, LLM evaluation rubric, or human-review note that verifies it for this design. A `conformant` row needs executable evidence (a resolvable test) or an explicitly declared review kind — a bare doc pointer is not evidence. Enumerate each row's **negative invariants** and pin each with a **negative test**. This is required for any future contribution PR.
 8. **Run the evaluate flow on the in-progress code as a self-check.**
 
 ## Evaluate flow
@@ -39,12 +39,17 @@ Inputs: a candidate PNA's source tree (or a description sufficient to read its b
    - If the candidate has an Architecture document with an AC attestation table, check that the declared verification mechanism actually runs and passes.
 2. **For each flavor-derived AC in `spec/axes.md`** triggered by the candidate's axis picks, do the same.
 3. **For each typed contract relevant to the candidate's axis picks**, check that the candidate implements the contract correctly. Contract headers (`Realizes: AC-X, AC-Y`) tell you which ACs the contract serves.
-4. **Produce a structured report keyed by AC ID**:
+4. **Attestation evidence audit — the Security Target is only as good as its executable evidence.** For each AC/CST the candidate attests `conformant`:
+   - **Confirm the named test exists and passes.** A Verification that doesn't resolve to a real, passing test — or to an explicitly declared review kind (`human-review` / `LLM rubric` / `code inspection` / `by architecture` / `by bounding` / `by construction`) — is a finding, not evidence. A bare doc pointer is **not** evidence: a doc that *asserts* a property does not *prove* it.
+   - **Enumerate the row's negative invariants** ("X must NOT happen"; "off-folder there is no durable private store") and confirm a **negative test** pins each. The happy-path test ("X happens when enabled") does not cover the negative — over-claiming a negative is the silent-conformance-failure this audit exists to catch.
+   - **Deferred / partial / Open rows must carry an honest status.** A deferral that lives only in a code comment ("lands later", "inert for now") is itself a finding — it belongs in the attestation table or as a `@pytest.mark.xfail(strict=True)` test naming the PR that will satisfy it.
+   - A portable checker for the first bullet ships in the reference template (`reference_designs/templates/ARCHITECTURE_TEMPLATE.md` → `test_attestation_has_evidence.py`).
+5. **Produce a structured report keyed by AC ID**:
    - `conformant` — with cited code locations.
    - `non-conformant` — with cited code locations showing the violation and the AC's stated requirement.
    - `not-applicable` — with reason (typically: the candidate's flavor doesn't trigger this AC).
    - `unable-to-determine` — with explanation; defaults to flagging for human review.
-5. **Summarize at the top**: overall posture and the most concerning non-conformances. Goals 1–5 are the load-bearing user-facing concerns — anything compromising private-data sovereignty (Goal 1), source-mirroring honesty (Goal 2), transport security (Goal 3), durability (Goal 4), or local diagnosability (Goal 5) leads the summary.
+6. **Summarize at the top**: overall posture and the most concerning non-conformances. Goals 1–5 are the load-bearing user-facing concerns — anything compromising private-data sovereignty (Goal 1), source-mirroring honesty (Goal 2), transport security (Goal 3), durability (Goal 4), or local diagnosability (Goal 5) leads the summary.
 
 Callers may ask you to emphasize specific Goals or axes at runtime (e.g., "focus on private-data sovereignty"). Treat that as a hint for the summary, not a structural variation.
 
@@ -75,6 +80,9 @@ Before authoring the PR, validate that the design is submission-ready. This step
    - Missing files (Architecture document, design record)
    - Missing sections in the Architecture document
    - Missing Verification field on any row of the AC attestation table
+   - A `conformant` row whose only evidence is a doc pointer (doc-only is not evidence) or an undeclared verification kind
+   - A negative invariant ("X must NOT happen") with no negative test pinning it
+   - A deferral living in a code comment instead of the attestation or a `strict=True` xfail
    - AC realizations whose cited code doesn't match the claim
    - Failing or missing tests on the Verification side
    - License problems (must be OSI-approved; must permit Software Heritage archival)
