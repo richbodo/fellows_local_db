@@ -1,10 +1,13 @@
 # Plan — Contributing the **Constraints** concept to the Personal Network Toolkit (PNT)
 
-> **Status: PLAN ONLY.** This document stages a future contribution to the
-> [`personal_network_toolkit`](https://github.com/richbodo/personal_network_toolkit) (PNT) repo.
-> It is **not** the contribution itself, and nothing here has been executed. No issues or PRs are
-> to be filed into PNT until the maintainer explicitly says so. This file lives in the
-> `fellows_local_db` repo (`plans/`) as a design record the maintainer reviews first.
+> **Status: FILED (2026-06-03) — [PNT PR #18](https://github.com/richbodo/personal_network_toolkit/pull/18), pending maintainer merge.** This document staged the contribution; it has now been
+> executed on the PNT branch `spec/constraints-concept` and opened as a PR per § 4. The as-built set
+> matches §3a–3f: `spec/constraints.md` (new), the `tools/lint-spec-ids.py` CST checks, the
+> `PNA_Spec.md`/`axes.md` pointers, the SKILL build + evaluate steps, and the `fellows_local_db`
+> reference-design record + § Constraint attestation. No `VERSION` bump (0.1 still draft-in-progress;
+> `constraints.md` carries `Toolkit-Version: 0.1`). The open questions in § 5 are surfaced in the PR
+> body for maintainer review. This file lives in the `fellows_local_db` repo (`plans/`) as the design
+> record.
 >
 > Local paths referenced below (confirmed against the current checkout):
 > - PNT repo: `/Users/richbodo/src/personal_network_toolkit` (spec files under `spec/`; `VERSION` = `0.1.0-draft`)
