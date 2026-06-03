@@ -1,6 +1,21 @@
 # Plan — Private-Data Enforcement (make "browse-only stores nothing durable" actually true)
 
-**Status:** PLAN ONLY. Not started. **Created:** 2026-06-03.
+**Status:** ✅ DONE. **Created:** 2026-06-03. **Landed:** 2026-06-03.
+- **PR A + PR B** (durable-write guard + prefs-dormant-off-folder) shipped in
+  **PR #244** (`d2706a9`). The worker-side load-bearing guard + page-side
+  defense-in-depth both refuse mutating `relationships.db` RPCs off-folder; the
+  boot reconciles no longer call `setSetting` in browse-only mode.
+- The strict-xfail placeholder in `tests/e2e/test_browse_only_durability.py`
+  was promoted to hard guards in the new
+  `tests/e2e/test_private_data_enforcement.py` and the now-superseded xfail was
+  dropped (`d1e7edf`).
+- **PR C** (the prevention substrate) landed via the conformance-discipline
+  work in **PR #243** (`1871b30`): `tests/test_attestation_has_evidence.py` is
+  the evidence checker, and the CLAUDE.md stanza from §5 below is now in the
+  *Conformance discipline* section of `CLAUDE.md`.
+- `docs/Architecture.md` CST rows reconciled to `conformant` citing
+  `tests/e2e/test_private_data_enforcement.py` (this PR).
+
 **Closes the gap found** while writing the Tier-1 security tests: the
 private-data capability gate
 ([`private_data_capability_gate.md`](private_data_capability_gate.md))
