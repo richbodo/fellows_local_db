@@ -33,7 +33,7 @@ def main():
 
         # Extract required fields
         session_id = input_data.get("session_id", "unknown")
-        _ = input_data.get("stop_hook_active", False)  # Reserved for future use
+        stop_hook_active = input_data.get("stop_hook_active", False)
 
         # Ensure session log directory exists
         log_dir = ensure_session_log_dir(session_id)
@@ -78,6 +78,18 @@ def main():
                         json.dump(chat_data, f, indent=2)
                 except Exception:
                     pass  # Fail silently
+
+        # Conformance guard (mirrors stop.py): block ONCE on an attestation-
+        # without-tests or deferral-without-xfail diff. Loop-safe; fails open.
+        if not stop_hook_active:
+            try:
+                from utils.conformance_guard import check as _conformance_check
+                _msg = _conformance_check()
+            except Exception:
+                _msg = None
+            if _msg:
+                print(_msg, file=sys.stderr)
+                sys.exit(2)
 
         sys.exit(0)
 
