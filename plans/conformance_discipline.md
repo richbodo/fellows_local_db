@@ -73,7 +73,7 @@ prose-only** evidence, with the honest fix:
 |---|---|---|
 | `CST-PWA-PRIVATE-SNAPSHOT` | conformant; "no false durability… stores nothing private" | **→ partial.** False today (prefs ride OPFS). Point at `private_data_enforcement.md` + the strict-xfail canary. |
 | `CST-PWA-STORAGE-EVICTABLE` | conformant; verification = `persistence_and_upgrades.md` (doc-only) | **→ partial.** Same reason; same pointer. |
-| `CST-PWA-SANDBOX-SEALED` | conformant; "folder-mode MCP e2e" (prose) | **→ partial.** MCP-unavailable-off-folder is not pinned by an e2e (Tier-2 test pending). |
+| `CST-PWA-SANDBOX-SEALED` | conformant; "folder-mode MCP e2e" (prose) | **DONE → conformant.** Tier-2 negative e2e landed (`tests/e2e/test_sandbox_sealed_mcp.py`); realization softened to the honest truth (off-folder there is no folder-resident *private* store for an external/MCP reader; `shared_data_ops` still reads `fellows.db`; setup warns). |
 | `CST-PWA-NO-SYNC` | conformant; "reconnect/chooser e2e; identity-stamp test" (prose) | Cite the concrete test file(s), or add `human-review`. |
 | `CST-PWA-SINGLE-OWNER` | conformant; "folder-write lock test (PR #209)" (prose) | Cite the concrete test file. |
 | `CST-PWA-NO-BACKGROUND` | conformant; "auto-backup debounce test" (prose) | Cite the concrete test file, or `code inspection`. |
