@@ -62,7 +62,20 @@ class TestSettingsPage:
         # path the user does (settings UI → setSetting RPC).
         page.goto(f"{base_url_fixture}/#/settings", wait_until="domcontentloaded")
         _wait_for_directory(page)
-        page.locator("#settings-self-email").fill("rich@example.com")
+        # Wait for the folder gate to resolve to private-folder (durable writes
+        # are gated on it), THEN let the gate-resolve route() re-render settle
+        # before filling — otherwise the late re-render clears the in-progress
+        # input. (Capability gate; see plans/private_data_enforcement.md.)
+        page.wait_for_function(
+            "() => window.__privateDataEnabled && window.__privateDataEnabled() === true",
+            timeout=10000,
+        )
+        addr_field = page.locator("#settings-self-email")
+        # Let any one-time late gate/folder re-render fire, then (re-)fill so the
+        # value is the one present at submit — the late re-render clears an
+        # in-progress fill ~1s after the page settles.
+        page.wait_for_timeout(1500)
+        addr_field.fill("rich@example.com")
         page.locator(".settings-save").click()
         expect(page.locator("#settings-status")).to_have_text("Saved.")
         # Now create a group via the worker (the test doesn't care about

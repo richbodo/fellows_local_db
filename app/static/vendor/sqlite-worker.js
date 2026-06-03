@@ -289,6 +289,14 @@ function _deviceLabelGuess() {
 
 // Mint identity once if absent (called from bootstrap — fresh + restored DBs).
 function _ensureWorkspaceIdentity(db) {
+  // NOTE: This still mints identity metadata (workspace_uuid + counters) into
+  // the OPFS relationships.db even off-folder. That metadata is benign (no
+  // private user content), but it means the off-folder store is not literally
+  // empty. Gating this on folder-mode is tracked as the final enforcement step
+  // (plans/private_data_enforcement.md); a first attempt collided with the
+  // folder-chooser identity/pivot flow, so it needs the folder mobile/desktop
+  // QA pass. The strict-xfail in tests/e2e/test_private_data_enforcement.py
+  // pins the "off-folder settings are empty" target.
   try {
     var existing = dbSelectOne(db, 'SELECT value FROM settings WHERE key = ?', ['workspace_uuid']);
     if (existing && existing.value) return;
