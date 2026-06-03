@@ -1,0 +1,262 @@
+#!/usr/bin/env python3
+"""Generate the conformance report — the deterministic serialization of the
+attestation gate (`scripts/conformance_lib.py`), plus a best-effort
+abandoned-deferral check that the static gate structurally cannot do.
+
+This is the "always know the status" readout. It is NOT the LLM evaluate flow
+(architectural judgment) — that stays a human/agent step. Everything here is
+deterministic and offline, except one fail-open `gh` call per tracked deferral.
+
+What it emits (under docs/conformance/):
+  - report.json  — typed artifact (status snapshot), committed + diffable.
+  - report.md    — human view over the same data, committed.
+  - log.jsonl    — append-only local run history (gitignored); drives the
+                   PR3 staleness auto-regen (`git rev-list <last_sha>..HEAD`).
+
+Headline is the deferral count vs the cap — the one number that's supposed to be
+zero, kept where the attestation is read so creeping debt is loud, not a ledger
+the eye glazes over.
+
+Exit code: 1 if there are findings (so it can gate `deploy-preflight` in PR3),
+else 0. A `gh`-unknown issue state is fail-open — never a finding.
+
+Usage:
+  python scripts/conformance_report.py            # write artifacts + log, print
+  python scripts/conformance_report.py --no-gh    # skip the issue-state probe
+  python scripts/conformance_report.py --no-write  # print only (don't touch fs)
+"""
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+
+# Importable whether run as a script (sibling) or via the package path.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.dirname(_HERE)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from scripts.conformance_lib import (  # noqa: E402
+    ARCH_MD,
+    DEFERRAL_CAP,
+    collect_strict_xfails,
+    evaluate_attestation,
+)
+
+OUT_DIR = os.path.join(_REPO_ROOT, "docs", "conformance")
+REPORT_JSON = os.path.join(OUT_DIR, "report.json")
+REPORT_MD = os.path.join(OUT_DIR, "report.md")
+LOG_JSONL = os.path.join(OUT_DIR, "log.jsonl")
+
+
+def _git_sha():
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=_REPO_ROOT,
+            capture_output=True, text=True, timeout=10,
+        )
+        return out.stdout.strip() if out.returncode == 0 else None
+    except Exception:
+        return None
+
+
+def _gh_issue_state(number):
+    """Return 'OPEN' / 'CLOSED' / None (unknown). Fail-open: any error → None,
+    so an offline run or a missing `gh` never manufactures a finding."""
+    try:
+        out = subprocess.run(
+            ["gh", "issue", "view", str(number), "--json", "state"],
+            cwd=_REPO_ROOT, capture_output=True, text=True, timeout=15,
+        )
+        if out.returncode != 0:
+            return None
+        return (json.loads(out.stdout).get("state") or "").upper() or None
+    except Exception:
+        return None
+
+
+def build_report(probe_gh=True):
+    with open(ARCH_MD, encoding="utf-8") as f:
+        rows = evaluate_attestation(f.read())
+    deferrals = collect_strict_xfails()
+
+    findings = []  # structured: {kind, detail}
+
+    # Attestation evidence findings (same set the pytest gate asserts on).
+    for row in rows:
+        for msg in row["findings"]:
+            findings.append({"kind": "attestation-evidence", "detail": msg})
+
+    # Deferral discipline (mirrors tests/test_xfail_discipline.py).
+    if len(deferrals) > DEFERRAL_CAP:
+        findings.append({
+            "kind": "deferral-over-cap",
+            "detail": "{} strict-xfail deferrals exceeds cap of {}".format(
+                len(deferrals), DEFERRAL_CAP
+            ),
+        })
+    for d in deferrals:
+        if d["tracking_issue"] is None:
+            findings.append({
+                "kind": "deferral-unanchored",
+                "detail": "{file}::{name} has no `tracking: #NNN` anchor".format(**d),
+            })
+
+    # Abandoned-deferral check — the asymmetry fix. A strict-xfail stays green
+    # forever if its fix is abandoned; `strict=True` only trips on accidental
+    # success. So we ask the tracker: is the issue CLOSED while the test is
+    # still xfailing (it is, by virtue of being in this list)? If so the
+    # deferral was abandoned, not completed. Fail-open on unknown state.
+    for d in deferrals:
+        issue = d["tracking_issue"]
+        d["issue_state"] = _gh_issue_state(issue) if (probe_gh and issue) else None
+        if d["issue_state"] == "CLOSED":
+            findings.append({
+                "kind": "deferral-abandoned",
+                "detail": (
+                    "{file}::{name} still xfails but its tracking issue #{issue} "
+                    "is CLOSED — the deferral was abandoned, not completed. Reopen "
+                    "#{issue} and finish it, or drop the deferral.".format(
+                        file=d["file"], name=d["name"], issue=issue
+                    )
+                ),
+            })
+
+    conformant_rows = [r for r in rows if r["conformant"]]
+    report = {
+        "meta": {
+            "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "git_sha": _git_sha(),
+            "source": "docs/Architecture.md",
+            "generator": "scripts/conformance_report.py",
+            "note": (
+                "Deterministic serialization of scripts/conformance_lib.py. "
+                "'live' = a real, non-deferred assertion exists; pass/fail is "
+                "enforced by the suite itself (`just test`). Not the LLM evaluate "
+                "flow. See plans/conformance_report_and_gate.md."
+            ),
+        },
+        "headline": {
+            "deferral_count": len(deferrals),
+            "deferral_cap": DEFERRAL_CAP,
+            "conformant_rows": len(conformant_rows),
+            "total_rows": len(rows),
+            "findings_count": len(findings),
+            "ok": not findings,
+        },
+        "deferrals": deferrals,
+        "findings": findings,
+        "rows": rows,
+    }
+    return report
+
+
+def render_md(report):
+    h = report["headline"]
+    m = report["meta"]
+    L = []
+    L.append("# Conformance Report")
+    L.append("")
+    L.append("_Generated {} for `{}`. Source of truth: `docs/Architecture.md`._"
+             .format(m["generated_at"], m["git_sha"] or "unknown"))
+    L.append("")
+    L.append("> Deterministic serialization of `scripts/conformance_lib.py` — the "
+             "same logic the pytest gate runs, **not** the LLM evaluate flow. "
+             "`live` means a real, non-deferred assertion exists; pass/fail is "
+             "enforced by the suite (`just test`). "
+             "See `plans/conformance_report_and_gate.md`.")
+    L.append("")
+    ok = "✅" if h["ok"] else "❌"
+    cap_mark = "✅" if h["deferral_count"] <= h["deferral_cap"] else "❌"
+    L.append("## Headline")
+    L.append("")
+    L.append("- **Deferrals: {} / cap {}** {}".format(
+        h["deferral_count"], h["deferral_cap"], cap_mark))
+    L.append("- **Conformant rows:** {} of {}".format(
+        h["conformant_rows"], h["total_rows"]))
+    L.append("- **Findings:** {} {}".format(h["findings_count"], ok))
+    L.append("")
+
+    L.append("## Deferrals (strict-xfail)")
+    L.append("")
+    if report["deferrals"]:
+        L.append("| Test | Tracking | Issue state |")
+        L.append("|---|---|---|")
+        for d in report["deferrals"]:
+            issue = "#{}".format(d["tracking_issue"]) if d["tracking_issue"] else "—"
+            state = d.get("issue_state") or "unknown"
+            L.append("| `{file}::{name}` | {issue} | {state} |".format(
+                file=d["file"], name=d["name"], issue=issue, state=state))
+    else:
+        L.append("_None — zero deferred invariants._")
+    L.append("")
+
+    L.append("## Findings")
+    L.append("")
+    if report["findings"]:
+        for f in report["findings"]:
+            L.append("- **[{kind}]** {detail}".format(**f))
+    else:
+        L.append("_None. Every `conformant` row cites live, non-deferred "
+                 "evidence; every deferral is anchored and under cap._")
+    L.append("")
+
+    L.append("## Attestation rows")
+    L.append("")
+    L.append("| Row | Status | Evidence (cited test → static state) |")
+    L.append("|---|---|---|")
+    for r in report["rows"]:
+        if r["refs"]:
+            ev = "; ".join("`{ref}` → {status}".format(**rs) for rs in r["refs"])
+        elif r["review_kind"]:
+            ev = "_declared review kind_"
+        else:
+            ev = "_—_"
+        L.append("| {id} | {status} | {ev} |".format(
+            id=r["id"], status=r["status_text"], ev=ev))
+    L.append("")
+    return "\n".join(L) + "\n"
+
+
+def write_artifacts(report):
+    os.makedirs(OUT_DIR, exist_ok=True)
+    with open(REPORT_JSON, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, sort_keys=False)
+        f.write("\n")
+    with open(REPORT_MD, "w", encoding="utf-8") as f:
+        f.write(render_md(report))
+    log_line = {
+        "generated_at": report["meta"]["generated_at"],
+        "git_sha": report["meta"]["git_sha"],
+        "deferral_count": report["headline"]["deferral_count"],
+        "conformant_rows": report["headline"]["conformant_rows"],
+        "findings_count": report["headline"]["findings_count"],
+        "ok": report["headline"]["ok"],
+    }
+    with open(LOG_JSONL, "a", encoding="utf-8") as f:
+        f.write(json.dumps(log_line) + "\n")
+
+
+def main(argv):
+    probe_gh = "--no-gh" not in argv
+    do_write = "--no-write" not in argv
+    report = build_report(probe_gh=probe_gh)
+    if do_write:
+        write_artifacts(report)
+    h = report["headline"]
+    print("Conformance: {} conformant rows, {} deferrals (cap {}), {} findings — {}"
+          .format(h["conformant_rows"], h["deferral_count"], h["deferral_cap"],
+                  h["findings_count"], "OK" if h["ok"] else "FINDINGS"))
+    for f in report["findings"]:
+        print("  - [{kind}] {detail}".format(**f))
+    if do_write:
+        print("Wrote {}, {}, {}".format(
+            os.path.relpath(REPORT_JSON, _REPO_ROOT),
+            os.path.relpath(REPORT_MD, _REPO_ROOT),
+            os.path.relpath(LOG_JSONL, _REPO_ROOT)))
+    return 1 if report["findings"] else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

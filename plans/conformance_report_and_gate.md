@@ -1,6 +1,6 @@
 # Plan — Conformance report + gate (close the "cited-but-not-passing" seam)
 
-**Status:** in progress. **Created:** 2026-06-04.
+**Status:** in progress — PR1 done (#249), PR2 done, PR3 pending. **Created:** 2026-06-04.
 
 ## The finding that motivates this
 
@@ -96,7 +96,16 @@ original bug. Self-contained and shippable alone.
 Touching `Architecture.md` attestation rows + `tests/` together satisfies the
 `conformance_guard.py` Stop hook.
 
-### PR2 — Conformance report + log (the readout)
+### PR2 — Conformance report + log (the readout) — DONE
+
+Shipped as `scripts/conformance_lib.py` (shared source of truth, imported by
+both the gate and the report), `scripts/conformance_report.py` (generator +
+abandoned-deferral `gh` probe), `tests/test_conformance_report.py`, and the
+committed artifacts under `docs/conformance/` (report.json + report.md; log.jsonl
+gitignored). The two PR1 test files were refactored to thin wrappers over the
+shared lib so the gate and the report can never drift. Design as specified below.
+
+
 
 Stdlib script (`scripts/conformance_report.py` or `build/`): emit an AC/CST-keyed
 report — the serialization of PR1's checker — shaped after PNT's
