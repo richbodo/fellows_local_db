@@ -24,6 +24,35 @@ Read README.md for project setup, API docs, and test commands. Read docs/Archite
 - **UI/UX changes belong in `docs/users_manual.md`.** When a feature PR changes user-visible behavior (new screen, new flow, changed control, new option), include the corresponding users-manual update in the same PR — accepting the PR accepts the doc change with it. The user guide is the source of truth for UI/UX from a user's perspective; the app links to it from the About page.
 - **OPFS access only via the dedicated worker; main thread is an RPC client.** All `relationships.db` and `fellows.db` reads/writes go through `app/static/vendor/sqlite-worker.js`. The main thread does not call `navigator.storage.getDirectory`, does not load `sqlite3.wasm`, and does not hold any `FileSystemSyncAccessHandle`. (Phase 1 of `plans/local_first_worker_architecture.md` enforces this in code; until then `app/static/app.js` still has the legacy main-thread paths and this convention applies to *new* code.)
 
+## Conformance discipline
+
+These rules keep `docs/Architecture.md`'s AC/CST attestation (the Security
+Target) honest. See [`plans/conformance_discipline.md`](plans/conformance_discipline.md).
+
+- **A `conformant` attestation row needs executable evidence.** It must cite a
+  resolvable test ref (`path/to/test.py[::name]`) or an explicitly declared
+  verification kind (`human-review` / `LLM rubric` / `code inspection` /
+  `by architecture` / `by bounding` / `by construction`). A bare doc pointer is
+  not evidence — a doc that *asserts* a property does not *prove* it.
+  `tests/test_attestation_has_evidence.py` enforces this; run it after touching
+  the attestation.
+- **Negative invariants need negative tests.** "X must NOT happen off-folder" is
+  not covered by the test that X happens on-folder.
+- **Deferred or not-yet-true invariants are `@pytest.mark.xfail(strict=True)`
+  tests that name the plan PR which will satisfy them — never a `// TODO`, a
+  prose "lands later," or an `INERT` code comment.** A strict-xfail is a deferral
+  with a tripwire: it goes red the day someone implements it, and
+  `grep "xfail(strict"` is the live list of claimed-but-unproven invariants. The
+  only other home for a deferral is the attestation table with an honest
+  `partial`/`Open` status.
+- **Capability reductions enforce at the data layer, never UI-only.** Hiding or
+  graying a surface and redirecting a route is the cosmetic half; the reduction
+  is that the *write does not happen* — refuse the mutating op at the worker (the
+  OPFS owner) and, defensively, at the `dataProvider`. A gated capability whose
+  RPC still succeeds from the DevTools console is not reduced.
+- **Everything fails loudly.** Convert an absent guarantee into a red test or a
+  blocking hook — never a silent pass.
+
 ## Two-DB architecture
 
 User-authored data (groups, per-fellow tags, per-fellow notes, settings) lives in `app/relationships.db`, a separate SQLite file from the imported contact data in `app/fellows.db`. Cross-DB joins use SQLite `ATTACH DATABASE` with `?mode=ro` on the fellows side — read-only-ness of contact tables is enforced at the SQLite level, not just the app layer. See `app/relationships.py` (Python) and the `RELATIONSHIPS_SCHEMA_SQL` mirror in `app/static/app.js` (PWA / OPFS). `relationships.db` is gitignored, per-user, and persists across app updates; `fellows.db` is regenerated from source on every build.
