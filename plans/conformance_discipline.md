@@ -54,10 +54,10 @@ from resolution (they're honestly aspirational) but must carry that status.
 
 | PR | Repo | Deliverable | Status |
 |---|---|---|---|
-| **PR-1** | fellows | `CLAUDE.md` "Conformance discipline" stanza + `docs/Architecture.md` attestation reconciliation (kind vocabulary preamble; honest statuses on over-claiming CST rows) + `tests/test_attestation_has_evidence.py` checker (green) | TODO |
-| **PR-2** | fellows | `.claude/hooks/stop.py` + `subagent_stop.py`: warn-then-block-once when a diff touches the attestation table without tests, or adds a deferral phrase to a frontier file without a strict-xfail. Loop-safe via `stop_hook_active`. Wire in `settings.local.json`. | TODO |
-| **PR-3** | fellows | `.claude/skills/pna-build-eval-contrib/SKILL.md` — harden the *evaluate* flow with the attestation-evidence rule + negative-invariant enumeration. | TODO |
-| **PR-4** | personal_network_toolkit | `SKILL.md` (evaluate flow, mirror of PR-3) + `reference_designs/templates/ARCHITECTURE_TEMPLATE.md` (kind vocabulary, attestation-checker pattern, strict-xfail discipline, negative-invariant requirement). **Separate repo → separate PR; do not push without maintainer sign-off.** | TODO |
+| **PR-1** | fellows | `CLAUDE.md` "Conformance discipline" stanza + `docs/Architecture.md` attestation reconciliation (kind vocabulary preamble; honest statuses on over-claiming CST rows) + `tests/test_attestation_has_evidence.py` checker (green) | **DONE** `1871b30` (branch `chore/conformance-discipline`) |
+| **PR-2** | fellows | `.claude/hooks/{stop,subagent_stop}.py` + `utils/conformance_guard.py`: block-once when a diff touches the attestation rows without tests, or adds a deferral phrase to a frontier file without a strict-xfail. Loop-safe via `stop_hook_active`; fails open. Registered in tracked `.claude/settings.json`. Unit-tested. | **DONE** `4342054` |
+| **PR-3** | fellows | `.claude/skills/pna-build-eval-contrib/SKILL.md` — *evaluate* flow attestation-evidence audit + negative-invariant enumeration; build-step-7 + preflight blockers reinforced. | **DONE** `d827ba5` |
+| **PR-4** | personal_network_toolkit | `pna-build-eval-contrib/SKILL.md` (mirror) + `reference_designs/templates/ARCHITECTURE_TEMPLATE.md` (kind vocabulary, attestation-checker pattern, strict-xfail discipline, negative-invariant requirement). | **DONE, NOT PUSHED** `4106279` (PNT branch `chore/conformance-evidence-discipline`) — needs maintainer sign-off before push/PR. |
 
 PR-1 is the keystone (defines the vocabulary the others reference). PR-2/3/4 can
 follow in any order once PR-1's vocabulary is fixed.
