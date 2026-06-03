@@ -21,6 +21,49 @@ sys.path.insert(0, REPO_ROOT)
 from app.server import PORT
 
 
+# --- CSP / Permissions-Policy parsing (for the egress-wall assertions) ------
+# The CSP `connect-src 'self'` is the wall between an XSS and full OPFS
+# exfiltration (see app/server.py:Handler.end_headers). The private-data
+# capability gate is a DURABILITY control, not a confidentiality boundary
+# (plans/private_data_capability_gate.md), so on-device confidentiality
+# actually lives here — pin it exactly so any widening is a deliberate,
+# reviewed change rather than an accident.
+_EXPECTED_CSP_DIRECTIVES = {
+    "default-src": ["'self'"],
+    "script-src": ["'self'", "'wasm-unsafe-eval'"],
+    "worker-src": ["'self'"],
+    "connect-src": ["'self'"],
+    "img-src": ["'self'", "data:"],
+    "style-src": ["'self'"],
+    "font-src": ["'self'"],
+    "object-src": ["'none'"],
+    "base-uri": ["'self'"],
+    "frame-ancestors": ["'none'"],
+}
+
+
+def _parse_csp(csp):
+    """Parse a CSP header into {directive: [values...]} (order-tolerant)."""
+    out = {}
+    for part in csp.split(";"):
+        toks = part.split()
+        if toks:
+            out[toks[0]] = toks[1:]
+    return out
+
+
+def _parse_permissions_policy(pp):
+    """Return the set of features locked to `()` in a Permissions-Policy."""
+    locked = set()
+    for part in pp.split(","):
+        part = part.strip()
+        if "=" in part:
+            feat, val = part.split("=", 1)
+            if val.strip() == "()":
+                locked.add(feat.strip())
+    return locked
+
+
 def get(path, query=None):
     path_with_query = path
     if query:
@@ -78,6 +121,57 @@ class TestSecurityHeaders:
         assert h.get("cross-origin-resource-policy") == "same-origin"
         assert h.get("x-content-type-options") == "nosniff"
         assert h.get("referrer-policy") == "strict-origin-when-cross-origin"
+
+    def test_csp_directives_exact_and_egress_locked(self):
+        """Pin the full CSP and assert the egress wall specifically.
+
+        The exact-directive pin fails loudly on ANY drift (added/renamed/
+        widened directive). The sharpened assertions below restate the
+        load-bearing properties independently, so they survive a benign
+        reorder but still catch the dangerous changes: an external
+        connect-src target (exfil path) or an 'unsafe-inline' /
+        'unsafe-eval' relaxation (XSS execution path).
+        """
+        _, h = get_headers("/")
+        parsed = _parse_csp(h.get("content-security-policy", ""))
+        assert parsed == _EXPECTED_CSP_DIRECTIVES, (
+            "CSP drifted from the pinned policy — this is the OPFS-exfil "
+            "wall. If you widened it on purpose, update "
+            "_EXPECTED_CSP_DIRECTIVES and justify it in review.\n"
+            f"expected={_EXPECTED_CSP_DIRECTIVES}\nactual={parsed}"
+        )
+        # Egress: nothing but same-origin may be a connect target.
+        assert parsed.get("connect-src") == ["'self'"], (
+            "connect-src must be exactly 'self' — any external target is an "
+            "XSS exfiltration path for the OPFS-resident DBs"
+        )
+        # Execution: no inline/eval script (only the wasm carve-out).
+        script_src = parsed.get("script-src", [])
+        assert "'unsafe-inline'" not in script_src, "script-src must not allow 'unsafe-inline'"
+        assert "'unsafe-eval'" not in script_src, (
+            "script-src must not allow 'unsafe-eval' (only 'wasm-unsafe-eval')"
+        )
+        # No external/wildcard origin anywhere in the policy.
+        for name, vals in parsed.items():
+            for v in vals:
+                assert not v.startswith(
+                    ("http://", "https://", "ws://", "wss://", "//", "*")
+                ), f"external/wildcard origin {v!r} in directive {name!r}"
+
+    def test_permissions_policy_locks_sensitive_features(self):
+        """Powerful device APIs the app never uses must be disabled, so an
+        XSS that lands has less leverage. Set in app/server.py and mirrored
+        in deploy/server.py."""
+        _, h = get_headers("/")
+        pp = h.get("permissions-policy", "")
+        assert pp, "Permissions-Policy header is missing"
+        locked = _parse_permissions_policy(pp)
+        for feat in (
+            "geolocation", "camera", "microphone", "payment", "usb",
+            "bluetooth", "serial", "midi", "accelerometer", "gyroscope",
+            "magnetometer",
+        ):
+            assert feat in locked, f"{feat!r} must be locked to () in Permissions-Policy"
 
 
 @pytest.mark.usefixtures("app_server")
