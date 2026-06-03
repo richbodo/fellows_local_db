@@ -221,6 +221,89 @@ def test_no_fixed_element_dominates_viewport(
     )
 
 
+def test_scroll_container_shell_keeps_appbar_fixed(
+    mobile_page, device_name, base_url_fixture
+):
+    """The is-phone scroll-container shell (PR6/mobile-PR1): the page
+    itself does not scroll — the directory list is the only scroller, and
+    the appbar stays pinned to the top while the list scrolls underneath.
+
+    This is the headline "frozen list" fix. Before the shell, the whole
+    document scrolled and the appbar/search header scrolled away with it.
+    The structural contract:
+
+      1. body.is-phone is set (UA-driven layout gate) and the page body
+         does not overflow vertically (overflow:hidden, fixed height).
+      2. #directory has its own vertical scroll with overflowing content.
+      3. Scrolling #directory does NOT move the document (documentElement
+         scrollTop stays 0) and the appbar stays at viewport top.
+    """
+    page = mobile_page
+    page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+    _wait_for_app_boot(page)
+
+    assert page.evaluate("() => document.body.classList.contains('is-phone')"), (
+        f"body.is-phone not set at {device_name} — the scroll shell is keyed on it"
+    )
+
+    before = page.evaluate(
+        """
+        () => {
+          const d = document.getElementById('directory');
+          const bar = document.querySelector('.appbar');
+          return {
+            bodyOverflowY: getComputedStyle(document.body).overflowY,
+            dirOverflowY: getComputedStyle(d).overflowY,
+            dirScrollable: d.scrollHeight - d.clientHeight,
+            docScrollable: document.documentElement.scrollHeight
+                           - document.documentElement.clientHeight,
+            appbarTop: bar ? Math.round(bar.getBoundingClientRect().top) : null,
+          };
+        }
+        """
+    )
+    assert before["bodyOverflowY"] == "hidden", (
+        f"body should not scroll at {device_name}; overflowY={before['bodyOverflowY']}"
+    )
+    assert before["dirOverflowY"] in ("auto", "scroll"), (
+        f"#directory should be the scroller at {device_name}; "
+        f"overflowY={before['dirOverflowY']}"
+    )
+    assert before["dirScrollable"] > 0, (
+        f"#directory has no overflowing content to scroll at {device_name} "
+        f"(scrollHeight-clientHeight={before['dirScrollable']})"
+    )
+    assert before["appbarTop"] == 0, (
+        f"appbar not pinned to top at {device_name}; top={before['appbarTop']}"
+    )
+
+    after = page.evaluate(
+        """
+        () => {
+          const d = document.getElementById('directory');
+          const bar = document.querySelector('.appbar');
+          d.scrollTop = 300;
+          return {
+            dirScrollTop: d.scrollTop,
+            docScrollTop: document.documentElement.scrollTop,
+            appbarTop: bar ? Math.round(bar.getBoundingClientRect().top) : null,
+          };
+        }
+        """
+    )
+    assert after["dirScrollTop"] > 0, (
+        f"#directory did not scroll at {device_name}"
+    )
+    assert after["docScrollTop"] == 0, (
+        f"the document scrolled instead of the list at {device_name}; "
+        f"documentElement.scrollTop={after['docScrollTop']}"
+    )
+    assert after["appbarTop"] == 0, (
+        f"appbar moved when the list scrolled at {device_name}; "
+        f"top={after['appbarTop']} (should stay 0)"
+    )
+
+
 def test_directory_route_has_visible_content(
     mobile_page, device_name, base_url_fixture
 ):

@@ -122,6 +122,9 @@
   var tabsEl = document.getElementById('tabs');
   var kebabSheetEl = document.getElementById('kebab-sheet');
   var kebabScrimEl = document.getElementById('kebab-scrim');
+  var appbarHamburgerEl = document.getElementById('appbar-hamburger');
+  var navDrawerEl = document.getElementById('nav-drawer');
+  var navScrimEl = document.getElementById('nav-scrim');
   // PR 2 of the mobile redesign: FAB-driven composer sheet + per-card
   // kebab on the groups index + group-detail action-bar overflow sheet.
   // All three reuse the .sheet / .sheet-scrim CSS pattern landed in PR 1.
@@ -3583,6 +3586,90 @@
     }
   }
 
+  // ----- Hamburger nav drawer (phones; PR6 step 2) ---------------------
+  // Pure navigation — Directory / Settings / About + a build-tag footer.
+  // Clones the kebab-sheet open/close/scrim/Esc pattern above; the links
+  // are plain hash anchors so route() does the actual navigation and we
+  // just close the drawer on click. The tab strip is hidden on is-phone
+  // (styles.css), so this becomes the only nav on a phone.
+
+  function isNavDrawerOpen() {
+    return !!(navDrawerEl && !navDrawerEl.classList.contains('hidden'));
+  }
+
+  function populateNavDrawerBuild() {
+    var el = document.getElementById('nav-drawer-build');
+    if (!el) return;
+    // Same source the About page uses: FELLOWS_UI_DIAG (app) + the git_sha
+    // (or built_at) from bootBuildMeta (server).
+    var serverLabel = (bootBuildMeta && bootBuildMeta.git_sha)
+      ? bootBuildMeta.git_sha
+      : ((bootBuildMeta && bootBuildMeta.built_at) || 'unknown');
+    el.innerHTML = '<span>app <b>' + escapeHtml(FELLOWS_UI_DIAG) + '</b></span>'
+      + '<span>server <b>' + escapeHtml(serverLabel) + '</b></span>';
+  }
+
+  function highlightNavDrawerActive() {
+    if (!navDrawerEl) return;
+    var h = location.hash || '#/';
+    var key = 'directory';
+    if (/^#\/settings/.test(h)) key = 'settings';
+    else if (/^#\/about/.test(h)) key = 'about';
+    var links = navDrawerEl.querySelectorAll('.drawer-link');
+    for (var i = 0; i < links.length; i++) {
+      links[i].classList.toggle(
+        'drawer-link--active', links[i].getAttribute('data-nav') === key
+      );
+    }
+  }
+
+  function openNavDrawer() {
+    if (!navDrawerEl) return;
+    populateNavDrawerBuild();
+    highlightNavDrawerActive();
+    navDrawerEl.classList.remove('hidden');
+    navDrawerEl.removeAttribute('hidden');
+    if (navScrimEl) {
+      navScrimEl.classList.remove('hidden');
+      navScrimEl.removeAttribute('hidden');
+    }
+    if (appbarHamburgerEl) appbarHamburgerEl.setAttribute('aria-expanded', 'true');
+  }
+
+  function closeNavDrawer() {
+    if (!navDrawerEl) return;
+    navDrawerEl.classList.add('hidden');
+    navDrawerEl.setAttribute('hidden', '');
+    if (navScrimEl) {
+      navScrimEl.classList.add('hidden');
+      navScrimEl.setAttribute('hidden', '');
+    }
+    if (appbarHamburgerEl) appbarHamburgerEl.setAttribute('aria-expanded', 'false');
+  }
+
+  function initNavDrawer() {
+    if (!appbarHamburgerEl || !navDrawerEl) return;
+    appbarHamburgerEl.addEventListener('click', function () {
+      if (isNavDrawerOpen()) closeNavDrawer();
+      else openNavDrawer();
+    });
+    if (navScrimEl) navScrimEl.addEventListener('click', closeNavDrawer);
+    var closeBtn = document.getElementById('nav-drawer-close');
+    if (closeBtn) closeBtn.addEventListener('click', closeNavDrawer);
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && isNavDrawerOpen()) closeNavDrawer();
+    });
+    var links = navDrawerEl.querySelectorAll('.drawer-link');
+    for (var i = 0; i < links.length; i++) {
+      links[i].addEventListener('click', function () { closeNavDrawer(); });
+    }
+    // Belt-and-suspenders: any hash change (back button, redirect) closes
+    // a drawer left open.
+    window.addEventListener('hashchange', function () {
+      if (isNavDrawerOpen()) closeNavDrawer();
+    });
+  }
+
   // ----- Composer FAB + sheet (PR 2) -----------------------------------
   // The FAB is the mobile entry point into the existing #group-rail
   // composer. CSS turns the rail into a fixed bottom-sheet at ≤1024px;
@@ -5790,32 +5877,50 @@
 
   function renderDirectoryList(items) {
     var ul = document.createElement('ul');
+    // EPIC PR6: on phones the row is a plain full-width link with a
+    // trailing chevron — no group +/− marker (groups have no UI on a
+    // phone). JS-skip rather than CSS-hide so there's no dead 44px tap
+    // target. Desktop keeps the marker.
+    var isPhone = isMobileDevice();
     items.forEach(function (f) {
       var li = document.createElement('li');
       li.className = 'dir-row';
       var rid = f.record_id || '';
-      var on = !!(rid && groupDraft.members.has(rid));
       var displayName = (f.name && String(f.name).trim()) ? f.name : 'Unknown';
-      var mark = document.createElement('button');
-      mark.type = 'button';
-      mark.className = 'dir-mark' + (on ? ' dir-mark--on' : '');
-      mark.dataset.recordId = rid;
-      mark.setAttribute('aria-pressed', on ? 'true' : 'false');
-      mark.title = on ? 'remove from group' : 'add to group';
-      mark.setAttribute('aria-label', on ? 'remove from group' : 'add to group');
-      mark.textContent = on ? '✕' : '+';
-      mark.addEventListener('click', function (ev) {
-        // Marker is inside the row but must NOT trigger row navigation.
-        ev.stopPropagation();
-        ev.preventDefault();
-        toggleDraftMember(rid, displayName);
-      });
+      if (!isPhone) {
+        var on = !!(rid && groupDraft.members.has(rid));
+        var mark = document.createElement('button');
+        mark.type = 'button';
+        mark.className = 'dir-mark' + (on ? ' dir-mark--on' : '');
+        mark.dataset.recordId = rid;
+        mark.setAttribute('aria-pressed', on ? 'true' : 'false');
+        mark.title = on ? 'remove from group' : 'add to group';
+        mark.setAttribute('aria-label', on ? 'remove from group' : 'add to group');
+        mark.textContent = on ? '✕' : '+';
+        mark.addEventListener('click', function (ev) {
+          // Marker is inside the row but must NOT trigger row navigation.
+          ev.stopPropagation();
+          ev.preventDefault();
+          toggleDraftMember(rid, displayName);
+        });
+        li.appendChild(mark);
+      }
       var a = document.createElement('a');
       a.href = '#/fellow/' + encodeURIComponent(f.slug || '');
       a.className = 'dir-link';
       a.textContent = displayName;
-      li.appendChild(mark);
       li.appendChild(a);
+      if (isPhone) {
+        // Trailing chevron affordance (decorative; the whole row links).
+        var go = document.createElement('span');
+        go.className = 'dir-row__go';
+        go.setAttribute('aria-hidden', 'true');
+        go.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" '
+          + 'fill="none" stroke="currentColor" stroke-width="2" '
+          + 'stroke-linecap="round" stroke-linejoin="round">'
+          + '<path d="m9 6 6 6-6 6"/></svg>';
+        li.appendChild(go);
+      }
       ul.appendChild(li);
     });
     directoryListEl.innerHTML = '';
@@ -5909,13 +6014,16 @@
     }
     var slug = fellow.slug || '';
     var rid = fellow.record_id || '';
+    // EPIC PR6: phones get Email/Call CTAs near the top and no group
+    // affordance (groups have no phone UI).
+    var isPhone = isMobileDevice();
     var inDraft = !!(rid && groupDraft.members.has(rid));
     var leftTop = '';
     var leftRest = '';
 
     var demo = [fellow.gender_pronouns, fellow.ethnicity].filter(Boolean).join(' | ');
     leftTop += '<h2 class="detail-name">' + escapeHtml(name);
-    if (rid) {
+    if (rid && !isPhone) {
       var addLabel = inDraft ? 'remove from group' : 'add to group';
       leftTop += ' <a href="#" class="detail-add-to-group' +
         (inDraft ? ' detail-add-to-group--on' : '') +
@@ -5948,6 +6056,48 @@
         '</div>';
     }
     if (fellow.bio_tagline) leftTop += '<p class="detail-tagline">' + escapeHtml(fellow.bio_tagline) + '</p>';
+
+    // EPIC PR6: Email/Call call-to-actions — the primary reason the app
+    // exists on a phone. Email is the headline (primary), Call is the
+    // ghost secondary. Each renders only when the field exists (same
+    // guards as the inline "How to Connect" rows below, which stay for the
+    // paste-elsewhere path). When email is absent, show the disabled "No
+    // email" state so the layout doesn't jump and the reason is explicit.
+    if (isPhone) {
+      var MAIL_ICO = '<svg class="contact-cta__ico" viewBox="0 0 24 24" width="18" height="18" '
+        + 'fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">'
+        + '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>';
+      var PHONE_ICO = '<svg class="contact-cta__ico" viewBox="0 0 24 24" width="18" height="18" '
+        + 'fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">'
+        + '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L20 13l2 5v2a2 2 0 0 1-2 2A16 16 0 0 1 4 6a2 2 0 0 1 2-2Z"/></svg>';
+      var cta = '';
+      if (fellow.contact_email) {
+        cta += '<a class="contact-cta__btn contact-cta__btn--primary" href="mailto:'
+          + escapeHtml(String(fellow.contact_email)) + '">' + MAIL_ICO + 'Email</a>';
+      } else {
+        cta += '<span class="contact-cta__btn contact-cta__btn--primary contact-cta__btn--disabled"'
+          + ' aria-disabled="true" title="No email on file">' + MAIL_ICO + 'No email</span>';
+      }
+      if (fellow.mobile_number) {
+        var ctaTel = String(fellow.mobile_number).trim().replace(/[^+\d]/g, '');
+        cta += '<a class="contact-cta__btn contact-cta__btn--ghost" href="tel:'
+          + escapeHtml(ctaTel) + '">' + PHONE_ICO + 'Call</a>';
+      }
+      leftTop += '<div class="contact-cta">' + cta + '</div>';
+      // Search tags as chips below the hero (match-the-mock). The blob is
+      // CSV-ish; split, trim, cap so a long tag list can't run away. The
+      // full "Search Tags" section still renders below for completeness.
+      if (fellow.search_tags && String(fellow.search_tags).trim()) {
+        var tags = String(fellow.search_tags).split(/[,;]/).map(function (t) {
+          return t.trim();
+        }).filter(Boolean).slice(0, 10);
+        if (tags.length) {
+          leftTop += '<div class="tag-chips">' + tags.map(function (t) {
+            return '<span class="tag-chip">' + escapeHtml(t) + '</span>';
+          }).join('') + '</div>';
+        }
+      }
+    }
 
     var howRows = [];
     if (fellow.fellow_status) howRows.push(fieldRow('Fellow Status', escapeHtml(fellow.fellow_status)));
@@ -7269,12 +7419,24 @@
     if (isEditing() && nextEditId !== groupDraft.editingGroupId) {
       exitEditMode();
     }
+    // EPIC PR6: phones are browse-only — private data (groups, selection,
+    // edit) has no UI on a phone, so any group/edit route lands on the
+    // directory. This is the phone half of the gate; it runs ahead of the
+    // desktop unlock redirect below and doesn't depend on gate resolution
+    // (the UA signal is synchronous). Cached directory reads are unaffected.
+    if (isMobileDevice() &&
+        (groupMatch || directoryMatch || editMatch || hash === '#/groups')) {
+      if (hash !== '#/') {
+        window.location.replace('#/');
+        return;
+      }
+    }
     // EPIC PR3: private-data routes need a verified folder. On desktop
     // without one, redirect to Settings (the unlock entry). Phones are
-    // always browse-only and are gated by the mobile rebuild (PR6), so this
-    // is scoped :not phone to avoid redirecting the mobile group-route
-    // tests before that rewrite. Reads of cached directory data are
-    // unaffected (only #/groups* and #/edit/* are gated).
+    // handled by the browse-only redirect just above (they go to the
+    // directory, not Settings — there's no unlock on a phone). Reads of
+    // cached directory data are unaffected (only #/groups* and #/edit/* are
+    // gated).
     if (privateDataGateResolved && !privateDataEnabled() && !isMobileDevice() &&
         (groupMatch || directoryMatch || editMatch || hash === '#/groups')) {
       if (hash !== '#/settings') {
@@ -9082,8 +9244,88 @@
 
   // ===== Settings page (PR 5) ==============================================
 
+  // EPIC PR6: phones get a reduced Settings — app info + tools only. The
+  // email field, private-data folder, download, restore, and Claude-Desktop
+  // (MCPB) sections are all gated off (private data has no phone UI). The
+  // Tools block absorbs what used to live in the appbar kebab (retired on
+  // phones), proxying to the same hidden desktop handlers.
+  function renderMobileSettingsPage() {
+    if (!detailEl) return;
+    if (window.location.hash.indexOf('#/settings') === 0) {
+      setShellChrome('settings', 'Settings');
+    }
+    var serverLabel = (bootBuildMeta && bootBuildMeta.git_sha)
+      ? bootBuildMeta.git_sha
+      : ((bootBuildMeta && bootBuildMeta.built_at) || 'unknown');
+    var fellowCount = (Array.isArray(list) && list.length)
+      ? String(list.length) : '—';
+    var html = '<div class="settings-page settings-page--phone">' +
+      '<h2 class="settings-title">Settings</h2>' +
+      '<div class="settings-section">' +
+        '<h3 class="settings-section-title">App info</h3>' +
+        '<div class="settings-statlines">' +
+          '<div class="settings-statline"><span class="settings-statline-label">App build</span>' +
+            '<span class="settings-statline-value">' + escapeHtml(FELLOWS_UI_DIAG) + '</span></div>' +
+          '<div class="settings-statline"><span class="settings-statline-label">Server build</span>' +
+            '<span class="settings-statline-value">' + escapeHtml(serverLabel) + '</span></div>' +
+          '<div class="settings-statline"><span class="settings-statline-label">Fellows loaded</span>' +
+            '<span class="settings-statline-value">' + escapeHtml(fellowCount) + '</span></div>' +
+          '<div class="settings-statline"><span class="settings-statline-label">Directory data</span>' +
+            '<span class="settings-statline-value" id="settings-phone-last-update">Checking…</span></div>' +
+        '</div>' +
+        '<p class="settings-hint">Full version details and update checks are on the ' +
+          '<a href="#/about">About page</a>.</p>' +
+      '</div>' +
+      '<div class="settings-section">' +
+        '<h3 class="settings-section-title">Tools</h3>' +
+        '<div class="settings-phone-tools">' +
+          '<button type="button" class="settings-download" id="settings-phone-diagnostics">Diagnostics…</button>' +
+          '<button type="button" class="settings-download" id="settings-phone-bug-report">Report a bug…</button>' +
+          '<button type="button" class="settings-download settings-phone-tool--danger" id="settings-phone-clear-cache">Clear app cache &amp; reload</button>' +
+          '<button type="button" class="settings-download settings-phone-tool--danger" id="settings-phone-reset">Reset everything (lose groups &amp; settings)</button>' +
+        '</div>' +
+      '</div>' +
+      '</div>';
+    detailEl.innerHTML = html;
+    detailEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    // Tools proxy to the existing hidden desktop controls — same code path
+    // the kebab sheet used before it was retired on phones.
+    var proxy = function (btnId, targetId) {
+      var btn = document.getElementById(btnId);
+      if (!btn) return;
+      btn.addEventListener('click', function () {
+        var target = document.getElementById(targetId);
+        if (target) target.click();
+      });
+    };
+    proxy('settings-phone-diagnostics', 'diag-toggle');
+    proxy('settings-phone-bug-report', 'bug-report-button');
+    proxy('settings-phone-clear-cache', 'clear-app-cache-button');
+    proxy('settings-phone-reset', 'reset-everything-button');
+
+    // Last directory-data update — same source as the About page.
+    var luEl = document.getElementById('settings-phone-last-update');
+    if (luEl && dataProvider && typeof dataProvider._getFellowsDbMeta === 'function') {
+      Promise.resolve(dataProvider._getFellowsDbMeta()).then(function (meta) {
+        if (!meta || (!meta.fetched_at && !meta.last_failure_at)) {
+          luEl.textContent = 'no update checks yet';
+          return;
+        }
+        var fetchedTs = meta.fetched_at ? new Date(meta.fetched_at).getTime() : 0;
+        var failedTs = meta.last_failure_at ? new Date(meta.last_failure_at).getTime() : 0;
+        luEl.textContent = (failedTs > fetchedTs)
+          ? (meta.last_failure_at + ' (failed)')
+          : (meta.fetched_at || 'unknown');
+      }).catch(function () { luEl.textContent = '—'; });
+    } else if (luEl) {
+      luEl.textContent = '—';
+    }
+  }
+
   function renderSettingsPage() {
     if (!detailEl) return;
+    if (isMobileDevice()) { renderMobileSettingsPage(); return; }
     var html = '<div class="settings-page">' +
       '<h2 class="settings-title">Settings</h2>' +
       '<p class="settings-intro">' +
@@ -11374,6 +11616,7 @@
   initBootStuckPanelButtons();
   initBootErrorPanelButtons();
   initKebabSheet();
+  initNavDrawer();
   initComposerFab();
   initGroupCardSheet();
   initGroupActionbarSheet();

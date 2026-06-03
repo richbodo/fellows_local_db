@@ -4969,3 +4969,459 @@ body.no-private-data:not(.is-phone) #group-rail {
   font-weight: 600;
   color: var(--accent, #2a6);
 }
+
+/* =========================================================================
+ * PR6 / mobile-PR1: is-phone scroll-container shell (the headline fix).
+ *
+ * Turn the page into a fixed-height flex column where the appbar/tabs stay
+ * put and the single visible content child (#directory on the list route,
+ * #detail elsewhere) is the only scroller. Keyed on body.is-phone (UA), not
+ * viewport width, so a narrow desktop window keeps normal document scroll.
+ * Appended last so it wins source-order ties against the
+ * @media(max-width:1024px) bleed/sticky rules above. Match-the-mock styling
+ * lands in PR3/PR4 — this PR is structural only.
+ * ========================================================================= */
+body.is-phone {
+  height: 100vh;          /* fallback for browsers without dvh */
+  height: 100dvh;
+  overflow: hidden;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Fixed bars: drop the sticky + negative-margin bleed (body padding is 0
+   now, so they reach the edges as plain flex items). */
+body.is-phone .appbar {
+  flex: 0 0 48px;
+  position: static;
+  margin: 0;
+}
+body.is-phone .tabs {
+  flex: 0 0 auto;
+  position: static;
+  margin: 0;
+}
+body.is-phone #site-header {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+/* Content region fills the remaining height; its one visible child scrolls.
+   min-height:0 is the load-bearing line — without it the flex child refuses
+   to shrink and the scroll never appears. align-items:stretch (overriding
+   #app-wrap's flex-start) lets the child take the full column height. */
+body.is-phone #app-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 0;
+  gap: 0;
+  align-items: stretch;
+}
+body.is-phone #directory,
+body.is-phone #detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+/* Directory rows lost their left inset when body padding went to 0
+   (#directory a has no horizontal padding of its own); restore it so the
+   list reads unchanged. #detail keeps its own 1rem padding. */
+body.is-phone #directory {
+  box-sizing: border-box;
+  padding: 0 0.75rem;
+}
+
+/* =========================================================================
+ * PR6 / mobile-PR2: hamburger nav drawer; retire the tab strip on phones.
+ *
+ * The hamburger lives in the appbar and shows only on phones (the appbar
+ * itself is desktop-hidden, but a narrow non-phone window still keeps the
+ * tab strip + site-nav, so we gate the hamburger on is-phone). Ported from
+ * mockups_no_groups/styles.css; positioning switched from the mock's
+ * absolute (inside a phone frame) to fixed (real viewport), reusing the
+ * established .sheet-scrim overlay.
+ * ========================================================================= */
+#appbar-hamburger {
+  display: none;       /* shown only on is-phone (below) */
+  width: 44px;
+  height: 44px;
+  border: 0;
+  background: transparent;
+  border-radius: 6px;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--accent);
+  flex: 0 0 44px;
+}
+#appbar-hamburger:hover {
+  background: var(--accent-soft);
+}
+#appbar-hamburger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+body.is-phone #appbar-hamburger {
+  display: flex;
+}
+body.is-phone .tabs {
+  display: none;
+}
+
+/* Defensive: the drawer is phone-only nav; never let it paint elsewhere. */
+body:not(.is-phone) #nav-drawer,
+body:not(.is-phone) #nav-scrim {
+  display: none !important;
+}
+
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 80%;
+  max-width: 296px;
+  background: var(--surface);
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.18);
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  padding-top: env(safe-area-inset-top, 0);
+}
+.drawer.hidden {
+  display: none;
+}
+.drawer__head {
+  height: 48px;
+  flex: 0 0 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 0 16px;
+  border-bottom: 1px solid var(--border);
+}
+.drawer__title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink-deep);
+}
+.drawer__nav {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+.drawer-link {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  min-height: 48px;
+  font-size: 16px;
+  color: var(--ink-deep);
+  text-decoration: none;
+}
+.drawer-link:hover {
+  background: var(--accent-tint);
+}
+.drawer-link--active {
+  background: var(--accent-soft);
+  color: var(--accent-deeper);
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.drawer-link .drawer-ico {
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+.drawer-link--active .drawer-ico {
+  color: var(--accent);
+}
+.drawer__foot {
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0));
+  border-top: 1px solid var(--border);
+}
+.build-tag {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.build-tag b {
+  color: var(--ink-deep);
+  font-weight: 600;
+}
+
+/* =========================================================================
+ * PR6 / mobile-PR3: strip group + selection chrome on phones, and restyle
+ * the directory rows to the mock (full-width tap rows + chevron, no select
+ * button). Group routes redirect to the directory in route(); these rules
+ * remove the surrounding chrome so nothing group/selection-related can
+ * surface on a phone. Keyed on is-phone (cosmetic layout gate).
+ * ========================================================================= */
+body.is-phone #bulk-select-bar,
+body.is-phone .detail-add-to-group,
+body.is-phone #composer-fab,
+body.is-phone #group-rail,
+body.is-phone #composer-scrim,
+body.is-phone #edit-mode-banner,
+body.is-phone #group-card-sheet,
+body.is-phone #group-card-scrim,
+body.is-phone #group-actionbar-sheet,
+body.is-phone #group-actionbar-scrim,
+body.is-phone .tabs__tab[data-tab="groups"] {
+  display: none !important;
+}
+
+/* Directory rows — match-the-mock: full-width tap row, ink name, trailing
+   chevron. The <li class="dir-row"> is the flex row; .dir-link is the name
+   (no marker on phones), .dir-row__go is the chevron. */
+body.is-phone #directory ul {
+  display: flex;
+  flex-direction: column;
+}
+body.is-phone #directory li.dir-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  min-height: 56px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+body.is-phone #directory li.dir-row:active {
+  background: var(--accent-soft);
+}
+body.is-phone #directory .dir-link {
+  flex: 1;
+  font-size: 16px;
+  color: var(--ink-deep);
+  text-decoration: none;
+}
+body.is-phone #directory .dir-row__go {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--muted-soft);
+}
+
+/* =========================================================================
+ * PR6 / mobile-PR4: fellow-detail Email/Call call-to-actions.
+ *
+ * The headline mobile action. Scoped buttons (not a shared .btn) so we
+ * don't introduce a global button system. Email is primary (filled), Call
+ * is ghost (outline); the disabled "No email" state reads as primary-shaped
+ * but muted. Lives at the top of the single-column phone detail; the inline
+ * "How to Connect" contact rows + copy buttons stay below for paste-
+ * elsewhere. Only renders inside #detail on a phone.
+ * ========================================================================= */
+body.is-phone .contact-cta {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+body.is-phone .contact-cta__btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 50px;
+  padding: 10px 14px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  text-decoration: none;
+  cursor: pointer;
+}
+body.is-phone .contact-cta__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+body.is-phone .contact-cta__btn--primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+body.is-phone .contact-cta__btn--ghost {
+  background: var(--surface);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+body.is-phone .contact-cta__btn--disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+body.is-phone .contact-cta__ico {
+  flex-shrink: 0;
+}
+
+/* =========================================================================
+ * PR6 / mobile-PR5: reduced mobile Settings (app-info + tools) and retire
+ * the appbar kebab on phones (its actions moved into Settings → Tools).
+ * ========================================================================= */
+body.is-phone #appbar-kebab {
+  display: none;
+}
+body.is-phone .settings-statlines {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 8px;
+}
+body.is-phone .settings-statline {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 15px;
+}
+body.is-phone .settings-statline:last-child {
+  border-bottom: 0;
+}
+body.is-phone .settings-statline-label {
+  color: var(--subink);
+}
+body.is-phone .settings-statline-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-deep);
+  text-align: right;
+  word-break: break-word;
+}
+body.is-phone .settings-phone-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+body.is-phone .settings-phone-tools .settings-download {
+  width: 100%;
+}
+body.is-phone .settings-phone-tool--danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* =========================================================================
+ * PR6 / mobile visual polish (match-the-mock): fellow-detail hero + search
+ * has-email chip. Cosmetic only — no DOM/JS structure change.
+ * ========================================================================= */
+
+/* Hero ordering: photo (centered, square) → name → tagline → CTA → tags.
+   The detail-left-top column already holds these as direct children; we
+   flex+order them on phones rather than reflow the HTML (desktop unchanged). */
+body.is-phone .detail-left-top {
+  display: flex;
+  flex-direction: column;
+}
+body.is-phone .detail-left-top .profile-image-wrap {
+  order: 1;
+  align-self: center;
+  margin: 4px 0 12px;
+}
+body.is-phone .detail-left-top .detail-name {
+  order: 2;
+  font-size: 24px;
+}
+body.is-phone .detail-left-top .detail-demographics {
+  order: 3;
+}
+body.is-phone .detail-left-top .detail-tagline {
+  order: 4;
+}
+body.is-phone .detail-left-top .contact-cta {
+  order: 5;
+}
+body.is-phone .detail-left-top .tag-chips {
+  order: 6;
+}
+
+/* Square, slightly-rounded, centered photo (mock default over circular). */
+body.is-phone .profile-image-wrap {
+  width: 168px;
+  height: 168px;
+}
+body.is-phone .detail img.profile-image {
+  width: 168px;
+  height: 168px;
+  max-width: 168px;
+  border-radius: 12px;
+}
+body.is-phone .profile-image-wrap .profile-image-status {
+  border-radius: 12px;
+}
+
+/* Tag chips below the hero. */
+body.is-phone .tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+body.is-phone .tag-chip {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--accent-deeper);
+  border: 1px solid var(--border);
+}
+
+/* Detail section headers read as the mock's uppercase section-head. */
+body.is-phone .detail-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+/* has-email control → removable pill chip. The native checkbox is hidden
+   but still toggled by the wrapping label (no new JS); :has() flips the
+   pill to the active accent state with a ✕ that reads as "tap to remove".
+   Function is unchanged: it's a defeatable default, not a hard gate. */
+body.is-phone .filter-checkbox {
+  gap: 6px;
+  padding: 5px 11px;
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+body.is-phone .filter-checkbox input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+body.is-phone .filter-checkbox:has(input:checked) {
+  background: var(--accent-soft);
+  color: var(--accent-deeper);
+}
+body.is-phone .filter-checkbox:has(input:checked)::after {
+  content: "×";
+  font-size: 16px;
+  line-height: 1;
+  color: var(--accent);
+}
+body.is-phone .filter-count {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--muted);
+}

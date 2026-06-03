@@ -464,6 +464,37 @@ across (AirDrop, email-to-yourself, USB, cloud drive), then use
 
 ---
 
+## On a phone
+
+Phones (and tablets) run in **browse-only mode** — search the directory,
+open a fellow, and email or call them. Saved groups, tags, notes, and the
+Claude Desktop integration are **desktop-only** features, because a phone
+browser can't reliably keep that private data safe (see *[Where your data
+is stored](#where-your-data-is-stored)*). The phone layout reflects that:
+
+- **Getting around.** Tap the **☰ menu** (top-right of the app bar) to
+  reach **Directory**, **Settings**, and **About**. There's no Groups
+  tab — groups don't exist on a phone.
+- **The list scrolls, the search bar doesn't.** The app bar and the
+  search box stay pinned at the top while the list of names scrolls under
+  them.
+- **Tap a name** to open that fellow. Rows are plain links with a ›
+  chevron — there's no "add to group" button.
+- **Email / Call.** A fellow's profile leads with big **Email** and
+  **Call** buttons (when those details exist). Email opens your mail app
+  with the address filled in; Call opens your dialer. The copy buttons
+  (📋) are still there for pasting elsewhere.
+- **Settings** is short on a phone: app version info and a few tools
+  (Diagnostics, Report a bug, Clear app cache, Reset everything). The
+  email field, data-folder, download, restore, and Claude Desktop
+  sections are desktop-only.
+
+Want the full experience — saved groups, notes, Claude Desktop? Open the
+app in **Chrome (or Edge/Brave/Arc) on a desktop** and attach a folder
+(*[Turning on saved groups](#turning-on-saved-groups-private-data)*).
+
+---
+
 ## The directory
 
 ![Directory page during a search; the visible-count line tracks how many

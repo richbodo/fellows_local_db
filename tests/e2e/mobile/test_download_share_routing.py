@@ -9,15 +9,22 @@ restricts the share-sheet branch to iOS (where `<a download>` is unreliable)
 and lets Android fall through to the `<a download>` anchor, which saves
 straight to the Downloads folder.
 
-These tests pin both halves of that decision so a future "simplification"
-can't silently re-introduce the Android dead-end or regress iOS:
+The phone download surface changed with the capability-gate rebuild (PR6):
+the standalone "Download my private data" button is gone (phones are
+browse-only). The remaining phone-reachable download is the backup offered
+by Settings → Tools → Reset everything, which goes through the SAME
+`downloadBlob` path — so the OS-routing guard rides on that flow here:
 
-  * Android UA  → anchor download fires (`relationships-*.db`), share NOT called.
+  * Android UA  → anchor download fires (`ehf-fellows-private-data-*.db`),
+    share NOT called.
   * iOS UA      → `navigator.share` IS called, no anchor download.
 
-Both UAs get a stubbed `navigator.canShare` that returns true (matching real
-Android, where it does), so the test exercises the OS-discrimination branch
-rather than relying on Chromium's headless canShare being absent.
+`window.confirm` is stubbed to false so the destructive reset does NOT
+proceed after the backup download fires (the download happens first; we
+only care about its routing). Both UAs get a stubbed `navigator.canShare`
+that returns true (matching real Android), so the test exercises the
+OS-discrimination branch rather than relying on Chromium's headless
+canShare being absent.
 """
 from __future__ import annotations
 
@@ -51,10 +58,12 @@ _SHARE_SPY_INIT = _STANDALONE_DISPLAY_INIT + """
 """
 
 
-def _seeded_settings_page(playwright, browser, device, base_url):
-    """Open a mobile-emulated page for `device`, seed a group, and land on
-    #/settings with the worker-backed download button visible. Returns
-    (context, page) — caller is responsible for context.close()."""
+def _reset_backup_prompt_page(playwright, browser, device, base_url):
+    """Open a mobile-emulated page for `device`, seed a group, land on the
+    reduced #/settings, and open the Reset-everything backup prompt (the
+    phone-reachable download). Returns (context, page) — caller closes the
+    context. window.confirm is stubbed false so the reset itself never
+    proceeds past the backup download."""
     context = browser.new_context(**dict(playwright.devices[device]))
     page = context.new_page()
     page.add_init_script(_SHARE_SPY_INIT)
@@ -64,37 +73,38 @@ def _seeded_settings_page(playwright, browser, device, base_url):
         pytest.skip("worker provider unavailable in this environment")
     helper.wipe_relationships()
     helper.create_group("download routing test")
+    # Halt the destructive flow after the backup download fires.
+    page.evaluate("() => { window.confirm = function () { return false; }; }")
     page.evaluate("() => { location.hash = '#/settings'; }")
-    btn = page.locator("#settings-download-userdata")
-    btn.wait_for(state="visible", timeout=10000)
+    reset_btn = page.locator("#settings-phone-reset")
+    reset_btn.wait_for(state="visible", timeout=10000)
+    reset_btn.click()
+    page.locator("#reset-backup-prompt").wait_for(state="visible", timeout=3000)
     return context, page
 
 
 def test_android_backup_saves_to_downloads_without_share(playwright, browser, base_url_fixture):
     """Android: the .db backup downloads via the anchor; share is never called."""
-    context, page = _seeded_settings_page(playwright, browser, "Pixel 5", base_url_fixture)
+    context, page = _reset_backup_prompt_page(playwright, browser, "Pixel 5", base_url_fixture)
     try:
         with page.expect_download(timeout=20000) as dl_info:
-            page.locator("#settings-download-userdata").click()
+            page.locator("#reset-backup-download").click()
         download = dl_info.value
         assert download.suggested_filename.startswith("ehf-fellows-private-data-")
         assert download.suggested_filename.endswith(".db")
         # The whole point: the Android share-sheet → Drive dead-end is gone.
         assert page.evaluate("() => window.__shareCalls") == 0
-        expect(page.locator("#settings-download-status")).to_contain_text("Downloads folder")
     finally:
         context.close()
 
 
 def test_ios_backup_uses_share_sheet(playwright, browser, base_url_fixture):
     """iOS: the share sheet is used (anchor download is unreliable there)."""
-    context, page = _seeded_settings_page(playwright, browser, "iPhone 13", base_url_fixture)
+    context, page = _reset_backup_prompt_page(playwright, browser, "iPhone 13", base_url_fixture)
     try:
-        page.locator("#settings-download-userdata").click()
-        # Share resolves → "Saved via the share sheet (N bytes)."; no download.
-        expect(page.locator("#settings-download-status")).to_contain_text(
-            "share sheet", timeout=10000
-        )
+        page.locator("#reset-backup-download").click()
+        # navigator.share is invoked on the iOS branch; no anchor download.
+        page.wait_for_function("() => window.__shareCalls >= 1", timeout=10000)
         assert page.evaluate("() => window.__shareCalls") >= 1
     finally:
         context.close()

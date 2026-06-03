@@ -76,158 +76,149 @@ def test_tap_fellow_name_navigates_to_detail(
     expect(page.locator("#detail")).to_be_visible()
 
 
-def test_selecting_fellow_reveals_fab(
+# ===== Browse-only on phones (PR6 step 3) ==================================
+#
+# Groups, selection, and the composer have NO UI on a phone — private data
+# is gated off (it lives in plans/private_data_capability_gate.md). These
+# tests replace the former mobile group-creation flow tests (the rail-driven
+# composer, FAB, and +/× markers) which guarded a path that PR6 removes.
+
+
+def test_directory_rows_have_no_group_marker_on_phone(
     mobile_interaction_page, device_name, base_url_fixture
 ):
-    """Tapping the +/× marker on a directory row should add the fellow
-    to the selection draft and reveal the composer FAB so the user has
-    a path to actually create a group on mobile.
-
-    Root of the user-reported "no way to create a group" bug — if this
-    fails, the rail-driven group-creation flow has no mobile entry
-    point at all."""
+    """Phone directory rows are plain links — no +/× group marker (it's
+    JS-skipped, not just CSS-hidden, so there's no dead tap target)."""
     page = mobile_interaction_page
     page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
     _wait_for_app_boot(page)
-    mark = page.locator("#directory li.dir-row .dir-mark").first
-    expect(mark).to_be_visible()
-    mark.click()
-    # Body picks up .has-selection once the draft is non-empty.
-    expect(page.locator("body")).to_have_class(
-        re.compile(r"\bhas-selection\b"),
-        timeout=3000,
+    rows = page.locator("#directory li.dir-row")
+    assert rows.count() > 0, f"no directory rows at {device_name}"
+    assert page.locator("#directory li.dir-row .dir-mark").count() == 0, (
+        f"group +/− marker still present on phone rows at {device_name}"
     )
-    # FAB is hidden initially via .hidden; should become visible on
-    # selection at mobile widths.
-    fab = page.locator("#composer-fab")
-    expect(fab).to_be_visible(timeout=3000)
 
 
-def test_can_open_and_close_composer_sheet(
+def test_directory_row_links_to_fellow_with_chevron(
     mobile_interaction_page, device_name, base_url_fixture
 ):
-    """Tap the FAB → composer rail slides up as a bottom sheet
-    (body.composer-open). Closing the composer should remove the
-    class and put the rail back off-screen."""
+    """Each phone row links straight to the fellow and shows a trailing
+    chevron affordance; tapping navigates to the detail route."""
     page = mobile_interaction_page
     page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
     _wait_for_app_boot(page)
-    page.locator("#directory li.dir-row .dir-mark").first.click()
-    fab = page.locator("#composer-fab")
-    expect(fab).to_be_visible(timeout=3000)
-    fab.click()
-    expect(page.locator("body")).to_have_class(
-        re.compile(r"\bcomposer-open\b"),
-        timeout=3000,
+    first = page.locator("#directory li.dir-row").first
+    link = first.locator(".dir-link")
+    expect(link).to_be_visible()
+    assert (link.get_attribute("href") or "").startswith("#/fellow/"), (
+        f"row link does not target a fellow at {device_name}"
     )
-    # The composer rail must now slide up. CSS transition is ~220ms, so
-    # poll for the transformed-on-screen state rather than measuring
-    # mid-transit. The rail's top should end up above the viewport
-    # bottom edge once translateY(0) finishes.
-    rail = page.locator("#group-rail")
-    expect(rail).to_be_visible()
+    expect(first.locator(".dir-row__go")).to_have_count(1)
+    link.click()
     page.wait_for_function(
-        """
-        () => {
-          const r = document.getElementById('group-rail').getBoundingClientRect();
-          return r.top < window.innerHeight - 10;
-        }
-        """,
-        timeout=3000,
+        "() => location.hash.indexOf('#/fellow/') === 0", timeout=3000
     )
 
 
-def test_can_create_group_from_directory_route(
-    mobile_worker_data, device_name, base_url_fixture
-):
-    """Headline test: a user at mobile should be able to create a group
-    end to end without leaving the directory route.
-
-    Flow: select one fellow → tap FAB → fill name → tap Create new
-    group → assert the group was persisted via the worker.
-
-    Failure here = the user's reported bug ("no way to create a group
-    on mobile") is reproduced."""
-    helper = mobile_worker_data
-    page = helper.page
-    # mobile_worker_data already navigated + waited; ensure we're on directory.
-    page.evaluate("location.hash = '#/'")
-    _wait_for_app_boot(page)
-    # Select the first fellow.
-    page.locator("#directory li.dir-row .dir-mark").first.click()
-    # Open composer.
-    fab = page.locator("#composer-fab")
-    expect(fab).to_be_visible(timeout=3000)
-    fab.click()
-    expect(page.locator("body")).to_have_class(
-        re.compile(r"\bcomposer-open\b"),
-        timeout=3000,
-    )
-    # Fill the group name. The title input is contenteditable in the
-    # current shipping rail. Fall back to typing if it's a regular input.
-    title = page.locator("#group-rail-title")
-    expect(title).to_be_visible()
-    group_name = f"Mobile created at {device_name}"
-    is_editable = page.evaluate(
-        "() => document.getElementById('group-rail-title').isContentEditable"
-    )
-    if is_editable:
-        title.click()
-        page.keyboard.type(group_name)
-    else:
-        title.fill(group_name)
-    # Submit.
-    create_btn = page.locator("#group-rail-create")
-    expect(create_btn).to_be_enabled(timeout=3000)
-    create_btn.click()
-    # Worker should now report the group exists.
-    page.wait_for_function(
-        f"() => window.__dataProvider.listGroups().then(gs => "
-        f"gs.some(g => g.name === {group_name!r}))",
-        timeout=5000,
-    )
-    groups = helper.list_groups()
-    names = [g["name"] for g in groups]
-    assert group_name in names, (
-        f"group not persisted via mobile composer at {device_name}; "
-        f"got names={names!r}"
-    )
-
-
-# ===== Kebab menu (app-bar) ================================================
-
-
-def test_kebab_menu_opens_and_dismisses(
+def test_no_composer_fab_or_rail_on_phone(
     mobile_interaction_page, device_name, base_url_fixture
 ):
-    """Top-right kebab button should open the bottom sheet; close
-    button (or scrim tap) should dismiss it."""
+    """The selection FAB and composer rail never surface on a phone."""
     page = mobile_interaction_page
     page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
     _wait_for_app_boot(page)
-    kebab = page.locator(".appbar__kebab").first
-    expect(kebab).to_be_visible(timeout=5000)
-    kebab.click()
-    # The kebab sheet has id="kebab-sheet" or similar — look for the
-    # generic .sheet that becomes visible after the click. Use whichever
-    # of the known kebab sheet ids exists in the DOM.
-    sheet_visible = page.evaluate(
-        """
-        () => {
-          const sheets = document.querySelectorAll('.sheet');
-          for (const s of sheets) {
-            if (!s.classList.contains('hidden')
-                && getComputedStyle(s).display !== 'none') {
-              return {id: s.id, cls: s.className};
-            }
-          }
-          return null;
-        }
-        """
-    )
-    assert sheet_visible is not None, (
-        f"kebab tap did not open any .sheet at {device_name}"
-    )
+    expect(page.locator("#composer-fab")).to_be_hidden()
+    expect(page.locator("#group-rail")).to_be_hidden()
+    expect(page.locator("#bulk-select-bar")).to_be_hidden()
+
+
+@pytest.mark.parametrize(
+    "group_hash",
+    ["#/groups", "#/groups/1", "#/groups/1/directory", "#/edit/1"],
+)
+def test_group_route_redirects_to_directory_on_phone(
+    mobile_interaction_page, device_name, base_url_fixture, group_hash
+):
+    """Any group/edit route on a phone lands on the directory — there's no
+    group UI to show, and no unlock (that's desktop-only)."""
+    page = mobile_interaction_page
+    page.goto(base_url_fixture + "/" + group_hash, wait_until="domcontentloaded")
+    _wait_for_app_boot(page)
+    page.wait_for_function("() => location.hash === '#/'", timeout=3000)
+    expect(page.locator("#directory")).to_be_visible()
+
+
+# ===== App-bar kebab retired on phones (PR6 step 5) ========================
+
+
+def test_appbar_kebab_hidden_on_phone(
+    mobile_interaction_page, device_name, base_url_fixture
+):
+    """The tools kebab is retired on phones — its actions moved into
+    Settings → Tools. The hamburger is the only appbar menu control."""
+    page = mobile_interaction_page
+    page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+    _wait_for_app_boot(page)
+    expect(page.locator("#appbar-kebab")).to_be_hidden()
+    expect(page.locator("#appbar-hamburger")).to_be_visible()
+
+
+# ===== Hamburger nav drawer (PR6 step 2) ===================================
+
+
+def test_nav_drawer_opens_and_navigates(
+    mobile_interaction_page, device_name, base_url_fixture
+):
+    """The appbar hamburger opens the nav drawer; tapping a destination
+    navigates and closes it. On phones the tab strip is gone, so the
+    drawer is the only nav."""
+    page = mobile_interaction_page
+    page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+    _wait_for_app_boot(page)
+
+    # The tab strip is retired on phones.
+    expect(page.locator("#tabs")).to_be_hidden()
+
+    hamburger = page.locator("#appbar-hamburger")
+    expect(hamburger).to_be_visible(timeout=5000)
+    drawer = page.locator("#nav-drawer")
+    expect(drawer).to_be_hidden()
+
+    hamburger.click()
+    expect(drawer).to_be_visible(timeout=2000)
+    assert hamburger.get_attribute("aria-expanded") == "true"
+    # Build tag populated from the same source the About page uses.
+    expect(page.locator("#nav-drawer-build")).to_contain_text("server")
+
+    # Navigate to Settings via the drawer.
+    page.locator('#nav-drawer .drawer-link[data-nav="settings"]').click()
+    expect(drawer).to_be_hidden(timeout=2000)
+    page.wait_for_function("() => location.hash.indexOf('#/settings') === 0", timeout=3000)
+    assert hamburger.get_attribute("aria-expanded") == "false"
+
+
+def test_nav_drawer_dismisses_via_scrim_and_close(
+    mobile_interaction_page, device_name, base_url_fixture
+):
+    """Scrim tap and the close (✕) button both dismiss the drawer."""
+    page = mobile_interaction_page
+    page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+    _wait_for_app_boot(page)
+    hamburger = page.locator("#appbar-hamburger")
+    drawer = page.locator("#nav-drawer")
+
+    # Close button.
+    hamburger.click()
+    expect(drawer).to_be_visible(timeout=2000)
+    page.locator("#nav-drawer-close").click()
+    expect(drawer).to_be_hidden(timeout=2000)
+
+    # Scrim tap. The drawer covers the right ~80% of the full-screen
+    # scrim, so click the exposed left strip rather than the center.
+    hamburger.click()
+    expect(drawer).to_be_visible(timeout=2000)
+    page.locator("#nav-scrim").click(position={"x": 8, "y": 200})
+    expect(drawer).to_be_hidden(timeout=2000)
 
 
 # ===== About page (post-#205 two-button layout) ============================
@@ -275,55 +266,76 @@ def test_about_check_application_updates_button_taps(
     )
 
 
-# ===== Settings page (post-#205 private-data-folder layout) ================
+# ===== Reduced mobile Settings (PR6 step 5) ================================
 
 
-def test_settings_email_field_saves(
-    mobile_worker_data, device_name, base_url_fixture
+def test_mobile_settings_reduced_to_app_info_and_tools(
+    mobile_interaction_page, device_name, base_url_fixture
 ):
-    """Settings → Your email saves to relationships.db via the worker.
-    Catches mobile-keyboard-covers-the-input + tap-the-save-button
-    failures at narrow widths."""
-    helper = mobile_worker_data
-    page = helper.page
-    page.evaluate("location.hash = '#/settings'")
+    """Phone Settings shows App info + Tools only. The private-data
+    surfaces — email field, folder section, download, restore, and the
+    Claude-Desktop/MCPB section — are all gated off (browse-only)."""
+    page = mobile_interaction_page
+    page.goto(base_url_fixture + "/#/settings", wait_until="domcontentloaded")
     _wait_for_app_boot(page)
-    email_input = page.locator("#settings-self-email")
-    expect(email_input).to_be_visible()
-    email_input.fill(f"mobile-{device_name.replace(' ', '-').lower()}@example.com")
-    page.locator(".settings-save").click()
-    # The setting lands via worker RPC.
-    page.wait_for_function(
-        f"() => window.__dataProvider.getSetting('self_email')"
-        f"  .then(v => v && v.indexOf('mobile-') === 0)",
-        timeout=5000,
-    )
-    saved = helper.get_setting("self_email")
-    assert saved and saved.startswith("mobile-"), (
-        f"settings did not persist via mobile UI at {device_name}; got {saved!r}"
-    )
+
+    # Present: app-info stat lines + the four tool buttons.
+    expect(page.locator(".settings-statlines")).to_have_count(1)
+    for tool_id in (
+        "#settings-phone-diagnostics",
+        "#settings-phone-bug-report",
+        "#settings-phone-clear-cache",
+        "#settings-phone-reset",
+    ):
+        expect(page.locator(tool_id)).to_be_visible()
+
+    # Absent: every private-data settings surface.
+    for gone in (
+        "#settings-self-email",
+        "#settings-folder-section",
+        "#settings-download-userdata",
+        "#settings-restore-section",
+        "#settings-mcpb-section",
+    ):
+        assert page.locator(gone).count() == 0, (
+            f"{gone} should not render in phone Settings at {device_name}"
+        )
 
 
-# ===== Groups index + fellow detail ========================================
+def test_mobile_settings_diagnostics_tool_opens_panel(
+    mobile_interaction_page, device_name, base_url_fixture
+):
+    """A Tools button proxies to the existing handler: tapping
+    Diagnostics opens the diagnostics panel (the same as the retired
+    kebab action did)."""
+    page = mobile_interaction_page
+    page.goto(base_url_fixture + "/#/settings", wait_until="domcontentloaded")
+    _wait_for_app_boot(page)
+    expect(page.locator("#diag-panel")).to_be_hidden()
+    page.locator("#settings-phone-diagnostics").click()
+    expect(page.locator("#diag-panel")).to_be_visible(timeout=3000)
 
 
-def test_groups_index_renders_card_list_on_mobile(
+# ===== Fellow detail =======================================================
+
+
+def test_groups_index_redirects_even_with_seeded_groups_on_phone(
     mobile_worker_data, device_name, base_url_fixture
 ):
-    """At mobile widths the groups index renders as cards (the
-    .groups-table is hidden). With at least one group seeded, at least
-    one card must render and be visible."""
+    """Even when groups exist in the worker store, #/groups on a phone
+    redirects to the directory — the groups index has no phone UI.
+
+    (Replaces the former card-list test: groups are browse-only-gated
+    off on phones, so there's no card list to render.)"""
     helper = mobile_worker_data
     helper.create_group(name="Mobile index card", fellow_record_ids=[])
     page = helper.page
     page.evaluate("location.hash = '#/groups'")
     _wait_for_app_boot(page)
-    # .groups-table is hidden at mobile; .groups-card-list takes over.
-    card_list = page.locator(".groups-card-list")
-    expect(card_list).to_be_visible()
-    cards = page.locator(".groups-card-list .groups-card")
-    assert cards.count() > 0, (
-        f"groups card list rendered no cards at {device_name}"
+    page.wait_for_function("() => location.hash === '#/'", timeout=3000)
+    expect(page.locator("#directory")).to_be_visible()
+    assert page.locator(".groups-card-list").count() == 0, (
+        f"groups card list rendered on a phone at {device_name}"
     )
 
 
@@ -350,3 +362,96 @@ def test_fellow_detail_renders_useful_content(
     assert text.strip(), (
         f"#detail is empty on fellow-detail route at {device_name}"
     )
+
+
+# ===== Fellow-detail Email/Call CTAs (PR6 step 4) ==========================
+
+
+def test_fellow_detail_email_and_call_ctas_on_phone(
+    mobile_interaction_page, device_name, base_url_fixture
+):
+    """A fellow with both email and phone shows an Email (mailto, primary)
+    CTA and a Call (tel, ghost) CTA near the top of the detail."""
+    page = mobile_interaction_page
+    # aaron_bird has both a contact email and a mobile number.
+    page.goto(base_url_fixture + "/#/fellow/aaron_bird", wait_until="domcontentloaded")
+    _wait_for_app_boot(page)
+    cta = page.locator("#detail .contact-cta")
+    expect(cta).to_have_count(1)
+
+    email_btn = page.locator("#detail .contact-cta__btn--primary")
+    expect(email_btn).to_have_count(1)
+    assert (email_btn.get_attribute("href") or "").startswith("mailto:"), (
+        f"Email CTA is not a mailto link at {device_name}"
+    )
+    assert "Email" in (email_btn.inner_text() or ""), "Email CTA mislabeled"
+
+    call_btn = page.locator("#detail .contact-cta__btn--ghost")
+    expect(call_btn).to_have_count(1)
+    assert (call_btn.get_attribute("href") or "").startswith("tel:"), (
+        f"Call CTA is not a tel link at {device_name}"
+    )
+
+
+def test_fellow_detail_call_cta_absent_without_phone(
+    mobile_interaction_page, device_name, base_url_fixture
+):
+    """A fellow with email but no phone shows the Email CTA and no Call
+    CTA (each button is guarded on its field)."""
+    page = mobile_interaction_page
+    # aaron_mcdonald has a contact email but no mobile number.
+    page.goto(
+        base_url_fixture + "/#/fellow/aaron_mcdonald", wait_until="domcontentloaded"
+    )
+    _wait_for_app_boot(page)
+    expect(page.locator("#detail .contact-cta")).to_have_count(1)
+    expect(page.locator("#detail .contact-cta__btn--primary")).to_have_count(1)
+    expect(page.locator("#detail .contact-cta__btn--ghost")).to_have_count(0)
+
+
+def test_fellow_detail_has_no_add_to_group_on_phone(
+    mobile_interaction_page, device_name, base_url_fixture
+):
+    """The +/− add-to-group affordance in the detail name is skipped on
+    phones (groups have no phone UI)."""
+    page = mobile_interaction_page
+    page.goto(base_url_fixture + "/#/fellow/aaron_bird", wait_until="domcontentloaded")
+    _wait_for_app_boot(page)
+    expect(page.locator("#detail .detail-add-to-group")).to_have_count(0)
+
+
+def test_fellow_detail_tag_chips_on_phone(
+    mobile_interaction_page, device_name, base_url_fixture
+):
+    """The hero renders search_tags as chips when present, and none when
+    the fellow has no tags."""
+    page = mobile_interaction_page
+    # aaron_bird: search_tags = "SaaS, AI" → 2 chips.
+    page.goto(base_url_fixture + "/#/fellow/aaron_bird", wait_until="domcontentloaded")
+    _wait_for_app_boot(page)
+    expect(page.locator("#detail .tag-chips .tag-chip")).to_have_count(2)
+
+    # aaron_mcdonald: no search_tags → no chip block.
+    page.goto(base_url_fixture + "/#/fellow/aaron_mcdonald", wait_until="domcontentloaded")
+    _wait_for_app_boot(page)
+    expect(page.locator("#detail .tag-chips")).to_have_count(0)
+
+
+def test_has_email_filter_chip_toggles_on_phone(
+    mobile_interaction_page, device_name, base_url_fixture
+):
+    """The has-email control renders as a pill chip and still toggles the
+    underlying filter (a defeatable default, not a hard gate) — the visual
+    restyle must not break the function."""
+    page = mobile_interaction_page
+    page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+    _wait_for_app_boot(page)
+    checkbox = page.locator("#has-email-filter")
+    # Default on.
+    assert checkbox.is_checked(), f"has-email should default on at {device_name}"
+    # Tapping the pill (the wrapping label) toggles the filter off.
+    page.locator(".filter-checkbox").click()
+    expect(checkbox).not_to_be_checked()
+    # And back on.
+    page.locator(".filter-checkbox").click()
+    expect(checkbox).to_be_checked()
