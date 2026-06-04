@@ -50,4 +50,25 @@ def test_markdown_renders_without_error():
     report = cr.build_report(probe_gh=False)
     md = cr.render_md(report)
     assert md.startswith("# Conformance Report")
-    assert "## Headline" in md and "## Findings" in md
+    assert "## Findings" in md
+    # A verdict headline is always present (conditionally-conformant or not).
+    assert ("Conditionally conformant" in md) or ("Not conformant" in md)
+    # The verification-ladder next-step link to the PNT audit flow.
+    assert "Audit a candidate PNA" in md
+
+
+def test_markdown_links_rows_to_pnt():
+    """Each attested row deep-links to its PNT definition (anchors from PNT #27)."""
+    report = cr.build_report(probe_gh=False)
+    md = cr.render_md(report)
+    assert "/spec/PNA_Spec.md#ac-1" in md          # universal AC
+    assert "/spec/constraints.md#cst-" in md        # a constraint
+    # Flavor-derived ACs resolve to axes.md, not PNA_Spec.md.
+    assert "/spec/axes.md#ac-13" in md
+
+
+def test_anchor_url_routing():
+    assert cr.pnt_anchor_url("AC-1 (two-store)").endswith("PNA_Spec.md#ac-1")
+    assert cr.pnt_anchor_url("AC-13 (coop/coep)").endswith("axes.md#ac-13")
+    assert cr.pnt_anchor_url("CST-PWA-SANDBOX-SEALED").endswith("constraints.md#cst-pwa-sandbox-sealed")
+    assert cr.pnt_anchor_url("EX-CLOUD-LLM").endswith("exceptions.md#ex-cloud-llm")

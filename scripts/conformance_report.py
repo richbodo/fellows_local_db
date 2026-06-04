@@ -31,6 +31,7 @@ Usage:
 """
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -59,6 +60,62 @@ LOG_JSONL = os.path.join(OUT_DIR, "log.jsonl")
 # is a convenience snapshot that rides along with work; the authoritative ship
 # check is deploy-preflight, which gates on every deploy regardless of staleness.
 STALE_COMMITS = 10
+
+# --- PNT deep-linking --------------------------------------------------------
+# Each attested row links to its definition in the Personal Network Toolkit, so
+# a reader (possibly meeting "architectural constraint" for the first time) can
+# click straight to the authority instead of scrolling a 50-section spec. The
+# per-ID anchors (#ac-1, #cst-pwa-sandbox-sealed, #ex-cloud-llm) were added to
+# PNT in PR #27.
+PNT_REPO = "https://github.com/richbodo/personal_network_toolkit"
+PNT_SPEC = PNT_REPO + "/blob/main/spec/"
+PNT_AUDIT_GUIDE = (PNT_REPO + "/blob/main/docs/users-guide.md"
+                   "#goal-2--audit-a-candidate-pna-before-installing-it")
+
+# Flavor-derived ACs live in axes.md; every other AC lives in PNA_Spec.md.
+# (Mirrors PNT's split — see the "gaps you'll see in the table" note in
+# PNA_Spec.md.) Kept here because the report can't read the PNT repo at runtime.
+_AXES_ACS = {"AC-2", "AC-3", "AC-5", "AC-8", "AC-12", "AC-13", "AC-14",
+             "AC-PRM-B", "AC-PRM-C"}
+
+_TOOLKIT_VERSION_RE = re.compile(r"Toolkit-Version:\*\*\s*\[([^\]]+)\]")
+
+
+def _id_token(row_id):
+    """The bare AC/CST/EX id leading a row label ('AC-1 (two-store …)' -> 'AC-1')."""
+    return row_id.split()[0].strip() if row_id else ""
+
+
+def pnt_anchor_url(row_id):
+    """Deep link to this row's AC/CST/EX definition in PNT, or None if unknown."""
+    tok = _id_token(row_id)
+    anchor = "#" + tok.lower()
+    if tok.startswith("EX-"):
+        return PNT_SPEC + "exceptions.md" + anchor
+    if tok.startswith("CST-"):
+        return PNT_SPEC + "constraints.md" + anchor
+    if tok.startswith("AC-"):
+        return PNT_SPEC + ("axes.md" if tok in _AXES_ACS else "PNA_Spec.md") + anchor
+    return None
+
+
+def _toolkit_version(md_text):
+    """The Toolkit-Version this design attests against ('0.1 (draft)'), or None."""
+    m = _TOOLKIT_VERSION_RE.search(md_text)
+    return m.group(1).strip() if m else None
+
+
+def _short_status(status_text):
+    """Normalize a verbose Status cell to a scannable token; the full prose stays
+    in docs/Architecture.md (the source of truth this report links to)."""
+    s = status_text.lower()
+    if "not-applicable" in s or "not applicable" in s:
+        return "not-applicable"
+    if "partial" in s:
+        return "partial-conformance"
+    if "conformant" in s:
+        return "conformant"
+    return status_text.split("(")[0].strip() or status_text
 
 
 def _git_sha():
@@ -113,7 +170,9 @@ def _gh_issue_state(number):
 
 def build_report(probe_gh=True):
     with open(ARCH_MD, encoding="utf-8") as f:
-        rows = evaluate_attestation(f.read())
+        arch_md = f.read()
+    rows = evaluate_attestation(arch_md)
+    toolkit_version = _toolkit_version(arch_md)
     deferrals = collect_strict_xfails()
 
     findings = []  # structured: {kind, detail}
@@ -159,12 +218,14 @@ def build_report(probe_gh=True):
             })
 
     conformant_rows = [r for r in rows if r["conformant"]]
+    ok = not findings
     report = {
         "meta": {
             "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "git_sha": _git_sha(),
             "source": "docs/Architecture.md",
             "generator": "scripts/conformance_report.py",
+            "toolkit_version": toolkit_version,
             "note": (
                 "Deterministic serialization of scripts/conformance_lib.py. "
                 "'live' = a real, non-deferred assertion exists; pass/fail is "
@@ -173,12 +234,16 @@ def build_report(probe_gh=True):
             ),
         },
         "headline": {
+            # The deterministic layer can only ever reach "conditionally
+            # conformant" — full conformance also needs the LLM + human evaluate
+            # flow. A finding is a definitive evidence gap at this layer.
+            "verdict": "conditionally-conformant" if ok else "not-conformant",
             "deferral_count": len(deferrals),
             "deferral_cap": DEFERRAL_CAP,
             "conformant_rows": len(conformant_rows),
             "total_rows": len(rows),
             "findings_count": len(findings),
-            "ok": not findings,
+            "ok": ok,
         },
         "deferrals": deferrals,
         "findings": findings,
@@ -190,27 +255,85 @@ def build_report(probe_gh=True):
 def render_md(report):
     h = report["headline"]
     m = report["meta"]
+    tk = m.get("toolkit_version") or "unknown version"
     L = []
-    L.append("# Conformance Report")
+
+    # Title + what-this-is (written for a reader who may be meeting "conformance"
+    # for the first time — say what it is, link the authority, name the stakes).
+    L.append("# Conformance Report — EHF Fellows Local Directory")
     L.append("")
-    L.append("_Generated {} for `{}`. Source of truth: `docs/Architecture.md`._"
+    L.append("> **What this is.** A check of whether this repository honestly "
+             "conforms to the **Personal Network Application (PNA)** spec — a "
+             "local-first, private-by-default app that mirrors contact data into a "
+             "user-owned workspace with no remote authority. The spec and this "
+             "conformance method come from the **[Personal Network Toolkit "
+             "(PNT)]({repo})**. This report is generated by "
+             "`scripts/conformance_report.py` (serializing "
+             "`scripts/conformance_lib.py`); it is the **deterministic** layer — "
+             "it verifies that every `conformant` claim in this app's Security "
+             "Target (`docs/Architecture.md`) is backed by live, executable "
+             "evidence. It does not run the spec's LLM/human evaluate flow."
+             .format(repo=PNT_REPO))
+    L.append(">")
+    L.append("> _Why it matters: PNA conformance is the spec's proxy for **safe "
+             "to install** — a local-first app with no remote authority over your "
+             "data._")
+    L.append("")
+
+    # Verdict — the deterministic layer tops out at "conditionally conformant".
+    if h["ok"]:
+        L.append("## 🟡 Conditionally conformant to the PNA Spec (PNT {tk})".format(tk=tk))
+        L.append("")
+        L.append("Every conformance claim this app makes is backed by live, "
+                 "executable evidence, and all deferrals are disciplined. This is "
+                 "the **deterministic** layer of conformance — a full "
+                 "determination also needs the spec's evaluate flow (below).")
+    else:
+        L.append("## 🔴 Not conformant (as attested) to the PNA Spec (PNT {tk})".format(tk=tk))
+        L.append("")
+        L.append("{n} finding(s) below: a `conformant` claim lacks live evidence, "
+                 "or a deferral is undisciplined. These are concrete gaps to fix "
+                 "before conformance can even be conditionally asserted."
+                 .format(n=h["findings_count"]))
+    L.append("")
+
+    # Verification ladder — makes "conditionally" concrete and shows what's left.
+    L.append("**Conformance is checked in layers, not awarded as a badge:**")
+    L.append("")
+    cond_here = " ← **this report**" if h["ok"] else ""
+    not_here = " ← **this report**" if not h["ok"] else ""
+    L.append("- 🟢 **Conformant** — deterministic ✓ · LLM evaluate ✓ · human "
+             "review ✓ — _the goal; not grantable by this report_")
+    L.append("- 🟡 **Conditionally conformant** — deterministic evidence "
+             "verified; evaluate flow pending{h}".format(h=cond_here))
+    L.append("- 🔴 **Not conformant** — a `conformant` claim lacks live "
+             "evidence{h}".format(h=not_here))
+    L.append("")
+    L.append("→ To complete the determination (🟡 → 🟢), run the spec's audit "
+             "flow: **[PNT User's Guide → Audit a candidate PNA]({url})**."
+             .format(url=PNT_AUDIT_GUIDE))
+    L.append("")
+    L.append("_Generated {} for `{}`. Source of truth: "
+             "[`docs/Architecture.md`](../Architecture.md)._"
              .format(m["generated_at"], m["git_sha"] or "unknown"))
     L.append("")
-    L.append("> Deterministic serialization of `scripts/conformance_lib.py` — the "
-             "same logic the pytest gate runs, **not** the LLM evaluate flow. "
-             "`live` means a real, non-deferred assertion exists; pass/fail is "
-             "enforced by the suite (`just test`). "
-             "See `plans/conformance_report_and_gate.md`.")
+
+    # Plain-language legend (the reader may not know AC/CST/EX) + the metrics.
+    L.append("**What the IDs mean** — "
+             "[**AC**]({s}PNA_Spec.md) Architectural Commitment (a rule every "
+             "safe PNA honors) · "
+             "[**CST**]({s}constraints.md) Constraint (a platform limit handled "
+             "honestly, not hidden) · "
+             "[**EX**]({s}exceptions.md) Exception (a declared departure from PNA "
+             "rules).".format(s=PNT_SPEC))
     L.append("")
-    ok = "✅" if h["ok"] else "❌"
+    findings_mark = "✅" if h["findings_count"] == 0 else "❌"
     cap_mark = "✅" if h["deferral_count"] <= h["deferral_cap"] else "❌"
-    L.append("## Headline")
-    L.append("")
-    L.append("- **Deferrals: {} / cap {}** {}".format(
-        h["deferral_count"], h["deferral_cap"], cap_mark))
     L.append("- **Conformant rows:** {} of {}".format(
         h["conformant_rows"], h["total_rows"]))
-    L.append("- **Findings:** {} {}".format(h["findings_count"], ok))
+    L.append("- **Deferrals:** {} of {} max {}".format(
+        h["deferral_count"], h["deferral_cap"], cap_mark))
+    L.append("- **Findings:** {} {}".format(h["findings_count"], findings_mark))
     L.append("")
 
     L.append("## Deferrals (strict-xfail)")
@@ -239,6 +362,10 @@ def render_md(report):
 
     L.append("## Attestation rows")
     L.append("")
+    L.append("Each row's ID links to its definition in the PNT spec. Status is "
+             "summarized; the full realization + verification prose lives in "
+             "[`docs/Architecture.md`](../Architecture.md).")
+    L.append("")
     L.append("| Row | Status | Evidence (cited test → static state) |")
     L.append("|---|---|---|")
     for r in report["rows"]:
@@ -248,8 +375,10 @@ def render_md(report):
             ev = "_declared review kind_"
         else:
             ev = "_—_"
-        L.append("| {id} | {status} | {ev} |".format(
-            id=r["id"], status=r["status_text"], ev=ev))
+        url = pnt_anchor_url(r["id"])
+        label = "[{id}]({url})".format(id=r["id"], url=url) if url else r["id"]
+        L.append("| {label} | {status} | {ev} |".format(
+            label=label, status=_short_status(r["status_text"]), ev=ev))
     L.append("")
     return "\n".join(L) + "\n"
 

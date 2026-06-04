@@ -1,12 +1,14 @@
 {
   "meta": {
-    "generated_at": "2026-06-04T00:01:08Z",
-    "git_sha": "eba3811",
+    "generated_at": "2026-06-04T06:52:09Z",
+    "git_sha": "17865ff",
     "source": "docs/Architecture.md",
     "generator": "scripts/conformance_report.py",
+    "toolkit_version": "0.1 (draft)",
     "note": "Deterministic serialization of scripts/conformance_lib.py. 'live' = a real, non-deferred assertion exists; pass/fail is enforced by the suite itself (`just test`). Not the LLM evaluate flow. See plans/conformance_report_and_gate.md."
   },
   "headline": {
+    "verdict": "conditionally-conformant",
     "deferral_count": 1,
     "deferral_cap": 3,
     "conformant_rows": 29,
