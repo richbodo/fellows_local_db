@@ -1,0 +1,677 @@
+{
+  "meta": {
+    "generated_at": "2026-06-04T06:52:09Z",
+    "git_sha": "17865ff",
+    "source": "docs/Architecture.md",
+    "generator": "scripts/conformance_report.py",
+    "toolkit_version": "0.1 (draft)",
+    "note": "Deterministic serialization of scripts/conformance_lib.py. 'live' = a real, non-deferred assertion exists; pass/fail is enforced by the suite itself (`just test`). Not the LLM evaluate flow. See plans/conformance_report_and_gate.md."
+  },
+  "headline": {
+    "verdict": "conditionally-conformant",
+    "deferral_count": 1,
+    "deferral_cap": 3,
+    "conformant_rows": 29,
+    "total_rows": 32,
+    "findings_count": 0,
+    "ok": true
+  },
+  "deferrals": [
+    {
+      "file": "tests/e2e/test_private_data_enforcement.py",
+      "name": "test_off_folder_settings_are_empty",
+      "reason": "Worker still mints benign workspace-identity metadata (workspace_uuid + counters) into OPFS even off-folder, so getSettings() is not literally empty. Gating _ensureWorkspaceIdentity on folder-mode collided with the folder-chooser identity/pivot flow (tests/e2e/test_folder_probe.py) and needs the folder QA pass \u2014 tracked in plans/private_data_enforcement.md. tracking: #248. When that lands this XPASSes; drop the marker and promote to a guard.",
+      "tracking_issue": 248,
+      "issue_state": "OPEN"
+    }
+  ],
+  "findings": [],
+  "rows": [
+    {
+      "id": "AC-1 (two-store ownership split)",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/test_relationships.py::test_attach_fellows_readonly_allows_select",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/test_database.py",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "AC-4 (versioned cross-boundary handshake)",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_version_handshake.py::test_version_skew_refuses_mutations_but_allows_reads",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_worker_rpc.py",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "AC-6 (always-reachable diagnostic escape)",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_email_gate.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_reset_everything.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_clear_app_cache.py",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "AC-7 (self-service field-debug substrate)",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_diagnostics_panel.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "test_boot_watchdog.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "test_boot_error_panel.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "test_bug_report.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "test_boot_beacon.py",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "AC-9 (auto-backup of private data)",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": true,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_user_folder_storage.py::test_snapshot_lands_in_folder_when_folder_mode_active",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_settings.py",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "AC-10 (opt-in non-destructive re-imports)",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_directory_data_update_flow.py::test_apply_with_group_impact_shows_dialog_and_can_cancel",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "test_orphan_soft_scan.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "test_versioned_fellows_db.py",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "AC-11 (concurrent-access detection)",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_user_folder_storage.py::TestPhase2WriteLock",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "test_worker_spawn_failure.py",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "AC-15 (build label tied to source revision)",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/test_build_pwa.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_update_check.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "test_bug_report.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "test_boot_beacon.py",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "AC-16 (user-driven transport selection)",
+      "status_text": "partial-conformance (conformant to the `mailto-only` axis pick; richer transports planned)",
+      "conformant": false,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_groups_export.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/test_comms.py",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "AC-17 (mirrored data is sourced)",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": true,
+      "refs": [
+        {
+          "ref": "tests/test_database.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "build/diff_fellows_db.py",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "AC-18 (transports cannot read message contents)",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": true,
+      "refs": [
+        {
+          "ref": "tests/test_comms.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/test_private_data_ops.py",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "AC-19 (user-visible payload before send)",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_groups_export.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_groups_compose.py",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "AC-PRM-A (LLM calls over user data are transports)",
+      "status_text": "partial-conformance (cloud opt-in via per-install consent; per-call prompt visibility is the cloud client's UI, not the workspace's)",
+      "conformant": false,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_pna_exception_mode.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "test_mcpb_settings.py",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "AC-PRM-D (re-ingestion is user-initiated)",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_directory_data_update_flow.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "test_versioned_fellows_db.py::test_install_only_does_not_refetch_on_sha_mismatch",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "AC-MCP-A (cloud AI clients require consent for Private DB)",
+      "status_text": "partial-conformance (per-session/per-install opt-in via `EX-CLOUD-LLM`; not per-call server-side gating)",
+      "conformant": false,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_pna_exception_mode.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/test_private_data_ops.py",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "AC-MCP-B (MCP Communications stages; workspace launches)",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/test_comms.py::test_stage_email_basic_to",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "AC-2 (no SaaS surface)",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/test_deploy_auth_round_trip.py::test_directory_api_is_403_without_session",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "test_deploy_sqlite_api.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "test_deploy_mcpb_routes.py",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "AC-3 (single OPFS owner)",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_worker_rpc.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "test_worker_cold_start.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "test_local_first_boot.py",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "AC-5 (stale session never locks users out of cache)",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_offline_only_mode.py::test_401_with_cached_data_shows_directory_from_cache",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "test_search_offline_fallback.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "test_local_first_boot.py",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "AC-8 (anti-enumeration + abuse-bounded analytics)",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/test_magic_link_auth.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "test_deploy_auth_round_trip.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "test_deploy_client_errors.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "test_client_error_sanitizer.py",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "AC-12 (capability detection inside worker)",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_unsupported_browser.py::test_no_sah_falls_back_to_api_idb_provider",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "test_worker_cold_start.py",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "AC-13 (COOP/COEP required)",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/test_api.py::TestSecurityHeaders",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "AC-14 (SW never owns SQLite)",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_sw_post_caching.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "test_image_cache_no_bust.py",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "EX-CLOUD-LLM",
+      "status_text": "conformant for EX-H1\u2013H6 and EX-H8; EX-H7 (consent-to-human) surfaced best-effort via MCP `instructions`",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_pna_exception_mode.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_mcpb_settings.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/test_private_data_ops.py::test_instructions_carry_cloud_llm_propagation_notice",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/test_shared_data_ops.py::test_instructions_carry_cloud_llm_propagation_notice",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "CST-PWA-PRIVATE-SNAPSHOT",
+      "status_text": "**conformant** (as a *handling*): the capability reduction is complete \u2014 UI/route reduction **plus** data-layer refusal of off-folder durable writes (worker-side load-bearing + page-side defense-in-depth, PR #244 `d2706a9`; [`../plans/private_data_enforcement.md`](../plans/private_data_enforcement.md)). The negative invariant is now a hard guard, not a strict-xfail. Frontier stays **Open**: this is honest handling, not a durable cross-platform store.",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_browse_only_durability.py::test_gate_defaults_to_browse_only_without_folder",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_private_data_enforcement.py::test_browse_only_refuses_create_group",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_private_data_enforcement.py::test_no_durable_private_write_when_browse_only",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_private_data_enforcement.py::test_folder_attached_allows_create_group",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "CST-PWA-SANDBOX-SEALED",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_sandbox_sealed_mcp.py::test_no_folder_resident_private_store_off_folder",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_sandbox_sealed_mcp.py::test_mcp_setup_warns_no_folder_off_folder",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_sandbox_sealed_mcp.py::test_mcp_folder_warning_hidden_when_folder_attached",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "CST-PWA-STORAGE-EVICTABLE",
+      "status_text": "**conformant**: the two prefs (`has_email_only` / `self_email`) are localStorage-only off-folder \u2014 the boot reconciles no longer write `settings` to OPFS in browse-only mode (PR #244 `d2706a9`; [`../plans/private_data_enforcement.md`](../plans/private_data_enforcement.md)). The \"Avoided\" claim now holds.",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_private_data_enforcement.py::test_prefs_stay_localstorage_only_off_folder",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "CST-PWA-NO-SYNC",
+      "status_text": "conformant: canonical-copy disambiguation shipped; sync explicitly out of scope",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_user_folder_storage.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_folder_probe.py",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "CST-PWA-DURABLE-SQL-ARCH",
+      "status_text": "conformant by architecture",
+      "conformant": true,
+      "review_kind": true,
+      "refs": [],
+      "findings": []
+    },
+    {
+      "id": "CST-PWA-SINGLE-OWNER",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_user_folder_storage.py::TestPhase2WriteLock",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "CST-PWA-NO-BACKGROUND",
+      "status_text": "conformant: opportunistic-only, honestly framed",
+      "conformant": true,
+      "review_kind": true,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_user_folder_storage.py",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "CST-PWA-SERVER-FLOOR",
+      "status_text": "conformant by bounding",
+      "conformant": true,
+      "review_kind": true,
+      "refs": [],
+      "findings": []
+    }
+  ]
+}

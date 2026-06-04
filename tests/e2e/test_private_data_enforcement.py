@@ -124,7 +124,8 @@ def test_prefs_stay_localstorage_only_off_folder(standalone_page, base_url_fixtu
         "empty. Gating _ensureWorkspaceIdentity on folder-mode collided with the "
         "folder-chooser identity/pivot flow (tests/e2e/test_folder_probe.py) and "
         "needs the folder QA pass — tracked in plans/private_data_enforcement.md. "
-        "When that lands this XPASSes; drop the marker and promote to a guard."
+        "tracking: #248. When that lands this XPASSes; drop the marker and "
+        "promote to a guard."
     ),
 )
 def test_off_folder_settings_are_empty(standalone_page, base_url_fixture):

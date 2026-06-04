@@ -57,3 +57,6 @@ backup/*.zip
 
 # Ansible become-password temp files — never commit
 BECOME_PASS*
+
+# Conformance run history (local; drives staleness auto-regen). Report JSON/MD are committed.
+docs/conformance/log.jsonl
