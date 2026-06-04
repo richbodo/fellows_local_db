@@ -258,7 +258,14 @@ function bootstrapRelationshipsSchema(db) {
   db.exec('PRAGMA foreign_keys = ON;');
   db.exec(RELATIONSHIPS_SCHEMA_SQL);
   db.exec('PRAGMA user_version = ' + RELATIONSHIPS_SCHEMA_VERSION);
-  _ensureWorkspaceIdentity(db);
+  // Workspace identity is intentionally NOT minted here (#248). Off-folder /
+  // browse-only the OPFS settings store must read literally empty — an
+  // identity stamp would be durable metadata for a store that is never
+  // canonical (no second copy to disambiguate). Minting happens only when the
+  // relDb becomes canonical: the first committed folder write
+  // (_maybeWriteFolderAfterCommit, which runs only with folder permission
+  // 'granted'). Folder bytes hydrated from an existing store already carry
+  // their own identity, so nothing is lost for folder users.
 }
 
 function nowIsoSecond() {
@@ -287,16 +294,13 @@ function _deviceLabelGuess() {
   return br + ' on ' + os;
 }
 
-// Mint identity once if absent (called from bootstrap — fresh + restored DBs).
+// Mint identity once if absent. Called ONLY from the canonical-folder-write
+// funnel (_maybeWriteFolderAfterCommit), so it never runs off-folder (#248):
+// in browse-only mode the OPFS settings store stays literally empty. Idempotent
+// — returns early when workspace_uuid already exists (a hydrated folder store
+// carries it), so the per-commit call mints once on a fresh folder store and is
+// a no-op thereafter.
 function _ensureWorkspaceIdentity(db) {
-  // NOTE: This still mints identity metadata (workspace_uuid + counters) into
-  // the OPFS relationships.db even off-folder. That metadata is benign (no
-  // private user content), but it means the off-folder store is not literally
-  // empty. Gating this on folder-mode is tracked as the final enforcement step
-  // (plans/private_data_enforcement.md); a first attempt collided with the
-  // folder-chooser identity/pivot flow, so it needs the folder mobile/desktop
-  // QA pass. The strict-xfail in tests/e2e/test_private_data_enforcement.py
-  // pins the "off-folder settings are empty" target.
   try {
     var existing = dbSelectOne(db, 'SELECT value FROM settings WHERE key = ?', ['workspace_uuid']);
     if (existing && existing.value) return;
@@ -2495,10 +2499,18 @@ async function _maybeWriteFolderAfterCommit() {
     // to write — would just fail and populate lastError with noise.
     return;
   }
-  // Stamp the write generation into the live DB BEFORE exporting, so the
-  // folder copy (and any backup of it) carries the recency the chooser ranks
-  // by (EPIC PR5). Runs only in folder mode — the only stores the chooser sees.
-  if (relDb) _stampWriteGeneration(relDb);
+  // Mint identity (#248) + stamp the write generation into the live DB BEFORE
+  // exporting, so the folder copy (and any backup of it) carries the identity +
+  // recency the chooser ranks by (EPIC PR5). This is the SOLE identity-mint
+  // site: we only reach here with folder permission 'granted' (checked above),
+  // so identity lands exactly when the relDb becomes canonical and never
+  // off-folder. _ensureWorkspaceIdentity is idempotent — it mints once on a
+  // fresh folder store and no-ops on every subsequent commit. Runs only in
+  // folder mode, the only stores the chooser ever sees.
+  if (relDb) {
+    _ensureWorkspaceIdentity(relDb);
+    _stampWriteGeneration(relDb);
+  }
   var bytes;
   try {
     bytes = poolUtil.exportFile(RELATIONSHIPS_DB_SLOT);

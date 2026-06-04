@@ -14,12 +14,12 @@ WITH a folder) is covered by tests/e2e/test_worker_rpc.py via worker_data_folder
 """
 from __future__ import annotations
 
-import pytest
-
-# Benign workspace-identity metadata the worker still mints into OPFS even
-# off-folder (a random UUID + device label + counters — no private user
-# content). Gating this on folder-mode is the tracked final step; see the
-# strict-xfail at the bottom. The user-data invariants below ignore these keys.
+# Benign workspace-identity metadata (a random UUID + device label + counters —
+# no private user content). Since #248 the worker mints this ONLY onto a
+# canonical folder store (on the first committed folder write), never off-folder,
+# so off-folder these keys are absent and getSettings() is literally empty
+# (test_off_folder_settings_are_empty below). The set is retained so folder-mode
+# assertions can name the identity keys explicitly.
 _IDENTITY_KEYS = {
     "workspace_uuid", "device_label", "created_at", "write_generation",
     "last_written_at",
@@ -116,23 +116,33 @@ def test_prefs_stay_localstorage_only_off_folder(standalone_page, base_url_fixtu
     assert leaked == set(), f"prefs leaked into durable store off-folder: {leaked} in {settings}"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Worker still mints benign workspace-identity metadata (workspace_uuid + "
-        "counters) into OPFS even off-folder, so getSettings() is not literally "
-        "empty. Gating _ensureWorkspaceIdentity on folder-mode collided with the "
-        "folder-chooser identity/pivot flow (tests/e2e/test_folder_probe.py) and "
-        "needs the folder QA pass — plan: plans/issue_248_identity_off_folder.md. "
-        "tracking: #248. When that lands this XPASSes; drop the marker and "
-        "promote to a guard."
-    ),
-)
 def test_off_folder_settings_are_empty(standalone_page, base_url_fixture):
+    """The strongest reading of CST-PWA-STORAGE-EVICTABLE: browse-only is
+    localStorage-only, so the durable OPFS settings store is *literally* empty —
+    not even benign workspace-identity metadata. Since #248 the worker mints
+    identity only onto a canonical folder store (see
+    test_folder_store_carries_identity_after_write); off-folder it never runs."""
     page = standalone_page
     _boot_browse_only(page, base_url_fixture)
     settings = _attempt(page, "() => window.__dataProvider.getSettings()").get("value")
     assert settings == {}, settings
+
+
+def test_folder_store_carries_identity_after_write(worker_data_folder):
+    """The flip side of #248: a folder store IS canonical, so identity is minted
+    onto it on the first committed folder write. This is the row the chooser
+    ranks by (CST-PWA-NO-SYNC), so it must survive the off-folder gating. Drives
+    a real mutation through the worker, then asserts workspace_uuid + the write
+    generation are present in the folder store's settings."""
+    wd = worker_data_folder
+    assert wd.page.evaluate("() => window.__privateDataEnabled()") is True
+    full = wd.get_full_fellows()
+    wd.create_group("identity check", fellow_record_ids=[full[0]["record_id"]])
+    settings = wd.list_settings() or {}
+    assert "workspace_uuid" in settings, settings
+    assert settings.get("workspace_uuid"), settings
+    # write_generation is bumped on each committed folder write (>= 1 here).
+    assert int(settings.get("write_generation", "0")) >= 1, settings
 
 
 def test_folder_attached_allows_create_group(worker_data_folder):

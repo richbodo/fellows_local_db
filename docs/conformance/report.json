@@ -1,7 +1,7 @@
 {
   "meta": {
-    "generated_at": "2026-06-04T07:40:59Z",
-    "git_sha": "7e2b922",
+    "generated_at": "2026-06-04T09:13:19Z",
+    "git_sha": "18bfab6",
     "source": "docs/Architecture.md",
     "generator": "scripts/conformance_report.py",
     "toolkit_version": "0.1 (draft)",
@@ -9,22 +9,14 @@
   },
   "headline": {
     "verdict": "conditionally-conformant",
-    "deferral_count": 1,
+    "deferral_count": 0,
     "deferral_cap": 3,
     "conformant_rows": 28,
     "total_rows": 31,
     "findings_count": 0,
     "ok": true
   },
-  "deferrals": [
-    {
-      "file": "tests/e2e/test_private_data_enforcement.py",
-      "name": "test_off_folder_settings_are_empty",
-      "reason": "Worker still mints benign workspace-identity metadata (workspace_uuid + counters) into OPFS even off-folder, so getSettings() is not literally empty. Gating _ensureWorkspaceIdentity on folder-mode collided with the folder-chooser identity/pivot flow (tests/e2e/test_folder_probe.py) and needs the folder QA pass \u2014 tracked in plans/private_data_enforcement.md. tracking: #248. When that lands this XPASSes; drop the marker and promote to a guard.",
-      "tracking_issue": 248,
-      "issue_state": "OPEN"
-    }
-  ],
+  "deferrals": [],
   "findings": [],
   "rows": [
     {
@@ -598,12 +590,17 @@
     },
     {
       "id": "CST-PWA-STORAGE-EVICTABLE",
-      "status_text": "**conformant**: the two prefs (`has_email_only` / `self_email`) are localStorage-only off-folder \u2014 the boot reconciles no longer write `settings` to OPFS in browse-only mode (PR #244 `d2706a9`; [`../plans/private_data_enforcement.md`](../plans/private_data_enforcement.md)). The \"Avoided\" claim now holds.",
+      "status_text": "**conformant**: the two prefs (`has_email_only` / `self_email`) are localStorage-only off-folder \u2014 the boot reconciles no longer write `settings` to OPFS in browse-only mode (PR #244 `d2706a9`; [`../plans/private_data_enforcement.md`](../plans/private_data_enforcement.md)). #248 closed the last residual: the worker no longer mints workspace-identity metadata into OPFS off-folder either (it's minted only when a store becomes canonical \u2014 the first folder write), so the browse-only settings store is now *literally* empty. `test_off_folder_settings_are_empty` is a hard guard, not a strict-xfail. The \"Avoided\" claim holds in its strongest reading.",
       "conformant": true,
       "review_kind": false,
       "refs": [
         {
           "ref": "tests/e2e/test_private_data_enforcement.py::test_prefs_stay_localstorage_only_off_folder",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_private_data_enforcement.py::test_off_folder_settings_are_empty",
           "status": "live",
           "detail": ""
         }

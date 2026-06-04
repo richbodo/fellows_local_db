@@ -16,19 +16,17 @@ Every conformance claim this app makes is backed by live, executable evidence, a
 
 → To complete the determination (🟡 → 🟢), run the spec's audit flow: **[PNT User's Guide → Audit a candidate PNA](https://github.com/richbodo/personal_network_toolkit/blob/main/docs/users-guide.md#goal-2--audit-a-candidate-pna-before-installing-it)**.
 
-_Generated 2026-06-04T07:40:59Z for `7e2b922`. Source of truth: [`docs/Architecture.md`](../Architecture.md)._
+_Generated 2026-06-04T09:13:19Z for `18bfab6`. Source of truth: [`docs/Architecture.md`](../Architecture.md)._
 
 **What the IDs mean** — [**AC**](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/PNA_Spec.md) Architectural Commitment (a rule every safe PNA honors) · [**CST**](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/constraints.md) Constraint (a platform limit handled honestly, not hidden) · [**EX**](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/exceptions.md) Exception (a declared departure from PNA rules).
 
 - **Conformant rows:** 28 of 31
-- **Deferrals:** 1 of 3 max ✅
+- **Deferrals:** 0 of 3 max ✅
 - **Findings:** 0 ✅
 
 ## Deferrals (strict-xfail)
 
-| Test | Tracking | Issue state |
-|---|---|---|
-| `tests/e2e/test_private_data_enforcement.py::test_off_folder_settings_are_empty` | #248 | OPEN |
+_None — zero deferred invariants._
 
 ## Findings
 
@@ -66,7 +64,7 @@ Each row's ID links to its definition in the PNT spec. Status is summarized; the
 | [EX-CLOUD-LLM](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/exceptions.md#ex-cloud-llm) | conformant | `tests/e2e/test_pna_exception_mode.py` → live; `tests/e2e/test_mcpb_settings.py` → live; `tests/test_private_data_ops.py::test_instructions_carry_cloud_llm_propagation_notice` → live; `tests/test_shared_data_ops.py::test_instructions_carry_cloud_llm_propagation_notice` → live |
 | [CST-PWA-PRIVATE-SNAPSHOT](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/constraints.md#cst-pwa-private-snapshot) | conformant | `tests/e2e/test_browse_only_durability.py::test_gate_defaults_to_browse_only_without_folder` → live; `tests/e2e/test_private_data_enforcement.py::test_browse_only_refuses_create_group` → live; `tests/e2e/test_private_data_enforcement.py::test_no_durable_private_write_when_browse_only` → live; `tests/e2e/test_private_data_enforcement.py::test_folder_attached_allows_create_group` → live |
 | [CST-PWA-SANDBOX-SEALED](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/constraints.md#cst-pwa-sandbox-sealed) | conformant | `tests/e2e/test_sandbox_sealed_mcp.py::test_no_folder_resident_private_store_off_folder` → live; `tests/e2e/test_sandbox_sealed_mcp.py::test_mcp_setup_warns_no_folder_off_folder` → live; `tests/e2e/test_sandbox_sealed_mcp.py::test_mcp_folder_warning_hidden_when_folder_attached` → live |
-| [CST-PWA-STORAGE-EVICTABLE](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/constraints.md#cst-pwa-storage-evictable) | conformant | `tests/e2e/test_private_data_enforcement.py::test_prefs_stay_localstorage_only_off_folder` → live |
+| [CST-PWA-STORAGE-EVICTABLE](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/constraints.md#cst-pwa-storage-evictable) | conformant | `tests/e2e/test_private_data_enforcement.py::test_prefs_stay_localstorage_only_off_folder` → live; `tests/e2e/test_private_data_enforcement.py::test_off_folder_settings_are_empty` → live |
 | [CST-PWA-NO-SYNC](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/constraints.md#cst-pwa-no-sync) | conformant | `tests/e2e/test_user_folder_storage.py` → live; `tests/e2e/test_folder_probe.py` → live |
 | [CST-PWA-SINGLE-OWNER](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/constraints.md#cst-pwa-single-owner) | conformant | `tests/e2e/test_user_folder_storage.py::TestPhase2WriteLock` → live |
 | [CST-PWA-NO-BACKGROUND](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/constraints.md#cst-pwa-no-background) | conformant | `tests/e2e/test_user_folder_storage.py` → live |
