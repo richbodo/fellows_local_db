@@ -47,6 +47,25 @@ setup:
     fi
     echo "Setup complete."
 
+# Drop into a sub-shell with the venv activated (pytest/playwright/python on PATH).
+# A `just` recipe runs in a child process, so it cannot activate your *current*
+# shell — instead this `exec`s a new interactive shell with the venv active.
+# Type `exit` (or Ctrl-D) to return. Runs `just setup` only when .venv is
+# missing, so repeat invocations are instant; run `just setup` yourself to
+# refresh deps. The prompt may not show a `(.venv)` prefix, but
+# `which python` will point inside {{venv}}.
+[group('setup')]
+shell:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -d {{venv}} ]; then
+        echo "No {{venv}} yet — running setup first…"
+        just setup
+    fi
+    source {{venv}}/bin/activate
+    echo "venv active: $(command -v python). Type 'exit' to leave."
+    exec "${SHELL:-/bin/sh}"
+
 # Sanity-check the dev environment.
 [group('setup')]
 doctor:
