@@ -1,6 +1,15 @@
 # Plan — Private-Data Enforcement (make "browse-only stores nothing durable" actually true)
 
-**Status:** ✅ DONE. **Created:** 2026-06-03. **Landed:** 2026-06-03.
+**Status:** ✅ DONE for the load-bearing enforcement (no durable private *user*
+data off-folder). ⚠️ **One residual still OPEN:** the worker still mints benign
+workspace-identity metadata into OPFS off-folder, so off-folder settings aren't
+*literally* empty — tracked separately as
+[#248](https://github.com/richbodo/fellows_local_db/issues/248) /
+[`issue_248_identity_off_folder.md`](issue_248_identity_off_folder.md), pinned by
+the strict-xfail `tests/e2e/test_private_data_enforcement.py::test_off_folder_settings_are_empty`.
+This plan's tests deliberately scoped that out (they subtract `_IDENTITY_KEYS`);
+do not read "DONE" as "off-folder OPFS is byte-empty."
+**Created:** 2026-06-03. **Landed (PRs A/B/C):** 2026-06-03.
 - **PR A + PR B** (durable-write guard + prefs-dormant-off-folder) shipped in
   **PR #244** (`d2706a9`). The worker-side load-bearing guard + page-side
   defense-in-depth both refuse mutating `relationships.db` RPCs off-folder; the
@@ -8,7 +17,8 @@
 - The strict-xfail placeholder in `tests/e2e/test_browse_only_durability.py`
   was promoted to hard guards in the new
   `tests/e2e/test_private_data_enforcement.py` and the now-superseded xfail was
-  dropped (`d1e7edf`).
+  dropped (`d1e7edf`). **A new, narrower strict-xfail remains** —
+  `test_off_folder_settings_are_empty` (the identity-metadata residual, #248).
 - **PR C** (the prevention substrate) landed via the conformance-discipline
   work in **PR #243** (`1871b30`): `tests/test_attestation_has_evidence.py` is
   the evidence checker, and the CLAUDE.md stanza from §5 below is now in the

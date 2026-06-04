@@ -123,7 +123,7 @@ def test_prefs_stay_localstorage_only_off_folder(standalone_page, base_url_fixtu
         "counters) into OPFS even off-folder, so getSettings() is not literally "
         "empty. Gating _ensureWorkspaceIdentity on folder-mode collided with the "
         "folder-chooser identity/pivot flow (tests/e2e/test_folder_probe.py) and "
-        "needs the folder QA pass — tracked in plans/private_data_enforcement.md. "
+        "needs the folder QA pass — plan: plans/issue_248_identity_off_folder.md. "
         "tracking: #248. When that lands this XPASSes; drop the marker and "
         "promote to a guard."
     ),
