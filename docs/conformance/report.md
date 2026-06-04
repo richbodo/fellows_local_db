@@ -16,11 +16,11 @@ Every conformance claim this app makes is backed by live, executable evidence, a
 
 → To complete the determination (🟡 → 🟢), run the spec's audit flow: **[PNT User's Guide → Audit a candidate PNA](https://github.com/richbodo/personal_network_toolkit/blob/main/docs/users-guide.md#goal-2--audit-a-candidate-pna-before-installing-it)**.
 
-_Generated 2026-06-04T06:52:09Z for `17865ff`. Source of truth: [`docs/Architecture.md`](../Architecture.md)._
+_Generated 2026-06-04T07:40:59Z for `7e2b922`. Source of truth: [`docs/Architecture.md`](../Architecture.md)._
 
 **What the IDs mean** — [**AC**](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/PNA_Spec.md) Architectural Commitment (a rule every safe PNA honors) · [**CST**](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/constraints.md) Constraint (a platform limit handled honestly, not hidden) · [**EX**](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/exceptions.md) Exception (a declared departure from PNA rules).
 
-- **Conformant rows:** 29 of 32
+- **Conformant rows:** 28 of 31
 - **Deferrals:** 1 of 3 max ✅
 - **Findings:** 0 ✅
 
@@ -68,7 +68,6 @@ Each row's ID links to its definition in the PNT spec. Status is summarized; the
 | [CST-PWA-SANDBOX-SEALED](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/constraints.md#cst-pwa-sandbox-sealed) | conformant | `tests/e2e/test_sandbox_sealed_mcp.py::test_no_folder_resident_private_store_off_folder` → live; `tests/e2e/test_sandbox_sealed_mcp.py::test_mcp_setup_warns_no_folder_off_folder` → live; `tests/e2e/test_sandbox_sealed_mcp.py::test_mcp_folder_warning_hidden_when_folder_attached` → live |
 | [CST-PWA-STORAGE-EVICTABLE](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/constraints.md#cst-pwa-storage-evictable) | conformant | `tests/e2e/test_private_data_enforcement.py::test_prefs_stay_localstorage_only_off_folder` → live |
 | [CST-PWA-NO-SYNC](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/constraints.md#cst-pwa-no-sync) | conformant | `tests/e2e/test_user_folder_storage.py` → live; `tests/e2e/test_folder_probe.py` → live |
-| [CST-PWA-DURABLE-SQL-ARCH](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/constraints.md#cst-pwa-durable-sql-arch) | conformant | _declared review kind_ |
 | [CST-PWA-SINGLE-OWNER](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/constraints.md#cst-pwa-single-owner) | conformant | `tests/e2e/test_user_folder_storage.py::TestPhase2WriteLock` → live |
 | [CST-PWA-NO-BACKGROUND](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/constraints.md#cst-pwa-no-background) | conformant | `tests/e2e/test_user_folder_storage.py` → live |
 | [CST-PWA-SERVER-FLOOR](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/constraints.md#cst-pwa-server-floor) | conformant | _declared review kind_ |

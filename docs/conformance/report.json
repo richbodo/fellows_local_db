@@ -1,7 +1,7 @@
 {
   "meta": {
-    "generated_at": "2026-06-04T06:52:09Z",
-    "git_sha": "17865ff",
+    "generated_at": "2026-06-04T07:40:59Z",
+    "git_sha": "7e2b922",
     "source": "docs/Architecture.md",
     "generator": "scripts/conformance_report.py",
     "toolkit_version": "0.1 (draft)",
@@ -11,8 +11,8 @@
     "verdict": "conditionally-conformant",
     "deferral_count": 1,
     "deferral_cap": 3,
-    "conformant_rows": 29,
-    "total_rows": 32,
+    "conformant_rows": 28,
+    "total_rows": 31,
     "findings_count": 0,
     "ok": true
   },
@@ -627,14 +627,6 @@
           "detail": ""
         }
       ],
-      "findings": []
-    },
-    {
-      "id": "CST-PWA-DURABLE-SQL-ARCH",
-      "status_text": "conformant by architecture",
-      "conformant": true,
-      "review_kind": true,
-      "refs": [],
       "findings": []
     },
     {
