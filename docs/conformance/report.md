@@ -1,6 +1,6 @@
 # Conformance Report
 
-_Generated 2026-06-03T23:53:10Z for `e0d9e7b`. Source of truth: `docs/Architecture.md`._
+_Generated 2026-06-04T00:01:08Z for `eba3811`. Source of truth: `docs/Architecture.md`._
 
 > Deterministic serialization of `scripts/conformance_lib.py` — the same logic the pytest gate runs, **not** the LLM evaluate flow. `live` means a real, non-deferred assertion exists; pass/fail is enforced by the suite (`just test`). See `plans/conformance_report_and_gate.md`.
 

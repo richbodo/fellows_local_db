@@ -1,6 +1,6 @@
 # Plan — Conformance report + gate (close the "cited-but-not-passing" seam)
 
-**Status:** in progress — PR1 done (#249), PR2 done, PR3 pending. **Created:** 2026-06-04.
+**Status:** DONE (all three commits on #249). **Created:** 2026-06-04.
 
 ## The finding that motivates this
 
@@ -120,7 +120,15 @@ report — the serialization of PR1's checker — shaped after PNT's
 - **Conformance log**: append-only record (timestamp, SHA, deferral count,
   pass/fail) at a fixed path.
 
-### PR3 — Wire into `just` (the event-driven triggers; no cron, no clock)
+### PR3 — Wire into `just` (the event-driven triggers; no cron, no clock) — DONE
+
+Shipped: `just conformance` (gate, hard-fails on findings) + `just
+conformance-refresh` (stale-only, offline, non-fatal); `just test` depends on
+`conformance-refresh`; the hard gate (`--no-write`) runs in `deploy-preflight`
+so every deploy route is covered. `--if-stale` (threshold `STALE_COMMITS = 10`,
+distinct from the deferral cap) added to the report script. Design below.
+
+
 
 - Deterministic checker already runs in `just test` (full `tests/`).
 - Add the report+gate to **`deploy-preflight`** — the single chokepoint every

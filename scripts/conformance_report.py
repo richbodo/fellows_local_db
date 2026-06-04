@@ -23,7 +23,11 @@ else 0. A `gh`-unknown issue state is fail-open — never a finding.
 Usage:
   python scripts/conformance_report.py            # write artifacts + log, print
   python scripts/conformance_report.py --no-gh    # skip the issue-state probe
-  python scripts/conformance_report.py --no-write  # print only (don't touch fs)
+  python scripts/conformance_report.py --no-write  # check only (don't touch fs)
+  python scripts/conformance_report.py --if-stale  # regen only if HEAD is
+                                                   # >= STALE_COMMITS past the
+                                                   # last logged run; non-fatal
+                                                   # (used by `just test`)
 """
 import json
 import os
@@ -49,6 +53,13 @@ REPORT_JSON = os.path.join(OUT_DIR, "report.json")
 REPORT_MD = os.path.join(OUT_DIR, "report.md")
 LOG_JSONL = os.path.join(OUT_DIR, "log.jsonl")
 
+# `just test` regenerates the committed snapshot when HEAD is this many commits
+# past the last logged run (or there's no log yet). This is *snapshot freshness*
+# — distinct from the deferral cap (3, in conformance_lib). The committed report
+# is a convenience snapshot that rides along with work; the authoritative ship
+# check is deploy-preflight, which gates on every deploy regardless of staleness.
+STALE_COMMITS = 10
+
 
 def _git_sha():
     try:
@@ -57,6 +68,30 @@ def _git_sha():
             capture_output=True, text=True, timeout=10,
         )
         return out.stdout.strip() if out.returncode == 0 else None
+    except Exception:
+        return None
+
+
+def _commits_since(sha):
+    """Number of commits from `sha` to HEAD, or None if unknown."""
+    if not sha:
+        return None
+    try:
+        out = subprocess.run(
+            ["git", "rev-list", "--count", "{}..HEAD".format(sha)],
+            cwd=_REPO_ROOT, capture_output=True, text=True, timeout=10,
+        )
+        return int(out.stdout.strip()) if out.returncode == 0 else None
+    except Exception:
+        return None
+
+
+def _last_logged_sha():
+    """git_sha of the most recent log entry, or None (no/empty/unreadable log)."""
+    try:
+        with open(LOG_JSONL, encoding="utf-8") as f:
+            lines = [ln for ln in f if ln.strip()]
+        return json.loads(lines[-1]).get("git_sha") if lines else None
     except Exception:
         return None
 
@@ -241,6 +276,19 @@ def write_artifacts(report):
 def main(argv):
     probe_gh = "--no-gh" not in argv
     do_write = "--no-write" not in argv
+    if_stale = "--if-stale" in argv
+
+    # Snapshot-freshness short-circuit for `just test`: if the committed report
+    # is recent enough, do nothing. Non-fatal regardless — findings are the
+    # pytest gate's job, not this refresh's.
+    if if_stale:
+        n = _commits_since(_last_logged_sha())
+        if n is not None and n < STALE_COMMITS:
+            print("Conformance report fresh ({} commit(s) since last run).".format(n))
+            return 0
+        print("Conformance report stale ({}) — regenerating…".format(
+            "no prior run" if n is None else "{} commits".format(n)))
+
     report = build_report(probe_gh=probe_gh)
     if do_write:
         write_artifacts(report)
@@ -255,6 +303,8 @@ def main(argv):
             os.path.relpath(REPORT_JSON, _REPO_ROOT),
             os.path.relpath(REPORT_MD, _REPO_ROOT),
             os.path.relpath(LOG_JSONL, _REPO_ROOT)))
+    if if_stale:
+        return 0  # snapshot refresh never fails a test run
     return 1 if report["findings"] else 0
 
 

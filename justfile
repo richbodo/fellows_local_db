@@ -238,8 +238,11 @@ data-restore-dry zip="--latest":
 # ---- tests ---------------------------------------------------------------
 
 # Free port and run pytest. Extra args pass through (use `--` before flags).
+# Refreshes the conformance snapshot first when it's gone stale (the readout
+# most devs/LLMs look at). The deterministic conformance *gates* run as pytest
+# under tests/, so findings surface here as ordinary test failures.
 [group('test')]
-test *args="tests/ -v":
+test *args="tests/ -v": conformance-refresh
     ./scripts/ensure_port_8765_free.sh {{args}}
 
 # DB unit tests only (no server needed).
@@ -288,6 +291,28 @@ test-mobile-functional *args="-v":
 test-mobile-promote:
     cp tests/e2e/mobile/current_state/*.png tests/e2e/mobile/__snapshots__/
     @echo "Baselines updated. Review the diff in git, then commit."
+
+
+# ---- conformance ---------------------------------------------------------
+
+# Generate the conformance report (docs/conformance/report.{json,md}) and
+# HARD-FAIL on findings. This is the ship gate — wired into deploy-preflight so
+# no deploy route can bypass it. Best-effort `gh` probe flags abandoned
+# deferrals (a tracking issue closed while its strict-xfail still fails); pass
+# `--no-gh` to skip it offline. The deterministic checker also runs as pytest
+# under `just test`. See plans/conformance_report_and_gate.md.
+[group('conformance')]
+conformance *args="":
+    {{python}} scripts/conformance_report.py {{args}}
+
+# Refresh the committed conformance snapshot only when it's gone stale (HEAD
+# >= 10 commits past the last logged run). Non-fatal and offline (`--no-gh`):
+# the snapshot rides along with work as it lands, the pytest gates enforce
+# findings, and deploy-preflight is the authoritative ship gate. Depended on by
+# `just test`.
+[group('conformance')]
+conformance-refresh:
+    {{python}} scripts/conformance_report.py --if-stale --no-gh
 
 
 # ---- MCP servers ---------------------------------------------------------
@@ -416,6 +441,19 @@ deploy-preflight:
     if [ "${FELLOWS_DEPLOY_SKIP_PREFLIGHT:-0}" = "1" ]; then
         echo "Deploy preflight: skipped (FELLOWS_DEPLOY_SKIP_PREFLIGHT=1)."
         exit 0
+    fi
+    # Conformance gate — the one place every deploy route (ship / ship-fast /
+    # deploy) passes through. `just ship` runs `test-fast`, which omits the
+    # attestation pytest entirely, so this is what actually blocks shipping a
+    # release whose Security Target over-claims. `--no-write` verifies without
+    # regenerating artifacts (which would dirty the tree the checks below flag).
+    echo "Deploy preflight: conformance gate…"
+    if ! {{python}} scripts/conformance_report.py --no-write; then
+        echo
+        echo "Deploy aborted: conformance findings above. A user-facing release"
+        echo "must ship a finding-free attestation — fix the code or honestly"
+        echo "downgrade the row before shipping (plans/conformance_report_and_gate.md)."
+        exit 1
     fi
     branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')
     head_sha=$(git rev-parse --short HEAD 2>/dev/null || echo '?')
