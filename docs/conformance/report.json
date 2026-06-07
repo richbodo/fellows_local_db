@@ -1,7 +1,7 @@
 {
   "meta": {
-    "generated_at": "2026-06-04T06:52:09Z",
-    "git_sha": "17865ff",
+    "generated_at": "2026-06-07T07:07:56Z",
+    "git_sha": "78ffc51",
     "source": "docs/Architecture.md",
     "generator": "scripts/conformance_report.py",
     "toolkit_version": "0.1 (draft)",
@@ -9,22 +9,14 @@
   },
   "headline": {
     "verdict": "conditionally-conformant",
-    "deferral_count": 1,
+    "deferral_count": 0,
     "deferral_cap": 3,
-    "conformant_rows": 29,
-    "total_rows": 32,
+    "conformant_rows": 28,
+    "total_rows": 31,
     "findings_count": 0,
     "ok": true
   },
-  "deferrals": [
-    {
-      "file": "tests/e2e/test_private_data_enforcement.py",
-      "name": "test_off_folder_settings_are_empty",
-      "reason": "Worker still mints benign workspace-identity metadata (workspace_uuid + counters) into OPFS even off-folder, so getSettings() is not literally empty. Gating _ensureWorkspaceIdentity on folder-mode collided with the folder-chooser identity/pivot flow (tests/e2e/test_folder_probe.py) and needs the folder QA pass \u2014 tracked in plans/private_data_enforcement.md. tracking: #248. When that lands this XPASSes; drop the marker and promote to a guard.",
-      "tracking_issue": 248,
-      "issue_state": "OPEN"
-    }
-  ],
+  "deferrals": [],
   "findings": [],
   "rows": [
     {
@@ -568,6 +560,11 @@
           "ref": "tests/e2e/test_private_data_enforcement.py::test_folder_attached_allows_create_group",
           "status": "live",
           "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_private_data_enforcement.py::test_permission_lapse_reduces_capability_then_reconnect_restores",
+          "status": "live",
+          "detail": ""
         }
       ],
       "findings": []
@@ -598,12 +595,22 @@
     },
     {
       "id": "CST-PWA-STORAGE-EVICTABLE",
-      "status_text": "**conformant**: the two prefs (`has_email_only` / `self_email`) are localStorage-only off-folder \u2014 the boot reconciles no longer write `settings` to OPFS in browse-only mode (PR #244 `d2706a9`; [`../plans/private_data_enforcement.md`](../plans/private_data_enforcement.md)). The \"Avoided\" claim now holds.",
+      "status_text": "**conformant**: the two prefs (`has_email_only` / `self_email`) are localStorage-only off-folder \u2014 the boot reconciles no longer write `settings` to OPFS in browse-only mode (PR #244 `d2706a9`; [`../plans/private_data_enforcement.md`](../plans/private_data_enforcement.md)). #248 closed the last residual: the worker no longer mints workspace-identity metadata into OPFS off-folder either (it's minted only when a store becomes canonical \u2014 the first folder write), so the browse-only settings store is now *literally* empty. `test_off_folder_settings_are_empty` is a hard guard, not a strict-xfail. The \"Avoided\" claim holds in its strongest reading.",
       "conformant": true,
       "review_kind": false,
       "refs": [
         {
           "ref": "tests/e2e/test_private_data_enforcement.py::test_prefs_stay_localstorage_only_off_folder",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_private_data_enforcement.py::test_off_folder_settings_are_empty",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_private_data_enforcement.py::test_folder_file_on_disk_carries_identity",
           "status": "live",
           "detail": ""
         }
@@ -612,7 +619,7 @@
     },
     {
       "id": "CST-PWA-NO-SYNC",
-      "status_text": "conformant: canonical-copy disambiguation shipped; sync explicitly out of scope",
+      "status_text": "conformant: canonical-copy disambiguation shipped (durably on disk, verified byte-level); sync explicitly out of scope",
       "conformant": true,
       "review_kind": false,
       "refs": [
@@ -625,16 +632,18 @@
           "ref": "tests/e2e/test_folder_probe.py",
           "status": "live",
           "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_private_data_enforcement.py::test_folder_file_on_disk_carries_identity",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_private_data_enforcement.py::test_folder_backup_on_disk_carries_identity",
+          "status": "live",
+          "detail": ""
         }
       ],
-      "findings": []
-    },
-    {
-      "id": "CST-PWA-DURABLE-SQL-ARCH",
-      "status_text": "conformant by architecture",
-      "conformant": true,
-      "review_kind": true,
-      "refs": [],
       "findings": []
     },
     {

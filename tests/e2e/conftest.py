@@ -271,6 +271,58 @@ _FOLDER_PICKER_STUB_MIN = """
     var root = await navigator.storage.getDirectory();
     try { await root.removeEntry(STUB, { recursive: true }); } catch (e) {}
   };
+  // Byte-level probe (#248). Read back the ACTUAL bytes the worker exported to
+  // the canonical folder file (and its backup ring), so a test can open them as
+  // a real SQLite DB and assert what is DURABLY on disk — not just the worker's
+  // in-RAM view via getSettings(). This is the file-content half of the manual
+  // folder QA ("inspect via Restore/inspect, or DevTools"). Returns base64
+  // (Playwright serializes strings cleanly; typed arrays it does not). Walks the
+  // stub's subfolders to find whichever holds relationships.db (Fellows /
+  // Fellows 2 after a collision), so it doesn't hard-code the subfolder name.
+  function _b64(buf) {
+    var bytes = new Uint8Array(buf);
+    var binary = '';
+    var CHUNK = 0x8000;  // chunk so String.fromCharCode.apply doesn't overflow the stack
+    for (var i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+    }
+    return btoa(binary);
+  }
+  window.__probeFolderDbBytes = async function () {
+    var out = { relDbBase64: null, backupNames: [], latestBackupBase64: null };
+    var root = await navigator.storage.getDirectory();
+    var stub;
+    try { stub = await root.getDirectoryHandle(STUB); }
+    catch (e) { return out; }
+    // Find the subfolder that actually holds relationships.db.
+    var sub = null;
+    try {
+      for await (var entry of stub.values()) {
+        if (entry.kind !== 'directory') continue;
+        try { await entry.getFileHandle('relationships.db'); sub = entry; break; }
+        catch (e) {}
+      }
+    } catch (e) {}
+    if (!sub) return out;
+    try {
+      var fh = await sub.getFileHandle('relationships.db');
+      out.relDbBase64 = _b64(await (await fh.getFile()).arrayBuffer());
+    } catch (e) {}
+    try {
+      for await (var e2 of sub.values()) {
+        if (e2.kind === 'file' && e2.name.indexOf('relationships.db.bak.') === 0) {
+          out.backupNames.push(e2.name);
+        }
+      }
+      out.backupNames.sort();
+      if (out.backupNames.length) {
+        var last = out.backupNames[out.backupNames.length - 1];
+        var bh = await sub.getFileHandle(last);
+        out.latestBackupBase64 = _b64(await (await bh.getFile()).arrayBuffer());
+      }
+    } catch (e) {}
+    return out;
+  };
 })();
 """
 

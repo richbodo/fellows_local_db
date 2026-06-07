@@ -4186,6 +4186,12 @@
           rpc.call('clearFolderHandle');
       },
       _checkFolderPermission: function () { return rpc.call('checkFolderPermission'); },
+      // E2E-only (#248) permission-lifecycle seam — simulate a permission lapse
+      // to exercise the reconnect / re-grant flow in CI. See sqlite-worker.js
+      // (__e2eForceFolderPermission); fail-closed, inert in production.
+      _e2eForceFolderPermission: function (permission) {
+        return rpc.call('__e2eForceFolderPermission', { permission: permission });
+      },
       // Read-only scan of all Fellows* stores in a parent (EPIC PR5 chooser).
       // Version-tolerant — it's a read, and the chooser must work to let a
       // stale page recover/pick a store.
@@ -9110,6 +9116,10 @@
   // Conservative default before the first async resolve: locked.
   window.__privateDataTier = isMobileDevice() ? 'browse-only-phone' : 'browse-only-desktop';
   window.__privateDataEnabled = privateDataEnabled;
+  // Exposed for e2e (#248): re-resolve the gate after a simulated permission
+  // lapse without a full reload (a reload would respawn the worker and reset the
+  // seam). Idempotent; same resolver the boot + after-mutation paths call.
+  window.__updatePrivateDataGate = updatePrivateDataGate;
 
   // ===== Folder-push banner (Phase 2 PR 3) =================================
   // Top-of-page banner that surfaces to capable browsers in OPFS-only mode,

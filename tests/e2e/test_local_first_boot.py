@@ -37,6 +37,13 @@ _e2e_conftest = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_e2e_conftest)
 _STANDALONE_DISPLAY_INIT = _e2e_conftest._STANDALONE_DISPLAY_INIT
 WorkerDataHelper = _e2e_conftest.WorkerDataHelper
+# Folder-mode helpers. Under the #244 capability gate a durable group only
+# persists when a verified folder backs it, so the local-first canary must be
+# seeded in folder mode. The fake folder is OPFS-backed and its handle persists
+# in IndexedDB, so it re-hydrates on the second boot within the same context —
+# and the directory still renders from the worker-owned OPFS fellows.db.
+_FOLDER_PICKER_STUB_MIN = _e2e_conftest._FOLDER_PICKER_STUB_MIN
+attach_verified_folder = _e2e_conftest.attach_verified_folder
 
 
 FELLOWS_DB = "**/fellows.db"
@@ -60,6 +67,7 @@ class TestLocalFirstBoot:
     ):
         # ----- First boot: prime OPFS -----
         page1 = _make_standalone_page(context)
+        page1.add_init_script(_FOLDER_PICKER_STUB_MIN)
         try:
             page1.goto(base_url_fixture + "/", wait_until="domcontentloaded")
             helper = WorkerDataHelper(page1)
@@ -68,9 +76,13 @@ class TestLocalFirstBoot:
                 f"Expected worker-backed dataProvider for first boot, got {kind!r}. "
                 "Without a worker provider this test can't validate local-first behavior."
             )
-            # Reset relationships state and seed one group so we can
-            # later assert it survived a network-down second boot.
+            # Reset relationships state, then attach a verified folder before
+            # seeding: under the #244 capability gate a browse-only createGroup
+            # is refused, so the canary must be written in folder mode to be
+            # durable. The fake folder (OPFS-backed) + its IDB handle re-hydrate
+            # on the second boot, so the group still survives the reload.
             helper.wipe_relationships()
+            attach_verified_folder(page1, base_url_fixture)
             full = helper.get_full_fellows()
             assert isinstance(full, list) and len(full) >= 2, (
                 "Expected at least 2 fellows in the local fellows.db after first boot."
@@ -109,6 +121,7 @@ class TestLocalFirstBoot:
                 contacted.append(url)
 
         page2 = _make_standalone_page(context)
+        page2.add_init_script(_FOLDER_PICKER_STUB_MIN)
         page2.on("request", _track)
         try:
             page2.goto(base_url_fixture + "/", wait_until="domcontentloaded")
@@ -162,6 +175,8 @@ class TestLocalFirstBoot:
             try:
                 helper2 = WorkerDataHelper(page2)
                 helper2.wipe_relationships()
+                page2.evaluate("() => window.__dataProvider._clearFolderHandle()")
+                page2.evaluate("() => window.__resetE2EUserFolderMin()")
             except Exception:
                 pass
             context.unroute(FELLOWS_DB)

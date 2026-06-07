@@ -258,7 +258,14 @@ function bootstrapRelationshipsSchema(db) {
   db.exec('PRAGMA foreign_keys = ON;');
   db.exec(RELATIONSHIPS_SCHEMA_SQL);
   db.exec('PRAGMA user_version = ' + RELATIONSHIPS_SCHEMA_VERSION);
-  _ensureWorkspaceIdentity(db);
+  // Workspace identity is intentionally NOT minted here (#248). Off-folder /
+  // browse-only the OPFS settings store must read literally empty — an
+  // identity stamp would be durable metadata for a store that is never
+  // canonical (no second copy to disambiguate). Minting happens only when the
+  // relDb becomes canonical: the first committed folder write
+  // (_maybeWriteFolderAfterCommit, which runs only with folder permission
+  // 'granted'). Folder bytes hydrated from an existing store already carry
+  // their own identity, so nothing is lost for folder users.
 }
 
 function nowIsoSecond() {
@@ -287,16 +294,13 @@ function _deviceLabelGuess() {
   return br + ' on ' + os;
 }
 
-// Mint identity once if absent (called from bootstrap — fresh + restored DBs).
+// Mint identity once if absent. Called ONLY from the canonical-folder-write
+// funnel (_maybeWriteFolderAfterCommit), so it never runs off-folder (#248):
+// in browse-only mode the OPFS settings store stays literally empty. Idempotent
+// — returns early when workspace_uuid already exists (a hydrated folder store
+// carries it), so the per-commit call mints once on a fresh folder store and is
+// a no-op thereafter.
 function _ensureWorkspaceIdentity(db) {
-  // NOTE: This still mints identity metadata (workspace_uuid + counters) into
-  // the OPFS relationships.db even off-folder. That metadata is benign (no
-  // private user content), but it means the off-folder store is not literally
-  // empty. Gating this on folder-mode is tracked as the final enforcement step
-  // (plans/private_data_enforcement.md); a first attempt collided with the
-  // folder-chooser identity/pivot flow, so it needs the folder mobile/desktop
-  // QA pass. The strict-xfail in tests/e2e/test_private_data_enforcement.py
-  // pins the "off-folder settings are empty" target.
   try {
     var existing = dbSelectOne(db, 'SELECT value FROM settings WHERE key = ?', ['workspace_uuid']);
     if (existing && existing.value) return;
@@ -2129,7 +2133,20 @@ async function _probeSubfolder(parentHandle, subfolderName) {
 }
 
 // ----- queryPermission wrapper ---------------------------------------------
+// E2E-only permission-lifecycle seam (#248). The OPFS-backed fake folder handle
+// the suite uses always reports 'granted', so a real permission LAPSE (the
+// 'prompt' state a real OS handle returns after a browser restart) can't be
+// reproduced. When a test sets _e2eForcedPermission via __e2eForceFolderPermission,
+// every query reports that instead, so the reconnect / re-grant flow can be
+// exercised in CI. FAIL-CLOSED BY CONSTRUCTION: the seam only accepts a
+// capability-REDUCING state (never 'granted'), so it cannot bypass the
+// durable-write guard; production page code never sends the RPC.
+var _e2eForcedPermission = null;
 async function _folderQueryPermission() {
+  if (_e2eForcedPermission) {
+    folderRecord.lastPermission = _e2eForcedPermission;
+    return _e2eForcedPermission;
+  }
   if (!folderRecord.parentHandle) return 'no-handle';
   if (typeof folderRecord.parentHandle.queryPermission !== 'function') {
     // Older browsers / non-FSA shims — treat as granted since the only way
@@ -2495,10 +2512,18 @@ async function _maybeWriteFolderAfterCommit() {
     // to write — would just fail and populate lastError with noise.
     return;
   }
-  // Stamp the write generation into the live DB BEFORE exporting, so the
-  // folder copy (and any backup of it) carries the recency the chooser ranks
-  // by (EPIC PR5). Runs only in folder mode — the only stores the chooser sees.
-  if (relDb) _stampWriteGeneration(relDb);
+  // Mint identity (#248) + stamp the write generation into the live DB BEFORE
+  // exporting, so the folder copy (and any backup of it) carries the identity +
+  // recency the chooser ranks by (EPIC PR5). This is the SOLE identity-mint
+  // site: we only reach here with folder permission 'granted' (checked above),
+  // so identity lands exactly when the relDb becomes canonical and never
+  // off-folder. _ensureWorkspaceIdentity is idempotent — it mints once on a
+  // fresh folder store and no-ops on every subsequent commit. Runs only in
+  // folder mode, the only stores the chooser ever sees.
+  if (relDb) {
+    _ensureWorkspaceIdentity(relDb);
+    _stampWriteGeneration(relDb);
+  }
   var bytes;
   try {
     bytes = poolUtil.exportFile(RELATIONSHIPS_DB_SLOT);
@@ -2779,6 +2804,19 @@ handlers.clearFolderHandle = async function () {
 handlers.checkFolderPermission = async function () {
   var state = await _folderQueryPermission();
   return { permission: state };
+};
+
+// E2E-only (#248): simulate a permission lapse so the reconnect / re-grant flow
+// is testable. Accepts only a capability-reducing state ('prompt' / 'denied' /
+// 'no-handle') or null to clear — modelling the OS re-granting, after which the
+// real handle query reports 'granted' again. Never accepts 'granted' (see the
+// fail-closed note on _folderQueryPermission). Inert in production: only the
+// e2e suite sends this RPC.
+handlers.__e2eForceFolderPermission = function (msg) {
+  var p = msg && msg.permission;
+  _e2eForcedPermission =
+    (p === 'prompt' || p === 'denied' || p === 'no-handle') ? p : null;
+  return { forced: _e2eForcedPermission };
 };
 
 // Re-hands the in-memory handle to the page so the page can call

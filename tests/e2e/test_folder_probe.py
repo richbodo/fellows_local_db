@@ -130,15 +130,18 @@ def test_lock_my_private_data_returns_to_browse_only(standalone_page, base_url_f
 
 
 def test_workspace_identity_and_write_generation_stamp(standalone_page, base_url_fixture):
-    """EPIC PR5 foundation: relationships.db carries a workspace identity
-    (minted at bootstrap) and a write_generation that strictly increases on
-    each committed mutation in folder mode — the recency the chooser ranks by."""
+    """EPIC PR5 + #248: workspace identity is minted onto a relationships.db
+    only when it becomes canonical — the first committed folder write — NOT at
+    bootstrap. So off-folder there is no identity (browse-only stays empty),
+    and once in folder mode write_generation strictly increases on each
+    committed mutation (the recency the chooser ranks by)."""
     page = standalone_page
     _boot(page, base_url_fixture)
-    # Identity is minted when relationships.db is bootstrapped at boot.
-    uuid = page.evaluate("() => window.__dataProvider.getSetting('workspace_uuid')")
-    assert uuid, "workspace_uuid should be minted at bootstrap"
-    # Attach a folder so the post-commit folder write (which stamps) runs.
+    # #248: off-folder the worker mints no identity — browse-only is
+    # localStorage-only, so workspace_uuid is absent until a folder is canonical.
+    uuid0 = page.evaluate("() => window.__dataProvider.getSetting('workspace_uuid')")
+    assert not uuid0, ("workspace_uuid must be absent off-folder (#248)", uuid0)
+    # Attach a folder so the post-commit folder write (which mints + stamps) runs.
     page.evaluate("() => window.__dataProvider._clearFolderHandle()")
     page.evaluate("() => window.__resetE2EUserFolderMin && window.__resetE2EUserFolderMin()")
     page.goto(base_url_fixture + "/#/settings", wait_until="domcontentloaded")
@@ -152,6 +155,9 @@ def test_workspace_identity_and_write_generation_stamp(standalone_page, base_url
         "(rid) => window.__dataProvider.createGroup({name:'g1', note:'', fellow_record_ids:[rid]})",
         rid,
     )
+    # Becoming canonical mints identity on the first committed folder write.
+    uuid = page.evaluate("() => window.__dataProvider.getSetting('workspace_uuid')")
+    assert uuid, "workspace_uuid should be minted on the first canonical folder write"
     gen1 = page.evaluate("() => window.__dataProvider.getSetting('write_generation')")
     page.evaluate(
         "() => window.__dataProvider.createGroup({name:'g2', note:'', fellow_record_ids:[]})"

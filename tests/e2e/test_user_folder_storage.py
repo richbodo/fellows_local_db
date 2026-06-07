@@ -257,17 +257,21 @@ class TestUserFolderStorage:
         self, folder_page, base_url_fixture
     ):
         _open_settings(folder_page, base_url_fixture)
-        # Seed a group so the relationships.db isn't empty.
+        # Attach the folder FIRST. Under the capability gate (#244) durable
+        # writes are refused until a folder backs the store, so a group can't be
+        # seeded before attaching — choosing the folder writes a fresh
+        # relationships.db, and the badge flips to Saved after the auto-save.
+        folder_page.locator("#settings-folder-choose").click()
+        badge_text = folder_page.locator("#settings-folder-badge .settings-folder-badge-text")
+        expect(badge_text).to_contain_text("Saved to", timeout=10000)
+        # Now in folder mode: seed a group so a real user mutation lands in the
+        # folder file (createGroup awaits the post-commit folder write).
         full = folder_page.evaluate("() => window.__dataProvider.getFull()")
         rid = full[0]["record_id"]
         folder_page.evaluate(
             "(rid) => window.__dataProvider.createGroup({name: 'Folder seed', note: '', fellow_record_ids: [rid]})",
             rid,
         )
-        folder_page.locator("#settings-folder-choose").click()
-        # Badge flips to Saved after the auto-save.
-        badge_text = folder_page.locator("#settings-folder-badge .settings-folder-badge-text")
-        expect(badge_text).to_contain_text("Saved to", timeout=10000)
         # Real file landed in the stub folder.
         probe = folder_page.evaluate("() => window.__probeE2EUserFolder()")
         assert probe["hasFellows"] is True, "Fellows/ subfolder should exist"
