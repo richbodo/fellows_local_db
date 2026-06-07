@@ -11,6 +11,98 @@ Newest first.
 
 ---
 
+## 2026-06-07 — The workspace is the user's actuation surface; test the gate, not the human
+
+### The finding
+
+Planning AI write-proposals ([`../plans/ai_write_proposals_groups.md`](../plans/ai_write_proposals_groups.md))
+made explicit a discipline the app had been practising piecemeal: an AI may
+*propose* a change, but the user *disposes* of it against a deterministic
+before/after diff **in the workspace, not in the AI's interface**. Pulling the
+thread showed this is not a rule about AI writes — it is one instance of a
+single, previously-unnamed principle:
+
+> **The human is the actuator; the workspace is the locus of ground truth.**
+> Every path that mutates the sovereign store or sends data out of it routes
+> through a user-legible review in a surface the user controls. The proposer —
+> AI, network, or importer — only *stages*; the human *disposes*.
+
+It was already load-bearing in five places before we named it: **AC-19** (payload
+visible before send), **AC-16** (user picks the transport), **AC-MCP-B** (MCP
+stages, the workspace launches), **AC-10 / AC-PRM-D** (directory re-import
+previews orphaned members and is user-initiated), and **AC-PRM-A** ("an LLM call
+over user data is a *transport*", so it inherits the same mediation). The
+AI-writes plan is the same principle reaching a new mutation source, not a new
+principle.
+
+### The hard part is what you must NOT try to test
+
+The obvious reading — "verify a real human is driving the workspace" — is a trap.
+That is the bot-detection / liveness arms race, and detection is not, and should
+not be assumed to be, ahead of automation in that race. A guarantee built on
+"is this a human?" is false confidence.
+
+The escape is that the invariant never required knowing *who* the actor is. The
+enforceable property is a property of the **code**, and it is actor-agnostic:
+
+1. **No bypass** — no path mutates `relationships.db` except through the dispose
+   gate (a negative-invariant test, same family as
+   `test_no_durable_private_write_when_browse_only` and the `mode=ro` proofs).
+2. **Separation** — the proposing surface (the MCP inbox; any in-workspace AI)
+   carries *no* actuation capability; dispose is a distinct, attributable event
+   decoupled from the proposer.
+3. **Legibility** — the diff is deterministic, renders human-readable content
+   (names, not `record_id`s), and escapes untrusted proposer strings.
+
+This is why we named it "the human is the *actuator*" and not "a human is
+*present*": the first is a code property you can test; the second is a detection
+problem you cannot win. **The naming choice is the testability decision.**
+
+### The claim is bounded — and that's the honest part
+
+The gate guarantees **separation, legibility, and attribution. It does not
+guarantee comprehension.** We cannot probe the user's understanding, and an
+automation driving the workspace can click *Approve* as easily as a person can.
+That residual is the same shape as `EX-H7` consent-to-human propagation, which
+already landed as a *best-effort* notice in the MCP `instructions` handshake
+(`CLOUD_LLM_PROPAGATION_NOTICE`) — conformant for the mechanical half, explicitly
+unenforceable for the "did the other side actually tell the human" half. At every
+boundary the workspace does not own — the user's mind, the AI client's UI — the
+posture is identical: make the ask legible, and attest the gap rather than
+pretend to close it. (The further idea of *extracting a binding promise from
+another AI* runs aground here: a stateless generator has no continuous identity
+or liability to bind, so an "AI contract" is closer to a category error than an
+unsolved engineering problem. Test that *we* made and recorded the ask; treat the
+other agent's compliance as out-of-band.)
+
+### Two consequences worth acting on
+
+- **A gap the principle exposes:** private-data *restore*
+  (`importRelationshipsBytes` over `relationships.db`) is a wholesale replace with
+  far less "what is changing" legibility than AC-10 gives a *directory* import. It
+  is the sibling boundary that does not yet meet its family's bar.
+- **A commitment to pin before it's needed:** "review happens in a non-AI
+  surface" is true today only *by construction* (vanilla-JS SPA, no embedded
+  agent). The `window.ai` search affordance and the plan's deferred in-app local
+  model are the pressure points. The honest commitment is not "the workspace MUST
+  NOT be an AI interface" but the user-knowledge form: any in-workspace AI is a
+  *proposer* subject to the same gate, never an *actuator*. Declare it, with a
+  frontier, before local-AI lands — not after.
+
+### What this feeds back into the toolkit
+
+A candidate third general PNA mechanism, dual in spirit to exceptions (the user
+raises) and constraints (the platform imposes): a **user-mediation /
+informed-actuation invariant** — the proposer stages, the human disposes, and the
+claim is *separation + legibility + attribution*, never *comprehension*. Per the
+toolkit's reference-driven model it should ride upstream with the working design
+that demonstrates it — and that demonstration is **test-first**: the demonstrating
+tests (the three properties above) define the enforceable boundary, and the spec
+is written to match what proved testable, not the other way round. Tracked in
+[#252](https://github.com/richbodo/fellows_local_db/issues/252).
+
+---
+
 ## 2026-06-01 — A PWA can't give every platform a writable private store; "constraints" name the ceiling honestly
 
 ### The finding
