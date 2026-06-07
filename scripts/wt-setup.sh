@@ -15,6 +15,9 @@
 #   git worktree add ../fellows-wt-mybranch -b mybranch
 #   scripts/wt-setup.sh ../fellows-wt-mybranch
 #
+# Higher-level shortcut (creates the worktree + launches Claude): `just wt <branch>`.
+# When to use worktrees + the port-8765 serialization rule: docs/worktrees.md.
+#
 # Re-runnable; skips links that already exist. (scripts/wt-claude.sh links .venv
 # via the `wt`/worktrunk flow; this script is the plain-git equivalent and also
 # carries app/fellows.db + mcp_servers/.venv.)
