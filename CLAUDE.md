@@ -24,6 +24,12 @@ Read README.md for project setup, API docs, and test commands. Read docs/Archite
 - **UI/UX changes belong in `docs/users_manual.md`.** When a feature PR changes user-visible behavior (new screen, new flow, changed control, new option), include the corresponding users-manual update in the same PR — accepting the PR accepts the doc change with it. The user guide is the source of truth for UI/UX from a user's perspective; the app links to it from the About page.
 - **OPFS access only via the dedicated worker; main thread is an RPC client.** All `relationships.db` and `fellows.db` reads/writes go through `app/static/vendor/sqlite-worker.js`. The main thread does not call `navigator.storage.getDirectory`, does not load `sqlite3.wasm`, and does not hold any `FileSystemSyncAccessHandle`. (Phase 1 of `plans/local_first_worker_architecture.md` enforces this in code; until then `app/static/app.js` still has the legacy main-thread paths and this convention applies to *new* code.)
 
+## Workflow (git, PRs, shipping)
+
+- **PR/issue bodies via `--body-file`, never inline.** Pass `gh pr create` / `gh issue create` a file (or a heredoc to a temp file). Backticks and `$(…)` in an inline `--body` get shell-interpreted and silently drop content — a commit hash has been lost this way.
+- **Branch new work off `main`** (confirm with `git branch --show-current` first), and **after a PR merges, verify every intended commit actually landed.** A dropped commit is silent; recover it in a follow-up PR.
+- **Before shipping, run the suite and triage every failure as pre-existing vs. newly-introduced.** A red that reproduces on a clean branch/`main` HEAD (stash your changes to check) is pre-existing — say so explicitly and fix it as its own scoped change; never silently absorb it into unrelated work, and never claim green while a known red stands. This is § Conformance discipline's *everything fails loudly* applied to the test run itself.
+
 ## Conformance discipline
 
 These rules keep `docs/Architecture.md`'s AC/CST attestation (the Security
