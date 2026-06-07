@@ -294,10 +294,16 @@ def test_failed_refresh_preserves_previous_db_and_records_failure(
 
 
 def test_relationships_restore_does_not_refetch_fellows_db(
-    standalone_page, base_url_fixture
+    folder_attached_page, base_url_fixture
 ):
     """Restoring a relationships.db backup must not desync fellows.db
     freshness — invariant L8 in the local-first worker plan.
+
+    Boots with a verified folder attached (``folder_attached_page``): under the
+    capability gate, createGroup + importRelationshipsBytes are durable-write
+    ops, refused off-folder at both the page and the worker (#244/#252), so the
+    restore round-trip this test needs requires a folder. fellows.db freshness
+    (the thing under test) is independent of the relationships folder.
 
     The whole reason `fellows.db.meta.json` lives at the OPFS root
     (sibling of the SAH-pool dir, not inside relationships.settings) is
@@ -306,7 +312,7 @@ def test_relationships_restore_does_not_refetch_fellows_db(
     a real importRelationshipsBytes round-trip, a reload must produce
     zero GET /fellows.db requests because meta.sha still matches.
     """
-    page = standalone_page
+    page = folder_attached_page
 
     # Cold-start boot to populate fellows.db + record its sha in meta.
     page.goto(base_url_fixture + "/", wait_until="domcontentloaded")

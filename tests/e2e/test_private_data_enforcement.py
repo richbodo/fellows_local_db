@@ -101,6 +101,51 @@ def test_browse_only_refuses_create_group(standalone_page, base_url_fixture):
     assert r.get("browseOnly") is True, r
 
 
+def test_browse_only_refuses_import_relationships_bytes(standalone_page, base_url_fixture):
+    """#252 no-bypass audit. importRelationshipsBytes (the restore path, and the
+    future email-import path) must NOT durably write private data off-folder.
+    Unlike createGroup/setSetting it carries no page-side refuseIfBrowseOnly and
+    the worker handler has no folder guard — so a console/restore call could land
+    a durable private store in the OPFS slot in browse-only mode, bypassing the
+    gate (CLAUDE.md: "a gated capability whose RPC still succeeds from the
+    DevTools console is not reduced"). Export is a read (fine); the import must be
+    refused."""
+    page = standalone_page
+    _boot_browse_only(page, base_url_fixture)
+    r = _attempt(
+        page,
+        "() => window.__dataProvider.exportRelationshipsBytes()"
+        ".then(function (b) { return window.__dataProvider.importRelationshipsBytes(b); })",
+    )
+    assert r.get("threw") is True, f"import must be refused browse-only, got: {r}"
+    assert r.get("browseOnly") is True, r
+
+
+def test_worker_is_load_bearing_off_folder_via_raw_rpc(standalone_page, base_url_fixture):
+    """#252 'full data-layer hardening': the WORKER itself — not just the page —
+    refuses durable private writes off-folder. Calls the raw worker RPC
+    (`window.__dataProvider._rpc`) directly, bypassing the page-side
+    refuseIfBrowseOnly, and asserts every mutating relationships.db op is refused
+    at the OPFS owner with a BrowseOnlyError. This is the load-bearing half: a
+    DevTools-console call can't write durable private data in browse-only mode
+    (CLAUDE.md — capability reductions enforce at the data layer, never UI-only)."""
+    page = standalone_page
+    _boot_browse_only(page, base_url_fixture)
+    ops = [
+        ("createGroup", "{name:'x', note:'', fellow_record_ids:[]}"),
+        ("updateGroup", "{id:1, patch:{name:'y'}}"),
+        ("deleteGroup", "{id:1}"),
+        ("setSetting", "{key:'self_email', value:'me@example.com'}"),
+        ("importRelationshipsBytes", "{bytes:new Uint8Array(0)}"),
+    ]
+    for op, args in ops:
+        r = _attempt(page, f"() => window.__dataProvider._rpc.call('{op}', {args})")
+        assert r.get("threw") is True, (op, r)
+        # name survives the worker→page error envelope (errorName); the
+        # browseOnly boolean does not, so key on name (set by the worker guard).
+        assert r.get("name") == "BrowseOnlyError", (op, r)
+
+
 def test_browse_only_refuses_set_setting(standalone_page, base_url_fixture):
     page = standalone_page
     _boot_browse_only(page, base_url_fixture)

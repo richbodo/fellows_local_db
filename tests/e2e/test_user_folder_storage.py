@@ -722,26 +722,38 @@ class TestPhase2Pivot:
     # visible whenever local persistence is available, so the
     # hide-on-folder-active behavior no longer applies.
 
-    def test_opfs_only_mode_keeps_backups_in_opfs(
+    def test_no_folder_writes_nothing_durable_not_even_opfs_backups(
         self, folder_page, base_url_fixture
     ):
-        """Regression check: a user who has NOT picked a folder still
-        gets OPFS-resident backups. Migration only kicks in when
-        folder mode is active.
+        """Capability gate (#244/#252): with NO folder picked, the app keeps no
+        durable private store — not even an OPFS backup ring.
+
+        This replaces the former test_opfs_only_mode_keeps_backups_in_opfs, which
+        asserted that an off-folder user still gets OPFS-resident backups. That
+        was the pre-gate leak written down as a feature: the import path seeded
+        durable private data into evictable OPFS off-folder, contradicting
+        CST-PWA-PRIVATE-SNAPSHOT ("off-folder there is no private store"). The
+        durable-write guard (#252) now refuses that import at the worker, so the
+        gate-consistent truth is: nothing durable lands off-folder.
         """
         _open_settings(folder_page, base_url_fixture)
-        # Don't pick a folder. Trigger a snapshot via the same
-        # export/import round-trip used in the folder-mode test.
-        folder_page.evaluate("""
+        # No folder picked → off-folder. The export/import round-trip that used
+        # to seed an OPFS backup is now refused (export is a read and succeeds;
+        # the import is the durable write and is refused at page + worker).
+        r = folder_page.evaluate("""
           async () => {
             var dp = window.__dataProvider;
-            var bytes = await dp.exportRelationshipsBytes();
-            await dp.importRelationshipsBytes(bytes);
+            try {
+              var bytes = await dp.exportRelationshipsBytes();
+              await dp.importRelationshipsBytes(bytes);
+              return { refused: false };
+            } catch (e) { return { refused: true, name: e.name }; }
           }
         """)
+        assert r["refused"] is True, f"off-folder import must be refused; got {r}"
         opfs_backups = folder_page.evaluate("() => window.__listE2EOpfsBackups()")
-        assert opfs_backups, (
-            f"OPFS-only mode should write snapshots to OPFS; OPFS backups={opfs_backups!r}"
+        assert opfs_backups == [], (
+            f"off-folder = no durable private store → no OPFS backups; got {opfs_backups!r}"
         )
         # No folder was picked, so the stub folder shouldn't exist at all.
         probe = folder_page.evaluate("() => window.__probeE2EUserFolder()")

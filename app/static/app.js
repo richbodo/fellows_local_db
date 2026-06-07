@@ -4120,14 +4120,16 @@
         return rpc.call('countRelationships');
       },
       importRelationshipsBytes: function (bytes) {
-        return refuseIfVersionSkew('importRelationshipsBytes') ||
+        return refuseIfBrowseOnly('importRelationshipsBytes') ||
+          refuseIfVersionSkew('importRelationshipsBytes') ||
           rpc.call('importRelationshipsBytes', { bytes: bytes });
       },
       listRelationshipsBackups: function () {
         return rpc.call('listRelationshipsBackups');
       },
       restoreRelationshipsBackup: function (name) {
-        return refuseIfVersionSkew('restoreRelationshipsBackup') ||
+        return refuseIfBrowseOnly('restoreRelationshipsBackup') ||
+          refuseIfVersionSkew('restoreRelationshipsBackup') ||
           rpc.call('restoreRelationshipsBackup', { name: name });
       },
       // Reset Everything — closes both DBs, tears down SAH-pool VFS,
