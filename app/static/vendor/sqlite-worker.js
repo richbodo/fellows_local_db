@@ -2133,7 +2133,20 @@ async function _probeSubfolder(parentHandle, subfolderName) {
 }
 
 // ----- queryPermission wrapper ---------------------------------------------
+// E2E-only permission-lifecycle seam (#248). The OPFS-backed fake folder handle
+// the suite uses always reports 'granted', so a real permission LAPSE (the
+// 'prompt' state a real OS handle returns after a browser restart) can't be
+// reproduced. When a test sets _e2eForcedPermission via __e2eForceFolderPermission,
+// every query reports that instead, so the reconnect / re-grant flow can be
+// exercised in CI. FAIL-CLOSED BY CONSTRUCTION: the seam only accepts a
+// capability-REDUCING state (never 'granted'), so it cannot bypass the
+// durable-write guard; production page code never sends the RPC.
+var _e2eForcedPermission = null;
 async function _folderQueryPermission() {
+  if (_e2eForcedPermission) {
+    folderRecord.lastPermission = _e2eForcedPermission;
+    return _e2eForcedPermission;
+  }
   if (!folderRecord.parentHandle) return 'no-handle';
   if (typeof folderRecord.parentHandle.queryPermission !== 'function') {
     // Older browsers / non-FSA shims — treat as granted since the only way
@@ -2791,6 +2804,19 @@ handlers.clearFolderHandle = async function () {
 handlers.checkFolderPermission = async function () {
   var state = await _folderQueryPermission();
   return { permission: state };
+};
+
+// E2E-only (#248): simulate a permission lapse so the reconnect / re-grant flow
+// is testable. Accepts only a capability-reducing state ('prompt' / 'denied' /
+// 'no-handle') or null to clear — modelling the OS re-granting, after which the
+// real handle query reports 'granted' again. Never accepts 'granted' (see the
+// fail-closed note on _folderQueryPermission). Inert in production: only the
+// e2e suite sends this RPC.
+handlers.__e2eForceFolderPermission = function (msg) {
+  var p = msg && msg.permission;
+  _e2eForcedPermission =
+    (p === 'prompt' || p === 'denied' || p === 'no-handle') ? p : null;
+  return { forced: _e2eForcedPermission };
 };
 
 // Re-hands the in-memory handle to the page so the page can call

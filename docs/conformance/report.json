@@ -1,7 +1,7 @@
 {
   "meta": {
-    "generated_at": "2026-06-04T09:13:19Z",
-    "git_sha": "18bfab6",
+    "generated_at": "2026-06-07T07:07:56Z",
+    "git_sha": "78ffc51",
     "source": "docs/Architecture.md",
     "generator": "scripts/conformance_report.py",
     "toolkit_version": "0.1 (draft)",
@@ -560,6 +560,11 @@
           "ref": "tests/e2e/test_private_data_enforcement.py::test_folder_attached_allows_create_group",
           "status": "live",
           "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_private_data_enforcement.py::test_permission_lapse_reduces_capability_then_reconnect_restores",
+          "status": "live",
+          "detail": ""
         }
       ],
       "findings": []
@@ -603,13 +608,18 @@
           "ref": "tests/e2e/test_private_data_enforcement.py::test_off_folder_settings_are_empty",
           "status": "live",
           "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_private_data_enforcement.py::test_folder_file_on_disk_carries_identity",
+          "status": "live",
+          "detail": ""
         }
       ],
       "findings": []
     },
     {
       "id": "CST-PWA-NO-SYNC",
-      "status_text": "conformant: canonical-copy disambiguation shipped; sync explicitly out of scope",
+      "status_text": "conformant: canonical-copy disambiguation shipped (durably on disk, verified byte-level); sync explicitly out of scope",
       "conformant": true,
       "review_kind": false,
       "refs": [
@@ -620,6 +630,16 @@
         },
         {
           "ref": "tests/e2e/test_folder_probe.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_private_data_enforcement.py::test_folder_file_on_disk_carries_identity",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_private_data_enforcement.py::test_folder_backup_on_disk_carries_identity",
           "status": "live",
           "detail": ""
         }

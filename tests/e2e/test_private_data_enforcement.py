@@ -14,6 +14,11 @@ WITH a folder) is covered by tests/e2e/test_worker_rpc.py via worker_data_folder
 """
 from __future__ import annotations
 
+import base64
+import os
+import sqlite3
+import tempfile
+
 # Benign workspace-identity metadata (a random UUID + device label + counters —
 # no private user content). Since #248 the worker mints this ONLY onto a
 # canonical folder store (on the first committed folder write), never off-folder,
@@ -31,6 +36,32 @@ _USER_PREF_KEYS = {"has_email_only", "self_email"}
 
 def _user_keys(settings):
     return set(settings or {}) - _IDENTITY_KEYS
+
+
+def _settings_from_db_bytes(b64):
+    """Open a base64-encoded SQLite image READ-ONLY with stdlib sqlite3 and
+    return its `settings` table as a dict.
+
+    The byte-level oracle (#248): this asserts on what is DURABLY written to the
+    folder file on disk — the bytes the worker exported via poolUtil.exportFile —
+    not the worker's in-RAM view returned by getSettings(). Opening the bytes as
+    a real SQLite DB also proves the export produced a valid DB with the expected
+    schema, not just plausible RAM. Stdlib only (no new deps); ``?mode=ro`` so the
+    parse can never mutate the copy.
+    """
+    raw = base64.b64decode(b64)
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    try:
+        with open(path, "wb") as f:
+            f.write(raw)
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            return dict(con.execute("SELECT key, value FROM settings").fetchall())
+        finally:
+            con.close()
+    finally:
+        os.unlink(path)
 
 
 def _boot_browse_only(page, base_url):
@@ -154,3 +185,108 @@ def test_folder_attached_allows_create_group(worker_data_folder):
     g = wd.create_group("ok with folder", fellow_record_ids=[full[0]["record_id"]])
     assert isinstance(g["id"], int)
     assert g["name"] == "ok with folder"
+
+
+# ===== Byte-level oracle (#248): assert what is durably ON DISK ==============
+# test_folder_store_carries_identity_after_write (above) asserts the worker's
+# in-RAM view via getSettings(). These two open the actual bytes the worker
+# exported to the folder file (and its backup ring) as a real SQLite DB — the
+# file-content checks the manual folder QA performs by hand ("inspect via
+# Restore/inspect, or DevTools"). They exercise a different link in the chain:
+# the export, not just the live connection.
+
+
+def test_folder_file_on_disk_carries_identity(worker_data_folder):
+    """#248 byte-level: identity is in the bytes exported to the canonical folder
+    file, not only in the worker's RAM. Drive a real mutation, then open the
+    on-disk Fellows/relationships.db and assert the identity row is durably
+    present. Covers the manual QA item "fresh folder attach → identity present in
+    the folder's relationships.db". Folder writes are awaited inside the mutation
+    handler, so by the time create_group returns the export has landed — no poll
+    needed."""
+    wd = worker_data_folder
+    full = wd.get_full_fellows()
+    wd.create_group("disk identity", fellow_record_ids=[full[0]["record_id"]])
+    probe = wd.page.evaluate("() => window.__probeFolderDbBytes()")
+    assert probe["relDbBase64"], f"no relationships.db landed in the folder: {probe}"
+    on_disk = _settings_from_db_bytes(probe["relDbBase64"])
+    assert on_disk.get("workspace_uuid"), on_disk
+    # _ensureWorkspaceIdentity mints write_generation '0', then
+    # _stampWriteGeneration bumps it before the export — so the file shows >= 1.
+    assert int(on_disk.get("write_generation", "0")) >= 1, on_disk
+
+
+def test_folder_backup_on_disk_carries_identity(worker_data_folder):
+    """#248 + CST-PWA-NO-SYNC byte-level: the folder backup ring also carries
+    identity, so a restored backup keeps its canonical-copy ranking
+    (write_generation). Force exactly one snapshot via an export/import
+    round-trip (importRelationshipsBytes always snapshots-before-import), then
+    open the latest folder bak.* as a SQLite DB and assert the identity row is in
+    its bytes. Covers the manual QA item "backup ring in folder mode still
+    carries identity"."""
+    wd = worker_data_folder
+    full = wd.get_full_fellows()
+    wd.create_group("backup identity", fellow_record_ids=[full[0]["record_id"]])
+    wd.page.evaluate(
+        """async () => {
+            var dp = window.__dataProvider;
+            var bytes = await dp.exportRelationshipsBytes();
+            await dp.importRelationshipsBytes(bytes);
+        }"""
+    )
+    probe = wd.page.evaluate("() => window.__probeFolderDbBytes()")
+    assert probe["backupNames"], f"no folder backup was written: {probe}"
+    assert probe["latestBackupBase64"], probe
+    backup = _settings_from_db_bytes(probe["latestBackupBase64"])
+    assert backup.get("workspace_uuid"), backup
+
+
+# ===== Permission-lifecycle: lapse → reduce → reconnect → restore ===========
+# The OPFS-backed fake folder handle always reports 'granted', so a real
+# permission lapse can't be reproduced. The worker carries a fail-closed e2e
+# seam (__e2eForceFolderPermission) that forces queryPermission to a
+# capability-REDUCING state, letting this exercise the app's HANDLING of the
+# reconnect / re-grant flow. The one thing it can't assert is that real Chrome
+# actually returns 'prompt' after a restart — a browser-behavior fact, the
+# documented manual residual (PR #251 maintainer QA).
+
+
+def test_permission_lapse_reduces_capability_then_reconnect_restores(worker_data_folder):
+    """A verified folder whose permission lapses (the 'prompt' a real OS handle
+    returns after a browser restart) must drop the app to browse-only — the gate
+    keys off live permission, not a one-time attach — and the real reconnect()
+    path must restore private-folder once permission is re-granted."""
+    wd = worker_data_folder
+    page = wd.page
+    # Precondition: folder attached, permission granted, private data live.
+    assert page.evaluate("() => window.__privateDataEnabled()") is True
+    pre = page.evaluate("() => window.__folderController.getState()")
+    assert pre["permission"] == "granted", pre
+
+    # 1) Simulate the lapse. Detection: badge 'inaccessible', and the gate
+    #    reduces capability to browse-only (no durable private store while the
+    #    folder is unverified).
+    page.evaluate("() => window.__dataProvider._e2eForceFolderPermission('prompt')")
+    lapsed = page.evaluate("() => window.__folderController.getState()")
+    assert lapsed["permission"] == "prompt", lapsed
+    assert page.evaluate(
+        "(s) => window.__folderController.badge(s)", lapsed
+    ) == "inaccessible"
+    tier = page.evaluate(
+        "async () => { await window.__updatePrivateDataGate(); return window.__privateDataTier; }"
+    )
+    assert tier == "browse-only-desktop", tier
+    assert page.evaluate("() => window.__privateDataEnabled()") is False
+
+    # 2) User re-grants: requestPermission succeeds and queryPermission reports
+    #    'granted' again (modelled by clearing the forced lapse). The real
+    #    reconnect() path (page requestPermission → worker re-query) restores
+    #    private-folder.
+    page.evaluate("() => window.__dataProvider._e2eForceFolderPermission(null)")
+    restored = page.evaluate("async () => await window.__folderController.reconnect()")
+    assert restored["permission"] == "granted", restored
+    tier2 = page.evaluate(
+        "async () => { await window.__updatePrivateDataGate(); return window.__privateDataTier; }"
+    )
+    assert tier2 == "private-folder", tier2
+    assert page.evaluate("() => window.__privateDataEnabled()") is True
