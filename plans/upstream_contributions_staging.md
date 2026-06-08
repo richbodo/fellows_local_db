@@ -46,13 +46,13 @@ Plus one **finding/principle** (not a new mechanism) that updates an existing co
 - **What is on PNT main:** `spec/exceptions.md` (concept + handler contract + `EX-CLOUD-LLM` registry), the `tools/lint-spec-ids.py` EX/Relaxes/Reversible checks (incl. the EX-H8 strength-class check), and the `reference_designs/fellows_local_db/Architecture.md` Exception-attestation copy. Initial filing `67d4622`, since iterated.
 - **Evolved beyond our plan:** the handler contract is now **EX-H1..EX-H8** (our plan stopped at EX-H7) — adds a per-dimension **strength profile** (EX-H8), a **fail-closed EX-H7** RFC, EARL-style per-clause predicate reporting, and a "Personal Network Toolkit → PNA Toolkit" rename. The upstream version is *ahead* of the fellows-side draft, not behind.
 - **Fellows demonstrating design:** complete — `EX-CLOUD-LLM` handler shipped in **PR #226**, **#156 closed**, `docs/Architecture.md` rates it **conformant** with live e2e evidence. The PNT reference-design Architecture.md copy already carries the EX-H1..H8 attestation.
-- **The only residual (and it is a *Constraints* item, not Exceptions):** the PNT reference-design `Architecture.md` copy is ~29 lines behind fellows' current `docs/Architecture.md` — it predates #260's data-layer-guard evidence on `CST-PWA-PRIVATE-SNAPSHOT` / `CST-PWA-STORAGE-EVICTABLE`. See §2 — this is the optional low-priority sync.
+- **The only residual was a reference-design `Architecture.md` snapshot sync — now done (PNT PR #54).** On close inspection the apparent ~29-line "drift" was mostly the PNT copy's *intentional curation* (file-level test refs, condensed prose), **not** staleness: #260's new guard tests live in `tests/e2e/test_private_data_enforcement.py`, which the copy already cites at file level. Only two genuine items needed fixing — a **stale AC-5 test ref** (cited a renamed/nonexistent test) and the **absent #258 EAR non-goal** note. See §2.
 
 ## 2. Constraints — DONE (merged upstream)
 
 - **Plan:** [`pna_toolkit_constraints_contribution.md`](pna_toolkit_constraints_contribution.md).
 - **Status:** **MERGED** — PNT PR #18 *"spec: add Constraints concept (CST-*)"* (merged 2026-06-03). `spec/constraints.md`, the lint CST checks, the `PNA_Spec.md`/`axes.md` pointers, the SKILL build+evaluate steps, and the fellows reference-design record + § Constraint attestation are upstream.
-- **Fellows side:** § Constraint attestation in `docs/Architecture.md` is live and conformant; #260 just **strengthened** two rows (`CST-PWA-PRIVATE-SNAPSHOT`, `CST-PWA-STORAGE-EVICTABLE`) to cite the data-layer no-bypass guards. Those strengthenings are *newer than PR #18* — the PNT copy of fellows' Architecture.md may want a refresh at the next sync (low priority; additive evidence, no semantic change to the constraints).
+- **Fellows side:** § Constraint attestation in `docs/Architecture.md` is live and conformant; #260 just **strengthened** two rows (`CST-PWA-PRIVATE-SNAPSHOT`, `CST-PWA-STORAGE-EVICTABLE`) to cite the data-layer no-bypass guards. Those strengthenings are *newer than PR #18*. A reference-design snapshot sync was filed (**PNT PR #54**) — but it turned out #260's evidence was already covered at the PNT copy's file-level granularity; the sync's real content was a stale AC-5 test-ref fix + the #258 EAR non-goal note (the rest of the divergence is intentional curation, left as-is).
 - **Remaining:** nothing required. The plan's status banner still reads "FILED … pending maintainer merge" — stale; refreshed to MERGED.
 
 ## 3. User-mediation — SCOPE STAGED, GATED (test-first)
@@ -76,7 +76,7 @@ Plus one **finding/principle** (not a new mechanism) that updates an existing co
 ## Recommended filing order (for the PNT agent)
 
 1. **Exceptions** — ✅ **already merged; nothing to file.** (Was listed "file next" in the first draft of this map — corrected.)
-2. **Reference-design `Architecture.md` sync** (optional, low priority) — refresh the PNT copy of fellows' `docs/Architecture.md` with #260's strengthened `CST-PWA-*` evidence (and any other drift; the PNT copy is ~29 lines behind). This is the one concrete upstream action currently available, and it is a **Constraints**-side sync.
+2. **Reference-design `Architecture.md` sync** — ✅ **DONE (PNT PR #54).** Fixed a stale AC-5 test ref + added the #258 EAR non-goal. The apparent ~29-line drift was mostly intentional curation (file-level test refs, condensed prose); #260's evidence was already file-level-covered, so no re-granularization. `just ci` green.
 3. **User-mediation** — not yet. Write the demonstrating tests first (gated on the AI-writes feature, or on accepting #260's existing no-bypass proofs as the minimum demonstration); attest; *then* draft the spec. The plan holds the scope until then. (Verified absent from PNT main 2026-06-08.)
 4. **EAR frontier note** — fold into a constraints follow-up once #257 lands an encrypted-export to demonstrate it.
 
