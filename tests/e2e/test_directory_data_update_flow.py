@@ -19,7 +19,14 @@ import json
 
 from playwright.sync_api import expect
 
-from conftest import _STANDALONE_DISPLAY_INIT
+# Fully-qualified import (not bare ``from conftest import``): with the mobile
+# tree collected, a bare ``conftest`` can resolve to tests/e2e/mobile/conftest.py,
+# which lacks the folder helpers. Mirrors test_orphan_soft_scan.py.
+from tests.e2e.conftest import (
+    _STANDALONE_DISPLAY_INIT,
+    _FOLDER_PICKER_STUB_MIN,
+    attach_verified_folder,
+)
 
 
 BUILD_META_PATH = "**/build-meta.json"
@@ -45,7 +52,29 @@ def _route_build_meta(context, *, git_sha="boot-sha", fellows_db_sha=None):
 def _make_standalone_page(context):
     page = context.new_page()
     page.add_init_script(_STANDALONE_DISPLAY_INIT)
+    # Folder-picker stub so the group-impact tests can attach a verified folder
+    # (privateDataEnabled()); harmless/unused for the no-group tests.
+    page.add_init_script(_FOLDER_PICKER_STUB_MIN)
     return page
+
+
+def _boot_attach_folder(page, base_url):
+    """Boot at /, attach a verified folder, and wait for boot's getFull to
+    settle. Under the private-data capability gate (#260) group seeding requires
+    a verified folder; this leaves the page at / ready for the caller to seed a
+    canary group, then navigate to /#/about for the update-check flow."""
+    page.goto(base_url + "/", wait_until="domcontentloaded")
+    _wait_for_worker_ready(page)
+    attach_verified_folder(page, base_url)
+    page.wait_for_function(
+        "() => window.__bootMarks && window.__bootMarks.get_full_done != null",
+        timeout=15000,
+    )
+
+
+def _goto_about(page, base_url):
+    page.goto(base_url + "/#/about", wait_until="domcontentloaded")
+    page.wait_for_selector("#about-check-data-update", timeout=5000)
 
 
 def _wait_for_worker_ready(page, timeout_ms=15000):
@@ -144,11 +173,12 @@ def test_apply_with_group_impact_shows_dialog_and_can_cancel(context, base_url_f
     page = _make_standalone_page(context)
     try:
         _route_build_meta(context, git_sha="boot-sha")
-        _boot_then_about(page, base_url_fixture)
+        _boot_attach_folder(page, base_url_fixture)
 
         # Seed a group with a synthetic member rid that won't appear in
         # the staged fellows.db. The worker will flag it as affected
-        # during preview.
+        # during preview. (Folder attached so the capability gate allows
+        # the write.)
         page.evaluate(
             """
             async () => {
@@ -162,6 +192,7 @@ def test_apply_with_group_impact_shows_dialog_and_can_cancel(context, base_url_f
             """
         )
 
+        _goto_about(page, base_url_fixture)
         context.unroute(BUILD_META_PATH)
         _route_build_meta(context, git_sha="boot-sha", fellows_db_sha="f" * 64)
 
@@ -257,8 +288,9 @@ def test_apply_with_group_impact_confirm_completes_swap(context, base_url_fixtur
     page = _make_standalone_page(context)
     try:
         _route_build_meta(context, git_sha="boot-sha")
-        _boot_then_about(page, base_url_fixture)
+        _boot_attach_folder(page, base_url_fixture)
 
+        # Folder attached so the capability gate allows seeding the canary.
         page.evaluate(
             """
             async () => {
@@ -272,6 +304,7 @@ def test_apply_with_group_impact_confirm_completes_swap(context, base_url_fixtur
             """
         )
 
+        _goto_about(page, base_url_fixture)
         context.unroute(BUILD_META_PATH)
         _route_build_meta(context, git_sha="boot-sha", fellows_db_sha="f" * 64)
 

@@ -1,7 +1,7 @@
 {
   "meta": {
-    "generated_at": "2026-06-07T07:07:56Z",
-    "git_sha": "78ffc51",
+    "generated_at": "2026-06-08T02:32:36Z",
+    "git_sha": "5198047",
     "source": "docs/Architecture.md",
     "generator": "scripts/conformance_report.py",
     "toolkit_version": "0.1 (draft)",
@@ -537,7 +537,7 @@
     },
     {
       "id": "CST-PWA-PRIVATE-SNAPSHOT",
-      "status_text": "**conformant** (as a *handling*): the capability reduction is complete \u2014 UI/route reduction **plus** data-layer refusal of off-folder durable writes (worker-side load-bearing + page-side defense-in-depth, PR #244 `d2706a9`; [`../plans/private_data_enforcement.md`](../plans/private_data_enforcement.md)). The negative invariant is now a hard guard, not a strict-xfail. Frontier stays **Open**: this is honest handling, not a durable cross-platform store.",
+      "status_text": "**conformant** (as a *handling*): the capability reduction is complete \u2014 UI/route reduction **plus** data-layer refusal of off-folder durable writes (worker-side load-bearing + page-side defense-in-depth, PR #244 `d2706a9`, extended in PR #261 to the restore/email-import path with a raw-RPC no-bypass proof; [`../plans/private_data_enforcement.md`](../plans/private_data_enforcement.md)). The negative invariant is now a hard guard, not a strict-xfail. Frontier stays **Open**: this is honest handling, not a durable cross-platform store.",
       "conformant": true,
       "review_kind": false,
       "refs": [
@@ -563,6 +563,16 @@
         },
         {
           "ref": "tests/e2e/test_private_data_enforcement.py::test_permission_lapse_reduces_capability_then_reconnect_restores",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_private_data_enforcement.py::test_browse_only_refuses_import_relationships_bytes",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_private_data_enforcement.py::test_worker_is_load_bearing_off_folder_via_raw_rpc",
           "status": "live",
           "detail": ""
         }
@@ -606,6 +616,11 @@
         },
         {
           "ref": "tests/e2e/test_private_data_enforcement.py::test_off_folder_settings_are_empty",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_private_data_enforcement.py::test_browse_only_refuses_import_relationships_bytes",
           "status": "live",
           "detail": ""
         },

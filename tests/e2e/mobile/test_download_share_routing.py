@@ -72,7 +72,10 @@ def _reset_backup_prompt_page(playwright, browser, device, base_url):
         context.close()
         pytest.skip("worker provider unavailable in this environment")
     helper.wipe_relationships()
-    helper.create_group("download routing test")
+    # No group seed: phones are browse-only under the capability gate, so
+    # createGroup is refused (#260). The Reset-everything backup download offers
+    # the relationships.db regardless of content, so the OS-routing assertion —
+    # the actual point of this test — rides on the empty/schema export.
     # Halt the destructive flow after the backup download fires.
     page.evaluate("() => { window.confirm = function () { return false; }; }")
     page.evaluate("() => { location.hash = '#/settings'; }")

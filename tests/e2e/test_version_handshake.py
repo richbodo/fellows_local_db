@@ -18,6 +18,8 @@ from urllib.parse import urlparse
 
 import pytest
 
+from tests.e2e.conftest import _FOLDER_PICKER_STUB_MIN, attach_verified_folder
+
 
 def _rewrite_worker_version(route, base_url):
     """Fulfill the worker bundle with WORKER_RPC_VERSION bumped to 99.
@@ -89,6 +91,23 @@ def test_version_skew_refuses_mutations_but_allows_reads(
     no_sw_page, base_url_fixture
 ):
     page = no_sw_page
+    # Attach a verified folder BEFORE inducing the skew. createGroup is guarded
+    # refuseIfBrowseOnly-first (app.js), so off-folder a skewed mutation throws
+    # BrowseOnlyError, masking the version gate this test exists to prove (#260).
+    # Attaching goes through setFolderHandle, itself version-gated — so do it on
+    # a clean (un-skewed) boot, then route the bumped worker and re-boot. The
+    # folder handle persists in IndexedDB across the reboot.
+    page.add_init_script(_FOLDER_PICKER_STUB_MIN)
+    page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+    page.locator("#loading").wait_for(state="hidden", timeout=15000)
+    page.wait_for_function(
+        "() => window.__dataProvider && window.__dataProvider.kind === 'worker'",
+        timeout=15000,
+    )
+    attach_verified_folder(page, base_url_fixture)
+
+    # Now induce the skew: serve the worker bundle with WORKER_RPC_VERSION
+    # bumped, then re-boot. The page sees the mismatch on init.
     page.route(
         "**/vendor/sqlite-worker.js",
         lambda r: _rewrite_worker_version(r, base_url_fixture),

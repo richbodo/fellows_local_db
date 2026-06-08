@@ -5446,6 +5446,12 @@
   // plans/opt_in_directory_data_updates.md.
   function maybeRunOrphanSoftScan() {
     if (!dataProvider) return;
+    // Off-folder (browse-only) there are no groups, so no group_members can be
+    // orphaned — the scan is moot, and its durable `orphan_scan_done` write
+    // would be refused by the capability gate (#252). Skip entirely off-folder.
+    // Mirrors the privateDataEnabled() gate on the has_email_only / self_email
+    // boot reconciles (#244). See #260.
+    if (!privateDataEnabled()) return;
     if (typeof dataProvider._findOrphanedGroupMembers !== 'function') return;
     if (typeof dataProvider.getSetting !== 'function') return;
     Promise.resolve(dataProvider.getSetting('orphan_scan_done')).then(function (done) {
