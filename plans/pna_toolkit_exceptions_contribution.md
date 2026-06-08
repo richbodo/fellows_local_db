@@ -1,23 +1,26 @@
 # Plan — Contributing the **Exceptions** concept to the Personal Network Toolkit (PNT)
 
-> **Status: READY TO FILE — fellows side complete, upstream spec work not yet executed (2026-06-08 refresh).**
-> The demonstrating design has **shipped**: the `EX-CLOUD-LLM` handler (consent gate + "Going rogue"
-> banner + `#/exception/<id>` explainer + return-to-PNA control + `<body data-pna-mode>` marker)
-> landed in **PR #226**, issue **#156 is closed** as done, and `docs/Architecture.md` rates
-> `EX-CLOUD-LLM` **conformant** with live e2e evidence (`tests/e2e/test_pna_exception_mode.py`,
-> `test_mcpb_settings.py`, the MCP `instructions` propagation tests). So this plan's §3f *gap analysis*
-> (no attestation table / handler unbuilt / status `planned`) and §4 *sequencing* steps 1–3 (build
-> handler → backfill attestation → preflight) are **DONE** — read them as historical. What remains is
-> **purely upstream** in PNT (§3a–3e + the reference-design copy in §3f); none of it has been executed,
-> and no issues or PRs are filed into PNT until the maintainer explicitly says so.
+> **Status: ALREADY MERGED UPSTREAM — this plan is HISTORICAL (2026-06-08 verified against PNA Toolkit `origin/main`).**
+> The Exceptions concept is **filed and merged** into the PNA Toolkit: `spec/exceptions.md` (concept +
+> handler contract + `EX-CLOUD-LLM` registry), the `tools/lint-spec-ids.py` EX/Relaxes/Reversible
+> checks, and the `reference_designs/fellows_local_db/Architecture.md` Exception-attestation copy are
+> all on PNT main. It has **evolved beyond this plan**: the handler contract is now **EX-H1..EX-H8**
+> (this plan stopped at EX-H7) — adding a per-dimension **strength profile** (EX-H8), a fail-closed
+> EX-H7 RFC, EARL-style per-clause predicate reporting, and a "Personal Network Toolkit → PNA Toolkit"
+> rename. Initial filing `67d4622 spec: add Exceptions concept + EX-CLOUD-LLM registry entry`, since
+> iterated. **There is nothing left to file** for this contribution; §3–§4 below are the original DRAFT
+> and are kept only as the design record of how it was scoped. Do **not** re-file — it would duplicate
+> merged work.
 >
-> **Reconcile against the merged Constraints work first:**
-> [PNT PR #18](https://github.com/richbodo/personal_network_toolkit/pull/18) (merged 2026-06-03) landed
-> the shared `PNA-DEFINITION` sentinel, the validation-not-certification framing callout, and the lint
-> header-tracing pattern this plan assumed *Exceptions* would introduce. Land order is now inverted —
-> build on PR #18's as-built; do not re-add those. Staging map:
+> **Earlier banners on this file were wrong.** A 2026-06-08 staging pass mislabeled this "READY TO
+> FILE" because it trusted this fellows-side plan's stale status instead of checking PNT `origin/main`,
+> where it was already merged (likely by the PNT agent). Corrected here.
+>
+> **The only residual** is a low-priority **reference-design `Architecture.md` sync** (the PNT copy is
+> ~29 lines behind fellows' current `docs/Architecture.md`, missing #260's data-layer-guard evidence) —
+> but that is a **Constraints**-side sync, not an Exceptions task. Tracked in
 > [`upstream_contributions_staging.md`](upstream_contributions_staging.md).
-> This file lives in the `fellows_local_db` repo (`plans/`) as a design record the maintainer reviews first.
+> This file lives in the `fellows_local_db` repo (`plans/`) as the design record.
 >
 > Local paths referenced below:
 > - PNT repo: `/Users/richbodo/src/personal_network_toolkit`

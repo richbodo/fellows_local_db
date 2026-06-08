@@ -23,7 +23,7 @@ framing, the three-layer lint/evaluate/human split):
 
 | # | Mechanism | What it names | Origin | PNT status |
 |---|---|---|---|---|
-| 1 | **Exceptions** (`EX-*`) | a deviation the **user raises** and the app handles (exits PNA mode) | cloud-LLM finding (2026-05-30) | spec **not filed** — ready |
+| 1 | **Exceptions** (`EX-*`) | a deviation the **user raises** and the app handles (exits PNA mode) | cloud-LLM finding (2026-05-30) | ✅ **MERGED** — PNA Toolkit main (evolved to EX-H1..H8) |
 | 2 | **Constraints** (`CST-*`) | a ceiling the **platform imposes** and the app handles (stays in PNA mode) | PWA-private-store finding (2026-06-01) | **MERGED** — PNT PR #18 |
 | 3 | **User-mediation** (working name) | the **human is the actuator**; the proposer stages, the human disposes | actuation-surface finding (2026-06-07) | spec **not filed** — scope staged, gated |
 
@@ -35,22 +35,18 @@ Plus one **finding/principle** (not a new mechanism) that updates an existing co
 
 ---
 
-## 1. Exceptions — READY TO FILE (fellows side complete)
+## 1. Exceptions — ✅ ALREADY MERGED UPSTREAM (nothing to file)
 
-- **Plan:** [`pna_toolkit_exceptions_contribution.md`](pna_toolkit_exceptions_contribution.md) (§3a–3f are execute-ready DRAFTs).
-- **Demonstrating design:** shipped. `EX-CLOUD-LLM` handler (consent gate + "Going rogue" banner + `#/exception/<id>` explainer + return-to-PNA control + `<body data-pna-mode>` marker) landed in **PR #226**; issue **#156 closed** as done. EX-H7 propagation notice ships in the MCP `instructions` (`CLOUD_LLM_PROPAGATION_NOTICE`).
-- **Attestation:** `docs/Architecture.md` § Exception attestation is built; the conformance report rates `EX-CLOUD-LLM` **conformant** with live e2e evidence (`tests/e2e/test_pna_exception_mode.py`, `test_mcpb_settings.py`, `tests/test_private_data_ops.py::test_instructions_carry_cloud_llm_propagation_notice`).
-- **What this changes vs the plan as written:** the plan's §3f *gap analysis* (no AC attestation table, handler unbuilt, status `planned`) and *sequencing* steps 1–3 ("build handler first, backfill attestation, preflight") are **DONE**. The plan's status banner is now stale and has been refreshed — see its header.
-- **Remaining work — all upstream, all in PNT:**
-  1. `spec/exceptions.md` (concept + EX-H1..H7 handler contract + `Relaxes:`/`Reversible:` headers + `EX-CLOUD-LLM` registry entry) — §3a.
-  2. One-line `PNA_Spec.md` pointer (vocab-pna) — §3b.
-  3. `tools/lint-spec-ids.py` EX/Relaxes/Reversible checks — §3c.
-  4. "Validation, not certification" framing promotion — §3d.
-  5. SKILL Evaluate-flow exceptions pass — §3e.
-  6. `reference_designs/fellows_local_db/` design-record bullet + Architecture.md copy + EX attestation — §3f.
-- **Dependencies:** none blocking. Shares the `PNA-DEFINITION` sentinel + framing callout with Constraints — **but Constraints already merged (PR #18)**, so that machinery is already upstream. Confirm whether PR #18 introduced `PNA-DEFINITION` / the framing callout already (likely) so Exceptions doesn't re-add them; reconcile against PR #18 as-built.
-- **Open questions for the maintainer:** §5 of the plan (handler-clause IDs `EX-H*`, `PNA-DEFINITION` vs `AC-PNA`, pointer placement). Several may already be settled by how PR #18 landed.
-- **Version bump:** Minor (additive).
+> **Correction (2026-06-08, verified against PNA Toolkit `origin/main`).** An earlier draft of this
+> map said "ready to file." That was **wrong** — it trusted the fellows-side plan's stale status
+> instead of checking PNT main, where Exceptions was already merged (likely by the PNT agent).
+> **Do not file it — that would duplicate merged work.**
+
+- **Plan:** [`pna_toolkit_exceptions_contribution.md`](pna_toolkit_exceptions_contribution.md) — now marked HISTORICAL.
+- **What is on PNT main:** `spec/exceptions.md` (concept + handler contract + `EX-CLOUD-LLM` registry), the `tools/lint-spec-ids.py` EX/Relaxes/Reversible checks (incl. the EX-H8 strength-class check), and the `reference_designs/fellows_local_db/Architecture.md` Exception-attestation copy. Initial filing `67d4622`, since iterated.
+- **Evolved beyond our plan:** the handler contract is now **EX-H1..EX-H8** (our plan stopped at EX-H7) — adds a per-dimension **strength profile** (EX-H8), a **fail-closed EX-H7** RFC, EARL-style per-clause predicate reporting, and a "Personal Network Toolkit → PNA Toolkit" rename. The upstream version is *ahead* of the fellows-side draft, not behind.
+- **Fellows demonstrating design:** complete — `EX-CLOUD-LLM` handler shipped in **PR #226**, **#156 closed**, `docs/Architecture.md` rates it **conformant** with live e2e evidence. The PNT reference-design Architecture.md copy already carries the EX-H1..H8 attestation.
+- **The only residual (and it is a *Constraints* item, not Exceptions):** the PNT reference-design `Architecture.md` copy is ~29 lines behind fellows' current `docs/Architecture.md` — it predates #260's data-layer-guard evidence on `CST-PWA-PRIVATE-SNAPSHOT` / `CST-PWA-STORAGE-EVICTABLE`. See §2 — this is the optional low-priority sync.
 
 ## 2. Constraints — DONE (merged upstream)
 
@@ -79,11 +75,13 @@ Plus one **finding/principle** (not a new mechanism) that updates an existing co
 
 ## Recommended filing order (for the PNT agent)
 
-1. **Exceptions** — file next. Fellows side is complete; it's the highest-value unfiled mechanism and completes the Exceptions/Constraints matched pair upstream. First reconcile against PR #18 as-built (don't re-add `PNA-DEFINITION` / the framing callout if PR #18 already introduced them).
-2. **Constraints Architecture.md sync** (optional, low priority) — refresh the PNT copy of fellows' § Constraint attestation with #260's strengthened evidence at a convenient sync.
-3. **User-mediation** — not yet. Write the demonstrating tests first (gated on the AI-writes feature, or on accepting #260's existing no-bypass proofs as the minimum demonstration); attest; *then* draft the spec. The plan holds the scope until then.
+1. **Exceptions** — ✅ **already merged; nothing to file.** (Was listed "file next" in the first draft of this map — corrected.)
+2. **Reference-design `Architecture.md` sync** (optional, low priority) — refresh the PNT copy of fellows' `docs/Architecture.md` with #260's strengthened `CST-PWA-*` evidence (and any other drift; the PNT copy is ~29 lines behind). This is the one concrete upstream action currently available, and it is a **Constraints**-side sync.
+3. **User-mediation** — not yet. Write the demonstrating tests first (gated on the AI-writes feature, or on accepting #260's existing no-bypass proofs as the minimum demonstration); attest; *then* draft the spec. The plan holds the scope until then. (Verified absent from PNT main 2026-06-08.)
 4. **EAR frontier note** — fold into a constraints follow-up once #257 lands an encrypted-export to demonstrate it.
 
 ## Cross-cutting reconciliation note
 
-All three mechanisms were planned to share machinery that **Constraints (PR #18) has now landed first**: the `PNA-DEFINITION` sentinel, the validation-not-certification framing callout, and the lint header-tracing pattern. Every subsequent contribution (Exceptions, User-mediation) must **build on PR #18's as-built**, not re-introduce these. The Exceptions and User-mediation plans were written assuming Exceptions-first; that assumption is now inverted — reconcile each against the merged constraints work before executing.
+All three mechanisms were planned to share machinery, and **both Exceptions and Constraints have now landed upstream** (Constraints via PR #18; Exceptions iterated to EX-H8) — they already share the `PNA-DEFINITION` sentinel, the validation-not-certification framing, and the lint header-tracing pattern. The only remaining new mechanism, **User-mediation**, must therefore **build on the merged Exceptions + Constraints as-built** (read `spec/exceptions.md` + `spec/constraints.md` + `tools/lint-spec-ids.py` on PNT main before drafting), not re-introduce that machinery.
+
+> **Methodology note (why this map was wrong once).** The first draft (2026-06-08) staged statuses from the fellows-side `plans/*.md` banners, which lag the PNT agent's actual filings. **Always verify contribution status against PNA Toolkit `origin/main` (the spec files + lint), not the fellows-side plan**, before recommending a filing action.

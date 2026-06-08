@@ -252,7 +252,8 @@ tests landing first.
    imply the user comprehended; it attests separation + legibility + attribution only"), so a future
    design can't quietly over-claim — the dual of EX-H5's "reversibility is mode-only, MUST NOT imply
    undo."
-6. **Reconcile against PR #18 as-built.** Constraints landed first and introduced the shared
-   `PNA-DEFINITION` sentinel, the validation-not-certification framing, and the lint header-tracing
-   pattern. This contribution (and Exceptions) MUST build on that, not re-add it. Read PR #18 before
-   drafting §3c/§3d.
+6. **Reconcile against the merged Exceptions + Constraints as-built.** Both already landed upstream
+   (Constraints via PR #18; Exceptions iterated to EX-H8) and share the `PNA-DEFINITION` sentinel, the
+   validation-not-certification framing, and the lint header-tracing pattern. This contribution MUST
+   build on that, not re-add it. Read `spec/exceptions.md` + `spec/constraints.md` +
+   `tools/lint-spec-ids.py` on PNA Toolkit `origin/main` before drafting §3c/§3d.
