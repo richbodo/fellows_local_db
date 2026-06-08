@@ -946,7 +946,32 @@ handlers.getGroup = async function (args) {
   return row;
 };
 
+// ---- Load-bearing durable-private-write guard (#252) -----------------------
+// A mutating relationships.db RPC may durably persist only when a verified
+// folder backs the store (folder mode = the store is canonical). Off-folder
+// (browse-only) there is NO durable private store, so these RPCs are refused
+// HERE, at the worker — the OPFS owner — not merely at the page
+// (refuseIfBrowseOnly is defense-in-depth, bypassable from the DevTools
+// console). Dynamic check (matches _maybeWriteFolderAfterCommit) so a
+// mid-session folder attach is honored; the page's privateDataEnabled()
+// resolves to the same condition. Error shape mirrors the page's
+// BrowseOnlyError — `name` survives the worker→page envelope (errorName) and
+// `code` rides errorCode; the boolean flag does not cross, so callers key on
+// those.
+async function _refuseDurablePrivateWriteOffFolder(op) {
+  var granted = false;
+  if (folderRecord.parentHandle) {
+    try { granted = (await _folderQueryPermission()) === 'granted'; } catch (e) {}
+  }
+  if (granted) return;
+  var err = new Error(op + ' refused: browse-only mode — no durable private store off-folder (connect a data folder)');
+  err.name = 'BrowseOnlyError';
+  err.code = 'BROWSE_ONLY';
+  throw err;
+}
+
 handlers.createGroup = async function (data) {
+  await _refuseDurablePrivateWriteOffFolder('createGroup');
   if (!relDb) throw new Error('relationships db not open');
   var name = data && data.name;
   var note = (data && typeof data.note === 'string') ? data.note : '';
@@ -976,6 +1001,7 @@ handlers.createGroup = async function (data) {
 };
 
 handlers.updateGroup = async function (args) {
+  await _refuseDurablePrivateWriteOffFolder('updateGroup');
   if (!relDb) throw new Error('relationships db not open');
   var id = args && args.id;
   var patch = (args && args.patch) || {};
@@ -1006,6 +1032,7 @@ handlers.updateGroup = async function (args) {
 };
 
 handlers.deleteGroup = async function (args) {
+  await _refuseDurablePrivateWriteOffFolder('deleteGroup');
   if (!relDb) throw new Error('relationships db not open');
   var id = args && args.id;
   var existing = dbSelectOne(relDb, 'SELECT 1 AS x FROM groups WHERE id = ?', [id]);
@@ -1030,6 +1057,7 @@ handlers.getSettings = async function () {
 };
 
 handlers.setSetting = async function (args) {
+  await _refuseDurablePrivateWriteOffFolder('setSetting');
   if (!relDb) throw new Error('relationships db not open');
   var key = args && args.key;
   var value = args && args.value;
@@ -1069,6 +1097,9 @@ handlers.countRelationships = async function () {
 };
 
 handlers.importRelationshipsBytes = async function (args) {
+  // Guard FIRST — before inspect/snapshot — so an off-folder call writes
+  // nothing (not even a pre-restore backup) into evictable OPFS (#252).
+  await _refuseDurablePrivateWriteOffFolder('importRelationshipsBytes');
   if (!poolUtil) throw new Error('pool util unavailable');
   var bytes = args && args.bytes;
   var inspection = await inspectBytes(bytes);
