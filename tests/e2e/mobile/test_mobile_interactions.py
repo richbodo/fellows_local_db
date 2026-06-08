@@ -319,17 +319,33 @@ def test_mobile_settings_diagnostics_tool_opens_panel(
 # ===== Fellow detail =======================================================
 
 
-def test_groups_index_redirects_even_with_seeded_groups_on_phone(
+def test_groups_index_refuses_seed_and_redirects_on_phone(
     mobile_worker_data, device_name, base_url_fixture
 ):
-    """Even when groups exist in the worker store, #/groups on a phone
-    redirects to the directory — the groups index has no phone UI.
+    """On a phone there's no group UI and no way to seed groups: private data
+    is browse-only-gated off (no folder path on mobile), so createGroup is
+    refused at the data layer, and #/groups redirects to the directory with no
+    card list to render.
 
-    (Replaces the former card-list test: groups are browse-only-gated
-    off on phones, so there's no card list to render.)"""
+    (Replaces the former 'even with seeded groups' test — a group can't be
+    seeded on a phone under the capability gate, so that premise is gone. This
+    instead pins both halves of the gate's mobile behavior: the durable write
+    is refused, and the route still redirects. #260.)"""
     helper = mobile_worker_data
-    helper.create_group(name="Mobile index card", fellow_record_ids=[])
     page = helper.page
+    # The capability gate refuses durable private writes on a phone (no folder
+    # path), so a group cannot be seeded in the first place.
+    refused = page.evaluate(
+        """async () => {
+          try {
+            await window.__dataProvider.createGroup({ name: 'Mobile index card', note: '', fellow_record_ids: [] });
+            return null;
+          } catch (e) { return e.name; }
+        }"""
+    )
+    assert refused == "BrowseOnlyError", (
+        f"createGroup should be refused browse-only on a phone at {device_name}; got {refused!r}"
+    )
     page.evaluate("location.hash = '#/groups'")
     _wait_for_app_boot(page)
     page.wait_for_function("() => location.hash === '#/'", timeout=3000)

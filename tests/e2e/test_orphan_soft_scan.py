@@ -75,6 +75,14 @@ def test_soft_scan_fires_toast_once_and_marks_done(context, base_url_fixture):
     try:
         page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
         _wait_for_worker_ready(page)
+        # The orphan scan only runs with private data live (a verified folder):
+        # off-folder there are no groups, so no group_members can be orphaned,
+        # and the durable orphan_scan_done write would be refused by the
+        # capability gate (#260). Attach a folder so the boot scan runs, seeding
+        # is allowed, and the marker persists. attach_verified_folder re-boots
+        # folder-attached; the handle then survives the reloads below.
+        attach_verified_folder(page, base_url_fixture)
+        _wait_for_worker_ready(page)
         # Wait for the boot soft scan to complete so we don't race with
         # it when clearing the marker. The boot scan always sets the
         # marker (whether or not orphans were found) — once we see '1'
@@ -92,6 +100,12 @@ def test_soft_scan_fires_toast_once_and_marks_done(context, base_url_fixture):
             elapsed += 200
         assert val == "1", f"boot soft scan did not set marker within {deadline_ms}ms"
 
+        # Capture the folder save marker before seeding so we can wait for the
+        # seed's own folder write to land before reloading.
+        before_saved = page.evaluate(
+            "() => window.__folderController.getState().then(function (s) { return s.lastSavedAt; })"
+        )
+
         # Seed an orphan group + clear the marker so the next boot's
         # scan re-runs against the now-orphan-bearing relationships.db.
         page.evaluate(
@@ -106,6 +120,18 @@ def test_soft_scan_fires_toast_once_and_marks_done(context, base_url_fixture):
               await dp.setSetting('orphan_scan_done', '');
             }
             """
+        )
+
+        # Wait for the seed's post-commit folder write to settle (lastSavedAt
+        # advances) before reloading. createGroup/setSetting resolve when the
+        # OPFS commit lands, but the reload can still race the folder serialize,
+        # leaving the new worker to hydrate a pre-seed folder snapshot (#260).
+        # Mirrors the lastSavedAt-advance gate in test_user_folder_storage.py.
+        page.wait_for_function(
+            "(prev) => window.__folderController.getState().then("
+            "  function (s) { return !!s.lastSavedAt && s.lastSavedAt !== prev; })",
+            arg=before_saved,
+            timeout=10000,
         )
 
         page.reload(wait_until="domcontentloaded")
