@@ -71,3 +71,25 @@ def test_unrelated_change_allows():
         added_by_file={},
     )
     assert msg is None
+
+
+def test_diff_collection_is_working_tree_scoped(monkeypatch):
+    """The guard nudges *while you edit* and goes quiet on commit, so it must
+    diff only the working tree (`HEAD`) — never `main...HEAD`. A branch-wide arm
+    re-fired the nudge on every Stop for the whole life of a committed branch
+    (pure noise, esp. for test-first PRs whose tests landed earlier). This pins
+    the scope so that arm can't silently return."""
+    calls = []
+
+    def fake_git(args):
+        calls.append(list(args))
+        return ""
+
+    monkeypatch.setattr(guard, "_git", fake_git)
+    guard._changed_files()
+    guard._added_lines(ARCH)
+
+    flat = " ".join(" ".join(a) for a in calls)
+    assert "main...HEAD" not in flat, calls   # no branch-wide arm
+    assert all("HEAD" in a for a in calls)     # everything is HEAD-scoped
+    assert calls                                # and it actually diffed
