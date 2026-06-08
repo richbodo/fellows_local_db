@@ -328,10 +328,31 @@ conformance *args="":
 # >= 10 commits past the last logged run). Non-fatal and offline (`--no-gh`):
 # the snapshot rides along with work as it lands, the pytest gates enforce
 # findings, and deploy-preflight is the authoritative ship gate. Depended on by
-# `just test`.
+# `just test`. Regenerating the snapshot also refreshes the toolkit-schema
+# evaluate-report (see `evaluate-report`).
 [group('conformance')]
 conformance-refresh:
     {{python}} scripts/conformance_report.py --if-stale --no-gh
+
+# Emit the toolkit-schema evaluate-report (docs/conformance/evaluate-report.json)
+# and validate it against PNT's render contract. This is the DETERMINISTIC
+# emitter — derived from docs/Architecture.md's attestation, NOT an LLM audit —
+# and it is the command the PNT keystone wires as its `[verify].entrypoint`.
+# Runs the real PNT lint when the toolkit checkout is present (override its
+# location with PNT_REPO); falls back to the emitter's built-in render-contract
+# check otherwise. See docs/conformance/README.md.
+[group('conformance')]
+evaluate-report:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{python}} scripts/evaluate_report.py
+    lint="${PNT_REPO:-$HOME/src/personal_network_toolkit}/tools/report-fixtures-lint.py"
+    if [ -f "$lint" ]; then
+        python3 "$lint" docs/conformance/evaluate-report.json
+    else
+        echo "Note: PNT lint not found at $lint — emitted + self-validated only."
+        echo "      Set PNT_REPO to your toolkit checkout to run the authoritative lint."
+    fi
 
 
 # ---- MCP servers ---------------------------------------------------------
@@ -472,6 +493,17 @@ deploy-preflight:
         echo "Deploy aborted: conformance findings above. A user-facing release"
         echo "must ship a finding-free attestation — fix the code or honestly"
         echo "downgrade the row before shipping (plans/conformance_report_and_gate.md)."
+        exit 1
+    fi
+    # The toolkit-schema evaluate-report (the keystone's [verify].entrypoint
+    # output) must still satisfy PNT's render contract. Hermetic (no toolkit
+    # checkout needed): --check builds in-memory and self-validates. This also
+    # fails loudly if a newly-declared EX/CST row has no AC home in the emitter.
+    echo "Deploy preflight: evaluate-report render contract…"
+    if ! {{python}} scripts/evaluate_report.py --check; then
+        echo
+        echo "Deploy aborted: docs/conformance/evaluate-report.json fails the toolkit"
+        echo "render contract. Run 'just evaluate-report' and fix scripts/evaluate_report.py."
         exit 1
     fi
     branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')

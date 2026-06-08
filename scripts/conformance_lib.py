@@ -56,6 +56,16 @@ TRACKING_ANCHOR = re.compile(r"tracking:\s*#(\d+)", re.IGNORECASE)
 # the smell. Keeps the attestation glanceable, not a debt ledger.
 DEFERRAL_CAP = 3
 
+# Flavor-derived ACs live in PNT's axes.md (triggered by an axis pick); every
+# other AC lives in PNA_Spec.md (universal). Single source of truth for the
+# split, consumed by scripts/conformance_report.py (PNT deep-linking) and
+# scripts/evaluate_report.py (the toolkit-schema `ac_source` field). Kept here
+# because neither can read the PNT repo at runtime.
+FLAVOR_DERIVED_ACS = frozenset({
+    "AC-2", "AC-3", "AC-5", "AC-8", "AC-12", "AC-13", "AC-14",
+    "AC-PRM-B", "AC-PRM-C",
+})
+
 
 # --- Markdown attestation parsing -------------------------------------------
 

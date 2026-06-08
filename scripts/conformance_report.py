@@ -45,6 +45,7 @@ if _REPO_ROOT not in sys.path:
 from scripts.conformance_lib import (  # noqa: E402
     ARCH_MD,
     DEFERRAL_CAP,
+    FLAVOR_DERIVED_ACS,
     collect_strict_xfails,
     evaluate_attestation,
 )
@@ -74,9 +75,9 @@ PNT_AUDIT_GUIDE = (PNT_REPO + "/blob/main/docs/users-guide.md"
 
 # Flavor-derived ACs live in axes.md; every other AC lives in PNA_Spec.md.
 # (Mirrors PNT's split — see the "gaps you'll see in the table" note in
-# PNA_Spec.md.) Kept here because the report can't read the PNT repo at runtime.
-_AXES_ACS = {"AC-2", "AC-3", "AC-5", "AC-8", "AC-12", "AC-13", "AC-14",
-             "AC-PRM-B", "AC-PRM-C"}
+# PNA_Spec.md.) Single source of truth is conformance_lib.FLAVOR_DERIVED_ACS,
+# shared with scripts/evaluate_report.py so the two never drift.
+_AXES_ACS = FLAVOR_DERIVED_ACS
 
 _TOOLKIT_VERSION_RE = re.compile(r"Toolkit-Version:\*\*\s*\[([^\]]+)\]")
 
@@ -400,6 +401,14 @@ def write_artifacts(report):
     }
     with open(LOG_JSONL, "a", encoding="utf-8") as f:
         f.write(json.dumps(log_line) + "\n")
+    # Keep the toolkit-schema evaluate-report (docs/conformance/evaluate-report.json,
+    # the PNT keystone's [verify].entrypoint output) current alongside report.json.
+    # Local import avoids any load-order coupling; both modules share
+    # conformance_lib as their single source of truth. Intentionally NOT wrapped
+    # in try/except: an unmapped EX/CST row must fail this write loudly, the same
+    # as it fails `just evaluate-report` and the pytest gate.
+    from scripts import evaluate_report as _er
+    _er.write_report()
 
 
 def main(argv):
