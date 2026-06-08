@@ -1,14 +1,27 @@
 # Plan — Contributing the **Exceptions** concept to the Personal Network Toolkit (PNT)
 
-> **Status: PLAN ONLY.** This document stages a future contribution to the
-> [`personal_network_toolkit`](https://github.com/richbodo/personal_network_toolkit) (PNT) repo.
-> It is **not** the contribution itself, and nothing here has been executed. No issues or PRs are
-> to be filed into PNT until the maintainer explicitly says so. This file lives in the
-> `fellows_local_db` repo (`plans/`) as a design record the maintainer reviews first.
+> **Status: READY TO FILE — fellows side complete, upstream spec work not yet executed (2026-06-08 refresh).**
+> The demonstrating design has **shipped**: the `EX-CLOUD-LLM` handler (consent gate + "Going rogue"
+> banner + `#/exception/<id>` explainer + return-to-PNA control + `<body data-pna-mode>` marker)
+> landed in **PR #226**, issue **#156 is closed** as done, and `docs/Architecture.md` rates
+> `EX-CLOUD-LLM` **conformant** with live e2e evidence (`tests/e2e/test_pna_exception_mode.py`,
+> `test_mcpb_settings.py`, the MCP `instructions` propagation tests). So this plan's §3f *gap analysis*
+> (no attestation table / handler unbuilt / status `planned`) and §4 *sequencing* steps 1–3 (build
+> handler → backfill attestation → preflight) are **DONE** — read them as historical. What remains is
+> **purely upstream** in PNT (§3a–3e + the reference-design copy in §3f); none of it has been executed,
+> and no issues or PRs are filed into PNT until the maintainer explicitly says so.
+>
+> **Reconcile against the merged Constraints work first:**
+> [PNT PR #18](https://github.com/richbodo/personal_network_toolkit/pull/18) (merged 2026-06-03) landed
+> the shared `PNA-DEFINITION` sentinel, the validation-not-certification framing callout, and the lint
+> header-tracing pattern this plan assumed *Exceptions* would introduce. Land order is now inverted —
+> build on PR #18's as-built; do not re-add those. Staging map:
+> [`upstream_contributions_staging.md`](upstream_contributions_staging.md).
+> This file lives in the `fellows_local_db` repo (`plans/`) as a design record the maintainer reviews first.
 >
 > Local paths referenced below:
 > - PNT repo: `/Users/richbodo/src/personal_network_toolkit`
-> - Demonstrating design (this repo): `/Users/richbodo/src/fellows_local_db-mcp-consent`
+> - Demonstrating design (this repo): `/Users/richbodo/src/fellows_local_db`
 
 ---
 

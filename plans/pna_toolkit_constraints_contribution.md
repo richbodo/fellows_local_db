@@ -1,13 +1,23 @@
 # Plan — Contributing the **Constraints** concept to the Personal Network Toolkit (PNT)
 
-> **Status: FILED (2026-06-03) — [PNT PR #18](https://github.com/richbodo/personal_network_toolkit/pull/18), pending maintainer merge.** This document staged the contribution; it has now been
-> executed on the PNT branch `spec/constraints-concept` and opened as a PR per § 4. The as-built set
+> **Status: MERGED — [PNT PR #18](https://github.com/richbodo/personal_network_toolkit/pull/18) merged 2026-06-03.** This document staged the contribution; it was
+> executed on the PNT branch `spec/constraints-concept`, opened as PR #18, and **merged**. The as-built set
 > matches §3a–3f: `spec/constraints.md` (new), the `tools/lint-spec-ids.py` CST checks, the
 > `PNA_Spec.md`/`axes.md` pointers, the SKILL build + evaluate steps, and the `fellows_local_db`
 > reference-design record + § Constraint attestation. No `VERSION` bump (0.1 still draft-in-progress;
-> `constraints.md` carries `Toolkit-Version: 0.1`). The open questions in § 5 are surfaced in the PR
-> body for maintainer review. This file lives in the `fellows_local_db` repo (`plans/`) as the design
-> record.
+> `constraints.md` carries `Toolkit-Version: 0.1`). The open questions in § 5 were surfaced in the PR
+> body for maintainer review.
+>
+> **Post-merge note (2026-06-08):** PR #260 *strengthened* two fellows-side rows
+> (`CST-PWA-PRIVATE-SNAPSHOT`, `CST-PWA-STORAGE-EVICTABLE`) to cite the data-layer no-bypass guards
+> (`test_browse_only_refuses_import_relationships_bytes`, `test_worker_is_load_bearing_off_folder_via_raw_rpc`).
+> That evidence is newer than PR #18, so the PNT copy of fellows' § Constraint attestation may want a
+> refresh at the next convenient sync (additive evidence only — no semantic change to any constraint).
+> Tracked in [`upstream_contributions_staging.md`](upstream_contributions_staging.md). PR #18
+> introduced the shared `PNA-DEFINITION` sentinel + validation-not-certification framing + lint
+> header-tracing that the Exceptions and User-mediation contributions must now build on (land order
+> inverted from this plan's §4 step 1 assumption). This file lives in the `fellows_local_db` repo
+> (`plans/`) as the design record.
 >
 > Local paths referenced below (confirmed against the current checkout):
 > - PNT repo: `/Users/richbodo/src/personal_network_toolkit` (spec files under `spec/`; `VERSION` = `0.1.0-draft`)
