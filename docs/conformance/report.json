@@ -1,7 +1,7 @@
 {
   "meta": {
-    "generated_at": "2026-06-08T02:32:36Z",
-    "git_sha": "5198047",
+    "generated_at": "2026-06-08T05:16:44Z",
+    "git_sha": "b30d1ea",
     "source": "docs/Architecture.md",
     "generator": "scripts/conformance_report.py",
     "toolkit_version": "0.1 (draft)",
@@ -11,8 +11,8 @@
     "verdict": "conditionally-conformant",
     "deferral_count": 0,
     "deferral_cap": 3,
-    "conformant_rows": 28,
-    "total_rows": 31,
+    "conformant_rows": 35,
+    "total_rows": 39,
     "findings_count": 0,
     "ok": true
   },
@@ -695,6 +695,143 @@
       "conformant": true,
       "review_kind": true,
       "refs": [],
+      "findings": []
+    },
+    {
+      "id": "UM-1 (no bypass)",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_private_data_enforcement.py::test_worker_is_load_bearing_off_folder_via_raw_rpc",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "UM-2 (separation)",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/test_private_data_ops.py::test_read_only_enforcement",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/test_comms.py::test_stage_email_basic_to",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "UM-3 (legibility)",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_groups_export.py::test_html_export_downloads_single_self_contained_file",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_groups_compose.py",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_stored_xss.py::test_group_name_and_note_are_escaped_on_index",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "Create / edit group, `group_members` add/remove",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_private_data_enforcement.py::test_worker_is_load_bearing_off_folder_via_raw_rpc",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "`mailto:` compose / send",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/test_comms.py::test_stage_email_basic_to",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_groups_compose.py",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "Group export (HTML / PDF)",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_groups_export.py::test_html_export_downloads_single_self_contained_file",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_stored_xss.py::test_group_name_and_note_are_escaped_on_index",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "Directory re-import (shared mirror; touches private FKs)",
+      "status_text": "conformant",
+      "conformant": true,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_directory_data_update_flow.py::test_apply_with_group_impact_shows_dialog_and_can_cancel",
+          "status": "live",
+          "detail": ""
+        }
+      ],
+      "findings": []
+    },
+    {
+      "id": "Private-data **restore** (`importRelationshipsBytes`)",
+      "status_text": "partial-conformance (UM-1 + UM-2 hold; UM-3 legibility weaker than AC-10 \u2014 frontier [#259](https://github.com/richbodo/fellows_local_db/issues/259))",
+      "conformant": false,
+      "review_kind": false,
+      "refs": [
+        {
+          "ref": "tests/e2e/test_private_data_enforcement.py::test_browse_only_refuses_import_relationships_bytes",
+          "status": "live",
+          "detail": ""
+        }
+      ],
       "findings": []
     }
   ]

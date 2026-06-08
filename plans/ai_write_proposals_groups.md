@@ -1,6 +1,14 @@
 # Plan — AI write proposals for the Private DB (propose/dispose machinery, groups first)
 
-**Status:** 🟡 DRAFT for review. **Created:** 2026-06-03.
+**Status:** ⏸️ **DEFERRED — richer demonstrator, NOT on the critical path.** **Created:** 2026-06-03.
+
+> **This is one satellite of the User-Mediation Arc; the spine is
+> [`pna_toolkit_user_mediation_contribution.md`](pna_toolkit_user_mediation_contribution.md).** Decision
+> recorded 2026-06-08: the user-mediation invariant is demonstrated **now** via the MVD path (already-green
+> fellows proofs) + PRM's built propose→apply loop — *without* building this feature. This feature would
+> add a *third* mediated boundary (AI-proposed group writes, the cleanest single-design propose→diff→dispose
+> loop) and is worth building **only if it earns product value on its own**. The design below stands; just
+> don't treat it as a prerequisite for the upstream mechanism. See arc §4 (PRM) and §5 (this feature's role).
 
 Extends fellows's MCP Private surface from **read-only** (today:
 `mcp_servers/private_data_ops.py`, `mode=ro`, groups only) to **write-via-proposal**:

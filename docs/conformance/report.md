@@ -16,11 +16,11 @@ Every conformance claim this app makes is backed by live, executable evidence, a
 
 → To complete the determination (🟡 → 🟢), run the spec's audit flow: **[PNT User's Guide → Audit a candidate PNA](https://github.com/richbodo/personal_network_toolkit/blob/main/docs/users-guide.md#goal-2--audit-a-candidate-pna-before-installing-it)**.
 
-_Generated 2026-06-08T02:32:36Z for `5198047`. Source of truth: [`docs/Architecture.md`](../Architecture.md)._
+_Generated 2026-06-08T05:16:44Z for `b30d1ea`. Source of truth: [`docs/Architecture.md`](../Architecture.md)._
 
 **What the IDs mean** — [**AC**](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/PNA_Spec.md) Architectural Commitment (a rule every safe PNA honors) · [**CST**](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/constraints.md) Constraint (a platform limit handled honestly, not hidden) · [**EX**](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/exceptions.md) Exception (a declared departure from PNA rules).
 
-- **Conformant rows:** 28 of 31
+- **Conformant rows:** 35 of 39
 - **Deferrals:** 0 of 3 max ✅
 - **Findings:** 0 ✅
 
@@ -69,4 +69,12 @@ Each row's ID links to its definition in the PNT spec. Status is summarized; the
 | [CST-PWA-SINGLE-OWNER](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/constraints.md#cst-pwa-single-owner) | conformant | `tests/e2e/test_user_folder_storage.py::TestPhase2WriteLock` → live |
 | [CST-PWA-NO-BACKGROUND](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/constraints.md#cst-pwa-no-background) | conformant | `tests/e2e/test_user_folder_storage.py` → live |
 | [CST-PWA-SERVER-FLOOR](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/constraints.md#cst-pwa-server-floor) | conformant | _declared review kind_ |
+| UM-1 (no bypass) | conformant | `tests/e2e/test_private_data_enforcement.py::test_worker_is_load_bearing_off_folder_via_raw_rpc` → live |
+| UM-2 (separation) | conformant | `tests/test_private_data_ops.py::test_read_only_enforcement` → live; `tests/test_comms.py::test_stage_email_basic_to` → live |
+| UM-3 (legibility) | conformant | `tests/e2e/test_groups_export.py::test_html_export_downloads_single_self_contained_file` → live; `tests/e2e/test_groups_compose.py` → live; `tests/e2e/test_stored_xss.py::test_group_name_and_note_are_escaped_on_index` → live |
+| Create / edit group, `group_members` add/remove | conformant | `tests/e2e/test_private_data_enforcement.py::test_worker_is_load_bearing_off_folder_via_raw_rpc` → live |
+| `mailto:` compose / send | conformant | `tests/test_comms.py::test_stage_email_basic_to` → live; `tests/e2e/test_groups_compose.py` → live |
+| Group export (HTML / PDF) | conformant | `tests/e2e/test_groups_export.py::test_html_export_downloads_single_self_contained_file` → live; `tests/e2e/test_stored_xss.py::test_group_name_and_note_are_escaped_on_index` → live |
+| Directory re-import (shared mirror; touches private FKs) | conformant | `tests/e2e/test_directory_data_update_flow.py::test_apply_with_group_impact_shows_dialog_and_can_cancel` → live |
+| Private-data **restore** (`importRelationshipsBytes`) | partial-conformance | `tests/e2e/test_private_data_enforcement.py::test_browse_only_refuses_import_relationships_bytes` → live |
 
