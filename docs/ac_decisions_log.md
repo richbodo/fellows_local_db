@@ -18,6 +18,41 @@ link to the newer entry. Newest first.
 
 ---
 
+## 2026-06-07 — Encryption-at-rest is rejected for the live private store; encryption belongs in-transit (the portable export)
+
+**Why this is worth recording.** A "Lock my user data" branch (PR #155)
+built opt-in app-layer encryption-at-rest (EAR) for `relationships.db`
+(PBKDF2/AES-GCM, non-extractable worker-memory key) and reached phases 1–3
+before stalling. A future contributor seeing a security-review line item
+"encrypt user data at rest" — or the harvested crypto in the closed PR —
+would reasonably resume it. We are deciding **not to**: app-EAR for the
+*live* store is rejected. Full analysis in
+[`architectural_findings.md`](architectural_findings.md) (2026-06-07);
+discussion in [#256](https://github.com/richbodo/fellows_local_db/issues/256).
+
+**The constraint that shaped the decision.** App-EAR for the live store is
+both *dominated* and *contradictory*:
+
+- **Dominated by device FDE.** Its entire defended-threat-set (stolen/
+  discarded device, offline drive image) is a strict subset of what
+  FileVault/BitLocker/LUKS already cover, in hardware, for the whole
+  device — while it *adds* a forgotten-passphrase → permanent-data-loss
+  risk.
+- **Contradicts `CST-PWA-SANDBOX-SEALED`.** Folder mode exists so
+  `relationships.db` is *a real file the user's other tools read* (MCP
+  `private_data_ops`, sqlite3 CLI, backups). A `.locked` ciphertext is
+  opaque to them, so "locked" and "tool-readable folder mode" are mutually
+  exclusive. EAR re-seals exactly the boundary the PNA model opens.
+
+**What we do instead.** Recommend device FDE (the stronger, OS-managed
+at-rest layer). Encryption's right home in a PNA is **in-transit**: an
+encrypted, versioned *portable export* crossing an untrusted commodity
+channel (email, etc.), where the live store stays plaintext/tool-readable
+and the passphrase cost lands on an occasional, deliberate "move my data"
+action. That is the sanctioned direction
+([#257](https://github.com/richbodo/fellows_local_db/issues/257)); the
+harvested crypto envelope from PR #155 (`eb66109`) is the reusable part.
+
 ## 2026-05-30 — Cloud-LLM integration is allowed but treated as a named, reversible "exception" that exits PNA mode, not forbidden and not silent
 
 **Why this is worth recording.** The PNA definition is "local-only,

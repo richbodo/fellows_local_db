@@ -130,6 +130,20 @@ version beats them and documents *how*. We claim only what we have done
 ceiling we merely reduced — over-reach (false durability) would itself be
 a silent conformance failure, which this gate exists to prevent.
 
+**Non-goal — encryption-at-rest for the live private store.** App-layer
+EAR of `relationships.db` is **intentionally not done** (decision
+2026-06-07; see [`./ac_decisions_log.md`](./ac_decisions_log.md) +
+[`./architectural_findings.md`](./architectural_findings.md),
+[#256](https://github.com/richbodo/fellows_local_db/issues/256)). It is
+*dominated* by device full-disk encryption and *contradicts*
+`CST-PWA-SANDBOX-SEALED` — a `.locked` file is unreadable by the
+MCP/CLI/backup tools folder mode exists to feed, so "encrypted" and
+"tool-readable" are mutually exclusive. Encryption's sanctioned home is
+**in-transit**: the encrypted portable export
+([#257](https://github.com/richbodo/fellows_local_db/issues/257)), where
+the live store stays tool-readable. Device FDE is the recommended at-rest
+layer.
+
 ---
 
 ## HTTP API

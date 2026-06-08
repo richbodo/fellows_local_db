@@ -11,6 +11,67 @@ Newest first.
 
 ---
 
+## 2026-06-07 — Encryption-at-rest is mis-fit for a PNA's live store; encryption belongs in-transit
+
+### The finding
+
+A "Lock my user data" effort (PR #155, phases 1–3 built — PBKDF2/AES-GCM,
+non-extractable worker-memory key) implemented opt-in app-layer
+encryption-at-rest (EAR) for the private store. Working it through surfaced
+that the stall was never code — it was an unmade architectural question —
+and that the answer generalizes beyond this app:
+
+> **For a PNA, encryption-at-rest of the *live* private store is the wrong
+> layer. Encryption's value is in-transit — sealing the portable copy that
+> crosses an untrusted channel — not at-rest on the user's own device.**
+
+### Why EAR is mis-fit for the live store
+
+1. **Dominated by device FDE.** The branch's own threat model defends
+   exactly one thing — a stolen/discarded device read offline — a strict
+   subset of what FileVault/BitLocker/LUKS already cover, in hardware, for
+   the whole device. App-EAR adds nothing to that threat and *adds* a
+   forgotten-passphrase → permanent-data-loss failure mode.
+2. **It contradicts the PNA openness promise** — the PNA-specific point the
+   original plan never reconciled. A PNA's private store is meant to be *a
+   real file the user's other tools read* (`CST-PWA-SANDBOX-SEALED` — MCP,
+   CLIs, backups). An encrypted-at-rest file is opaque to that ecosystem,
+   so "encrypted" and "tool-readable" are mutually exclusive. EAR re-seals
+   exactly the boundary the PNA model opens; a store your own tools can't
+   read is only half a PNA.
+3. **A browser PWA has nowhere honest to hold the key** for the live store:
+   a per-session passphrase kills the convenience that justifies a local
+   tool, a stored key is theater. (The branch chose the honest option —
+   passphrase-gated, key in worker memory — at the cost of manual-lock-only
+   UX and no recovery.)
+
+### Where encryption *does* belong: in-transit
+
+The same crypto, pointed at the portable **export/backup that leaves the
+device**, inverts every objection: the live store stays
+plaintext/tool-readable (no openness conflict), and the passphrase cost
+lands on an occasional, deliberate "move my data to my other device"
+action (no per-session friction). The untrusted commodity channel (email,
+a shared drive) is a genuine at-rest-on-someone-else's-disk exposure that
+device FDE does *not* cover — so the encryption does real work. This is the
+sanctioned direction (#257), and it reframes `CST-PWA-NO-SYNC`'s
+"encrypt-then-email-to-self" frontier from a vague candidate into a scoped
+feature.
+
+### What this feeds back into the toolkit
+
+A reusable PNA principle: **encrypt the artifact that crosses a trust
+boundary, not the store that sits behind your own OS.** EAR-at-rest for a
+local-first private store is dominated by the platform (FDE) and in tension
+with the spec's tool-readability goal; EAR-in-transit is the conformant
+placement. Candidate guidance alongside the constraints/exceptions work.
+Decision recorded in [`ac_decisions_log.md`](ac_decisions_log.md)
+(2026-06-07); discussion in
+[#256](https://github.com/richbodo/fellows_local_db/issues/256), feature
+space in [#257](https://github.com/richbodo/fellows_local_db/issues/257).
+
+---
+
 ## 2026-06-07 — The workspace is the user's actuation surface; test the gate, not the human
 
 ### The finding
