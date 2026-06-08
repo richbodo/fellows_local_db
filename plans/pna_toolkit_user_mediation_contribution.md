@@ -1,20 +1,56 @@
-# Plan — Contributing the **User-mediation** invariant to the Personal Network Toolkit (PNT)
+# Plan — The User-Mediation Arc: invariant → demonstrators → upstream contribution
 
-> **Status: SCOPE STAGED — TEST-FIRST, NOT YET EXECUTABLE.** This document scopes the third general
-> PNT mechanism (dual in spirit to Exceptions and Constraints) and stages it for hand-off. Unlike the
-> [Exceptions](pna_toolkit_exceptions_contribution.md) and [Constraints](pna_toolkit_constraints_contribution.md)
-> plans, this one deliberately **does not** ship execute-ready spec text. Per the tracking issue
-> (**#252**) the mechanism is **test-first**: the demonstrating tests define the enforceable boundary,
-> and the spec is written to match what proved testable — not the other way round. Writing the spec
-> first risks an unenforceable "user MUST comprehend" clause that `test_attestation_has_evidence.py`
-> would (correctly) reject as evidence-free. So §3 sketches the *shape* of the PNT artifacts; the
-> normative text is drafted only after §4 step 1 (the tests) lands.
+> **Status: ARC SPINE. The MVD path (§3) is the PRIMARY route and is READY NOW.** This is the single
+> source of truth for the user-mediation arc: one invariant (the third general PNT mechanism, dual to
+> Exceptions and Constraints), demonstrated by **two reference designs already in hand**, then
+> contributed upstream. The arc has two satellites: the **deferred richer demonstrator**
+> ([`ai_write_proposals_groups.md`](ai_write_proposals_groups.md) — the fellows AI-writes feature, *not
+> on the critical path*) and the **staging map**
+> ([`upstream_contributions_staging.md`](upstream_contributions_staging.md)).
 >
-> Nothing here files into PNT until the maintainer says so. Companion to, and the third of, the
-> matched set staged in [`upstream_contributions_staging.md`](upstream_contributions_staging.md).
-> The canonical lesson-learned is [`../docs/architectural_findings.md` § 2026-06-07](../docs/architectural_findings.md).
+> **Test-first, by design.** Per the tracking issue (**#252**) the demonstrating tests define the
+> enforceable boundary and the spec is written to match what proved testable — never the reverse
+> (writing the spec first risks an unenforceable "user MUST comprehend" clause that
+> `test_attestation_has_evidence.py` would correctly reject as evidence-free). §6 sketches the *shape*
+> of the PNT artifacts; the normative text is drafted only after the MVD's tests/attestation land (§3).
 >
-> Local paths: PNT repo `~/src/personal_network_toolkit`; demonstrating design (this repo) `~/src/fellows_local_db`.
+> **Decision recorded (2026-06-08): demonstrate now via the MVD, defer the feature.** The minimum
+> viable demonstration (§3) carries the mechanism upstream **without** building the fellows AI-writes
+> feature, because PRM already supplies the half fellows' MVD lacks (§4). Nothing files into PNT
+> without the maintainer's explicit go-ahead.
+>
+> Local paths: PNT repo `~/src/personal_network_toolkit`; demonstrating design (this repo)
+> `~/src/fellows_local_db`; second demonstrator `~/src/prm`. The canonical lesson-learned is
+> [`../docs/architectural_findings.md` § 2026-06-07](../docs/architectural_findings.md).
+
+---
+
+## 0. The arc at a glance
+
+One mechanism, **two demonstrators already in hand**, one upstream contribution — the same shape that
+landed Exceptions and Constraints, but with a stronger evidence base than either had (each of those
+rode up on fellows alone).
+
+**The demonstration ladder** — what proves the invariant:
+
+| Demonstrator | Substrate | Covers | Status | Role |
+|---|---|---|---|---|
+| **fellows MVD** | `opfs-sqlite-wasm` | UM-1 no-bypass (data-layer), UM-2 separation (`mode=ro` + no write tools), UM-3 legibility for **egress** (export/compose) | tests **already green** (#260/#261 + groups export/compose) | **PRIMARY — §3** |
+| **PRM** | `native-sqlite-via-filesystem` + daemon | UM-1 (FK + absent tool), UM-2 (propose-only MCP), UM-3 legibility for **mutation** (propose→diff→apply) | **built** (M2–M5 merged); attests at **M6** | second demonstrator — §4 |
+| fellows AI-writes feature | `opfs-sqlite-wasm` | UM-3 legibility for **mutation** (a 3rd boundary) | planned, **unbuilt** | deferred richer demo — §5 |
+
+**Why the MVD is sufficient without the feature.** The only gap in fellows' MVD — legibility of a
+proposed *mutation* diff — is exactly what PRM's propose→apply loop already covers, on a *second*
+storage substrate. Together fellows (egress) + PRM (mutation) cover UM-1/2/3 across two substrates: a
+stronger demonstration than fellows-alone-with-feature, and it needs no new feature build. The
+AI-writes feature becomes a *richer* third boundary to add later if it earns product value, not a
+prerequisite for the mechanism.
+
+**Sequencing summary** (full detail §7): **(A)** fellows MVD prep runs **now, in parallel** with the
+toolkit's Tier-0 keystone (different repo, different owner; off the critical path). **(B)** PRM carries
+a user-mediation boundary list into its M6 attestation. **(C)** after the keystone frees the toolkit
+instance, draft the upstream contribution (§6) test-first, citing fellows **+** PRM; Minor bump.
+**(D)** optional: build the fellows AI-writes feature later.
 
 ---
 
@@ -90,7 +126,7 @@ spec change rides along with working code, as `CONTRIBUTING.md` requires.
 ### The three enforceable properties (the demonstrating-test targets)
 
 These are the code properties #252 commits to proving **first**. They become the normative
-sub-contract clauses (working IDs `UM-1..UM-3`; naming is an open question, §5):
+sub-contract clauses (working IDs `UM-1..UM-3`; naming is an open question, §8):
 
 - **UM-1 — No bypass.** No path mutates the sovereign store or egresses its data except through the
   dispose gate. This is a **negative invariant** and so needs a **negative test** — same family as
@@ -127,16 +163,106 @@ SPA, no embedded agent). The deferred in-app local model and the `window.ai` sea
 pressure points. The honest commitment is not "the workspace MUST NOT be an AI interface" but the
 user-knowledge form: **any in-workspace AI is a *proposer* subject to the same gate, never an
 *actuator*.** Declare it, with a frontier, *before* local-AI lands — not after. (This is a fellows-side
-attestation commitment AND a candidate normative line for the spec; §5.)
+attestation commitment AND a candidate normative line for the spec; §8.)
 
 ---
 
-## 3. Proposed PNT artifacts (SHAPE ONLY — normative text drafted from the tests)
+## 3. The MVD path — PRIMARY, ready now
 
-Mirrors the matched set's structure. **None of the normative text below is final**; it is drafted
-after §4 step 1, to match what the tests prove.
+The minimum viable demonstration carries the invariant upstream using evidence fellows **already has
+green**, plus one honest gap declaration. **No new feature.** This section is the fellows-instance task
+list; it runs in parallel with the toolkit's Tier-0 keystone (§7) and is off the critical path.
 
-### 3a. NEW file: `spec/user_mediation.md` (or fold into an existing spec section — §5)
+### 3.0 Preconditions (already satisfied — verified 2026-06-08)
+
+- **UM-1 (no-bypass):** `tests/e2e/test_private_data_enforcement.py::test_no_durable_private_write_when_browse_only`
+  and `::test_worker_is_load_bearing_off_folder_via_raw_rpc` — green (PR #261 / #260, enforced at the
+  worker/data layer, not UI-only).
+- **UM-2 (separation):** `mcp_servers/private_data_ops.py` is `mode=ro` with **no** write tools
+  (`list_groups` / `find_group` / `get_group_members` only); `tests/test_private_data_ops.py::test_read_only_enforcement`
+  green. The MCP surface can stage/read, never commit.
+- **UM-3 (legibility, egress):** `tests/e2e/test_groups_export.py`, `tests/e2e/test_groups_compose.py`
+  — deterministic, human-readable (names, not `record_id`s), `escapeHtml` on untrusted strings.
+- **Built upstream machinery to build on:** the merged `spec/exceptions.md` + `spec/constraints.md` +
+  `tools/lint-spec-ids.py` on PNT `origin/main` — do **not** re-introduce the shared machinery (§8 Q6).
+
+### 3.1 Frame the existing tests under UM-1/2/3
+
+Re-label / cross-reference the green tests above as the UM-1 / UM-2 / UM-3(egress) evidence rows. **No
+new test code** is required for these three; this is the mapping that makes the attestation legible.
+
+### 3.2 Boundary audit (the one piece of real work)
+
+Enumerate every mutation/egress boundary and confirm UM-1/2/3 or honestly attest the gap. Known
+boundaries: create/edit group, `group_members` add/remove, mailto-stage (AC-MCP-B), directory
+re-import (AC-10), **private-data restore** (`importRelationshipsBytes`), export (PR-6).
+
+- **Restore is the known gap.** Off-folder it now *refuses* (UM-1 holds — PR #261), but in folder mode
+  its "what is changing" legibility is weaker than AC-10's orphan preview gives a directory import.
+  **Attest the gap honestly; do NOT block on closing it.** The closure decision is tracked in **#259**
+  (off-folder durability model + Restore-affordance tidy), explicitly *deferred / not urgent*. Cite
+  #259 as the frontier. This is exactly the EX-H7-style "conformant for the mechanical half, gap named"
+  honesty. (Note: #259 also flags a *visible-but-erroring* Restore button off-folder — a cosmetic-half
+  issue to mention but not gate on.)
+
+### 3.3 Pin the workspace-AI frontier stance
+
+Record in `docs/Architecture.md`, *before* local-AI / `window.ai` lands: **any in-workspace AI is a
+proposer subject to the dispose gate, never an actuator.** A frontier line, not a closed guarantee (§2).
+
+### 3.4 Attest in fellows `docs/Architecture.md` § User-mediation
+
+New section: the mediated-boundary list, each row citing a live test (UM-1/2/3) or an honestly-named
+gap (#259). Run `tests/test_attestation_has_evidence.py` + the conformance report; keep the `just` gate
+green.
+
+### 3.5 SKILL preflight
+
+Run the toolkit's evaluate/preflight flow against fellows; iterate until clean.
+
+### Exit criteria (MVD done)
+
+fellows attests a user-mediation boundary list with green UM-1/2/3 evidence + an honestly-named restore
+gap (#259). At this point the invariant is *demonstrated*; §7 Step C drafts the spec to match.
+
+---
+
+## 4. PRM — the built second demonstrator
+
+PRM (`~/src/prm`) already implements the same invariant on a *different* substrate
+(`native-sqlite-via-filesystem` + local daemon): its v0.1 spine is "AI deduplicates via **propose →
+review → apply**: the AI stages a merge changeset, the human reviews and applies" (PRM
+`docs/roadmap.md`, `plans/v0.1-implementation-plan.md`), realizing the proposed AC-PRM-E/F ("MCP
+stages, workspace applies"). M2–M5 are merged; the proposal-review UI exists.
+
+- **It covers the half fellows' MVD lacks:** UM-3 legibility for a proposed **mutation** diff.
+- **It rides up at PRM M6.** PRM's M6 attestation already carries the distribution-axis split (#39 /
+  prm#8); add a **user-mediation boundary list** alongside it. The upstream contribution then cites
+  *two* designs across *two* substrates.
+- **Verify when attesting — don't over-claim now.** Confirm PRM's apply UI renders a deterministic,
+  human-readable, escaped diff before the dispose action — i.e. that it actually meets UM-3, not merely
+  "has an apply step." State it as a check to perform, not a settled fact, until the test is cited.
+
+---
+
+## 5. The deferred richer demonstrator — fellows AI-writes feature
+
+[`ai_write_proposals_groups.md`](ai_write_proposals_groups.md) (plan #254 merged, **feature unbuilt**)
+would add a *third* mediated boundary: AI-proposed writes to `groups` / `group_members` via a
+folder-resident inbox, applied only by the worker after a workspace diff review. It is the cleanest
+single-design propose→diff→dispose loop, but it is **no longer on the mechanism's critical path** — the
+MVD (§3) + PRM (§4) already carry the upstream case. Build it later only if it earns product value on
+its own; when it lands, add it as another attested boundary row in the fellows attestation. That plan
+now carries a DEFERRED banner pointing here.
+
+---
+
+## 6. Proposed PNT artifacts (SHAPE ONLY — normative text drafted from the tests)
+
+Mirrors the matched set's structure. **None of the normative text below is final**; it is drafted after
+§3 (the MVD path), to match what the tests prove.
+
+### 6a. NEW file: `spec/user_mediation.md` (or fold into an existing spec section — §8)
 
 Sibling to `spec/exceptions.md` and `spec/constraints.md`. Carries: the concept (proposer stages /
 principal disposes), the normative handler contract (`UM-1..UM-3` + the bounded-claim clause), the
@@ -150,7 +276,7 @@ reference design routes through the gate.
 > the test that proves UM-1/2/3 for it. The spec defines the invariant once; designs attest the
 > boundary list.
 
-### 3b. Header conventions (mirroring `Relaxes:`/`Triggered-by:`)
+### 6b. Header conventions (mirroring `Relaxes:`/`Triggered-by:`)
 
 - **`Mediates:`** — on a reference-design boundary entry, names what crosses the gate: a mutation of
   the sovereign store, or an egress of its data. Token form TBD from the tests (likely `mutation:<op>`
@@ -159,21 +285,21 @@ reference design routes through the gate.
   (e.g. `mcp-inbox`, `network-import`, `in-workspace-ai`).
 - **`Dispose:`** — names the attributable authorization surface + the test ref that proves UM-1/2/3.
 
-### 3c. Extend `tools/lint-spec-ids.py`
+### 6c. Extend `tools/lint-spec-ids.py`
 
 Mirror the AC/EX/CST machinery: collect `UM-*` clause IDs and the `Mediates:`/`Dispose:` headers;
 verify each boundary entry's `Dispose:` cites a resolvable test ref (the lint already validates
 *shape + traceability*, not runtime behavior — same 80/20 line as the existing checks). **Build on
 PR #18's as-built** (the constraints lint extension is the closest template).
 
-### 3d. "Validation, not certification" framing
+### 6d. "Validation, not certification" framing
 
 Already promoted by the Exceptions/Constraints work. Add the user-mediation clause: the evaluate flow
 detects each mediated boundary and verifies UM-1/2/3 hold, reporting by boundary; an **un-mediated
 mutation/egress path is a silent conformance failure** — the dual of an undeclared Exception
 (deviation) and an undeclared over-reach (constraint). The three backstops then form a complete set.
 
-### 3e. SKILL flow steps (`pna-build-eval-contrib/SKILL.md`)
+### 6e. SKILL flow steps (`pna-build-eval-contrib/SKILL.md`)
 
 - **Build flow:** when adding any mutation or egress path, route it through the dispose gate; the
   proposer stages only.
@@ -182,54 +308,49 @@ mutation/egress path is a silent conformance failure** — the dual of an undecl
   (the proposer can't self-commit), UM-3 (deterministic, human-readable, escaped diff). **Backstop:**
   find an un-mediated path and flag it. Report by boundary.
 
-### 3f. `fellows_local_db` as the demonstrating reference design
+### 6f. Demonstrating reference designs
 
-- **(i) `docs/Architecture.md` § User-mediation attestation** — a new section listing fellows'
-  mediated boundaries with their UM-1/2/3 evidence. **Starting evidence already exists** from #260:
-  `test_worker_is_load_bearing_off_folder_via_raw_rpc` and `test_no_durable_private_write_when_browse_only`
-  (UM-1 no-bypass, data-layer), the `mode=ro` MCP proofs (UM-2 separation: MCP stages, can't write),
-  `test_groups_export.py` / `test_groups_compose.py` (UM-3 legibility before send). The **dispose-gate
-  diff** boundary (UM-3 for AI-proposed writes) is the one that needs the AI-writes feature.
-- **(ii) Reference-design record + Architecture.md copy** into `reference_designs/fellows_local_db/`.
-- **Known gap to close first (#252):** private-data **restore** (`importRelationshipsBytes` wholesale
-  replace) has far less "what is changing" legibility than AC-10 gives a directory import. It is the
-  sibling boundary that does not yet meet the family's UM-3 bar — surface it honestly (attest the gap,
-  or close it) rather than claiming uniform mediation.
-
----
-
-## 4. Sequencing (test-first)
-
-Stays a **scope in the fellows repo** until the maintainer approves. When approved:
-
-1. **Write the three demonstrating tests** (UM-1 no-bypass, UM-2 separation, UM-3 legibility) against
-   the mediated boundaries. Start from the #260 data-layer proofs (already green) as the UM-1 seed;
-   the dispose-gate diff tests come with the AI-writes feature (gated — see §Dependencies). **This step
-   defines the enforceable boundary; the spec text is written to match it.**
-2. **Audit every inbound/egress boundary** against the invariant (the known restore-legibility gap +
-   any others). Close or honestly attest each.
-3. **Pin the workspace-AI stance** (any in-workspace AI is a proposer, never an actuator) with a
-   frontier — *before* local-AI / `window.ai` lands.
-4. **Attest in fellows' `docs/Architecture.md`** § User-mediation, every boundary citing a live test.
-   Run `tests/test_attestation_has_evidence.py` + the conformance report.
-5. **Run the SKILL preflight** against fellows; iterate clean.
-6. **Draft + author the PNT changes** (§3a–3f) on a PNT branch, *now* that the tests have proven the
-   boundary — reconcile against PR #18's as-built machinery. Run `tools/lint-spec-ids.py` green.
-7. **Only on the maintainer's explicit go-ahead:** open the PNT PR. Version bump **Minor** (additive).
-
-**Dependencies / gate:** the flagship demonstration (the AI propose/dispose diff) needs the AI-writes
-feature ([`ai_write_proposals_groups.md`](ai_write_proposals_groups.md), plan #254 merged, **feature
-unbuilt**). **Maintainer decision (§5):** demonstrate now via #260's existing no-bypass/separation
-proofs as the minimum viable demonstration, or wait for the AI-writes dispose gate to demonstrate the
-full propose→diff→dispose loop.
-
-**Explicit decision recorded here:** no issues or PRs are filed into PNT from this scope. This
-document is the artifact the maintainer reviews; everything downstream waits on approval and on the
-tests landing first.
+- **(i) fellows `docs/Architecture.md` § User-mediation attestation** — the mediated-boundary list with
+  UM-1/2/3 evidence. **Starting evidence already exists** (§3.0): the #260/#261 data-layer no-bypass
+  proofs (UM-1), the `mode=ro` MCP proofs (UM-2), `test_groups_export.py` / `test_groups_compose.py`
+  (UM-3 legibility before send / egress). The mutation-diff legibility boundary is supplied by **PRM**
+  (§4), not by an unbuilt fellows feature.
+- **(ii) PRM** — its M6 attestation carries a user-mediation boundary list for the mutation side (§4).
+- **(iii) Reference-design records + Architecture.md copies** into `reference_designs/<design>/` for
+  each, per the contribute flow.
+- **Known gap to attest (not close):** private-data **restore** legibility vs AC-10's directory-import
+  preview — surfaced honestly, frontier = #259 (§3.2).
 
 ---
 
-## 5. Open questions / terminology notes
+## 7. Sequencing — MVD-primary
+
+Dependency-ordered, not calendar-ordered. The MVD prep (Step A) is **off the critical path** and runs
+now in parallel with the toolkit's keystone; the upstream draft (Step C) waits for toolkit-instance
+bandwidth, not for any hard dependency.
+
+- **Step A — fellows MVD prep (now; owner: fellows instance; parallel to the Tier-0 keystone).**
+  Execute §3 (3.1–3.5). Output: a green user-mediation attestation in fellows + an honestly-named
+  restore gap (#259).
+- **Step B — PRM second demonstrator (with PRM M6; owner: prm instance).** Add a user-mediation
+  boundary list to PRM's M6 attestation (§4). Output: a second design, second substrate.
+- **Step C — upstream contribution (after the Tier-0 keystone frees the toolkit instance; owner:
+  toolkit instance).** Draft §6 **test-first**, to match what A/B proved: `spec/user_mediation.md`
+  (or a prominent `PNA_Spec.md` section), the `lint-spec-ids.py` `UM-*` / `Mediates:` / `Proposer:` /
+  `Dispose:` machinery built on PR #18's as-built, the SKILL build+evaluate steps, the
+  validation-not-certification clause. Cite fellows **+** PRM. **Minor** version bump (additive).
+  **File only on the maintainer's explicit go-ahead.**
+- **Step D — optional richer demo (later).** Build the fellows AI-writes feature (§5) if it earns its
+  keep; add it as another attested boundary.
+
+**Hard dependencies:** Step C builds on the merged Exceptions + Constraints (done). **Soft sequencing:**
+C benefits from B (dual demonstrator) but fellows' MVD alone could carry it if PRM M6 slips. No PNT
+issues/PRs are filed from this scope until Step C, on the maintainer's explicit go-ahead. This document
+is the artifact the maintainer reviews.
+
+---
+
+## 8. Open questions / terminology notes
 
 1. **Mechanism name + ID prefix.** Working name "user-mediation / informed-actuation"; working clause
    prefix `UM-*`. Alternatives: `MED-*`, `ACT-*` (actuation). The metaphor to lead with: **separation
@@ -243,10 +364,10 @@ tests landing first.
    *foundational* than EX/CST (it underlies the whole AC-16/18/19/10/PRM family), which argues for a
    prominent home in `PNA_Spec.md` rather than a sibling file. Maintainer's call; recommend a sibling
    file + a prominent `PNA_Spec.md` pointer (parallels axes/use_cases/exceptions/constraints).
-4. **Demonstrate-now vs wait-for-AI-writes** (the §4 gate). Recommend: stage the spec now, demonstrate
-   the **minimum** (UM-1/UM-2 via #260's proofs + UM-3 via export/compose) immediately, and add the
-   AI-propose/dispose boundary as a second attested boundary when the feature ships — rather than
-   blocking the whole mechanism on unbuilt feature work.
+4. **Demonstrate-now vs wait-for-AI-writes.** **RESOLVED (2026-06-08): demonstrate now.** The MVD (§3)
+   + PRM (§4) carry the upstream case across two substrates without the fellows AI-writes feature,
+   which is deferred (§5). This removes the unbuilt feature from the critical path; the AI-propose/
+   dispose boundary is added later as another attested boundary if the feature ships.
 5. **The comprehension bound — how loudly to state it.** The mechanism's honesty rests on *not*
    claiming comprehension. Recommend the spec states the bound **normatively** ("a handler MUST NOT
    imply the user comprehended; it attests separation + legibility + attribution only"), so a future
@@ -256,4 +377,4 @@ tests landing first.
    (Constraints via PR #18; Exceptions iterated to EX-H8) and share the `PNA-DEFINITION` sentinel, the
    validation-not-certification framing, and the lint header-tracing pattern. This contribution MUST
    build on that, not re-add it. Read `spec/exceptions.md` + `spec/constraints.md` +
-   `tools/lint-spec-ids.py` on PNA Toolkit `origin/main` before drafting §3c/§3d.
+   `tools/lint-spec-ids.py` on PNA Toolkit `origin/main` before drafting §6c/§6d.

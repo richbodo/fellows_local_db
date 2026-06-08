@@ -144,6 +144,82 @@ MCP/CLI/backup tools folder mode exists to feed, so "encrypted" and
 the live store stays tool-readable. Device FDE is the recommended at-rest
 layer.
 
+### User-mediation attestation
+
+A third standing invariant sits beneath the AC-16/18/19/10 and AC-MCP/PRM
+families and unifies them: **the human is the actuator; the workspace is the
+locus of ground truth.** Every path that mutates the sovereign store
+(`relationships.db`) or egresses its data routes through a distinct,
+attributable, legible authorization the user performs in a surface they
+control — the *proposer* (an AI, the network, an importer) only **stages**;
+the *principal* **disposes**. This is the dual of the
+[Exception](#exception-attestation-non-pna-mode) (user-raised) and
+[Constraint](#constraint-attestation) (platform-imposed) mechanisms: nothing
+is raised or inherited, it is **always on**, and an un-mediated
+mutation/egress path is a *silent conformance failure* — the same class as an
+undeclared exception or a constraint over-reach. Discovery and the
+testability argument: [`./architectural_findings.md` § 2026-06-07](./architectural_findings.md)
+("the workspace is the user's actuation surface; test the gate, not the
+human"); the upstream-contribution arc and the `UM-1..UM-3` working IDs are
+staged in [`../plans/pna_toolkit_user_mediation_contribution.md`](../plans/pna_toolkit_user_mediation_contribution.md)
+(tracking [#252](https://github.com/richbodo/fellows_local_db/issues/252)).
+
+**The bounded claim (the honest part).** The invariant guarantees
+**separation, legibility, and attribution — not comprehension.** We do not,
+and cannot, probe whether the user understood the diff, and an automation
+driving the workspace can click *Approve* as readily as a person can; the
+enforceable property is a property of the *code* and is actor-agnostic.
+Stating the bound here is deliberate — over-claiming comprehension would be
+the same false-confidence failure this attestation exists to prevent (cf.
+EX-H7, which surfaces consent-to-human best-effort and *attests the residual*
+rather than pretending to close it). The naming choice — *actuator*, not
+*present human* — **is** the testability decision: "is this a human?" is an
+unwinnable detection arms race, and a guarantee built on it is false
+confidence, so none is made here.
+
+#### The three enforceable properties
+
+| Property | What it requires | Verification | Status |
+|---|---|---|---|
+| UM-1 (no bypass) | A **negative invariant**: no path mutates the sovereign store or egresses its data except through the dispose gate. Enforced at the worker/data layer, not UI-only — refused even when driven through the raw worker `_rpc`. | `tests/e2e/test_private_data_enforcement.py::test_worker_is_load_bearing_off_folder_via_raw_rpc`, `::test_no_durable_private_write_when_browse_only`, `::test_browse_only_refuses_import_relationships_bytes` | conformant |
+| UM-2 (separation) | The proposing surface carries **no actuation capability**; dispose is a distinct, attributable event decoupled from the proposer. The MCP servers open both DBs `mode=ro` with no write tools; comms `stage_email` returns a `mailto:` URL and never fires a transport. | `tests/test_private_data_ops.py::test_read_only_enforcement`; `tests/test_comms.py::test_stage_email_basic_to`, `::test_stage_email_bcc_group_send` | conformant |
+| UM-3 (legibility) | The dispose surface renders a **deterministic**, **human-readable** payload (names, not `record_id`s) and **escapes untrusted proposer strings** (the proposer's text is data, never trusted markup). | `tests/e2e/test_groups_export.py::test_html_export_downloads_single_self_contained_file`; `tests/e2e/test_groups_compose.py`; `tests/e2e/test_stored_xss.py::test_group_name_and_note_are_escaped_on_index` | conformant |
+
+#### Mediated-boundary registry
+
+Every mutation/egress boundary fellows exposes, the surface that may only
+*stage* it, the surface where the user *disposes*, and the test that proves
+UM-1/2/3 (or the honestly-named gap). The spec defines the invariant once;
+this design attests its **boundary list**.
+
+| Boundary | Mediates | Proposer → Dispose | Verification | Status |
+|---|---|---|---|---|
+| Create / edit group, `group_members` add/remove | mutation | in-workspace composer (and any future in-workspace AI) → user save; the OPFS-owning worker is the sole applier | `tests/e2e/test_private_data_enforcement.py::test_worker_is_load_bearing_off_folder_via_raw_rpc`, `::test_folder_attached_allows_create_group`, `::test_no_durable_private_write_when_browse_only` | conformant |
+| `mailto:` compose / send | egress:mailto | MCP `comms.stage_email` / compose panel stages a `mailto:` URL + payload preview → the user's mail client launches it | `tests/test_comms.py::test_stage_email_basic_to`, `::test_stage_email_bcc_group_send`; `tests/e2e/test_groups_compose.py` | conformant |
+| Group export (HTML / PDF) | egress:export | export panel renders recipients + subject + body + merged member data before launch → user downloads / launches | `tests/e2e/test_groups_export.py::test_html_export_downloads_single_self_contained_file`; `tests/e2e/test_stored_xss.py::test_group_name_and_note_are_escaped_on_index` | conformant |
+| Directory re-import (shared mirror; touches private FKs) | mutation:reimport | About-page importer stages new `fellows.db` bytes and previews `group_members` orphaned by the swap → user confirms / cancels | `tests/e2e/test_directory_data_update_flow.py::test_apply_with_group_impact_shows_dialog_and_can_cancel`, `::test_apply_with_group_impact_confirm_completes_swap` | conformant |
+| Private-data **restore** (`importRelationshipsBytes`) | mutation:wholesale-replace | file / auto-backup picker stages bytes → user confirms a row-count delta | **UM-1 + UM-2 hold:** off-folder the restore is refused at the worker (`tests/e2e/test_private_data_enforcement.py::test_browse_only_refuses_import_relationships_bytes`); the picker stages, the worker applies. **UM-3 gap:** in folder mode the dispose surface shows only a row-count delta — weaker "what is changing" legibility than AC-10's per-member orphan preview. | partial-conformance (UM-1 + UM-2 hold; UM-3 legibility weaker than AC-10 — frontier [#259](https://github.com/richbodo/fellows_local_db/issues/259)) |
+
+**Frontiers (kept honest, not closed).**
+
+- **Restore legibility ([#259](https://github.com/richbodo/fellows_local_db/issues/259), Open).**
+  Private-data restore is a wholesale replace; its folder-mode dispose surface
+  gives less per-item legibility than a directory re-import. The closure
+  decision (the off-folder durability model plus a Restore-affordance tidy —
+  including a visible-but-erroring off-folder Restore button) is tracked in
+  #259 and is **deferred, not urgent** — surfaced here à la EX-H7 (conformant
+  for the no-bypass / separation half, gap named for the legibility half), not
+  papered over. This attestation does **not** claim #259 closed.
+- **In-workspace AI (frontier line, not a closed guarantee).** "Review happens
+  in a non-AI surface" is true today only **by construction** — the workspace
+  is a vanilla-JS SPA with no embedded agent. The deferred in-app local model
+  and the `window.ai` search affordance are the pressure points. The standing
+  commitment, pinned **before** local-AI lands: **any in-workspace AI is a
+  *proposer* subject to the dispose gate, never an *actuator*.** When such an
+  affordance ships it must enter the registry above as another mediated
+  boundary with its own UM-1/2/3 evidence; until then this is a frontier line,
+  not a conformant row.
+
 ---
 
 ## HTTP API
