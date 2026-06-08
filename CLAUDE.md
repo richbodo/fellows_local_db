@@ -60,6 +60,16 @@ Target) honest. See [`plans/conformance_discipline.md`](plans/conformance_discip
   RPC still succeeds from the DevTools console is not reduced.
 - **Everything fails loudly.** Convert an absent guarantee into a red test or a
   blocking hook — never a silent pass.
+- **The conformance-guard stop-hook is a nudge, not the gate.** It fires while
+  you're *editing* `docs/Architecture.md`'s attestation without touching
+  `tests/`. If `pytest tests/test_attestation_has_evidence.py` is green and the
+  change is framing-only (cites already-green tests) or an honest
+  `partial`/`Open` row, **acknowledge once and move on — don't re-run the gate
+  or re-explain on later stops.** If a row is intentionally not-yet-true
+  (test-first), say so and name the PR/step that makes it conform; it carries a
+  `partial`/`Open` status or a strict-xfail until then. The pytest gate in CI is
+  the enforcement; the hook only nudges while you edit (and goes quiet once you
+  commit — it is working-tree-scoped).
 
 ## Two-DB architecture
 

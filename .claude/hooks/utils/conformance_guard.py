@@ -63,21 +63,29 @@ def _git(args):
 
 
 def _changed_files():
+    # Working-tree scope only (`diff HEAD`): the guard is a *nudge while you
+    # edit*, not a branch-wide gate. A former `main...HEAD` arm re-fired the
+    # nudge on every Stop for the whole life of a branch — even after the change
+    # was committed and the pytest gate (test_attestation_has_evidence.py) was
+    # green — which is pure noise, especially for test-first PRs whose tests
+    # landed in an earlier PR. The committed-branch case is already enforced by
+    # that pytest gate in CI; this hook only needs to cover the live editing
+    # window, then go quiet on commit. Fails open.
     files = set()
-    for spec in (["diff", "--name-only", "HEAD"], ["diff", "--name-only", "main...HEAD"]):
-        for line in _git(spec).splitlines():
-            line = line.strip()
-            if line:
-                files.add(line)
+    for line in _git(["diff", "--name-only", "HEAD"]).splitlines():
+        line = line.strip()
+        if line:
+            files.add(line)
     return files
 
 
 def _added_lines(path):
+    # Working-tree scope only — see _changed_files for why the `main...HEAD` arm
+    # is intentionally gone.
     added = []
-    for spec in (["diff", "HEAD", "--", path], ["diff", "main...HEAD", "--", path]):
-        for line in _git(spec).splitlines():
-            if line.startswith("+") and not line.startswith("+++"):
-                added.append(line[1:])
+    for line in _git(["diff", "HEAD", "--", path]).splitlines():
+        if line.startswith("+") and not line.startswith("+++"):
+            added.append(line[1:])
     return added
 
 
