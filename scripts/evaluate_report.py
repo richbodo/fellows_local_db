@@ -50,7 +50,6 @@ Usage:
 import json
 import os
 import re
-import subprocess
 import sys
 
 # Importable whether run as a script (sibling of conformance_lib) or via the
@@ -65,6 +64,7 @@ from scripts.conformance_lib import (  # noqa: E402
     FLAVOR_DERIVED_ACS,
     REPO_ROOT,
     evaluate_attestation,
+    input_commit,
     is_separator,
     py_index,
     split_row,
@@ -249,22 +249,14 @@ def _ac_finding(row, ext_evidence):
 
 # --- Report assembly ---------------------------------------------------------
 
-def _git_head_sha():
-    try:
-        out = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=_REPO_ROOT,
-            capture_output=True, text=True, timeout=10,
-        )
-        return out.stdout.strip() if out.returncode == 0 else None
-    except Exception:
-        return None
-
-
-def build_evaluate_report(commit="__HEAD__"):
+def build_evaluate_report(commit="__AUTO__"):
     """Build the toolkit-schema evaluate-report dict from docs/Architecture.md.
 
-    commit: pass an explicit sha, None to omit, or the sentinel '__HEAD__'
-    (default) to read git HEAD. Tests pass a fixed value for determinism.
+    commit: pass an explicit sha, None to omit, or the sentinel '__AUTO__'
+    (default) to derive the self-stable input-commit — the commit that last
+    touched the attestation source docs/Architecture.md, NOT raw HEAD (see
+    scripts/conformance_lib.input_commit for why). Tests pass a fixed value for
+    determinism.
     """
     with open(ARCH_MD, encoding="utf-8") as f:
         arch_md = f.read()
@@ -350,7 +342,10 @@ def build_evaluate_report(commit="__HEAD__"):
         "name": CANDIDATE_NAME,
         "repo_url": CANDIDATE_REPO_URL,
     }
-    sha = _git_head_sha() if commit == "__HEAD__" else commit
+    # Self-stable commit (NOT raw HEAD): the commit that last touched the
+    # attestation source. Keeps the archived keystone artifact byte-identical
+    # on regen so committing it never dirties the tree. See input_commit().
+    sha = input_commit() if commit == "__AUTO__" else commit
     if sha:
         candidate["commit"] = sha
     candidate["pna_spec_version"] = spec_version

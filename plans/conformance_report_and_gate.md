@@ -157,3 +157,34 @@ Two contributions, once the fellows side is proven:
 Different reference designs will wire the *running* differently per their build
 (this repo: `just` + pytest). Keep the upstream contribution to the *form*
 (checker template + skill + discipline doc), not the wiring.
+
+## Follow-up — self-stable report commit (PR #267 hardening, 2026-06-09)
+
+The deterministic evaluate-report emitter (#267) initially set
+`candidate.commit` (and report.json's `meta.git_sha`) from raw `git rev-parse
+HEAD`. That made both reports record the *parent* of the commit that generated
+them (HEAD at generation time), so the archived keystone artifact
+self-referenced a stale commit — and any fresh checkout or ≥10-commit staleness
+refresh regenerated a *different* file (the commit bumped to the new HEAD),
+dirtying the tree. Not a loop today (staleness is 10-commit-gated, the log is
+gitignored, the refresh is non-fatal, no clean-tree CI), but a landmine for any
+future clean-tree gate and a keystone artifact that mis-reports the evaluated
+commit.
+
+Fix: a shared `scripts/conformance_lib.input_commit()` derives the commit that
+last touched the report's **inputs** — `git rev-list -1 HEAD -- docs/Architecture.md`,
+the attestation source both reports derive from — falling back to `rev-parse
+HEAD` when git can't resolve it. Inputs are Architecture.md **only**, *not* the
+emitter scripts: a commit that edits the emitter (this one included) must not
+move the recorded commit of the candidate it evaluates, or the fix would
+reintroduce its own self-reference. Both `evaluate_report.py` (`candidate.commit`)
+and `conformance_report.py` (report.json `meta.git_sha`) use the one helper, so
+they name the same evaluated commit and the committed reports stay byte-identical
+on regen. The staleness *log* keeps recording HEAD (the run point) — distinct
+from the report's displayed commit — so `_commits_since` still measures distance
+from the last run, not from the last attestation change. Regression coverage:
+`tests/test_evaluate_report.py::test_candidate_commit_is_the_input_commit`,
+`::test_build_is_invariant_to_committed_report_changing`,
+`::test_report_files_are_not_their_own_input`. (report.json still carries a
+wall-clock `generated_at`, so it churns on regen regardless — only the
+no-timestamp keystone evaluate-report.json is truly byte-identical.)

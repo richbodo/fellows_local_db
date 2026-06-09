@@ -48,6 +48,7 @@ from scripts.conformance_lib import (  # noqa: E402
     FLAVOR_DERIVED_ACS,
     collect_strict_xfails,
     evaluate_attestation,
+    input_commit,
 )
 
 OUT_DIR = os.path.join(_REPO_ROOT, "docs", "conformance")
@@ -119,7 +120,11 @@ def _short_status(status_text):
     return status_text.split("(")[0].strip() or status_text
 
 
-def _git_sha():
+def _head_short_sha():
+    """Short HEAD sha — the staleness-log marker only ("where did we last
+    regenerate?"), consumed by `_last_logged_sha` / `_commits_since`. Distinct
+    from the report's *displayed* commit (`_report_short_sha`), which names the
+    attested state, not the run point."""
     try:
         out = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"], cwd=_REPO_ROOT,
@@ -128,6 +133,17 @@ def _git_sha():
         return out.stdout.strip() if out.returncode == 0 else None
     except Exception:
         return None
+
+
+def _report_short_sha():
+    """Short form of the self-stable input-commit (the commit that last touched
+    docs/Architecture.md) for `meta.git_sha` — so report.json names the SAME
+    evaluated commit as the keystone evaluate-report.json's `candidate.commit`,
+    and committing the snapshot doesn't churn the sha on an unrelated commit.
+    Sliced (not `git --short`) so the length is deterministic as the repo grows.
+    See scripts/conformance_lib.input_commit."""
+    full = input_commit()
+    return full[:7] if full else None
 
 
 def _commits_since(sha):
@@ -223,7 +239,7 @@ def build_report(probe_gh=True):
     report = {
         "meta": {
             "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "git_sha": _git_sha(),
+            "git_sha": _report_short_sha(),
             "source": "docs/Architecture.md",
             "generator": "scripts/conformance_report.py",
             "toolkit_version": toolkit_version,
@@ -393,7 +409,11 @@ def write_artifacts(report):
         f.write(render_md(report))
     log_line = {
         "generated_at": report["meta"]["generated_at"],
-        "git_sha": report["meta"]["git_sha"],
+        # The log marks the RUN POINT (HEAD), which the staleness short-circuit
+        # measures distance from — deliberately NOT report.meta.git_sha (the
+        # attested input-commit), or `_commits_since` would grow unbounded since
+        # the last attestation change and force a regen every run.
+        "git_sha": _head_short_sha(),
         "deferral_count": report["headline"]["deferral_count"],
         "conformant_rows": report["headline"]["conformant_rows"],
         "findings_count": report["headline"]["findings_count"],

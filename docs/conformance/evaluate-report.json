@@ -4,7 +4,7 @@
   "candidate": {
     "name": "fellows_local_db",
     "repo_url": "https://github.com/richbodo/fellows_local_db",
-    "commit": "658b28d5bef688cbd3bb21f92a16d64f3fc553e4",
+    "commit": "bbaf66e874ed3b97d0ce5f01f468f9e8fc4193e5",
     "pna_spec_version": "0.1",
     "picks_source": "declared",
     "axis_picks": {

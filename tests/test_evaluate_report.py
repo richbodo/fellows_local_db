@@ -106,6 +106,50 @@ def test_committed_artifact_is_render_contract_valid():
     assert er.render_contract_violations(committed) == []
 
 
+def test_candidate_commit_is_the_input_commit():
+    """candidate.commit tracks the commit that last touched the attestation
+    source (docs/Architecture.md) — self-stable, NOT raw HEAD — so committing
+    the regenerated keystone artifact never dirties the tree on the next regen.
+    With no git, the field is simply omitted. See input_commit() rationale and
+    plans/conformance_report_and_gate.md."""
+    from scripts.conformance_lib import input_commit
+    expected = input_commit()
+    cand = er.build_evaluate_report()["candidate"]  # default sentinel -> input_commit()
+    if expected is None:
+        assert "commit" not in cand
+    else:
+        assert cand["commit"] == expected
+
+
+def test_build_is_invariant_to_committed_report_changing(tmp_path, monkeypatch):
+    """The build derives purely from docs/Architecture.md + the input-commit,
+    never from its own output file: a no-op (or garbage) edit to the committed
+    report cannot change the next regen. The report files are NOT in their own
+    input set, so a >=10-commit staleness refresh / fresh checkout can't churn
+    them. See plans/conformance_report_and_gate.md."""
+    fixed = "0" * 40
+    out = tmp_path / "evaluate-report.json"
+    monkeypatch.setattr(er, "OUT_PATH", str(out))
+
+    er.write_report(er.build_evaluate_report(commit=fixed))
+    canonical = out.read_bytes()
+
+    # Perturb the committed artifact, then regenerate — must come back identical.
+    out.write_bytes(b'{"candidate": {"commit": "deadbeef"}, "junk": true}\n')
+    er.write_report(er.build_evaluate_report(commit=fixed))
+    assert out.read_bytes() == canonical
+
+
+def test_report_files_are_not_their_own_input():
+    """Structural complement to the byte-identity test: the git gate must never
+    include the generated report files, or committing a regenerated report would
+    bump the recorded input-commit and re-dirty the tree — the loop this closes."""
+    from scripts import conformance_lib as cl
+    assert cl.REPORT_INPUT_PATHS  # non-empty
+    for p in cl.REPORT_INPUT_PATHS:
+        assert not p.startswith("docs/conformance/"), p
+
+
 def test_real_toolkit_lint_passes_when_available(tmp_path):
     """Belt-and-suspenders: when the PNT checkout is present, the *real* lint
     (the authoritative render contract) accepts a freshly-built report. Skipped
