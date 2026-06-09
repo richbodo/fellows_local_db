@@ -45,8 +45,10 @@ if _REPO_ROOT not in sys.path:
 from scripts.conformance_lib import (  # noqa: E402
     ARCH_MD,
     DEFERRAL_CAP,
+    FLAVOR_DERIVED_ACS,
     collect_strict_xfails,
     evaluate_attestation,
+    input_commit,
 )
 
 OUT_DIR = os.path.join(_REPO_ROOT, "docs", "conformance")
@@ -74,9 +76,9 @@ PNT_AUDIT_GUIDE = (PNT_REPO + "/blob/main/docs/users-guide.md"
 
 # Flavor-derived ACs live in axes.md; every other AC lives in PNA_Spec.md.
 # (Mirrors PNT's split — see the "gaps you'll see in the table" note in
-# PNA_Spec.md.) Kept here because the report can't read the PNT repo at runtime.
-_AXES_ACS = {"AC-2", "AC-3", "AC-5", "AC-8", "AC-12", "AC-13", "AC-14",
-             "AC-PRM-B", "AC-PRM-C"}
+# PNA_Spec.md.) Single source of truth is conformance_lib.FLAVOR_DERIVED_ACS,
+# shared with scripts/evaluate_report.py so the two never drift.
+_AXES_ACS = FLAVOR_DERIVED_ACS
 
 _TOOLKIT_VERSION_RE = re.compile(r"Toolkit-Version:\*\*\s*\[([^\]]+)\]")
 
@@ -118,7 +120,11 @@ def _short_status(status_text):
     return status_text.split("(")[0].strip() or status_text
 
 
-def _git_sha():
+def _head_short_sha():
+    """Short HEAD sha — the staleness-log marker only ("where did we last
+    regenerate?"), consumed by `_last_logged_sha` / `_commits_since`. Distinct
+    from the report's *displayed* commit (`_report_short_sha`), which names the
+    attested state, not the run point."""
     try:
         out = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"], cwd=_REPO_ROOT,
@@ -127,6 +133,17 @@ def _git_sha():
         return out.stdout.strip() if out.returncode == 0 else None
     except Exception:
         return None
+
+
+def _report_short_sha():
+    """Short form of the self-stable input-commit (the commit that last touched
+    docs/Architecture.md) for `meta.git_sha` — so report.json names the SAME
+    evaluated commit as the keystone evaluate-report.json's `candidate.commit`,
+    and committing the snapshot doesn't churn the sha on an unrelated commit.
+    Sliced (not `git --short`) so the length is deterministic as the repo grows.
+    See scripts/conformance_lib.input_commit."""
+    full = input_commit()
+    return full[:7] if full else None
 
 
 def _commits_since(sha):
@@ -222,7 +239,7 @@ def build_report(probe_gh=True):
     report = {
         "meta": {
             "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "git_sha": _git_sha(),
+            "git_sha": _report_short_sha(),
             "source": "docs/Architecture.md",
             "generator": "scripts/conformance_report.py",
             "toolkit_version": toolkit_version,
@@ -392,7 +409,11 @@ def write_artifacts(report):
         f.write(render_md(report))
     log_line = {
         "generated_at": report["meta"]["generated_at"],
-        "git_sha": report["meta"]["git_sha"],
+        # The log marks the RUN POINT (HEAD), which the staleness short-circuit
+        # measures distance from — deliberately NOT report.meta.git_sha (the
+        # attested input-commit), or `_commits_since` would grow unbounded since
+        # the last attestation change and force a regen every run.
+        "git_sha": _head_short_sha(),
         "deferral_count": report["headline"]["deferral_count"],
         "conformant_rows": report["headline"]["conformant_rows"],
         "findings_count": report["headline"]["findings_count"],
@@ -400,6 +421,14 @@ def write_artifacts(report):
     }
     with open(LOG_JSONL, "a", encoding="utf-8") as f:
         f.write(json.dumps(log_line) + "\n")
+    # Keep the toolkit-schema evaluate-report (docs/conformance/evaluate-report.json,
+    # the PNT keystone's [verify].entrypoint output) current alongside report.json.
+    # Local import avoids any load-order coupling; both modules share
+    # conformance_lib as their single source of truth. Intentionally NOT wrapped
+    # in try/except: an unmapped EX/CST row must fail this write loudly, the same
+    # as it fails `just evaluate-report` and the pytest gate.
+    from scripts import evaluate_report as _er
+    _er.write_report()
 
 
 def main(argv):

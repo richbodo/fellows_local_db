@@ -19,6 +19,7 @@ Pure stdlib, 3.8-safe (no `ast.unparse`).
 import ast
 import os
 import re
+import subprocess
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ARCH_MD = os.path.join(REPO_ROOT, "docs", "Architecture.md")
@@ -55,6 +56,69 @@ TRACKING_ANCHOR = re.compile(r"tracking:\s*#(\d+)", re.IGNORECASE)
 # builds most features in ~3 PRs; a deferral load past one feature's worth is
 # the smell. Keeps the attestation glanceable, not a debt ledger.
 DEFERRAL_CAP = 3
+
+# Flavor-derived ACs live in PNT's axes.md (triggered by an axis pick); every
+# other AC lives in PNA_Spec.md (universal). Single source of truth for the
+# split, consumed by scripts/conformance_report.py (PNT deep-linking) and
+# scripts/evaluate_report.py (the toolkit-schema `ac_source` field). Kept here
+# because neither can read the PNT repo at runtime.
+FLAVOR_DERIVED_ACS = frozenset({
+    "AC-2", "AC-3", "AC-5", "AC-8", "AC-12", "AC-13", "AC-14",
+    "AC-PRM-B", "AC-PRM-C",
+})
+
+
+# --- Git provenance (self-stable report commit) -----------------------------
+
+# Repo-relative path(s) the committed conformance reports are *derived from*.
+# The recorded commit is the one that last touched these inputs — NOT raw HEAD
+# — which makes the reports self-stable: committing a regenerated report does
+# not dirty the tree on the next regen, because an unrelated commit (and the
+# report-emitter tooling itself) never bumps the recorded commit; only an
+# attestation change moves it.
+#
+# Why this matters (the landmine this closes): with raw HEAD, the archived
+# evaluate-report.json recorded `candidate.commit` = the *parent* of the commit
+# that generated it (HEAD at generation time), so it self-referenced a stale
+# commit, and any fresh checkout / >=10-commit staleness refresh regenerated a
+# DIFFERENT file (candidate.commit bumped to the new HEAD) — dirtying the tree
+# for any future clean-tree CI. Gating on the attestation source instead means
+# the keystone artifact names the commit it actually describes and stays
+# byte-identical on regen. Inputs are docs/Architecture.md ONLY (the attestation
+# both reports derive from) — deliberately NOT the emitter scripts, since a
+# commit that edits the emitter must not move the recorded commit of the
+# candidate it evaluates. See plans/conformance_report_and_gate.md.
+REPORT_INPUT_PATHS = ("docs/Architecture.md",)
+
+
+def _run_git(args):
+    """Run `git <args>` at the repo root; return stripped stdout on success,
+    else None. Never raises — missing git / timeout / non-repo all yield None."""
+    try:
+        out = subprocess.run(
+            ["git", *args], cwd=REPO_ROOT,
+            capture_output=True, text=True, timeout=10,
+        )
+        return out.stdout.strip() if out.returncode == 0 else None
+    except Exception:
+        return None
+
+
+def input_commit(paths=REPORT_INPUT_PATHS):
+    """Full 40-char SHA of the most recent commit that touched the report's
+    INPUTS (default: docs/Architecture.md), with `git rev-parse HEAD` as a
+    fallback when git can't resolve a path-scoped commit (shallow clone, a path
+    never committed), or None when git is unavailable entirely.
+
+    Single source of truth for `candidate.commit` in
+    docs/conformance/evaluate-report.json and the display sha in
+    docs/conformance/report.json, so both reports name the same evaluated
+    commit and stay byte-identical on regen. See the section comment above for
+    the self-stability rationale."""
+    sha = _run_git(["rev-list", "-1", "HEAD", "--", *paths])
+    if sha:
+        return sha
+    return _run_git(["rev-parse", "HEAD"])
 
 
 # --- Markdown attestation parsing -------------------------------------------

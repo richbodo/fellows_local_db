@@ -1,0 +1,606 @@
+{
+  "report_schema_version": "0.1",
+  "generated_by": "scripts/evaluate_report.py (deterministic; derived from docs/Architecture.md attestation)",
+  "candidate": {
+    "name": "fellows_local_db",
+    "repo_url": "https://github.com/richbodo/fellows_local_db",
+    "commit": "bbaf66e874ed3b97d0ce5f01f468f9e8fc4193e5",
+    "pna_spec_version": "0.1",
+    "picks_source": "declared",
+    "axis_picks": {
+      "distribution": "web-bundle-with-magic-link",
+      "storage-substrate": "opfs-sqlite-wasm",
+      "ingestion-shape": "single-source-static-mirror",
+      "workspace-shell": "vanilla-js-spa",
+      "comms-transport-set": "mailto-only",
+      "mcp-exposure": "shared+private+comms"
+    }
+  },
+  "summary": {
+    "posture": "conformant",
+    "headline": "fellows_local_db is deterministically attested conformant to PNA Spec 0.1 for its declared flavor: 23 conformant, 2 not-applicable, 0 non-conformant across 25 evaluated ACs. 3 AC(s) carry self-attested partial-conformance flagged for human review (AC-16, AC-PRM-A, AC-MCP-A); the EX-CLOUD-LLM exception and the CST-PWA-* platform constraints are handled honestly and folded into the AC findings they bear on. Derived from docs/Architecture.md by scripts/evaluate_report.py — not an LLM audit.",
+    "leading_concerns": [
+      "AC-16",
+      "AC-PRM-A",
+      "AC-MCP-A"
+    ]
+  },
+  "findings": [
+    {
+      "ac_id": "AC-1",
+      "ac_source": "universal",
+      "status": "conformant",
+      "citations": [
+        {
+          "path": "tests/test_relationships.py",
+          "note": "cited test: test_attach_fellows_readonly_allows_select"
+        },
+        {
+          "path": "tests/test_database.py"
+        }
+      ],
+      "evidence": [
+        {
+          "source": "deterministic",
+          "tool": "conformance-attestation-gate",
+          "detail": "Attestation gate (scripts/conformance_lib.py) resolved 2 cited test ref(s), all non-deferred: tests/test_relationships.py::test_attach_fellows_readonly_allows_select -> live; tests/test_database.py -> live. Static existence + marker-state only — pass/fail is enforced by the suite (`just test`)."
+        }
+      ]
+    },
+    {
+      "ac_id": "AC-4",
+      "ac_source": "universal",
+      "status": "conformant",
+      "citations": [
+        {
+          "path": "tests/e2e/test_version_handshake.py",
+          "note": "cited test: test_version_skew_refuses_mutations_but_allows_reads"
+        },
+        {
+          "path": "tests/e2e/test_worker_rpc.py"
+        }
+      ],
+      "evidence": [
+        {
+          "source": "deterministic",
+          "tool": "conformance-attestation-gate",
+          "detail": "Attestation gate (scripts/conformance_lib.py) resolved 2 cited test ref(s), all non-deferred: tests/e2e/test_version_handshake.py::test_version_skew_refuses_mutations_but_allows_reads -> live; tests/e2e/test_worker_rpc.py -> live. Static existence + marker-state only — pass/fail is enforced by the suite (`just test`)."
+        }
+      ]
+    },
+    {
+      "ac_id": "AC-6",
+      "ac_source": "universal",
+      "status": "conformant",
+      "citations": [
+        {
+          "path": "tests/e2e/test_email_gate.py"
+        },
+        {
+          "path": "tests/e2e/test_reset_everything.py"
+        },
+        {
+          "path": "tests/e2e/test_clear_app_cache.py"
+        }
+      ],
+      "evidence": [
+        {
+          "source": "deterministic",
+          "tool": "conformance-attestation-gate",
+          "detail": "Attestation gate (scripts/conformance_lib.py) resolved 3 cited test ref(s), all non-deferred: tests/e2e/test_email_gate.py -> live; tests/e2e/test_reset_everything.py -> live; tests/e2e/test_clear_app_cache.py -> live. Static existence + marker-state only — pass/fail is enforced by the suite (`just test`)."
+        }
+      ]
+    },
+    {
+      "ac_id": "AC-7",
+      "ac_source": "universal",
+      "status": "conformant",
+      "citations": [
+        {
+          "path": "tests/e2e/test_diagnostics_panel.py"
+        },
+        {
+          "path": "tests/e2e/test_boot_watchdog.py"
+        },
+        {
+          "path": "tests/e2e/test_boot_error_panel.py"
+        },
+        {
+          "path": "tests/e2e/test_bug_report.py"
+        },
+        {
+          "path": "tests/e2e/test_boot_beacon.py"
+        }
+      ],
+      "evidence": [
+        {
+          "source": "deterministic",
+          "tool": "conformance-attestation-gate",
+          "detail": "Attestation gate (scripts/conformance_lib.py) resolved 5 cited test ref(s), all non-deferred: tests/e2e/test_diagnostics_panel.py -> live; test_boot_watchdog.py -> live; test_boot_error_panel.py -> live; test_bug_report.py -> live; test_boot_beacon.py -> live. Static existence + marker-state only — pass/fail is enforced by the suite (`just test`)."
+        }
+      ]
+    },
+    {
+      "ac_id": "AC-9",
+      "ac_source": "universal",
+      "status": "conformant",
+      "citations": [
+        {
+          "path": "tests/e2e/test_user_folder_storage.py",
+          "note": "cited test: test_snapshot_lands_in_folder_when_folder_mode_active"
+        },
+        {
+          "path": "tests/e2e/test_settings.py"
+        }
+      ],
+      "evidence": [
+        {
+          "source": "deterministic",
+          "tool": "conformance-attestation-gate",
+          "detail": "Attestation gate (scripts/conformance_lib.py) resolved 2 cited test ref(s), all non-deferred: tests/e2e/test_user_folder_storage.py::test_snapshot_lands_in_folder_when_folder_mode_active -> live; tests/e2e/test_settings.py -> live. Static existence + marker-state only — pass/fail is enforced by the suite (`just test`)."
+        },
+        {
+          "source": "human",
+          "detail": "docs/Architecture.md also declares a non-test verification kind for this row (human-review / code inspection / by construction / by bounding)."
+        },
+        {
+          "source": "human",
+          "detail": "Bears on constraint CST-PWA-PRIVATE-SNAPSHOT (**conformant** (as a *handling*): the capability reduction is complete — UI/route reduction **plus** data-layer refusal of off-folder durable writes (worker-side load-bearing + page-side defense-in-depth, PR #244 `d2706a9`, extended in PR #261 to the restore/email-import path with a raw-RPC no-bypass proof; [`../plans/private_data_enforcement.md`](../plans/private_data_enforcement.md)). The negative invariant is now a hard guard, not a strict-xfail. Frontier stays **Open**: this is honest handling, not a durable cross-platform store.); declared and handled in docs/Architecture.md § Constraint attestation, folded here per the toolkit schema rule that EX-*/CST-* live as references inside the AC findings they bear on."
+        },
+        {
+          "source": "human",
+          "detail": "Bears on constraint CST-PWA-STORAGE-EVICTABLE (**conformant**: the two prefs (`has_email_only` / `self_email`) are localStorage-only off-folder — the boot reconciles no longer write `settings` to OPFS in browse-only mode (PR #244 `d2706a9`; [`../plans/private_data_enforcement.md`](../plans/private_data_enforcement.md)). #248 closed the last residual: the worker no longer mints workspace-identity metadata into OPFS off-folder either (it's minted only when a store becomes canonical — the first folder write), so the browse-only settings store is now *literally* empty. `test_off_folder_settings_are_empty` is a hard guard, not a strict-xfail. The \"Avoided\" claim holds in its strongest reading.); declared and handled in docs/Architecture.md § Constraint attestation, folded here per the toolkit schema rule that EX-*/CST-* live as references inside the AC findings they bear on."
+        },
+        {
+          "source": "human",
+          "detail": "Bears on constraint CST-PWA-NO-SYNC (conformant: canonical-copy disambiguation shipped (durably on disk, verified byte-level); sync explicitly out of scope); declared and handled in docs/Architecture.md § Constraint attestation, folded here per the toolkit schema rule that EX-*/CST-* live as references inside the AC findings they bear on."
+        },
+        {
+          "source": "human",
+          "detail": "Bears on constraint CST-PWA-NO-BACKGROUND (conformant: opportunistic-only, honestly framed); declared and handled in docs/Architecture.md § Constraint attestation, folded here per the toolkit schema rule that EX-*/CST-* live as references inside the AC findings they bear on."
+        }
+      ]
+    },
+    {
+      "ac_id": "AC-10",
+      "ac_source": "universal",
+      "status": "conformant",
+      "citations": [
+        {
+          "path": "tests/e2e/test_directory_data_update_flow.py",
+          "note": "cited test: test_apply_with_group_impact_shows_dialog_and_can_cancel"
+        },
+        {
+          "path": "tests/e2e/test_orphan_soft_scan.py"
+        },
+        {
+          "path": "tests/e2e/test_versioned_fellows_db.py"
+        }
+      ],
+      "evidence": [
+        {
+          "source": "deterministic",
+          "tool": "conformance-attestation-gate",
+          "detail": "Attestation gate (scripts/conformance_lib.py) resolved 3 cited test ref(s), all non-deferred: tests/e2e/test_directory_data_update_flow.py::test_apply_with_group_impact_shows_dialog_and_can_cancel -> live; test_orphan_soft_scan.py -> live; test_versioned_fellows_db.py -> live. Static existence + marker-state only — pass/fail is enforced by the suite (`just test`)."
+        }
+      ]
+    },
+    {
+      "ac_id": "AC-11",
+      "ac_source": "universal",
+      "status": "conformant",
+      "citations": [
+        {
+          "path": "tests/e2e/test_user_folder_storage.py",
+          "note": "cited test: TestPhase2WriteLock"
+        },
+        {
+          "path": "tests/e2e/test_worker_spawn_failure.py"
+        }
+      ],
+      "evidence": [
+        {
+          "source": "deterministic",
+          "tool": "conformance-attestation-gate",
+          "detail": "Attestation gate (scripts/conformance_lib.py) resolved 2 cited test ref(s), all non-deferred: tests/e2e/test_user_folder_storage.py::TestPhase2WriteLock -> live; test_worker_spawn_failure.py -> live. Static existence + marker-state only — pass/fail is enforced by the suite (`just test`)."
+        },
+        {
+          "source": "human",
+          "detail": "Bears on constraint CST-PWA-SINGLE-OWNER (conformant); declared and handled in docs/Architecture.md § Constraint attestation, folded here per the toolkit schema rule that EX-*/CST-* live as references inside the AC findings they bear on."
+        }
+      ]
+    },
+    {
+      "ac_id": "AC-15",
+      "ac_source": "universal",
+      "status": "conformant",
+      "citations": [
+        {
+          "path": "tests/test_build_pwa.py"
+        },
+        {
+          "path": "tests/e2e/test_update_check.py"
+        },
+        {
+          "path": "tests/e2e/test_bug_report.py"
+        },
+        {
+          "path": "tests/e2e/test_boot_beacon.py"
+        }
+      ],
+      "evidence": [
+        {
+          "source": "deterministic",
+          "tool": "conformance-attestation-gate",
+          "detail": "Attestation gate (scripts/conformance_lib.py) resolved 4 cited test ref(s), all non-deferred: tests/test_build_pwa.py -> live; tests/e2e/test_update_check.py -> live; test_bug_report.py -> live; test_boot_beacon.py -> live. Static existence + marker-state only — pass/fail is enforced by the suite (`just test`)."
+        }
+      ]
+    },
+    {
+      "ac_id": "AC-16",
+      "ac_source": "universal",
+      "status": "conformant",
+      "citations": [
+        {
+          "path": "tests/e2e/test_groups_export.py"
+        },
+        {
+          "path": "tests/test_comms.py"
+        }
+      ],
+      "needs_human_review": true,
+      "evidence": [
+        {
+          "source": "deterministic",
+          "tool": "conformance-attestation-gate",
+          "detail": "Attestation gate (scripts/conformance_lib.py) resolved 2 cited test ref(s), all non-deferred: tests/e2e/test_groups_export.py -> live; tests/test_comms.py -> live. Static existence + marker-state only — pass/fail is enforced by the suite (`just test`)."
+        },
+        {
+          "source": "human",
+          "detail": "docs/Architecture.md self-attests partial-conformance: \"partial-conformance (conformant to the `mailto-only` axis pick; richer transports planned)\". The toolkit schema has no 'partial' status, so this is recorded as conformant with needs_human_review to keep the residual visible."
+        }
+      ]
+    },
+    {
+      "ac_id": "AC-17",
+      "ac_source": "universal",
+      "status": "conformant",
+      "citations": [
+        {
+          "path": "tests/test_database.py"
+        },
+        {
+          "path": "build/diff_fellows_db.py"
+        }
+      ],
+      "evidence": [
+        {
+          "source": "deterministic",
+          "tool": "conformance-attestation-gate",
+          "detail": "Attestation gate (scripts/conformance_lib.py) resolved 2 cited test ref(s), all non-deferred: tests/test_database.py -> live; build/diff_fellows_db.py -> live. Static existence + marker-state only — pass/fail is enforced by the suite (`just test`)."
+        },
+        {
+          "source": "human",
+          "detail": "docs/Architecture.md also declares a non-test verification kind for this row (human-review / code inspection / by construction / by bounding)."
+        }
+      ]
+    },
+    {
+      "ac_id": "AC-18",
+      "ac_source": "universal",
+      "status": "conformant",
+      "citations": [
+        {
+          "path": "tests/test_comms.py"
+        },
+        {
+          "path": "tests/test_private_data_ops.py"
+        }
+      ],
+      "evidence": [
+        {
+          "source": "deterministic",
+          "tool": "conformance-attestation-gate",
+          "detail": "Attestation gate (scripts/conformance_lib.py) resolved 2 cited test ref(s), all non-deferred: tests/test_comms.py -> live; tests/test_private_data_ops.py -> live. Static existence + marker-state only — pass/fail is enforced by the suite (`just test`)."
+        },
+        {
+          "source": "human",
+          "detail": "docs/Architecture.md also declares a non-test verification kind for this row (human-review / code inspection / by construction / by bounding)."
+        }
+      ]
+    },
+    {
+      "ac_id": "AC-19",
+      "ac_source": "universal",
+      "status": "conformant",
+      "citations": [
+        {
+          "path": "tests/e2e/test_groups_export.py"
+        },
+        {
+          "path": "tests/e2e/test_groups_compose.py"
+        }
+      ],
+      "evidence": [
+        {
+          "source": "deterministic",
+          "tool": "conformance-attestation-gate",
+          "detail": "Attestation gate (scripts/conformance_lib.py) resolved 2 cited test ref(s), all non-deferred: tests/e2e/test_groups_export.py -> live; tests/e2e/test_groups_compose.py -> live. Static existence + marker-state only — pass/fail is enforced by the suite (`just test`)."
+        }
+      ]
+    },
+    {
+      "ac_id": "AC-PRM-A",
+      "ac_source": "universal",
+      "status": "conformant",
+      "citations": [
+        {
+          "path": "tests/e2e/test_pna_exception_mode.py"
+        },
+        {
+          "path": "tests/e2e/test_mcpb_settings.py"
+        }
+      ],
+      "needs_human_review": true,
+      "evidence": [
+        {
+          "source": "deterministic",
+          "tool": "conformance-attestation-gate",
+          "detail": "Attestation gate (scripts/conformance_lib.py) resolved 2 cited test ref(s), all non-deferred: tests/e2e/test_pna_exception_mode.py -> live; test_mcpb_settings.py -> live. Static existence + marker-state only — pass/fail is enforced by the suite (`just test`)."
+        },
+        {
+          "source": "human",
+          "detail": "docs/Architecture.md self-attests partial-conformance: \"partial-conformance (cloud opt-in via per-install consent; per-call prompt visibility is the cloud client's UI, not the workspace's)\". The toolkit schema has no 'partial' status, so this is recorded as conformant with needs_human_review to keep the residual visible."
+        },
+        {
+          "source": "human",
+          "detail": "Bears on exception EX-CLOUD-LLM (conformant for EX-H1–H6 and EX-H8; EX-H7 (consent-to-human) surfaced best-effort via MCP `instructions`); declared and handled in docs/Architecture.md § Exception attestation, folded here per the toolkit schema rule that EX-*/CST-* live as references inside the AC findings they bear on."
+        }
+      ]
+    },
+    {
+      "ac_id": "AC-PRM-D",
+      "ac_source": "universal",
+      "status": "conformant",
+      "citations": [
+        {
+          "path": "tests/e2e/test_directory_data_update_flow.py"
+        },
+        {
+          "path": "tests/e2e/test_versioned_fellows_db.py",
+          "note": "cited test: test_install_only_does_not_refetch_on_sha_mismatch"
+        }
+      ],
+      "evidence": [
+        {
+          "source": "deterministic",
+          "tool": "conformance-attestation-gate",
+          "detail": "Attestation gate (scripts/conformance_lib.py) resolved 2 cited test ref(s), all non-deferred: tests/e2e/test_directory_data_update_flow.py -> live; test_versioned_fellows_db.py::test_install_only_does_not_refetch_on_sha_mismatch -> live. Static existence + marker-state only — pass/fail is enforced by the suite (`just test`)."
+        }
+      ]
+    },
+    {
+      "ac_id": "AC-MCP-A",
+      "ac_source": "universal",
+      "status": "conformant",
+      "citations": [
+        {
+          "path": "tests/e2e/test_pna_exception_mode.py"
+        },
+        {
+          "path": "tests/test_private_data_ops.py"
+        }
+      ],
+      "needs_human_review": true,
+      "evidence": [
+        {
+          "source": "deterministic",
+          "tool": "conformance-attestation-gate",
+          "detail": "Attestation gate (scripts/conformance_lib.py) resolved 2 cited test ref(s), all non-deferred: tests/e2e/test_pna_exception_mode.py -> live; tests/test_private_data_ops.py -> live. Static existence + marker-state only — pass/fail is enforced by the suite (`just test`)."
+        },
+        {
+          "source": "human",
+          "detail": "docs/Architecture.md self-attests partial-conformance: \"partial-conformance (per-session/per-install opt-in via `EX-CLOUD-LLM`; not per-call server-side gating)\". The toolkit schema has no 'partial' status, so this is recorded as conformant with needs_human_review to keep the residual visible."
+        },
+        {
+          "source": "human",
+          "detail": "Bears on exception EX-CLOUD-LLM (conformant for EX-H1–H6 and EX-H8; EX-H7 (consent-to-human) surfaced best-effort via MCP `instructions`); declared and handled in docs/Architecture.md § Exception attestation, folded here per the toolkit schema rule that EX-*/CST-* live as references inside the AC findings they bear on."
+        },
+        {
+          "source": "human",
+          "detail": "Bears on constraint CST-PWA-SANDBOX-SEALED (conformant); declared and handled in docs/Architecture.md § Constraint attestation, folded here per the toolkit schema rule that EX-*/CST-* live as references inside the AC findings they bear on."
+        }
+      ]
+    },
+    {
+      "ac_id": "AC-MCP-B",
+      "ac_source": "universal",
+      "status": "conformant",
+      "citations": [
+        {
+          "path": "tests/test_comms.py",
+          "note": "cited test: test_stage_email_basic_to"
+        }
+      ],
+      "evidence": [
+        {
+          "source": "deterministic",
+          "tool": "conformance-attestation-gate",
+          "detail": "Attestation gate (scripts/conformance_lib.py) resolved 1 cited test ref(s), all non-deferred: tests/test_comms.py::test_stage_email_basic_to -> live. Static existence + marker-state only — pass/fail is enforced by the suite (`just test`)."
+        }
+      ]
+    },
+    {
+      "ac_id": "AC-2",
+      "ac_source": "flavor-derived",
+      "status": "conformant",
+      "citations": [
+        {
+          "path": "tests/test_deploy_auth_round_trip.py",
+          "note": "cited test: test_directory_api_is_403_without_session"
+        },
+        {
+          "path": "tests/test_deploy_sqlite_api.py"
+        },
+        {
+          "path": "tests/test_deploy_mcpb_routes.py"
+        }
+      ],
+      "evidence": [
+        {
+          "source": "deterministic",
+          "tool": "conformance-attestation-gate",
+          "detail": "Attestation gate (scripts/conformance_lib.py) resolved 3 cited test ref(s), all non-deferred: tests/test_deploy_auth_round_trip.py::test_directory_api_is_403_without_session -> live; test_deploy_sqlite_api.py -> live; test_deploy_mcpb_routes.py -> live. Static existence + marker-state only — pass/fail is enforced by the suite (`just test`)."
+        },
+        {
+          "source": "human",
+          "detail": "Bears on constraint CST-PWA-SERVER-FLOOR (conformant by bounding); declared and handled in docs/Architecture.md § Constraint attestation, folded here per the toolkit schema rule that EX-*/CST-* live as references inside the AC findings they bear on."
+        }
+      ]
+    },
+    {
+      "ac_id": "AC-3",
+      "ac_source": "flavor-derived",
+      "status": "conformant",
+      "citations": [
+        {
+          "path": "tests/e2e/test_worker_rpc.py"
+        },
+        {
+          "path": "tests/e2e/test_worker_cold_start.py"
+        },
+        {
+          "path": "tests/e2e/test_local_first_boot.py"
+        }
+      ],
+      "evidence": [
+        {
+          "source": "deterministic",
+          "tool": "conformance-attestation-gate",
+          "detail": "Attestation gate (scripts/conformance_lib.py) resolved 3 cited test ref(s), all non-deferred: tests/e2e/test_worker_rpc.py -> live; test_worker_cold_start.py -> live; test_local_first_boot.py -> live. Static existence + marker-state only — pass/fail is enforced by the suite (`just test`)."
+        }
+      ]
+    },
+    {
+      "ac_id": "AC-5",
+      "ac_source": "flavor-derived",
+      "status": "conformant",
+      "citations": [
+        {
+          "path": "tests/e2e/test_offline_only_mode.py",
+          "note": "cited test: test_401_with_cached_data_shows_directory_from_cache"
+        },
+        {
+          "path": "tests/e2e/test_search_offline_fallback.py"
+        },
+        {
+          "path": "tests/e2e/test_local_first_boot.py"
+        }
+      ],
+      "evidence": [
+        {
+          "source": "deterministic",
+          "tool": "conformance-attestation-gate",
+          "detail": "Attestation gate (scripts/conformance_lib.py) resolved 3 cited test ref(s), all non-deferred: tests/e2e/test_offline_only_mode.py::test_401_with_cached_data_shows_directory_from_cache -> live; test_search_offline_fallback.py -> live; test_local_first_boot.py -> live. Static existence + marker-state only — pass/fail is enforced by the suite (`just test`)."
+        }
+      ]
+    },
+    {
+      "ac_id": "AC-8",
+      "ac_source": "flavor-derived",
+      "status": "conformant",
+      "citations": [
+        {
+          "path": "tests/test_magic_link_auth.py"
+        },
+        {
+          "path": "tests/test_deploy_auth_round_trip.py"
+        },
+        {
+          "path": "tests/test_deploy_client_errors.py"
+        },
+        {
+          "path": "tests/test_client_error_sanitizer.py"
+        }
+      ],
+      "evidence": [
+        {
+          "source": "deterministic",
+          "tool": "conformance-attestation-gate",
+          "detail": "Attestation gate (scripts/conformance_lib.py) resolved 4 cited test ref(s), all non-deferred: tests/test_magic_link_auth.py -> live; test_deploy_auth_round_trip.py -> live; test_deploy_client_errors.py -> live; test_client_error_sanitizer.py -> live. Static existence + marker-state only — pass/fail is enforced by the suite (`just test`)."
+        }
+      ]
+    },
+    {
+      "ac_id": "AC-12",
+      "ac_source": "flavor-derived",
+      "status": "conformant",
+      "citations": [
+        {
+          "path": "tests/e2e/test_unsupported_browser.py",
+          "note": "cited test: test_no_sah_falls_back_to_api_idb_provider"
+        },
+        {
+          "path": "tests/e2e/test_worker_cold_start.py"
+        }
+      ],
+      "evidence": [
+        {
+          "source": "deterministic",
+          "tool": "conformance-attestation-gate",
+          "detail": "Attestation gate (scripts/conformance_lib.py) resolved 2 cited test ref(s), all non-deferred: tests/e2e/test_unsupported_browser.py::test_no_sah_falls_back_to_api_idb_provider -> live; test_worker_cold_start.py -> live. Static existence + marker-state only — pass/fail is enforced by the suite (`just test`)."
+        }
+      ]
+    },
+    {
+      "ac_id": "AC-13",
+      "ac_source": "flavor-derived",
+      "status": "conformant",
+      "citations": [
+        {
+          "path": "tests/test_api.py",
+          "note": "cited test: TestSecurityHeaders"
+        }
+      ],
+      "evidence": [
+        {
+          "source": "deterministic",
+          "tool": "conformance-attestation-gate",
+          "detail": "Attestation gate (scripts/conformance_lib.py) resolved 1 cited test ref(s), all non-deferred: tests/test_api.py::TestSecurityHeaders -> live. Static existence + marker-state only — pass/fail is enforced by the suite (`just test`)."
+        }
+      ]
+    },
+    {
+      "ac_id": "AC-14",
+      "ac_source": "flavor-derived",
+      "status": "conformant",
+      "citations": [
+        {
+          "path": "tests/e2e/test_sw_post_caching.py"
+        },
+        {
+          "path": "tests/e2e/test_image_cache_no_bust.py"
+        }
+      ],
+      "evidence": [
+        {
+          "source": "deterministic",
+          "tool": "conformance-attestation-gate",
+          "detail": "Attestation gate (scripts/conformance_lib.py) resolved 2 cited test ref(s), all non-deferred: tests/e2e/test_sw_post_caching.py -> live; test_image_cache_no_bust.py -> live. Static existence + marker-state only — pass/fail is enforced by the suite (`just test`)."
+        }
+      ]
+    },
+    {
+      "ac_id": "AC-PRM-B",
+      "ac_source": "flavor-derived",
+      "status": "not-applicable",
+      "rationale": "Applies to `ingestion:multi-source-merge-with-dedup`; fellows is single-source (`single-source-static-mirror`)."
+    },
+    {
+      "ac_id": "AC-PRM-C",
+      "ac_source": "flavor-derived",
+      "status": "not-applicable",
+      "rationale": "Applies to `storage:native-sqlite-via-filesystem`; fellows uses `opfs-sqlite-wasm`."
+    }
+  ]
+}

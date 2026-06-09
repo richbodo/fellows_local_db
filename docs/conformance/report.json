@@ -1,7 +1,7 @@
 {
   "meta": {
-    "generated_at": "2026-06-08T05:16:44Z",
-    "git_sha": "b30d1ea",
+    "generated_at": "2026-06-09T07:46:26Z",
+    "git_sha": "bbaf66e",
     "source": "docs/Architecture.md",
     "generator": "scripts/conformance_report.py",
     "toolkit_version": "0.1 (draft)",

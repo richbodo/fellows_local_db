@@ -102,6 +102,29 @@ Export them or inline: `FELLOWS_BASE_URL=https://staging.example.com just smoke`
   it's passed to pytest as `-k FILTER`: `just test-e2e email_gate`.
 - **`test-fast`** — DB + API only. Skips Playwright; ~10× faster than `test`.
 
+### conformance
+
+See [`conformance_report_and_gate.md`](../plans/conformance_report_and_gate.md)
+and [`conformance/README.md`](conformance/README.md). Source of truth for every
+claim is the attestation table in [`Architecture.md`](Architecture.md).
+
+- **`conformance [ARGS]`** — generate the fellows-format report
+  (`docs/conformance/report.{json,md}`) and **hard-fail on findings**. The ship
+  gate: wired into `deploy-preflight` so no deploy route can bypass it. A
+  best-effort `gh` probe flags abandoned deferrals; pass `--no-gh` to skip it
+  offline. The same deterministic checker also runs as pytest under `just test`.
+- **`conformance-refresh`** — refresh the committed snapshot only when it's
+  gone stale (HEAD ≥ 10 commits past the last logged run). Non-fatal, offline.
+  Depended on by `just test`. Also re-emits the evaluate-report.
+- **`evaluate-report`** — emit the **toolkit-schema** artifact
+  (`docs/conformance/evaluate-report.json`) and validate it against PNT's render
+  contract. This is the deterministic emitter (derived from `Architecture.md`,
+  **not** an LLM audit) and the command the PNT keystone wires as its
+  `[verify].entrypoint`. Runs the real PNT lint when the toolkit checkout is
+  present (override its location with `PNT_REPO`); otherwise self-validates with
+  the emitter's built-in render-contract check. Prints
+  `satisfies the render contract` on success.
+
 ### build
 
 - **`build`** — assemble `deploy/dist/` (runs `build/build_pwa.py`). The

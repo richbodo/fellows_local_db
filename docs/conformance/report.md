@@ -16,7 +16,7 @@ Every conformance claim this app makes is backed by live, executable evidence, a
 
 → To complete the determination (🟡 → 🟢), run the spec's audit flow: **[PNT User's Guide → Audit a candidate PNA](https://github.com/richbodo/personal_network_toolkit/blob/main/docs/users-guide.md#goal-2--audit-a-candidate-pna-before-installing-it)**.
 
-_Generated 2026-06-08T05:16:44Z for `b30d1ea`. Source of truth: [`docs/Architecture.md`](../Architecture.md)._
+_Generated 2026-06-09T07:46:26Z for `bbaf66e`. Source of truth: [`docs/Architecture.md`](../Architecture.md)._
 
 **What the IDs mean** — [**AC**](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/PNA_Spec.md) Architectural Commitment (a rule every safe PNA honors) · [**CST**](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/constraints.md) Constraint (a platform limit handled honestly, not hidden) · [**EX**](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/exceptions.md) Exception (a declared departure from PNA rules).
 
