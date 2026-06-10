@@ -345,12 +345,12 @@ Backups (the `relationships.db.bak.<timestamp>` files in the same
 few alongside the live file. Visible in Finder so you can copy them out if
 you want extra safety.
 
-**If your groups end up "only in browser storage"** — for example after a
+**If your groups end up only in browser storage** — for example after a
 browser restart drops the folder connection — a reminder banner appears at the
-top: *"Your saved groups are only in browser storage."* Browser storage can be
-cleared by the browser without warning, so tap **Move my data to a folder** to
-put a copy back on disk where it's safe. (That button, and the **Set up data
-folder** banner, open the folder picker directly — one tap, no detour.)
+top naming how many are at risk: *"Save your 3 saved groups to a folder."*
+Browser storage can be cleared by the browser without warning, so tap **Save my
+groups** to put a copy back on disk where it's safe. (That button, and the **Set
+up data folder** banner, open the folder picker directly — one tap, no detour.)
 
 ### Reconnecting vs. re-picking your folder
 

@@ -9150,10 +9150,12 @@
   // Render the top-of-app folder banner in one of three modes and reveal it:
   //   'browser-only'  — cream nag pushing OPFS-only users to pick a folder.
   //   'migrate'       — stronger nudge when private data is stranded in OPFS
-  //                     (groups/notes exist but no folder is attached).
+  //                     (groups/notes exist but no folder is attached). Names
+  //                     the group count when known ("Save your N saved groups").
   //   'write-failed'  — urgent (amber/red) warning that the most recent
   //                     folder write failed (#221).
-  function renderFolderPushBanner(bannerEl, mode, state) {
+  // `count` is the stranded group count (migrate mode only); 0/undefined elsewhere.
+  function renderFolderPushBanner(bannerEl, mode, state, count) {
     var leadEl = bannerEl.querySelector('.folder-push-banner-lead');
     var detailEl = bannerEl.querySelector('.folder-push-banner-detail');
     var ctaEl = document.getElementById('folder-push-cta');
@@ -9185,15 +9187,35 @@
       // leaving the hydrated buffer behind. Push the user to move it onto disk
       // before the browser can clear it. More urgent than the generic set-up
       // nudge below, and the gate's honest handling of the "data shouldn't sit
-      // in OPFS off-folder" case (CST-PWA-STORAGE-EVICTABLE).
+      // in OPFS off-folder" case (CST-PWA-STORAGE-EVICTABLE). When the group
+      // count is known (the common case) the copy names it ("Save your N saved
+      // groups") so the user sees exactly what's at risk — the personalized
+      // rescue copy from PR #240, whose merge was dropped from main before #271
+      // re-added a generic version; restored here.
       bannerEl.classList.remove('folder-push-banner--error');
       bannerEl.setAttribute('role', 'status');
-      if (leadEl) leadEl.textContent = 'Your saved groups are only in browser storage.';
-      if (detailEl) {
-        detailEl.textContent =
-          'Pick a data folder to keep them — browser storage can be cleared without warning.';
+      var nGroups = count || 0;
+      if (nGroups > 0) {
+        if (leadEl) {
+          leadEl.textContent = 'Save your ' + nGroups + ' saved group' +
+            (nGroups === 1 ? '' : 's') + ' to a folder.';
+        }
+        if (detailEl) {
+          detailEl.textContent =
+            'They live only in this browser right now and could be lost if it ' +
+            'clears its data. Pick a folder to keep them safe.';
+        }
+        if (ctaEl) ctaEl.textContent = 'Save my groups';
+      } else {
+        // No groups, but other private data (tags/notes) is stranded — keep the
+        // generic phrasing since there's no group count to name.
+        if (leadEl) leadEl.textContent = 'Your saved data is only in browser storage.';
+        if (detailEl) {
+          detailEl.textContent =
+            'Pick a data folder to keep it — browser storage can be cleared without warning.';
+        }
+        if (ctaEl) ctaEl.textContent = 'Move my data to a folder';
       }
-      if (ctaEl) ctaEl.textContent = 'Move my data to a folder';
       if (dismissEl) dismissEl.hidden = false;
     } else {
       bannerEl.classList.remove('folder-push-banner--error');
@@ -9263,9 +9285,10 @@
       var dp = window.__dataProvider;
       if (dp && typeof dp.countRelationships === 'function') {
         dp.countRelationships().then(function (counts) {
+          var nGroups = (counts && counts.groups) || 0;
           var stranded = !!(counts && (counts.groups || counts.members ||
             counts.tags || counts.notes));
-          renderFolderPushBanner(bannerEl, stranded ? 'migrate' : 'browser-only', state);
+          renderFolderPushBanner(bannerEl, stranded ? 'migrate' : 'browser-only', state, nGroups);
         }).catch(function () {
           renderFolderPushBanner(bannerEl, 'browser-only', state);
         });

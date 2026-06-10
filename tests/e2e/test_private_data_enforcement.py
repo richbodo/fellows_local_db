@@ -366,16 +366,18 @@ def test_stranded_opfs_groups_fire_migration_prompt(worker_data_folder):
     assert page.evaluate("() => window.__folderController.getState()")["hasHandle"] is False
     assert page.evaluate("() => window.__dataProvider.countRelationships()")["groups"] >= 1
 
-    # 3) The banner must show the MIGRATE variant.
+    # 3) The banner must show the MIGRATE variant — and name the group count
+    #    ("Save your 1 saved group"), the personalized rescue copy restored from
+    #    PR #240 (its merge was dropped from main; see fix/restore-pr240-…).
     page.evaluate("() => window.__refreshFolderPushBanner()")
     page.wait_for_function(
         "() => { var b = document.getElementById('folder-push-banner');"
         " return b && !b.classList.contains('hidden')"
-        " && /only in browser storage/i.test(b.textContent); }",
+        " && /save your 1 saved group\\b/i.test(b.textContent); }",
         timeout=5000,
     )
     cta = page.evaluate("() => document.getElementById('folder-push-cta').textContent")
-    assert "Move my data to a folder" in cta, cta
+    assert "Save my groups" in cta, cta
 
 
 def test_clean_no_folder_shows_generic_nudge_not_migrate(worker_data_folder):
@@ -396,9 +398,75 @@ def test_clean_no_folder_shows_generic_nudge_not_migrate(worker_data_folder):
         " && /need a data folder/i.test(b.textContent); }",
         timeout=5000,
     )
-    assert "only in browser storage" not in page.evaluate(
+    banner_text = page.evaluate(
         "() => document.getElementById('folder-push-banner').textContent"
     )
+    assert "Save your" not in banner_text, banner_text
+    assert "only in browser storage" not in banner_text, banner_text
+
+
+def test_stranded_opfs_groups_migrate_into_freshly_picked_folder(worker_data_folder):
+    """END-TO-END migration (restored from PR #240, whose merge was silently
+    dropped from main before #271 re-added the prompt generically): when the user
+    acts on the migrate prompt and picks a fresh folder, the groups stranded in
+    OPFS are *copied into* the folder — the data survives, the on-disk file holds
+    it, and the gate reopens.
+
+    #271's tests only assert the prompt *fires*; this covers the 'does the
+    migration actually complete' path the pre-ship plan (§4.2) flags as the
+    highest-risk one with no automated equivalent."""
+    wd = worker_data_folder
+    page = wd.page
+
+    # 1) Folder attached → create two groups; they land in OPFS and are written
+    #    through to the folder.
+    page.evaluate(
+        "() => window.__dataProvider.createGroup({name:'M1', note:'', fellow_record_ids:[]})"
+    )
+    page.evaluate(
+        "() => window.__dataProvider.createGroup({name:'M2', note:'', fellow_record_ids:[]})"
+    )
+    assert page.evaluate("() => window.__dataProvider.countRelationships()")["groups"] == 2
+
+    # 2) Strand the data: drop the folder handle AND clear the on-disk folder, so
+    #    re-picking lands on a FRESH empty folder and exercises the OPFS→folder
+    #    write (migration) path rather than re-adopting an existing store. Neither
+    #    call touches the OPFS buffer, so its rows linger (the stranded state).
+    page.evaluate("() => window.__dataProvider._clearFolderHandle()")
+    page.evaluate("() => window.__resetE2EUserFolderMin()")
+    assert page.evaluate("() => window.__folderController.getState()")["hasHandle"] is False
+    assert page.evaluate("() => window.__dataProvider.countRelationships()")["groups"] == 2
+
+    # 3) Act on the migrate prompt: pick a folder from Settings. The choose flow
+    #    probes the fresh folder, writes the current OPFS (groups included) into
+    #    it (writeNow), and flips the gate — all without a reload.
+    page.evaluate("() => { location.hash = '#/settings'; }")
+    page.locator("#settings-folder-choose").wait_for(state="visible", timeout=5000)
+    page.locator("#settings-folder-choose").click()
+    page.wait_for_function(
+        "() => { var t = document.querySelector('#settings-folder-badge .settings-folder-badge-text');"
+        " return t && /Saved to/.test(t.textContent); }",
+        timeout=10000,
+    )
+
+    # 4a) The groups survived the migration and are live again.
+    assert page.evaluate("() => window.__dataProvider.listGroups().then(g => g.length)") == 2
+    # 4b) The gate reopened (private surfaces are back).
+    page.wait_for_function(
+        "() => document.body && !document.body.classList.contains('no-private-data')",
+        timeout=8000,
+    )
+    # 4c) Byte-of-truth: the freshly-picked folder file actually holds the two
+    #     groups — not just the worker's in-RAM view.
+    scan = page.evaluate(
+        """async () => {
+            const root = await navigator.storage.getDirectory();
+            const parent = await root.getDirectoryHandle('__e2e_user_folder__');
+            return await window.__folderController.scanCandidates(parent);
+        }"""
+    )
+    fellows = [c for c in scan["candidates"] if c["subfolderName"] == "Fellows"]
+    assert fellows and fellows[0]["groups"] == 2, scan
 
 
 # ===== Private-DB export is a real portability bridge (round-trip) ============
