@@ -12,6 +12,7 @@ emits: each entry is a dict with at least ``MESSAGE`` and
 """
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import sqlite3
@@ -730,6 +731,72 @@ def test_print_human_errors_only_with_no_errors_says_so(capsys):
     assert "4xx errors:              0" in out
     assert "5xx errors:              0" in out
     assert "(none in window)" in out
+
+
+# ---- journal_entries(): streaming behavior -------------------------------
+
+class _FakePopen:
+    """Minimal subprocess.Popen stand-in for journal_entries tests.
+
+    stdout/stderr are StringIO streams (line-iterable, closeable, readable)
+    so we exercise the streaming parse + warning paths without shelling out
+    to a real journalctl.
+    """
+
+    def __init__(self, stdout_text="", stderr_text="", returncode=0):
+        self.stdout = io.StringIO(stdout_text)
+        self.stderr = io.StringIO(stderr_text)
+        self._returncode = returncode
+
+    def wait(self):
+        return self._returncode
+
+
+def test_journal_entries_streams_lines_and_skips_bad_json(monkeypatch):
+    """The OOM fix: journal_entries is a lazy generator that parses one line
+    at a time (no full-journal buffering), skipping non-JSON lines."""
+    lines = "\n".join([
+        json.dumps({"MESSAGE": "first"}),
+        "not-json-garbage",
+        json.dumps({"MESSAGE": "second"}),
+    ]) + "\n"
+    monkeypatch.setattr(prod_stats.subprocess, "Popen",
+                        lambda *a, **k: _FakePopen(lines))
+    gen = prod_stats.journal_entries("fellows-pwa", "@0")
+    # Regression guard: it must stay a lazy iterator, not a buffered list —
+    # buffering the full @0 journal is exactly what OOM-killed prod (255).
+    assert iter(gen) is gen
+    entries = list(gen)
+    assert [e["MESSAGE"] for e in entries] == ["first", "second"]
+
+
+def test_journal_entries_warns_on_zero_entries(monkeypatch, capsys):
+    monkeypatch.setattr(prod_stats.subprocess, "Popen",
+                        lambda *a, **k: _FakePopen(""))
+    assert list(prod_stats.journal_entries("fellows-pwa", "@0")) == []
+    assert "returned 0 entries" in capsys.readouterr().err
+
+
+def test_journal_entries_reports_journalctl_failure_without_zero_warning(
+    monkeypatch, capsys
+):
+    """A non-zero journalctl exit prints the failure (with stderr) and does
+    NOT also emit the misleading 'returned 0 entries' group-membership hint."""
+    monkeypatch.setattr(prod_stats.subprocess, "Popen",
+                        lambda *a, **k: _FakePopen("", stderr_text="boom", returncode=1))
+    assert list(prod_stats.journal_entries("fellows-pwa", "@0")) == []
+    err = capsys.readouterr().err
+    assert "journalctl failed (exit 1)" in err
+    assert "boom" in err
+    assert "returned 0 entries" not in err
+
+
+def test_journal_entries_handles_missing_journalctl(monkeypatch, capsys):
+    def _raise(*a, **k):
+        raise FileNotFoundError
+    monkeypatch.setattr(prod_stats.subprocess, "Popen", _raise)
+    assert list(prod_stats.journal_entries("fellows-pwa", "@0")) == []
+    assert "journalctl not found" in capsys.readouterr().err
 
 
 # ---- main() + --json -----------------------------------------------------
