@@ -122,18 +122,80 @@ dist-build + SW-precache + build-label-stamp path. Run `just serve-prod` first.
 > `just serve-prod-reset && just serve-prod` to bump the build label — reload and confirm
 > `#sw-update-banner` appears (the SW noticed the new shell)."*
 
-### Recipe D — real Android Chrome over adb (Phase 2 §3, optional)
+### Recipe D — real Android Chrome over adb (Phase 2 mobile pass)
 
-For a tethered Android device with USB debugging on:
+Android Chrome speaks the Chrome DevTools Protocol, so the same chrome-devtools-mcp
+attach works on a real phone — over a USB tunnel. **Point the phone at prod**
+(`https://fellows.globaldonut.com/`): the worker/OPFS path needs a secure context, and
+`just serve-lan` is plain HTTP, so a phone on the LAN URL falls back to `api+idb` and
+won't exercise the real store. On a phone the app is **browse-only** (private data is
+hidden — no group/selection chrome, no folder picker); confirming that is the point.
 
-```bash
-adb forward tcp:9222 localabstract:chrome_devtools_remote
-# then point chrome-devtools-mcp at --browser-url http://127.0.0.1:9222
-```
+1. Phone: Developer Options on, **USB debugging** on, plug in a *data* cable.
+2. Mac: `adb devices` → if `unauthorized`, unlock the phone and tap **Allow USB
+   debugging** (`adb kill-server && adb start-server` re-pokes the dialog).
+3. Open Chrome on the phone to the PWA, then tunnel its CDP port to the Mac:
+   ```bash
+   adb forward tcp:9222 localabstract:chrome_devtools_remote
+   curl -s http://127.0.0.1:9222/json/version   # Chrome version JSON ⇒ tunnel is up
+   ```
+4. Hand it off. A user-scope `chrome-devtools-android` MCP server is already registered
+   at `--browser-url http://127.0.0.1:9222` (its tools load on the next session start,
+   once the tunnel is up):
 
 > *"Attach to the Android Chrome on port 9222, open `https://fellows.globaldonut.com/`,
-> drive the magic-link round-trip (I'll paste the link), and confirm the directory loads,
-> a fellow detail opens, and selecting a fellow reveals the composer FAB."*
+> drive the magic-link round-trip (I'll paste the link), and confirm: the directory loads
+> in **browse-only** (no group/selection chrome, no folder picker), a fellow detail opens
+> with **Email/Call** CTAs, the hamburger drawer navigates, and visiting `#/groups`
+> redirects to the directory."*
 
-The Add-to-Home-Screen install gesture itself stays manual (the OS install prompt is
+Cleanup: `adb forward --remove tcp:9222`; turn USB debugging back off. Privacy: while
+forwarded, every tab in the phone's Chrome is visible to the session — keep it to just
+the PWA tab. The Add-to-Home-Screen install gesture stays manual (the OS prompt is
 outside the page).
+
+### Recipe E — real iPhone via Safari Web Inspector (manual; Claude assists)
+
+**There is no adb/CDP path for iPhone.** iOS forces every browser onto WebKit, which is
+debugged via **Safari Web Inspector** (the Web Inspector Protocol) — *not* the Chrome
+DevTools Protocol chrome-devtools-mcp speaks. So Claude **can't tap-drive the iPhone**
+the way it drives Android; the iOS pass is **human-driven**, with the Web Inspector
+attached for visibility, and Claude assists by interpreting the console/network you
+surface (the snippet below runs unchanged in the Web Inspector console).
+
+Setup — **USB first** (required to pair and to turn on Wi-Fi debugging):
+
+1. iPhone: **Settings → Safari → Advanced → Web Inspector = ON**.
+2. Mac Safari: **Settings → Advanced → "Show features for web developers"** (adds the
+   **Develop** menu).
+3. Connect the iPhone by cable, unlock, **Trust This Computer**.
+4. Mac Safari → **Develop → [your iPhone]** → it lists the phone's Safari tabs **and any
+   installed Home-Screen web app** (the PWA). Click the target → full Web Inspector
+   (DOM / Console / Network / Storage).
+
+Then switch to **Wi-Fi for the realistic pass** (preferred — the standalone-PWA layout
+and the "bottom bar takes half the screen" safe-area symptom only show with the phone in
+hand, untethered):
+
+5. With the device listed under **Develop → [iPhone]**, enable **"Connect via
+   Network."** Unplug; keep both on the same Wi-Fi — it stays inspectable over the air.
+
+During the pass you tap; the inspector (and Claude, via what you paste) watches. Walk the
+iOS mobile steps — install via **Add to Home Screen**, browse-only (no group/folder
+affordances), hamburger nav, Email/Call CTAs, group-route redirect, the bottom-bar
+symptom — and in the Web Inspector **Console** run the same ground-truth snippet the
+desktop recipes use, then paste the output here:
+
+```js
+({ provider: window.__dataProvider && window.__dataProvider.kind,
+   marks:    window.__bootMarks && [...window.__bootMarks.keys()],
+   gate:     document.querySelector('#install-gate-private') ? 'gate' : 'app',
+   route:    location.hash })
+```
+
+> **Experimental automation (don't block on it):** `brew install ios-webkit-debug-proxy`
+> then `ios_webkit_debug_proxy` exposes a DevTools-*ish* endpoint (the libimobiledevice
+> bridge Appium uses). It translates an older slice of the WebKit protocol and is
+> **incomplete vs. modern Chrome CDP**, so chrome-devtools-mcp may only partially work
+> against it, or not at all. Treat it as a tinker — Safari Web Inspector above is the
+> reliable iOS tool.
