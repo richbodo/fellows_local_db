@@ -335,3 +335,67 @@ def test_permission_lapse_reduces_capability_then_reconnect_restores(worker_data
     )
     assert tier2 == "private-folder", tier2
     assert page.evaluate("() => window.__privateDataEnabled()") is True
+
+
+# ===== Stranded OPFS data → migration prompt (CST-PWA-STORAGE-EVICTABLE) ======
+# The "Avoided" claim — browse-only is localStorage-only, nothing durable in
+# OPFS off-folder — holds for a never-had-a-folder install but NOT for a
+# browse-only state reached via a dropped folder handle: the relationships rows
+# the worker hydrated into OPFS during the folder session linger there. The
+# honest handling (Framing A: "Mitigated", not "Avoided") is to surface that
+# stranded data with a dedicated 'migrate' banner so the user moves it onto disk
+# before the browser can evict it — never to silently leave it, and never to
+# wipe it (that would be data loss).
+
+
+def test_stranded_opfs_groups_fire_migration_prompt(worker_data_folder):
+    """Groups in OPFS with NO folder attached (handle dropped — Lock, or the
+    'no-handle' a real OS returns after a browser restart) must surface the
+    'migrate' folder banner, not the generic set-up nudge and not silence."""
+    wd = worker_data_folder
+    page = wd.page
+    # 1) Folder attached → create a group so OPFS holds private data.
+    page.evaluate(
+        "() => window.__dataProvider.createGroup({name:'Stranded', note:'', fellow_record_ids:[]})"
+    )
+    assert page.evaluate("() => window.__dataProvider.countRelationships()")["groups"] >= 1
+
+    # 2) Drop the folder handle. clearFolderHandle resets the handle ref only,
+    #    never the OPFS db, so the rows linger off-folder (the stranded state).
+    page.evaluate("() => window.__dataProvider._clearFolderHandle()")
+    assert page.evaluate("() => window.__folderController.getState()")["hasHandle"] is False
+    assert page.evaluate("() => window.__dataProvider.countRelationships()")["groups"] >= 1
+
+    # 3) The banner must show the MIGRATE variant.
+    page.evaluate("() => window.__refreshFolderPushBanner()")
+    page.wait_for_function(
+        "() => { var b = document.getElementById('folder-push-banner');"
+        " return b && !b.classList.contains('hidden')"
+        " && /only in browser storage/i.test(b.textContent); }",
+        timeout=5000,
+    )
+    cta = page.evaluate("() => document.getElementById('folder-push-cta').textContent")
+    assert "Move my data to a folder" in cta, cta
+
+
+def test_clean_no_folder_shows_generic_nudge_not_migrate(worker_data_folder):
+    """Negative half: with NO stranded data, the banner is the generic 'set up a
+    folder' nudge — never the 'migrate' variant. Don't cry wolf about data that
+    isn't there."""
+    wd = worker_data_folder
+    page = wd.page
+    page.evaluate("() => window.__dataProvider._clearFolderHandle()")
+    assert page.evaluate("() => window.__folderController.getState()")["hasHandle"] is False
+    counts = page.evaluate("() => window.__dataProvider.countRelationships()")
+    assert not (counts and (counts["groups"] or counts["members"]
+                            or counts["tags"] or counts["notes"])), counts
+    page.evaluate("() => window.__refreshFolderPushBanner()")
+    page.wait_for_function(
+        "() => { var b = document.getElementById('folder-push-banner');"
+        " return b && !b.classList.contains('hidden')"
+        " && /need a data folder/i.test(b.textContent); }",
+        timeout=5000,
+    )
+    assert "only in browser storage" not in page.evaluate(
+        "() => document.getElementById('folder-push-banner').textContent"
+    )
