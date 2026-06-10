@@ -60,3 +60,5 @@ BECOME_PASS*
 
 # Conformance run history (local; drives staleness auto-regen). Report JSON/MD are committed.
 docs/conformance/log.jsonl
+
+logs/
