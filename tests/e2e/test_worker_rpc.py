@@ -121,11 +121,15 @@ class TestGroupsRpc:
 
 
 # Boot- and folder-managed keys that legitimately populate `settings` in
-# folder mode (workspace identity stamp + the migrated has-email pref). The
-# RPC round-trip tests assert on their own keys via subset, ignoring these.
+# folder mode (workspace identity stamp + the migrated has-email pref + the
+# AC-10 orphan soft-scan's one-shot `orphan_scan_done` flag). These are
+# system-written, not user-authored; the RPC round-trip tests assert on their
+# own keys via subset, ignoring these. `orphan_scan_done` can leak in from a
+# prior test that triggered the boot scan through the shared folder fixture, so
+# it must be tolerated here regardless of suite ordering.
 _BOOT_MANAGED_KEYS = {
     "workspace_uuid", "device_label", "created_at", "write_generation",
-    "last_written_at", "has_email_only",
+    "last_written_at", "has_email_only", "orphan_scan_done",
 }
 
 
