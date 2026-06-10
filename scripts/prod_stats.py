@@ -21,6 +21,7 @@ import sqlite3
 import subprocess
 import sys
 from collections import Counter
+from collections.abc import Iterator
 from datetime import datetime, timezone
 
 
@@ -37,35 +38,54 @@ ACCESS_RE = re.compile(
 FELLOWS_DB_PATH = "/opt/fellows/deploy/dist/fellows.db"
 
 
-def journal_entries(unit: str, since: str) -> list:
-    """Return journalctl -o json entries (dicts) for (unit, since).
+def journal_entries(unit: str, since: str) -> Iterator[dict]:
+    """Yield journalctl -o json entries (dicts) for (unit, since), one at a time.
 
-    Emits a stderr warning when the call succeeds but returns zero lines —
+    Streams the subprocess output line-by-line rather than buffering the whole
+    journal into memory. The full-history scan (`--since @0`, what
+    --include-emails forces) is >100 MB of JSON across >100k lines on a
+    long-lived host; the old `capture_output=True` + `.splitlines()` +
+    list-of-dicts approach peaked at ~700 MB of resident Python objects and
+    was OOM-killed on the 1 GB / no-swap prod droplet — surfacing as a
+    messageless `ssh` exit 255. Streaming keeps peak memory flat regardless
+    of journal size; ``tally`` consumes this generator in a single pass.
+
+    Emits a stderr warning when the call succeeds but yields zero entries —
     almost always the SSH user isn't in systemd-journal/adm and journalctl
     is silently withholding the unit's logs. Previously this failure mode
     was indistinguishable from a real zero-activity window.
     """
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             ["journalctl", "-u", unit, "--since", since, "-o", "json", "--no-pager"],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
         )
     except FileNotFoundError:
         print("journalctl not found (not a systemd host?)", file=sys.stderr)
-        return []
-    if proc.returncode != 0:
-        print(f"journalctl failed (exit {proc.returncode}): {proc.stderr.strip()}",
-              file=sys.stderr)
-        return []
-    entries = []
-    for line in proc.stdout.splitlines():
+        return
+    count = 0
+    # proc.stdout is a line-iterable text stream; each line is one JSON entry.
+    for line in proc.stdout:
         try:
             entry = json.loads(line)
         except json.JSONDecodeError:
             continue
-        entries.append(entry)
-    if not entries:
+        count += 1
+        yield entry
+    proc.stdout.close()
+    # journalctl writes little to stderr (warnings only), so reading it after
+    # stdout is drained won't deadlock in practice.
+    stderr = proc.stderr.read() if proc.stderr else ""
+    if proc.stderr:
+        proc.stderr.close()
+    returncode = proc.wait()
+    if returncode != 0:
+        print(f"journalctl failed (exit {returncode}): {stderr.strip()}",
+              file=sys.stderr)
+        return
+    if count == 0:
         print(
             f"WARNING: journalctl returned 0 entries for {unit}.\n"
             "  Almost always this means the SSH user isn't in the\n"
@@ -74,7 +94,6 @@ def journal_entries(unit: str, since: str) -> list:
             "  the operator workstation to re-apply the common role.",
             file=sys.stderr,
         )
-    return entries
 
 
 def _entry_message(entry: dict) -> str | None:
