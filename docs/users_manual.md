@@ -71,12 +71,15 @@ Almost always: it installed fine, your OS just put it somewhere unexpected.
 on Linux is the most reliable way to find it — search for "EHF" and it'll
 surface.
 
-The specific gotcha worth knowing: on **macOS with Chrome or Edge**, the app
-installs to `~/Applications/Chrome Apps/` — *not* the main Applications
-folder. That's a Chromium quirk, not a bug; installing into `/Applications`
-would need admin rights. Spotlight (`⌘-Space → "EHF"`) finds it; you can
-also drag the icon from `~/Applications/Chrome Apps/` onto your Dock to
-keep it one click away.
+The specific gotcha worth knowing: on **a Mac with Chrome or Edge**, the app
+doesn't go into your main Applications folder. It lands in a separate
+Applications folder inside your personal account instead (Chrome keeps it in
+a folder called **Chrome Apps** there). That's normal for these browsers,
+not a bug — using the main Applications folder would need an administrator
+password. The easiest way to open it: use **Spotlight** (press
+**Command-Space**), type **EHF**, and press Return. To keep it handy, open
+it, then right-click its icon in the Dock and choose **Options → Keep in
+Dock**.
 
 If Spotlight / Start menu / launcher all come up empty, it probably didn't
 install — try *Can't install at all?* below. If that doesn't help either,
@@ -114,7 +117,7 @@ Launch it like any other app — no browser needed.
 
 | OS | Where the icon shows up |
 |---|---|
-| **macOS** | Applications folder, Spotlight (`⌘-Space → "EHF"`), `chrome://apps` |
+| **macOS** | Applications folder, Spotlight (**Command-Space**, type "EHF"), `chrome://apps` |
 | **Windows** | Start menu → "EHF Fellows Directory"; Edge can pin to taskbar |
 | **Linux** | Application launcher (GNOME / KDE), `~/.local/share/applications/` |
 | **Android** | Home screen + app drawer |
@@ -139,8 +142,8 @@ confusing if you weren't expecting it.
 
 ### What you'll see
 
-- **Spotlight (`⌘-Space → "EHF"`)** shows two (or more) results,
-  all identical-looking.
+- **Spotlight** (press **Command-Space**, type "EHF") shows two (or more)
+  results, all identical-looking.
 - **Each install has its own data.** Groups, notes, and tags you
   created in Safari aren't visible to the Chrome copy and vice
   versa.
@@ -150,17 +153,25 @@ confusing if you weren't expecting it.
 
 ### Tell installs apart in Finder
 
-Each browser puts the `.app` bundle in a different folder, so you
-can rename them visibly:
+When a browser installs the app, it saves the app's icon in a special
+Applications folder **inside your personal account** — not the main
+Applications folder, and the exact spot depends on the browser. To get
+there: open **Finder**, click **Go** in the menu bar at the top of the
+screen, click **Home**, then open the **Applications** folder shown there.
+Inside it:
 
-- **Safari** → `~/Applications/EHF Fellows Directory.app`
-- **Chrome / Brave / Edge** → `~/Applications/Chrome Apps/EHF Fellows Directory.app`
-- **Arc** → managed by Arc, accessed through Arc's sidebar
+- **Safari** — the app is right there, named **EHF Fellows Directory**.
+- **Chrome** — it's inside a folder called **Chrome Apps**.
+- **Brave** — it's inside a folder called **Brave Browser Apps** (on some
+  versions it's in the **Chrome Apps** folder instead — the name varies).
+- **Edge** — it's inside a folder called **Edge Apps**.
+- **Arc** — there's nothing to find here. In Arc the "copy" is just a
+  pinned tab or Favorite in the sidebar; it isn't saved as a separate app.
 
-Right-click each bundle in Finder → **Rename** → give them
-distinctive labels like `EHF Fellows — Safari.app` and
-`EHF Fellows — Chrome.app`. The renamed labels surface in Spotlight
-on subsequent searches.
+To tell several copies apart, right-click an app's icon in Finder, choose
+**Rename**, and give it a clear label like **EHF Fellows — Safari** or
+**EHF Fellows — Chrome**. The new names show up the next time you search
+in Spotlight.
 
 ### Consolidate to one install
 
@@ -179,33 +190,128 @@ If you've accumulated copies and want to keep just one:
 
 ### Uninstall a copy
 
-Each browser uninstalls its own PWA differently. Below is the short
-form; if a step is out of date for your browser version, check the
-browser's official help — that's always the canonical reference:
+Removing a copy works differently in each browser — and **none of them put
+the app in your main Applications folder**, which is usually why it looks
+like there's nothing to remove. Two things to know first:
 
-- **Safari (macOS)** — drag `~/Applications/EHF Fellows Directory.app`
-  to the Trash. →
-  [Apple's Web Apps doc](https://support.apple.com/guide/safari/manage-web-apps-pdsuc1d62cd4/mac)
-- **Chrome** — visit `chrome://apps`, right-click the app, **Remove
-  from Chrome…**. →
-  [Google's PWA management doc](https://support.google.com/chrome/answer/9658361)
-- **Edge** — visit `edge://apps`, click **⋯** on the app,
-  **Uninstall**.
-- **Brave** — same as Chrome but at `brave://apps`.
-- **Arc** — right-click in Arc's sidebar, **Delete**.
-- **Firefox** — no PWA install on desktop; close the tab and remove
-  the bookmark.
+- **Dragging the icon off the Dock (or the Windows taskbar/Start menu) does
+  *not* uninstall it** — that only removes the shortcut. Use the steps below.
+- **To erase the saved data too** (so a fresh install starts clean), check
+  the **"also delete data"** box wherever the steps offer it. That clears
+  the browser's own copy of your data — it does **not** touch a separate
+  data *folder* you may have set up (see the note at the end).
 
-**Important:** uninstalling a copy does **not** delete a private data folder
-you set up. The folder lives on your disk and stays put. To remove
-the data too, separately drag the `Fellows/` subfolder you picked
-to the Trash. (Auto-backups inside it go with it.)
+Each link below opens that browser's own official help page.
 
-If you've uninstalled what you thought was the last copy and now
-the app appears to be gone, see *Where the installed app lives*
-above — Spotlight may surface a copy you forgot about, and the
-`https://fellows.globaldonut.com` URL always opens fresh in a
-browser tab.
+**Safari (Mac).** When you add the app with **File → Add to Dock**, your Mac
+saves it in a special Applications folder inside your personal account —
+which is different from the main Applications folder, and is why it can look
+like it isn't installed.
+
+1. Quit the app: press **Command-Q**.
+2. Open **Finder**. In the menu bar at the very top of the screen, click
+   **Go**, then **Home**. Double-click the **Applications** folder that
+   appears.
+3. Find **EHF Fellows Directory**, drag it to the **Trash**, then empty the
+   Trash.
+4. If its icon is still in the Dock, drag it upward onto the screen and let
+   go when **Remove** appears.
+
+→ [Use Safari web apps on Mac → "How to delete a web app"](https://support.apple.com/en-us/104996#delete)
+*(On an iPhone or iPad: touch and hold the icon, tap **Remove App** — or
+**Delete Bookmark** — then **Delete**.
+[Apple's steps](https://support.apple.com/en-us/101550).)*
+
+**Chrome.**
+
+1. Click the address bar (where you'd type a web address), type
+   **chrome://apps**, and press **Return**.
+2. Right-click the **EHF Fellows Directory** icon and choose
+   **Remove from Chrome…**.
+3. Check the box **"Also delete data from Chrome,"** then click **Remove**.
+
+If you don't see it and you use Chrome with more than one account, switch
+to the account you installed it under (the round picture at the top-right),
+then look again.
+→ [Use web apps (Chrome Help) → "Uninstall a web app"](https://support.google.com/chrome/answer/9658361)
+
+**Edge.**
+
+1. Click the address bar, type **edge://apps**, and press **Return**.
+2. On the **EHF Fellows Directory** tile, click **Details** (or right-click
+   the tile), then **Uninstall**.
+3. Check the box **"Also clear data from Microsoft Edge,"** then click
+   **Uninstall**.
+
+(On Windows you can also remove it from **Settings → Apps → Installed
+apps**, but that way may not offer the delete-data box — using
+**edge://apps** is better.)
+→ [Install, manage, or uninstall apps in Microsoft Edge → "Uninstall an app"](https://support.microsoft.com/en-us/edge/install-manage-or-uninstall-apps-in-microsoft-edge)
+
+**Brave.**
+
+1. Click the address bar, type **brave://apps**, and press **Return**.
+2. Right-click the **EHF Fellows Directory** icon and choose the uninstall
+   option (if you open the app's own window, the menu calls it
+   **Uninstall app**).
+3. Check the box to **also delete the data**, then confirm.
+
+→ [How do I install and use Web Apps in Brave? → "Uninstalling an app"](https://support.brave.app/hc/en-us/articles/39077114659597-How-do-I-install-and-use-Web-Apps-in-Brave)
+
+**Arc.** Arc doesn't install the app as a separate program, so there's
+nothing to find in a folder. Your "copy" is just a **pinned tab** or a
+**Favorite** in Arc's sidebar, plus the data the site saved. Remove both:
+
+1. In the sidebar, right-click the EHF Fellows item and choose **Unpin**
+   (for a pinned tab) or **Move To** (for a Favorite); then close the tab
+   (press **Command-W**).
+2. Clear its data: in the menu bar, click **Arc → Settings**, choose
+   **Profiles**, click **Clear Browsing Data**, then **Delete Browsing
+   Data**. Set the time range to **All time**, include cookies and site
+   data, and confirm. (This clears everything for that profile. To clear
+   only this one site instead, click the small lock icon at the left end of
+   the address bar, open the site settings, and clear its data there.)
+
+If you use Arc Sync, unpinning a synced pinned tab also removes it from your
+other devices.
+→ [Does Arc support web apps? (it doesn't)](https://resources.arc.net/hc/en-us/articles/25678978728983-Does-Arc-for-Desktop-Support-Progressive-Web-Apps)
+· [Clear cache & cookies on Arc](https://resources.arc.net/hc/en-us/articles/25614376281751-How-Do-You-Clear-Your-Cache-Cookies-and-or-History-on-Arc-for-Desktop)
+
+**Firefox.** Firefox on a computer doesn't install web apps at all, so
+there's nothing to uninstall — your "copy" is just a tab, a bookmark, or a
+pinned tab. To remove it:
+
+1. Delete the bookmark, and/or right-click the pinned tab and unpin it.
+2. Clear the saved data: open the Firefox menu (the button with three
+   stacked lines, at the top-right) → **Settings** → **Privacy & Security**.
+   Scroll to **Cookies and Site Data** (called **Browsing data** in newer
+   versions) and click **Manage Data…**. Type **fellows.globaldonut.com**,
+   click **Remove All Shown**, then **Save Changes**. (Quicker way: while
+   you're on the site, click the small lock icon at the left of the address
+   bar and choose **Clear cookies and site data**.)
+
+*(On an Android phone: press and hold the home-screen icon and tap
+**Remove**; then clear the data with the lock icon → **Clear cookies and
+site data**.)*
+→ [Clear cookies and site data in Firefox → "Clear cookies for any website"](https://support.mozilla.org/en-US/kb/clear-cookies-and-site-data-firefox#w_clear-cookies-for-any-website)
+
+**Important — your data folder is separate.** If you set up a data folder
+(in Chrome, Edge, or Brave, under **Settings → Private data**), removing the
+app does **not** delete it, and the "also delete data" boxes above don't
+touch it either — that folder stays on your disk. To remove it too, drag the
+**Fellows** folder you chose into the Trash (the auto-backups inside it go
+with it).
+
+If you've removed what you thought was the last copy and the app still shows
+up, check your other browsers — see *Where the installed app lives* above.
+You can always reach the app fresh at **https://fellows.globaldonut.com** in
+a normal browser tab.
+
+**Starting fresh.** Once you've removed every copy (and cleared its data),
+install the current version again: go to **https://fellows.globaldonut.com**
+in the browser you want, and use that browser's install button — the
+**Install** icon at the right end of the address bar, or, in Safari,
+**File → Add to Dock**.
 
 ---
 
@@ -226,8 +332,9 @@ Bringing your data across is a two-step copy:
 2. **Settings → Private data → ⬇ Download my private data**. The file
    is named so you can recognize it later —
    `ehf-fellows-private-data-<date>.db`. Save it somewhere stable on your
-   disk — `~/Documents/` works well, or anywhere you can find again.
-   **Don't put it in Downloads** if you regularly empty that folder.
+   computer — your **Documents** folder works well, or anywhere you can
+   find again. **Don't put it in Downloads** if you regularly empty that
+   folder.
 
 ### Step 2 — Import into the new browser
 
@@ -378,10 +485,10 @@ for more.
 from web apps, so the badge can only show a relative location
 (e.g. *Documents / Fellows*). To find the live file on disk:
 
-- **macOS** — open Spotlight (⌘-Space), type `relationships.db`,
-  and the file you just created shows up. Or navigate to the
-  parent folder you picked in Finder; the `Fellows/` subfolder
-  is right there.
+- **macOS** — open Spotlight (press **Command-Space**), type
+  `relationships.db`, and the file you just created shows up. Or
+  navigate to the parent folder you picked in Finder; the `Fellows/`
+  subfolder is right there.
 - **Windows** — open File Explorer, paste `relationships.db` into
   the search box at the top, and pick the result.
 - **Linux** — `find ~ -name relationships.db` from a terminal.
