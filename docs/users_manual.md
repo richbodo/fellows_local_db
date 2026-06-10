@@ -332,8 +332,9 @@ Bringing your data across is a two-step copy:
 2. **Settings → Private data → ⬇ Download my private data**. The file
    is named so you can recognize it later —
    `ehf-fellows-private-data-<date>.db`. Save it somewhere stable on your
-   disk — `~/Documents/` works well, or anywhere you can find again.
-   **Don't put it in Downloads** if you regularly empty that folder.
+   computer — your **Documents** folder works well, or anywhere you can
+   find again. **Don't put it in Downloads** if you regularly empty that
+   folder.
 
 ### Step 2 — Import into the new browser
 
@@ -484,10 +485,10 @@ for more.
 from web apps, so the badge can only show a relative location
 (e.g. *Documents / Fellows*). To find the live file on disk:
 
-- **macOS** — open Spotlight (⌘-Space), type `relationships.db`,
-  and the file you just created shows up. Or navigate to the
-  parent folder you picked in Finder; the `Fellows/` subfolder
-  is right there.
+- **macOS** — open Spotlight (press **Command-Space**), type
+  `relationships.db`, and the file you just created shows up. Or
+  navigate to the parent folder you picked in Finder; the `Fellows/`
+  subfolder is right there.
 - **Windows** — open File Explorer, paste `relationships.db` into
   the search box at the top, and pick the result.
 - **Linux** — `find ~ -name relationships.db` from a terminal.
