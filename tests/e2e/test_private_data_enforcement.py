@@ -399,3 +399,50 @@ def test_clean_no_folder_shows_generic_nudge_not_migrate(worker_data_folder):
     assert "only in browser storage" not in page.evaluate(
         "() => document.getElementById('folder-push-banner').textContent"
     )
+
+
+# ===== Private-DB export is a real portability bridge (round-trip) ============
+# CST-PWA-PRIVATE-SNAPSHOT and CST-PWA-NO-SYNC both lean on the timestamped `.db`
+# export as the manual cross-install/cross-device portability bridge. Until now
+# that handling was asserted only in prose — no attestation row cited a test that
+# the export actually produces a valid, re-importable artifact. This is that
+# executable evidence: export the live Private DB to bytes, confirm they're a
+# valid SQLite file carrying the data, and re-import them so the counts round-trip.
+# Whether the export should become a first-class, gated invariant (its own AC,
+# rather than evidence cited inside two CST rows) is tracked in #272.
+
+
+def test_private_db_export_round_trips(worker_data_folder):
+    """Export → valid SQLite bytes carrying the data → re-import → row counts
+    match. Proves the `.db` export is a genuine portability bridge, not just a
+    claim. (Re-importing the same bytes is idempotent; import is allowed here
+    because a folder is attached — off-folder it is refused, see above.)"""
+    wd = worker_data_folder
+    page = wd.page
+    page.evaluate(
+        "() => window.__dataProvider.createGroup({name:'Portable', note:'', fellow_record_ids:[]})"
+    )
+    before = page.evaluate("() => window.__dataProvider.countRelationships()")
+    assert before["groups"] >= 1, before
+    result = page.evaluate(
+        """async () => {
+          const dp = window.__dataProvider;
+          const bytes = await dp.exportRelationshipsBytes();
+          const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+          const insp = await dp.inspectRelationshipsBytes(u8);
+          await dp.importRelationshipsBytes(u8);              // re-import the export
+          const after = await dp.countRelationships();
+          return {
+            header: new TextDecoder().decode(u8.slice(0, 15)),
+            size: u8.length,
+            inspectValid: !!(insp && insp.valid),
+            inspectGroups: insp && insp.counts ? insp.counts.groups : null,
+            afterGroups: after.groups,
+          };
+        }"""
+    )
+    assert result["header"] == "SQLite format 3", result      # readable by any SQLite tool
+    assert result["size"] > 0, result
+    assert result["inspectValid"] is True, result
+    assert result["inspectGroups"] >= 1, result               # the export carries the data
+    assert result["afterGroups"] == before["groups"], result  # round-trips cleanly
