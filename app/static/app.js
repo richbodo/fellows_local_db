@@ -9147,8 +9147,10 @@
     catch (e) { return false; }
   }
 
-  // Render the top-of-app folder banner in one of two modes and reveal it:
+  // Render the top-of-app folder banner in one of three modes and reveal it:
   //   'browser-only'  — cream nag pushing OPFS-only users to pick a folder.
+  //   'migrate'       — stronger nudge when private data is stranded in OPFS
+  //                     (groups/notes exist but no folder is attached).
   //   'write-failed'  — urgent (amber/red) warning that the most recent
   //                     folder write failed (#221).
   function renderFolderPushBanner(bannerEl, mode, state) {
@@ -9176,6 +9178,23 @@
       // The warning must persist until the next write succeeds — don't let
       // the user dismiss away an unsaved-data warning.
       if (dismissEl) dismissEl.hidden = true;
+    } else if (mode === 'migrate') {
+      // Stranded private data: groups/notes already exist but live only in
+      // evictable browser storage (OPFS) with no folder attached — typically a
+      // folder session whose permission lapsed (e.g. after a browser restart),
+      // leaving the hydrated buffer behind. Push the user to move it onto disk
+      // before the browser can clear it. More urgent than the generic set-up
+      // nudge below, and the gate's honest handling of the "data shouldn't sit
+      // in OPFS off-folder" case (CST-PWA-STORAGE-EVICTABLE).
+      bannerEl.classList.remove('folder-push-banner--error');
+      bannerEl.setAttribute('role', 'status');
+      if (leadEl) leadEl.textContent = 'Your saved groups are only in browser storage.';
+      if (detailEl) {
+        detailEl.textContent =
+          'Pick a data folder to keep them — browser storage can be cleared without warning.';
+      }
+      if (ctaEl) ctaEl.textContent = 'Move my data to a folder';
+      if (dismissEl) dismissEl.hidden = false;
     } else {
       bannerEl.classList.remove('folder-push-banner--error');
       bannerEl.setAttribute('role', 'status');
@@ -9236,7 +9255,23 @@
         bannerEl.classList.add('hidden');
         return;
       }
-      renderFolderPushBanner(bannerEl, 'browser-only', state);
+      // No folder attached. Peek the OPFS row counts (reads are never gated
+      // off-folder) to tell stranded private data — groups/notes/tags that
+      // exist only in evictable browser storage — apart from a clean "set up a
+      // folder" nudge. Stranded data gets the more urgent 'migrate' prompt so
+      // it doesn't quietly sit in OPFS where the browser can clear it.
+      var dp = window.__dataProvider;
+      if (dp && typeof dp.countRelationships === 'function') {
+        dp.countRelationships().then(function (counts) {
+          var stranded = !!(counts && (counts.groups || counts.members ||
+            counts.tags || counts.notes));
+          renderFolderPushBanner(bannerEl, stranded ? 'migrate' : 'browser-only', state);
+        }).catch(function () {
+          renderFolderPushBanner(bannerEl, 'browser-only', state);
+        });
+      } else {
+        renderFolderPushBanner(bannerEl, 'browser-only', state);
+      }
     }).catch(function () {
       bannerEl.classList.add('hidden');
     });
@@ -9255,13 +9290,25 @@
   }
 
   (function bindFolderPushBanner() {
+    // Test seam: let the e2e suite drive a banner re-evaluation deterministically
+    // (the 'migrate' vs 'browser-only' decision is async — getState + countRelationships).
+    window.__refreshFolderPushBanner = refreshFolderPushBanner;
     var ctaBtn = document.getElementById('folder-push-cta');
     var dismissBtn = document.getElementById('folder-push-dismiss');
     if (ctaBtn) {
       ctaBtn.addEventListener('click', function () {
-        // Navigate to Settings → focus the Data folder section so the
-        // user lands on the Choose button. Use a small post-hashchange
-        // delay so the section markup is mounted before scrolling.
+        // If the Settings folder section is already mounted (we're on the
+        // Settings page), forward the click to its "Choose folder…" button
+        // within this same user gesture so the OS folder picker launches
+        // directly. The old behaviour just set location.hash = '#/settings',
+        // which fires no navigation when you're already there and looks broken
+        // — the button appeared dead. showDirectoryPicker needs the live user
+        // gesture, so the hand-off must be synchronous here, not after the
+        // scroll timeout below (which has already lost activation).
+        var chooseNow = document.getElementById('settings-folder-choose');
+        if (chooseNow && !chooseNow.hidden) { chooseNow.click(); return; }
+        // Otherwise (on another route) route to Settings and focus the picker
+        // so the user lands on the Choose button.
         location.hash = '#/settings';
         setTimeout(function () {
           var section = document.getElementById('settings-folder-section');
