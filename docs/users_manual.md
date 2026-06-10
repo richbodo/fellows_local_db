@@ -150,12 +150,18 @@ confusing if you weren't expecting it.
 
 ### Tell installs apart in Finder
 
-Each browser puts the `.app` bundle in a different folder, so you
-can rename them visibly:
+Each browser that installs a real app puts the `.app` bundle in a
+different folder — all inside `~/Applications` (the Applications folder
+in **your home folder**, reached via Finder **Go → Home**), *not* the
+system `/Applications`:
 
 - **Safari** → `~/Applications/EHF Fellows Directory.app`
-- **Chrome / Brave / Edge** → `~/Applications/Chrome Apps/EHF Fellows Directory.app`
-- **Arc** → managed by Arc, accessed through Arc's sidebar
+- **Chrome** → `~/Applications/Chrome Apps/EHF Fellows Directory.app`
+- **Brave** → `~/Applications/Brave Browser Apps/EHF Fellows Directory.app`
+  (some versions reuse `~/Applications/Chrome Apps/` — the name varies)
+- **Edge** → `~/Applications/Edge Apps/EHF Fellows Directory.app`
+- **Arc** → no app bundle; the "copy" is a pinned tab or Favorite in
+  Arc's sidebar (nothing lands in `~/Applications`)
 
 Right-click each bundle in Finder → **Rename** → give them
 distinctive labels like `EHF Fellows — Safari.app` and
@@ -179,33 +185,117 @@ If you've accumulated copies and want to keep just one:
 
 ### Uninstall a copy
 
-Each browser uninstalls its own PWA differently. Below is the short
-form; if a step is out of date for your browser version, check the
-browser's official help — that's always the canonical reference:
+Each browser removes its own copy differently, and **none of them put
+the app in the main `/Applications` folder** — that's the usual reason it
+looks like there's nothing to remove. Two things to know first:
 
-- **Safari (macOS)** — drag `~/Applications/EHF Fellows Directory.app`
-  to the Trash. →
-  [Apple's Web Apps doc](https://support.apple.com/guide/safari/manage-web-apps-pdsuc1d62cd4/mac)
-- **Chrome** — visit `chrome://apps`, right-click the app, **Remove
-  from Chrome…**. →
-  [Google's PWA management doc](https://support.google.com/chrome/answer/9658361)
-- **Edge** — visit `edge://apps`, click **⋯** on the app,
-  **Uninstall**.
-- **Brave** — same as Chrome but at `brave://apps`.
-- **Arc** — right-click in Arc's sidebar, **Delete**.
-- **Firefox** — no PWA install on desktop; close the tab and remove
-  the bookmark.
+- **Removing the icon from the Dock, taskbar, or Start menu is *not* an
+  uninstall** — it only drops the shortcut. Use the steps below.
+- **To wipe the saved data too** (so a reinstall starts clean), use the
+  "also delete data" / "clear data" option where the steps offer it. That
+  clears the browser's own internal copy of your data — it does **not**
+  touch a private-data *folder* you attached (see the note at the end).
 
-**Important:** uninstalling a copy does **not** delete a private data folder
-you set up. The folder lives on your disk and stays put. To remove
-the data too, separately drag the `Fellows/` subfolder you picked
-to the Trash. (Auto-backups inside it go with it.)
+Each link below goes straight to that browser's official removal page.
 
-If you've uninstalled what you thought was the last copy and now
-the app appears to be gone, see *Where the installed app lives*
-above — Spotlight may surface a copy you forgot about, and the
-`https://fellows.globaldonut.com` URL always opens fresh in a
-browser tab.
+**Safari (macOS).** Safari web apps (made with **File → Add to Dock**,
+macOS Sonoma 14 or later) are saved in the Applications folder of your
+**home** folder — `~/Applications`, *not* the system `/Applications`.
+
+1. Quit the app (**⌘Q**).
+2. In Finder, choose **Go → Home** from the menu bar (or **⇧⌘H**), then
+   open the **Applications** folder. (Or **Go → Go to Folder…**, type
+   `~/Applications`, press Return.)
+3. Drag **EHF Fellows Directory** to the Trash, then empty the Trash.
+4. If a leftover icon stays in the Dock, drag it off the Dock until
+   **Remove** appears.
+
+→ [Use Safari web apps on Mac → "How to delete a web app"](https://support.apple.com/en-us/104996#delete)
+&nbsp;&nbsp;*iPhone/iPad:* touch and hold the icon → **Remove App** (or
+**Delete Bookmark**) → **Delete**
+([Delete apps on iPhone/iPad](https://support.apple.com/en-us/101550)).
+
+**Chrome.**
+
+1. Open `chrome://apps`.
+2. Right-click **EHF Fellows Directory** → **Remove from Chrome…**.
+3. Tick **"Also delete data from Chrome"**, then click **Remove**.
+
+If it isn't listed, switch to the Chrome **profile** you installed it under
+(top-right avatar) — apps are per-profile.
+→ [Use web apps (Chrome Help) → "Uninstall a web app"](https://support.google.com/chrome/answer/9658361)
+
+**Edge.**
+
+1. Open `edge://apps`.
+2. On the **EHF Fellows Directory** card, open **Details** (or right-click)
+   → **Uninstall**.
+3. Tick **"Also clear data from Microsoft Edge"**, then **Uninstall**.
+
+On Windows it's also under **Settings → Apps → Installed apps**, but that
+route may skip the clear-data option — prefer `edge://apps`.
+→ [Install, manage, or uninstall apps in Microsoft Edge → "Uninstall an app"](https://support.microsoft.com/en-us/edge/install-manage-or-uninstall-apps-in-microsoft-edge)
+
+**Brave.**
+
+1. Open `brave://apps`.
+2. Right-click **EHF Fellows Directory** and choose the uninstall option
+   (inside the app's own window the menu calls it **Uninstall app**).
+3. Tick **"Also delete data from Brave"**, then confirm.
+
+→ [How do I install and use Web Apps in Brave? → "Uninstalling an app"](https://support.brave.app/hc/en-us/articles/39077114659597-How-do-I-install-and-use-Web-Apps-in-Brave)
+
+**Arc.** Arc doesn't install PWAs at all — there's no app bundle and
+nothing in `~/Applications`. Your "copy" is a **pinned tab** or
+**Favorite** plus the site's stored data, so removal is two steps:
+
+1. In the sidebar, right-click the EHF Fellows item → **Unpin** (pinned
+   tab) or **Move To** (Favorite), then close the tab (**⌘W**).
+2. Clear its data: **Arc → Settings (⌘,) → Profiles → Clear Browsing
+   Data → Delete Browsing Data**; choose **All time** and include cookies
+   and site data. (That clears the whole profile; to clear only this site,
+   click the lock icon at the left of the address bar → site settings →
+   clear data.)
+
+If you use Arc Sync, unpinning a synced pinned tab also removes it on your
+other devices.
+→ [Does Arc support PWAs? (it doesn't)](https://resources.arc.net/hc/en-us/articles/25678978728983-Does-Arc-for-Desktop-Support-Progressive-Web-Apps)
+· [Clear cache & cookies on Arc](https://resources.arc.net/hc/en-us/articles/25614376281751-How-Do-You-Clear-Your-Cache-Cookies-and-or-History-on-Arc-for-Desktop)
+
+**Firefox.** Firefox desktop doesn't install PWAs (the feature was removed
+in Firefox 86; a Windows-only "taskbar tabs" experiment is off by default
+and only makes shortcuts). So there's no app to uninstall — your "copy" is
+a tab, bookmark, or pinned tab. Remove it by:
+
+1. Deleting the bookmark and/or unpinning the pinned tab.
+2. Clearing the site's data: **menu → Settings → Privacy & Security →
+   Cookies and Site Data** (newer versions call it **Browsing data**) →
+   **Manage Data…** → search `fellows.globaldonut.com` → **Remove All
+   Shown** → **Save Changes**. (Shortcut: on the site, click the
+   shield/lock icon left of the address bar → **Clear cookies and site
+   data**.)
+
+*Android:* long-press the home-screen icon → **Remove**, then clear site
+data (lock icon → **Clear cookies and site data**).
+→ [Clear cookies and site data in Firefox → "Clear cookies for any website"](https://support.mozilla.org/en-US/kb/clear-cookies-and-site-data-firefox#w_clear-cookies-for-any-website)
+
+**Important:** uninstalling a copy does **not** delete a private-data
+*folder* you set up (Chromium folder mode). That folder lives on your disk
+and stays put — the "also delete data" options above only clear the
+browser's own internal copy. To remove the folder too, drag the
+`Fellows/` subfolder you picked to the Trash. (Auto-backups inside it go
+with it.)
+
+If you've removed what you thought was the last copy and the app still
+turns up, see *Where the installed app lives* above — Spotlight may
+surface a copy in another browser, and `https://fellows.globaldonut.com`
+always opens fresh in a normal browser tab.
+
+**Starting over with a clean install.** Once every copy is removed (and its
+data cleared), reinstall the current version by visiting
+`https://fellows.globaldonut.com` in the browser you want and using that
+browser's install control — the **Install** / **⊕** icon in the address
+bar, or **File → Add to Dock** in Safari.
 
 ---
 
