@@ -455,7 +455,7 @@ Fellows pins:
 
 - `TOKEN_TTL = 30 min`, `INSTALL_WINDOW = 30 min`, `SESSION_MAX_AGE = 7 days`.
 - Session cookie: HttpOnly, HMAC-signed, **v2 format** (v1 rejected on sight post-deploy).
-- Token re-consume grace window: ~60 s — defends against bfcache, iOS back-button, email-side link scanners.
+- Token re-consume window: the full `TOKEN_TTL` (30 min from issue) — a consumed token stays redeemable until it expires, so a link-scanner, a second device, a bfcache restore, or an iOS back-button that consumes the link first cannot burn the human's click. (Superseded the prior fixed ~60 s grace, which didn't cover the multi-minute scanner-to-human gaps seen in prod.)
 - Allowlist built in memory at startup by HMAC-ing each `contact_email` row in `fellows.db` with `FELLOWS_ALLOWLIST_HMAC_KEY`. No `allowed_emails.json` artifact ships in `dist/`.
 - Six-step browser-mode decision tree (see [`./email_gate.md`](./email_gate.md) for the full table).
 - Persistence marker (per WS persistence-marker contract): `localStorage['fellows_authenticated_once']` is the one localStorage key preserved across the workspace's Clear App Cache affordance.

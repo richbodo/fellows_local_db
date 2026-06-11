@@ -15,7 +15,7 @@ Operator procedures (Postmark, env file, Postmark response interpretation) stay 
 ## Definitions
 
 - **Session cookie** — `fellows_session`, HttpOnly, HMAC-signed, carrying `token_issued_at` (epoch seconds) and a server-side `session_id`. v3 format; v1 and v2 cookies are rejected on sight so prior sessions re-login cleanly after each version bump.
-- **Magic-link token** — single-use, `TOKEN_TTL = 30 min` from issue. Random 32-byte hex.
+- **Magic-link token** — random 32-byte hex, valid for `TOKEN_TTL = 30 min` from issue. **Re-consumable within that TTL**, not strictly single-use: a consumed token stays redeemable until it expires so a link-scanner, a second device, or a bfcache/back-button replay that opens the link before the human can't invalidate the human's click. Each consume mints a fresh session carrying the original `token_issued_at`. Past the TTL it reports `expired`.
 - **Install window** — `INSTALL_WINDOW = 30 min` measured from token issue (not from click). Same duration as token TTL by design: a user has 30 min from the email being sent to finish clicking and installing.
 - **Display mode** — *browser* (`display-mode != standalone`) vs *PWA* (`display-mode: standalone`).
 
@@ -23,8 +23,8 @@ Operator procedures (Postmark, env file, Postmark response interpretation) stay 
 
 1. **Email gate is the default.** The only exits from it are: (a) a URL carrying an unexpired magic-link token, or (b) an authenticated session *within* the install window, or (c) PWA mode with a valid session (→ directory).
 2. **Install landing never repeats.** It shows only inside the install window. Once the window closes, or the user explicitly logs out, the only path back is a fresh magic link.
-3. **Expired links are explicit.** Clicking an expired token lands on the email gate with a visible "that link expired" banner.
-4. **Invalid links are explicit.** Clicking a tampered or already-consumed token lands on the email gate with "that link isn't valid".
+3. **Expired links are explicit.** Clicking a token past its TTL lands on the email gate with a visible "that link expired" banner — including a token that was consumed earlier and has now aged past its TTL.
+4. **Invalid links are explicit.** Clicking a tampered or never-issued token lands on the email gate with "that link isn't valid". A token that was already consumed but is still within its TTL is **not** invalid — it re-consumes successfully (see the re-consume policy in [`magic_link_auth.py`](../deploy/magic_link_auth.py)); only a never-issued/tampered token, or one cleaned up after its TTL elapsed, is invalid.
 5. **Magic-link emails state the TTL.** Body includes: "This link will expire in 30 minutes."
 6. **Session cookie TTL is long** (`SESSION_MAX_AGE = 7 days`) so installed PWAs persist; the install window is decoupled and short.
 7. **Dev escape hatch is always reachable.** Two layers:

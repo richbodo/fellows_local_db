@@ -29,15 +29,19 @@ SESSION_COOKIE = "fellows_session"
 SESSION_MAX_AGE = 7 * 24 * 3600
 TOKEN_TTL = 30 * 60
 INSTALL_WINDOW = TOKEN_TTL  # window (from token issue) during which install landing may show
-# Re-consume window: after a token is first consumed, the same token re-presented
-# within GRACE_WINDOW seconds returns the same session payload instead of
-# "invalid". Defends against bfcache / back-button replays in iOS Safari and
-# against email-side link scanners that GET the URL before the user clicks.
-# Net threat-model effect is a safety win: the dominant real-world failure was
-# "passive scanner consumes the token, legit user sees invalid"; the grace
-# window flips that to "scanner consumes, legit user's click within 60s also
-# succeeds." See plans/auth_debug_improvements.md (M3) for the rationale.
-GRACE_WINDOW = 60
+# Re-consume policy: a token, once consumed, stays redeemable for the
+# REMAINDER of its original TOKEN_TTL (not a brief fixed grace window). This
+# defends against email-side link scanners (which GET/execute the link before
+# the human clicks), bfcache / iOS back-button replays, and a second device
+# opening the same link. The dominant real-world failure was "a passive
+# scanner consumes the token, then the legit user's click seconds-to-minutes
+# later sees 'invalid'." A fixed 60 s grace (the prior GRACE_WINDOW) did not
+# cover the multi-minute gaps seen in prod — a scanner consumed at +222 s and
+# the human clicked at +309 s, 87 s after the scanner, outside 60 s. Bounding
+# re-use by TOKEN_TTL adds no exposure window: a never-consumed link is
+# already valid for the full TTL, so this only removes the "first consumer
+# wins, everyone else gets invalid" race. See
+# plans/auth_debug_improvements.md (M3) for the original grace rationale.
 RATE_WINDOW = 3600
 RATE_MAX = 3
 SESSION_VERSION = "v3"
@@ -89,7 +93,8 @@ class AuthState:
     tokens: dict[str, float] = {}
     # tok -> {"issued_at": <epoch>, "consumed_at": <epoch>}. Populated by
     # consume_token on first success; used to honor a re-consume of the same
-    # token within GRACE_WINDOW seconds. Cleaned up by cleanup_stale_tokens.
+    # token for the remainder of its TOKEN_TTL. Cleaned up by
+    # cleanup_stale_tokens once the token has aged past TOKEN_TTL.
     consumed: dict[str, dict] = {}
     rate_buckets: dict[str, list[float]] = {}
     # session_id (32-char hex) -> {"issued_at": float, "expires_at": float}.
@@ -170,7 +175,11 @@ def cleanup_stale_tokens() -> None:
             if exp < now:
                 del AuthState.tokens[t]
         for t, rec in list(AuthState.consumed.items()):
-            if (now - rec["consumed_at"]) >= GRACE_WINDOW:
+            # Consumed records must outlive the token's full TTL so a
+            # legitimate re-consume within that window still resolves (a
+            # scanner-then-human gap can be many minutes). Drop only once the
+            # original token has aged past TOKEN_TTL.
+            if (now - rec["issued_at"]) >= TOKEN_TTL:
                 del AuthState.consumed[t]
         for sid, srec in list(AuthState.sessions.items()):
             if srec["expires_at"] < now:
@@ -224,29 +233,34 @@ def consume_token(tok: str) -> dict:
 
     Returns one of:
       {"status": "ok", "issued_at": <epoch>, "session_id": <hex>} —
-          token was valid and unexpired, OR was consumed within the
-          last GRACE_WINDOW seconds. On a fresh consume the issued_at
-          is derived from the live token's stored expiry; on a
-          re-consume within the grace window it's the issued_at that
-          was captured at first consume. The session_id is freshly
-          minted on each consume and registered in
-          ``AuthState.sessions`` so the cookie that signs over it
-          will pass ``verify_session_value`` until the session
-          expires or is revoked.
-      {"status": "expired"} — token existed but was past TTL. Shown to user as
-          "that link expired".
-      {"status": "invalid"} — token was never issued, or was consumed more
-          than GRACE_WINDOW seconds ago. Shown to user as
-          "that link isn't valid".
+          token is valid: either freshly consumed (live and within
+          TTL), or re-consumed while still inside its ORIGINAL
+          TOKEN_TTL. On a fresh consume the issued_at is derived from
+          the live token's stored expiry; on a re-consume it is the
+          issued_at captured at first consume, so every minted session
+          carries the same install-window anchor as the first. The
+          session_id is freshly minted on each consume and registered
+          in ``AuthState.sessions`` so the cookie that signs over it
+          will pass ``verify_session_value`` until the session expires
+          or is revoked.
+      {"status": "expired"} — token existed but is past its 30-min TTL
+          (whether never consumed, or consumed and now aged out). Shown
+          to user as "that link expired".
+      {"status": "invalid"} — token was never issued (or was cleaned up
+          after its TTL elapsed). Shown to user as "that link isn't valid".
+
+    A consumed token stays re-consumable for the remainder of its
+    original TOKEN_TTL — see the module-level re-consume policy comment
+    for why (link scanners / bfcache / a second device must not be able
+    to burn the human's click).
     """
     now = time.time()
     with AuthState.lock:
         exp = AuthState.tokens.pop(tok, None)
         if exp is not None:
             if exp < now:
-                # Past-TTL tokens are treated as expired and NOT recorded
-                # in `consumed` — re-presenting them after this point is
-                # an "invalid" outcome, consistent with the prior contract.
+                # Past-TTL on first sight → expired, and NOT recorded in
+                # `consumed` (re-presenting it lands in the invalid branch).
                 return {"status": "expired"}
             issued_at = exp - TOKEN_TTL
             AuthState.consumed[tok] = {
@@ -259,19 +273,25 @@ def consume_token(tok: str) -> dict:
                 "issued_at": issued_at,
                 "session_id": session_id,
             }
-        # Token not in the live set — check whether it was just consumed.
+        # Token already consumed once. It stays usable for the remainder of
+        # its original TOKEN_TTL (not a brief grace window) so a scanner /
+        # second device / bfcache replay that consumed it first does not
+        # invalidate the human's later click. See the re-consume policy
+        # comment near TOKEN_TTL above.
         rec = AuthState.consumed.get(tok)
-        if rec and (now - rec["consumed_at"]) < GRACE_WINDOW:
-            session_id = _register_session(now, rec["issued_at"])
-            return {
-                "status": "ok",
-                "issued_at": rec["issued_at"],
-                "session_id": session_id,
-            }
-        if rec:
-            # Past the grace window; drop opportunistically so memory doesn't
-            # accumulate even when cleanup_stale_tokens hasn't run recently.
+        if rec is not None:
+            if (now - rec["issued_at"]) < TOKEN_TTL:
+                session_id = _register_session(now, rec["issued_at"])
+                return {
+                    "status": "ok",
+                    "issued_at": rec["issued_at"],
+                    "session_id": session_id,
+                }
+            # Past the original 30-min TTL: the link genuinely aged out.
+            # Drop opportunistically and report `expired` (not `invalid`) so
+            # the gate shows "that link expired, request a new one".
             AuthState.consumed.pop(tok, None)
+            return {"status": "expired"}
         return {"status": "invalid"}
 
 

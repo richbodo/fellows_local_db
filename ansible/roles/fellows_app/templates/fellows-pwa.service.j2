@@ -13,6 +13,20 @@ ExecStart=/usr/bin/python3 {{ app_root }}/deploy/server.py
 Restart=on-failure
 RestartSec=3
 
+# Resource guardrails (added for the wider 2026-06 rollout). The droplet is
+# 1 vCPU / ~960 MB. A pathological thread/connection pile-up under load (or a
+# future bug) could otherwise exhaust RAM and OOM the whole box — taking Caddy
+# and sshd down with it (the "all-ports outage" failure mode). MemoryMax caps
+# THIS service's cgroup, so a runaway is OOM-killed as just fellows-pwa and
+# Restart=on-failure brings it back, while Caddy + sshd survive. OOMScoreAdjust
+# biases the global OOM killer toward this service if the box as a whole runs
+# short. Normal usage is ~16-150 MB, so these never fire under legitimate load
+# (file page cache is reclaimable and not held against the cap). Raise these if
+# the droplet is ever resized.
+MemoryHigh=550M
+MemoryMax=700M
+OOMScoreAdjust=500
+
 # Hardening. The service binds 127.0.0.1:8765 (Caddy reverse-proxies) and
 # reads server.py + helpers + fellows.db + static files. It never writes to
 # its own code tree. dist/ is listed in ReadWritePaths only as a safety net

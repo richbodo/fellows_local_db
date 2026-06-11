@@ -183,13 +183,13 @@ def test_verify_token_with_empty_token_returns_401_invalid(deploy_server):
     assert body == {"ok": False, "error": "invalid"}
 
 
-def test_verify_token_reuse_within_grace_window_returns_ok(deploy_server):
-    """A re-consume of the same token within ``GRACE_WINDOW`` seconds (M3
-    follow-up to the Anne-Marie iOS report) returns ok again, so a bfcache
-    replay or scanner pre-fetch doesn't break the legitimate user. Both
-    responses end up with the same session contract: 200 ok + a fresh
-    Set-Cookie carrying the original ``token_issued_at``. After the grace
-    window the token reverts to ``invalid`` — see the test below."""
+def test_verify_token_reuse_within_ttl_returns_ok(deploy_server):
+    """A re-consume of the same token while still within its TOKEN_TTL
+    returns ok again, so a bfcache replay, a second device, or a link-scanner
+    pre-fetch doesn't break the legitimate user. Both responses end up with
+    the same session contract: 200 ok + a fresh Set-Cookie carrying the
+    original ``token_issued_at``. After the TTL the token reports ``expired``
+    — see the test below."""
     _post_json(
         deploy_server, "/api/send-unlock", {"email": deploy_server["test_email"]}
     )
@@ -200,10 +200,12 @@ def test_verify_token_reuse_within_grace_window_returns_ok(deploy_server):
     assert s2 == 200 and b2 == {"ok": True}
 
 
-def test_verify_token_reuse_after_grace_window_returns_invalid(deploy_server):
-    """Outside the grace window a re-consume reverts to ``invalid`` —
-    re-asserts the original single-use property holds in the long run.
-    We rewind the consumed record's ``consumed_at`` rather than sleeping."""
+def test_verify_token_reuse_after_ttl_returns_expired(deploy_server):
+    """Past the token's TTL a re-consume reports ``expired`` (distinct from
+    ``invalid``) so the gate can render the right banner. Within the TTL a
+    re-consume still succeeds (test above + the scanner-race unit test in
+    test_magic_link_auth.py). We rewind the consumed record's ``issued_at``
+    rather than waiting 30 minutes."""
     state = deploy_server["auth_state"]
     ml = deploy_server["ml"]
     _post_json(
@@ -217,10 +219,11 @@ def test_verify_token_reuse_after_grace_window_returns_invalid(deploy_server):
     with state.lock:
         rec = state.consumed.get(token)
         assert rec is not None
-        rec["consumed_at"] = _time.time() - (ml.GRACE_WINDOW + 1)
+        rec["issued_at"] = _time.time() - (ml.TOKEN_TTL + 1)
+        rec["consumed_at"] = _time.time() - (ml.TOKEN_TTL + 1)
     s2, _, b2 = _post_json(deploy_server, "/api/verify-token", {"token": token})
     assert s2 == 401
-    assert b2 == {"ok": False, "error": "invalid"}
+    assert b2 == {"ok": False, "error": "expired"}
 
 
 def test_verify_token_after_ttl_expiry_returns_401_expired(deploy_server):
