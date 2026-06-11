@@ -179,6 +179,40 @@
   become: false
   notify: Restart fellows app
 
+# Verify the three Claude Desktop .mcpb bundles actually landed in the
+# deployed dist. The /mcpb/<name>.mcpb routes are auth-gated — the 403
+# for an unauthenticated request is returned *before* the file-existence
+# check — so an HTTPS smoke can't distinguish "present" from "absent".
+# The honest check is on-disk, here, right after rsync. This is the
+# tripwire for the ship bug where the build never produced the bundles
+# and rsync --delete then removed them from prod, surfacing to fellows as
+# the "File wasn't available on site" download failure. Pass
+# --extra-vars fellows_skip_mcpb_check=true for a deliberate PWA-only deploy.
+- name: Verify Claude Desktop .mcpb bundles are present in deployed dist
+  ansible.builtin.stat:
+    path: "{{ app_root }}/deploy/dist/mcpb/{{ item }}.mcpb"
+  register: fellows_mcpb_stat
+  loop:
+    - comms
+    - shared_data_ops
+    - private_data_ops
+  when: not (fellows_skip_mcpb_check | default(false) | bool)
+
+- name: Fail if any .mcpb bundle is missing from deployed dist
+  ansible.builtin.fail:
+    msg: >-
+      {{ item.item }}.mcpb is missing from {{ app_root }}/deploy/dist/mcpb/.
+      The Claude Desktop install routes (/mcpb/{{ item.item }}.mcpb) will 404
+      ("File wasn't available on site"). Run `just build` (it now runs
+      build/build_mcpb.py) before deploy, or pass
+      --extra-vars fellows_skip_mcpb_check=true for a deliberate PWA-only deploy.
+  loop: "{{ fellows_mcpb_stat.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - not (fellows_skip_mcpb_check | default(false) | bool)
+    - not (item.stat.exists | default(false))
+
 # If the Phase 4 env file is present, make sure it is readable by the new
 # service group. (The configure_email_auth_env.sh script originally created
 # it as root:deploy; this task rewrites the group so the new service user

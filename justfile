@@ -440,10 +440,28 @@ test-mcpb-parity:
 
 # ---- build / deploy ------------------------------------------------------
 
-# Assemble deploy/dist/ (runs build/build_pwa.py).
+# Assemble deploy/dist/ (build/build_pwa.py) AND the Claude Desktop
+# .mcpb bundles (build/build_mcpb.py) into deploy/dist/mcpb/.
+#
+# Ordering is load-bearing: build_pwa.py rmtree's deploy/dist/ and
+# recreates it from app/static/, so build-mcpb MUST run *after* it —
+# otherwise the bundles get wiped before they ship, the rsync --delete
+# removes them from prod, and the in-app "Set up Claude Desktop
+# integration" download 404s ("File wasn't available on site"). Wiring
+# build-mcpb in here is the fix: every `just build` / `deploy` / `ship`
+# now produces the bundles the deploy rsync ships. Set FELLOWS_SKIP_MCPB=1
+# for a fast PWA-only build that skips the Node toolchain (deploys leave
+# it unset so the bundles always ship; deploy verifies their presence).
 [group('build')]
 build:
+    #!/usr/bin/env bash
+    set -euo pipefail
     {{python}} build/build_pwa.py
+    if [ "${FELLOWS_SKIP_MCPB:-0}" = "1" ]; then
+        echo "build: FELLOWS_SKIP_MCPB=1 — skipping .mcpb bundles (PWA-only build)."
+    else
+        python3 build/build_mcpb.py
+    fi
 
 # Generate the prod ECDSA P-256 signing keypair (one-time, per maintainer).
 # Prompts for a passphrase, writes ~/.fellows/signing-key.enc.pem, prints
