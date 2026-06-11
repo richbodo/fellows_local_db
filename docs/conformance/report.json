@@ -1,7 +1,7 @@
 {
   "meta": {
-    "generated_at": "2026-06-09T07:46:26Z",
-    "git_sha": "bbaf66e",
+    "generated_at": "2026-06-11T00:33:28Z",
+    "git_sha": "a81899c",
     "source": "docs/Architecture.md",
     "generator": "scripts/conformance_report.py",
     "toolkit_version": "0.1 (draft)",
@@ -575,6 +575,11 @@
           "ref": "tests/e2e/test_private_data_enforcement.py::test_worker_is_load_bearing_off_folder_via_raw_rpc",
           "status": "live",
           "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_private_data_enforcement.py::test_private_db_export_round_trips",
+          "status": "live",
+          "detail": ""
         }
       ],
       "findings": []
@@ -605,7 +610,7 @@
     },
     {
       "id": "CST-PWA-STORAGE-EVICTABLE",
-      "status_text": "**conformant**: the two prefs (`has_email_only` / `self_email`) are localStorage-only off-folder \u2014 the boot reconciles no longer write `settings` to OPFS in browse-only mode (PR #244 `d2706a9`; [`../plans/private_data_enforcement.md`](../plans/private_data_enforcement.md)). #248 closed the last residual: the worker no longer mints workspace-identity metadata into OPFS off-folder either (it's minted only when a store becomes canonical \u2014 the first folder write), so the browse-only settings store is now *literally* empty. `test_off_folder_settings_are_empty` is a hard guard, not a strict-xfail. The \"Avoided\" claim holds in its strongest reading.",
+      "status_text": "**conformant** (as a handling): settings/prefs are localStorage-only off-folder (`test_off_folder_settings_are_empty`, a hard guard; #248 closed the identity-metadata residual). The relationships residual \u2014 rows hydrated into OPFS during a folder session linger after the handle drops \u2014 is **mitigated, not avoided**: the migration banner surfaces it for the user to move onto disk, and acting on the prompt completes the OPFS\u2192folder migration (`test_stranded_opfs_groups_fire_migration_prompt`, `test_stranded_opfs_groups_migrate_into_freshly_picked_folder`). The earlier \"Avoided \u2026 in its strongest reading\" was an over-claim for the post-folder-lapse path, corrected here (Framing A). A future stronger handling could clear the OPFS buffer *after* a verified migration \u2014 never before.",
       "conformant": true,
       "review_kind": false,
       "refs": [
@@ -626,6 +631,21 @@
         },
         {
           "ref": "tests/e2e/test_private_data_enforcement.py::test_folder_file_on_disk_carries_identity",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_private_data_enforcement.py::test_stranded_opfs_groups_fire_migration_prompt",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_private_data_enforcement.py::test_clean_no_folder_shows_generic_nudge_not_migrate",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_private_data_enforcement.py::test_stranded_opfs_groups_migrate_into_freshly_picked_folder",
           "status": "live",
           "detail": ""
         }
@@ -655,6 +675,11 @@
         },
         {
           "ref": "tests/e2e/test_private_data_enforcement.py::test_folder_backup_on_disk_carries_identity",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_private_data_enforcement.py::test_private_db_export_round_trips",
           "status": "live",
           "detail": ""
         }
