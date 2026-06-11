@@ -2371,6 +2371,15 @@
         try {
           window.indexedDB.deleteDatabase('fellows-local-db');
         } catch (err) {}
+        // Reset Everything = brand-new install: also drop the worker-owned
+        // folder-handle store (a separate IndexedDB, mirrors FOLDER_IDB_NAME
+        // in vendor/sqlite-worker.js). The worker's wipeAll RPC already
+        // clears this when the worker is alive; this is the belt-and-
+        // suspenders for the worker-unavailable path. (Clear App Cache must
+        // NOT do this — it preserves the folder.)
+        try {
+          window.indexedDB.deleteDatabase('fellows-fs-handles');
+        } catch (err) {}
       }
 
       if ('caches' in window) {
