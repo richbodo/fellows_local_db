@@ -251,3 +251,74 @@ class TestOfflineOnlyMode:
             context.unroute(API_FELLOWS)
             context.unroute("**/api/auth/status")
             page.close()
+
+    def test_folder_push_banner_stays_hidden_on_gate_after_stale_session(self, context, base_url_fixture):
+        """Regression: the folder-push "set up a data folder" banner must NOT
+        paint on top of the email gate.
+
+        Repro (the only state that triggers it): an already-installed user
+        (fellows_authenticated_once) whose session expired boots via
+        bootDirectoryAsApp → pickDataProvider assigns window.__dataProvider →
+        401/403 → the catch handler hands off to startBrowserUx → initEmailGate.
+        The provider stays assigned, so the banner's old inApp-only guard let
+        the nag render over the gate. The fix also requires #app-wrap to be
+        visible (the gate hides it via showApp(false)). A fresh incognito
+        visitor never reproduces this — they never call bootDirectoryAsApp, so
+        the provider is never set; that asymmetry was the field symptom.
+        """
+        page = context.new_page()
+        # Installed browser-tab user → boots via bootDirectoryAsApp; no cache.
+        page.add_init_script(
+            "window.localStorage.setItem('fellows_authenticated_once', '1');"
+        )
+        context.route(
+            FELLOWS_DB,
+            lambda r: r.fulfill(status=401, body="session expired"),
+        )
+        context.route(
+            API_FELLOWS,
+            lambda r: r.fulfill(status=401, body="session expired"),
+        )
+        context.route(
+            "**/api/auth/status",
+            lambda r: r.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "authEnabled": True,
+                    "authenticated": False,
+                    "hasSessionCookie": False,
+                    "installRecentlyAllowed": False,
+                }),
+            ),
+        )
+        try:
+            page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+            page.locator("#install-gate-private").wait_for(state="visible", timeout=10000)
+            # Bug precondition: the provider lingers (set during the failed
+            # bootDirectoryAsApp, never cleared by the gate handoff) and the
+            # app shell is hidden.
+            assert page.evaluate(
+                "() => !!(window.__dataProvider && window.__dataProvider.kind)"
+            ), "expected window.__dataProvider to remain set after the gate handoff"
+            expect(page.locator("#app-wrap")).to_be_hidden()
+            # Drive the banner re-evaluation exactly as the production 1.5s
+            # safety-net timer (setTimeout(refreshFolderPushBanner, 1500)) does,
+            # but deterministically via the test seam. Without the app-wrap
+            # guard this paints the nag over the gate; with it, it stays hidden.
+            page.wait_for_function(
+                "() => typeof window.__refreshFolderPushBanner === 'function'",
+                timeout=5000,
+            )
+            page.evaluate("() => window.__refreshFolderPushBanner()")
+            # Let the async getState()/countRelationships chain settle — a
+            # regression would flip the banner visible within this window.
+            page.wait_for_timeout(1000)
+            expect(page.locator("#folder-push-banner")).to_be_hidden()
+            # The gate is still the thing on screen.
+            expect(page.locator("#install-gate-private")).to_be_visible()
+        finally:
+            context.unroute(FELLOWS_DB)
+            context.unroute(API_FELLOWS)
+            context.unroute("**/api/auth/status")
+            page.close()

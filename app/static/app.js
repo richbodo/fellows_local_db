@@ -5043,6 +5043,13 @@
     setShellVisible(false);
     showLoading(false);
     showApp(false);
+    // Defense-in-depth: a stale-session boot can reach this gate with
+    // window.__dataProvider still assigned (bootDirectoryAsApp → 401/403 →
+    // startBrowserUx → initEmailGate). Hide the folder-push "set up a data
+    // folder" nag immediately so it can't sit on top of the gate; its own
+    // refresh also now guards on app-wrap visibility (see refreshFolderPushBanner).
+    var folderPushOnGate = document.getElementById('folder-push-banner');
+    if (folderPushOnGate) folderPushOnGate.classList.add('hidden');
 
     setGateReasonBanner(reason);
 
@@ -9251,7 +9258,18 @@
     // this fix: the 1500ms boot-time safety-net timer, the Settings-render
     // cascade, and — for the write-failed variant — afterFolderMutation.)
     var inApp = !!(window.__dataProvider && window.__dataProvider.kind);
-    if (!inApp) {
+    // ...but inApp alone is not enough. A stale-session boot leaves
+    // window.__dataProvider assigned and then routes to the email gate
+    // (bootDirectoryAsApp → pickDataProvider assigns the provider → 401/403 →
+    // the catch handler hands off to startBrowserUx → initEmailGate, which
+    // hides the app via showApp(false) but never clears the provider). So an
+    // already-installed user with an expired session saw this banner painted
+    // on top of the gate, while a fresh incognito visitor never did (they
+    // never call bootDirectoryAsApp, so the provider stays unset). Require the
+    // directory itself to be on screen — #app-wrap is hidden on the gate, the
+    // install landing, and the loading screens.
+    var appVisible = !!(appWrapEl && !appWrapEl.classList.contains('hidden'));
+    if (!inApp || !appVisible) {
       bannerEl.classList.add('hidden');
       return;
     }
