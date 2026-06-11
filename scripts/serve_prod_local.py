@@ -30,6 +30,7 @@ import base64
 import os
 import shutil
 import sqlite3
+import subprocess
 import sys
 from datetime import datetime
 from functools import partial
@@ -122,20 +123,34 @@ def _build_dist(force: bool) -> None:
         encoding="utf-8",
     )
 
-    # Wire the .mcpb bundles if a previous `just build-mcpb` produced them.
-    # Without this, § 6/§ 7 of the maintainer test plan can't run locally.
-    if MCPB_SOURCE_DIR.is_dir():
-        bundles = sorted(MCPB_SOURCE_DIR.glob("*.mcpb"))
-        if bundles:
-            target = DIST_DIR / "mcpb"
-            target.mkdir(exist_ok=True)
-            for b in bundles:
-                shutil.copy2(b, target / b.name)
-            print(f"  Wired {len(bundles)} .mcpb bundle(s) from deploy/dist/mcpb/")
-    else:
+    # Wire the .mcpb bundles so /mcpb/<name>.mcpb routes serve real bytes —
+    # otherwise § 6/§ 7 of the maintainer test plan silently runs against
+    # absent bundles (the staging analog of the prod ship bug where `build`
+    # never produced them). Build them on demand if a prior
+    # `just build-mcpb` / `just build` hasn't, unless FELLOWS_SKIP_MCPB=1.
+    # Failing to build (e.g. no Node) surfaces loudly rather than leaving
+    # the routes silently 404ing under a green-looking staging server.
+    skip_mcpb = os.environ.get("FELLOWS_SKIP_MCPB", "0") == "1"
+    have_bundles = MCPB_SOURCE_DIR.is_dir() and any(MCPB_SOURCE_DIR.glob("*.mcpb"))
+    if not have_bundles and not skip_mcpb:
         print(
-            "  No .mcpb bundles found at deploy/dist/mcpb/ — run "
-            "`just build-mcpb` first if you want § 6/§ 7 tests."
+            "  No .mcpb bundles at deploy/dist/mcpb/ — building them "
+            "(build/build_mcpb.py; needs Node 20+)…"
+        )
+        subprocess.run(
+            [sys.executable, str(REPO_ROOT / "build" / "build_mcpb.py")], check=True
+        )
+    bundles = sorted(MCPB_SOURCE_DIR.glob("*.mcpb")) if MCPB_SOURCE_DIR.is_dir() else []
+    if bundles:
+        target = DIST_DIR / "mcpb"
+        target.mkdir(exist_ok=True)
+        for b in bundles:
+            shutil.copy2(b, target / b.name)
+        print(f"  Wired {len(bundles)} .mcpb bundle(s) from deploy/dist/mcpb/")
+    elif skip_mcpb:
+        print(
+            "  FELLOWS_SKIP_MCPB=1 — no .mcpb bundles wired "
+            "(§ 6/§ 7 staging tests will be skipped)."
         )
 
     print(f"  Built dist at {DIST_DIR.relative_to(REPO_ROOT)} (label: {label})")

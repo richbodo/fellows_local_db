@@ -127,11 +127,19 @@ claim is the attestation table in [`Architecture.md`](Architecture.md).
 
 ### build
 
-- **`build`** — assemble `deploy/dist/` (runs `build/build_pwa.py`). The
-  build stamps the current `git rev-parse --short HEAD` into the
-  `__FELLOWS_UI_DIAG__` and `__CACHE_VERSION__` placeholders in
-  `app.js` and `sw.js` as it copies them. Format: `<YYYY-MM-DD>-<short-sha>`.
-  No manual bump step; every build label matches HEAD.
+- **`build`** — assemble `deploy/dist/` (runs `build/build_pwa.py`) **and** the
+  Claude Desktop `.mcpb` bundles into `deploy/dist/mcpb/` (runs
+  `build/build_mcpb.py`, which needs Node 20+). `build_mcpb` runs *after*
+  `build_pwa` because `build_pwa` `rmtree`'s `deploy/dist/` — running it after
+  is what keeps the bundles from being wiped before the deploy rsync ships
+  them. Set `FELLOWS_SKIP_MCPB=1` for a fast PWA-only build that skips the
+  Node toolchain (deploys leave it unset; `deploy` verifies the bundles are
+  present on the host post-rsync and fails loudly if not — bypass that with
+  `--extra-vars fellows_skip_mcpb_check=true`). The build also stamps the
+  current `git rev-parse --short HEAD` into the `__FELLOWS_UI_DIAG__` and
+  `__CACHE_VERSION__` placeholders in `app.js` and `sw.js` as it copies them.
+  Format: `<YYYY-MM-DD>-<short-sha>`. No manual bump step; every build label
+  matches HEAD.
 - **`build-meta`** — print `deploy/dist/build-meta.json` (build_label,
   git_sha, built_at). Useful to pair with `drift`.
 
