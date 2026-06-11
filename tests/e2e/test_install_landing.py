@@ -183,9 +183,11 @@ class TestInstallLandingEscape:
 class TestRedeemDoubleFireGuard:
     """M2: a second tryUnlockFromHash invocation with the same token in the
     same tab must skip the POST entirely. Covers iOS Safari bfcache restore
-    and back-button replay, where today the second POST returns 401 invalid
-    (the first already consumed the single-use token) and the user sees
-    'That link isn't valid' even though they did everything right.
+    and back-button replay. (The server now re-consumes a token for its full
+    TTL — see deploy/magic_link_auth.py — so a redundant second POST would
+    succeed rather than return 401; this per-tab guard still avoids the
+    needless re-POST and keeps the hash stripped so a navigation event can't
+    re-arm the loop.)
     """
 
     def test_second_invocation_skips_verify_token_post(self, context, deploy_server):

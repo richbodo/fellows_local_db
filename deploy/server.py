@@ -765,6 +765,17 @@ class Handler(SimpleHTTPRequestHandler):
         super().end_headers()
 
 
+class _FellowsServer(ThreadingHTTPServer):
+    # The stdlib default listen backlog (request_queue_size) is 5 — shallow
+    # for a burst of simultaneous install connections (a single install opens
+    # several: shell assets + fellows.db + the SW's no-store precache
+    # re-fetch). Raise it so a short spike queues in the kernel instead of
+    # getting connection-reset. Threads are still one-per-connection
+    # (ThreadingMixIn); the systemd MemoryMax guardrail bounds a pathological
+    # pile-up so a backlog this deep can't translate into an OOM of the box.
+    request_queue_size = 128
+
+
 def main():
     global AUTH_ACTIVE, BUILD_META
     init_auth()
@@ -774,7 +785,7 @@ def main():
         print(json.dumps({"event": "build_meta", "build": BUILD_META}), file=sys.stderr)
     DIST_DIR.mkdir(parents=True, exist_ok=True)
     os.chdir(DIST_DIR)
-    server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    server = _FellowsServer(("127.0.0.1", PORT), Handler)
     bits = []
     if AUTH_ACTIVE:
         bits.append("auth")

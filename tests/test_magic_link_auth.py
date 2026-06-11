@@ -216,33 +216,60 @@ def test_consume_token_distinguishes_invalid_expired_ok(monkeypatch):
     r = ml.consume_token(tok)
     assert r["status"] == "ok"
     assert "issued_at" in r
-    # Second consume within the grace window is ok with the original
-    # issued_at (M3) — see test_consume_within_grace_window_returns_ok
-    # below for the dedicated coverage.
+    # Second consume (still within the token's TTL) is ok with the original
+    # issued_at — see test_consume_token_survives_scanner_pre_consume below
+    # for the multi-minute-gap (link-scanner) case.
     r2 = ml.consume_token(tok)
     assert r2["status"] == "ok"
     assert r2["issued_at"] == r["issued_at"]
 
 
-def test_consume_within_grace_window_returns_ok_with_original_issued_at():
-    """M3: a second consume within GRACE_WINDOW seconds returns ok with
-    the issued_at captured at first consume (so the resulting session
-    cookie carries the same install-window anchor as the first one)."""
+def test_consume_re_consume_returns_ok_with_original_issued_at():
+    """A second consume (still within TTL) returns ok with the issued_at
+    captured at first consume, so the resulting session cookie carries the
+    same install-window anchor as the first one."""
     with ml.AuthState.lock:
         ml.AuthState.tokens.clear()
         ml.AuthState.consumed.clear()
     tok = ml.issue_token()
     r1 = ml.consume_token(tok)
     assert r1["status"] == "ok"
-    # Re-consume inside the window: ok, same issued_at.
+    # Re-consume immediately: ok, same issued_at.
     r2 = ml.consume_token(tok)
     assert r2["status"] == "ok"
     assert r2["issued_at"] == r1["issued_at"]
 
 
-def test_consume_after_grace_window_returns_invalid():
-    """M3: outside the window the re-consume reverts to invalid. Rewind
-    the consumed record's consumed_at rather than sleeping."""
+def test_consume_token_survives_scanner_pre_consume():
+    """Regression for the link-scanner race: a passive scanner consumes the
+    token minutes before the human clicks, but as long as the human's click
+    is still within the original TOKEN_TTL it succeeds — no 60 s grace cliff.
+
+    Models the prod incident: the scanner consumed at +222 s and the human
+    clicked at +309 s (87 s later), which the old GRACE_WINDOW=60 turned into
+    `invalid`. Here we rewind the record so the human's re-consume is well
+    past any 60 s window yet comfortably inside the 30-min TTL."""
+    with ml.AuthState.lock:
+        ml.AuthState.tokens.clear()
+        ml.AuthState.consumed.clear()
+    tok = ml.issue_token()
+    r1 = ml.consume_token(tok)  # the scanner
+    assert r1["status"] == "ok"
+    with ml.AuthState.lock:
+        rec = ml.AuthState.consumed.get(tok)
+        assert rec is not None
+        # Issued + scanner-consumed ~5 min ago → ~25 min of TTL remains.
+        # The old 60 s grace would have turned this human click into invalid.
+        rec["issued_at"] = time.time() - 300
+        rec["consumed_at"] = time.time() - 300
+    r2 = ml.consume_token(tok)  # the human, ~5 min after the scanner
+    assert r2["status"] == "ok"
+    assert r2["issued_at"] == rec["issued_at"]
+
+
+def test_consume_after_ttl_returns_expired():
+    """Past the original 30-min TTL a re-consume reports `expired` (not
+    `invalid`) and drops the record. Rewind issued_at rather than sleeping."""
     with ml.AuthState.lock:
         ml.AuthState.tokens.clear()
         ml.AuthState.consumed.clear()
@@ -252,9 +279,10 @@ def test_consume_after_grace_window_returns_invalid():
     with ml.AuthState.lock:
         rec = ml.AuthState.consumed.get(tok)
         assert rec is not None
-        rec["consumed_at"] = time.time() - (ml.GRACE_WINDOW + 1)
+        rec["issued_at"] = time.time() - (ml.TOKEN_TTL + 1)
+        rec["consumed_at"] = time.time() - (ml.TOKEN_TTL + 1)
     r2 = ml.consume_token(tok)
-    assert r2 == {"status": "invalid"}
+    assert r2 == {"status": "expired"}
     # Opportunistic drop on miss: the consumed record should be gone now.
     with ml.AuthState.lock:
         assert tok not in ml.AuthState.consumed
@@ -262,27 +290,30 @@ def test_consume_after_grace_window_returns_invalid():
 
 def test_cleanup_stale_tokens_drops_expired_consumed_entries():
     """cleanup_stale_tokens drops both past-TTL live tokens AND consumed
-    records past the grace window. Bounded memory across long uptimes."""
+    records whose original token has aged past TOKEN_TTL — bounded memory
+    across long uptimes, while keeping a consumed record alive long enough
+    for a legitimate re-consume within the token's TTL."""
     with ml.AuthState.lock:
         ml.AuthState.tokens.clear()
         ml.AuthState.consumed.clear()
-    # One stale live token, one stale consumed record, one fresh consumed record.
+    # One stale live token, one consumed record aged past TTL (drop), one
+    # consumed record still within TTL (retain for legitimate re-consume).
     now = time.time()
     with ml.AuthState.lock:
         ml.AuthState.tokens["stale-live"] = now - 10
-        ml.AuthState.consumed["stale-consumed"] = {
-            "issued_at": now - 200,
-            "consumed_at": now - (ml.GRACE_WINDOW + 5),
+        ml.AuthState.consumed["aged-out"] = {
+            "issued_at": now - (ml.TOKEN_TTL + 5),
+            "consumed_at": now - (ml.TOKEN_TTL + 5),
         }
-        ml.AuthState.consumed["fresh-consumed"] = {
+        ml.AuthState.consumed["still-within-ttl"] = {
             "issued_at": now - 5,
             "consumed_at": now - 5,
         }
     ml.cleanup_stale_tokens()
     with ml.AuthState.lock:
         assert "stale-live" not in ml.AuthState.tokens
-        assert "stale-consumed" not in ml.AuthState.consumed
-        assert "fresh-consumed" in ml.AuthState.consumed
+        assert "aged-out" not in ml.AuthState.consumed
+        assert "still-within-ttl" in ml.AuthState.consumed
 
 
 def test_cleanup_stale_tokens_drops_expired_sessions():

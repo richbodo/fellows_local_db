@@ -99,9 +99,14 @@ LockPersonality=yes
 MemoryDenyWriteExecute=yes
 SystemCallArchitectures=native
 ReadWritePaths=/opt/fellows/deploy/dist
+MemoryHigh=550M
+MemoryMax=700M
+OOMScoreAdjust=500
 ```
 
 `ProtectSystem=strict` remounts the entire filesystem read-only for the service except `/dev`, `/proc`, `/sys` (handled separately), and anything in `ReadWritePaths`. `dist/` is explicitly writable only as a safety net for SQLite journal files — the server's SQL path is SELECT-only in practice. If you later switch the Python code to open the DB with `?mode=ro`, you can drop `ReadWritePaths` entirely.
+
+`MemoryMax` / `MemoryHigh` / `OOMScoreAdjust` are **availability guardrails**, not security hardening (added for the wider 2026-06 rollout). The droplet is 1 vCPU / ~960 MB; `deploy/server.py` is a `ThreadingHTTPServer` (one thread per connection, no pool — bounded only by `TasksMax`), so a connection/thread pile-up under a burst, or a future bug, could exhaust RAM and OOM the **whole box**, taking Caddy + sshd with it (the resource-starvation "all-ports outage" failure mode). `MemoryMax=700M` caps the service's own cgroup so a runaway is OOM-killed as just `fellows-pwa` (and `Restart=on-failure` revives it) while Caddy + sshd survive; `OOMScoreAdjust=500` biases the global OOM killer toward this service if the box as a whole runs short. Normal usage is ~16–150 MB (file page cache is reclaimable and not held against the cap), so these never fire under legitimate load. Pair with the kernel listen backlog raised to 128 in `deploy/server.py` (stdlib default is 5) so a short connection spike queues instead of resetting. **Raise all three if the droplet is ever resized.**
 
 ## Network and firewall
 
