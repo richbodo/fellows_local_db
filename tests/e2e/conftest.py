@@ -372,9 +372,14 @@ def worker_data_folder(standalone_page, base_url_fixture):
     # gate to flip open.
     page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
     helper.wait()
+    # The heaviest wait in the folder-attach path: a full folder-mode worker
+    # re-init on (re)load before privateDataEnabled() flips and the
+    # `no-private-data` body class is removed. At 8000ms this was the only step
+    # to time out at the tail of a loaded full-suite run (it completes in ~2s in
+    # isolation); the sibling waits here already use 10000ms. Bump for headroom.
     page.wait_for_function(
         "() => document.body && !document.body.classList.contains('no-private-data')",
-        timeout=8000,
+        timeout=15000,
     )
     try:
         yield helper
@@ -410,9 +415,14 @@ def attach_verified_folder(page, base_url):
         "() => window.__dataProvider && typeof window.__dataProvider.listGroups === 'function'",
         timeout=10000,
     )
+    # The heaviest wait in the folder-attach path: a full folder-mode worker
+    # re-init on (re)load before privateDataEnabled() flips and the
+    # `no-private-data` body class is removed. At 8000ms this was the only step
+    # to time out at the tail of a loaded full-suite run (it completes in ~2s in
+    # isolation); the sibling waits here already use 10000ms. Bump for headroom.
     page.wait_for_function(
         "() => document.body && !document.body.classList.contains('no-private-data')",
-        timeout=8000,
+        timeout=15000,
     )
 
 
