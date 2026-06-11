@@ -1203,3 +1203,47 @@ class TestPhase2WriteLock:
             except Exception:
                 pass
             second_page.close()
+
+
+def test_reset_everything_wipeall_clears_persisted_folder_handle(
+    folder_attached_page, base_url_fixture
+):
+    """Reset Everything must clear the persisted user-folder handle so a fresh
+    boot after a reset (e.g. a reinstall) does NOT resurrect the old folder.
+
+    Regression: wipeAll — Reset Everything's storage wipe — cleared OPFS and
+    the page's `fellows-local-db` IndexedDB, but never the worker's *separate*
+    `fellows-fs-handles` IndexedDB that persists the FileSystemDirectoryHandle.
+    So after Reset Everything + reinstall the worker re-hydrated a stale
+    "Folder set but unreachable" pointer at the old path. The fix has wipeAll
+    drop the handle (folderRecord reset + _folderIdbDelete), with a page-side
+    deleteDatabase('fellows-fs-handles') backstop in clearEverything.
+    """
+    page = folder_attached_page
+    # Precondition: a folder handle is attached and persisted in IDB.
+    assert page.evaluate(
+        "async () => { const s = await window.__folderController.getState();"
+        " return !!s.hasHandle; }"
+    ) is True, "fixture should have attached a folder"
+
+    # Reset Everything's storage wipe is the worker wipeAll RPC.
+    page.evaluate("async () => { await window.__dataProvider.wipeAll(); }")
+
+    # Reload — the post-reset reinstall boot. The worker re-inits and would
+    # re-hydrate the handle from fellows-fs-handles if wipeAll hadn't cleared it.
+    page.reload(wait_until="domcontentloaded")
+    page.wait_for_function(
+        "() => window.__dataProvider"
+        " && typeof window.__dataProvider.listGroups === 'function'",
+        timeout=15000,
+    )
+
+    # The persisted handle must be gone — a fresh boot must not resurrect it.
+    has_handle = page.evaluate(
+        "async () => { const s = await window.__folderController.getState();"
+        " return !!s.hasHandle; }"
+    )
+    assert has_handle is False, (
+        "wipeAll must clear the persisted folder handle (fellows-fs-handles); "
+        "a reinstall re-hydrated the old folder pointer"
+    )

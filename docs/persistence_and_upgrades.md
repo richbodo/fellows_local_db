@@ -53,7 +53,7 @@ there is no private store at all — see
 | Cache API `fellows-app-shell-vN` | service worker | HTML, JS, CSS, SW, manifest, icons, sqlite3.wasm, `vendor/sqlite-worker.js` | Yes — every CACHE_VERSION bump | Yes |
 | Cache API `fellows-images-v1` | service worker | Profile photos | No (separate cache name) — re-fetched as needed | Yes |
 | IndexedDB `fellows-local-db` | main (retired in Phase 6) | Offline-fallback full fellow rows | Regenerated on every successful boot | Yes |
-| IndexedDB `fellows-fs-handles` | worker | The `FileSystemDirectoryHandle` the user picked (key `relationships-folder`) — what makes folder mode "remember" the folder across browser restarts | Untouched | **No** (survives Clear App Cache); cleared by browser-level "Clear site data" |
+| IndexedDB `fellows-fs-handles` | worker | The `FileSystemDirectoryHandle` the user picked (key `relationships-folder`) — what makes folder mode "remember" the folder across browser restarts | Untouched | **No** (survives Clear App Cache); cleared by **Reset Everything** and by browser-level "Clear site data" |
 | OPFS `fellows.db` | worker | Imported Knack contact data | **Re-imported on user request** via the About-page *Update directory data* button when `fellows.db.meta.json:sha` differs from `build-meta.json:fellows_db_sha`. Boot path is install-only and never auto-refreshes a returning visitor (`plans/opt_in_directory_data_updates.md`). | **No** (gap; see "Open questions") |
 | OPFS `fellows.db.meta.json` | worker | `{sha, fetched_at, last_failure_at, last_failure_reason}` — the freshness sidecar that records what's locally installed. Sibling of `fellows.db` at the OPFS root, outside the SAH-pool dir, so a `relationships.db` restore can't desync it. | Updated after each successful user-driven re-import; otherwise untouched | **No** |
 | OPFS `relationships.db` *(folder mode — buffer; browse-only — dormant)* | worker | Groups, group members, fellow_tags, fellow_notes, settings. In folder mode this is a transient working buffer hydrated from folder bytes on boot and serialized back on every commit. In **browse-only mode it is dormant** — not opened for durable data (one read-only legacy peek for the migration prompt is the only access). | **Never** — that's the whole point of this file | **No** |
@@ -334,7 +334,11 @@ lost.
 
 - localStorage clears (including `fellows_authenticated_once`, unlike
   Clear App Cache).
-- IndexedDB clears.
+- IndexedDB clears — both `fellows-local-db` (the offline cache) **and**
+  `fellows-fs-handles` (the persisted folder handle), so a reinstall after
+  reset does **not** resurrect the old "folder set but unreachable" pointer.
+  The worker's `wipeAll` drops the handle; `clearEverything` also deletes the
+  database directly as a backstop for the worker-unavailable path.
 - All Cache API entries clear (shell + images).
 - The HttpOnly session cookie clears via `POST /api/logout`.
 - Service worker registrations are unregistered.

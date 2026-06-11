@@ -1818,6 +1818,14 @@ handlers.wipeAll = async function () {
     trace('wipeAll: root iteration failed: ' + (e3 && e3.message || e3));
   }
   poolUtil = null;
+  // Reset Everything is a "brand-new install" — also drop the persisted
+  // user-folder handle. It lives in its own IndexedDB (FOLDER_IDB_NAME),
+  // separate from OPFS and from the page's fellows-local-db, so the OPFS
+  // sweep above never touches it. Without this, a reinstall after reset
+  // re-hydrated a stale "folder set but unreachable" pointer at the old path.
+  folderRecord = _emptyFolderRecord();
+  try { await _folderIdbDelete(); }
+  catch (e) { trace('wipeAll: folder IDB delete failed: ' + (e && e.message || e)); }
   trace('wipeAll: removedVfs=' + removedVfs + ' rootRemoved=' + rootEntriesRemoved.length +
         ' rootFailed=' + rootEntriesFailed.length);
   return {
