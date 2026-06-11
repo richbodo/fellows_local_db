@@ -190,18 +190,29 @@ If you've accumulated copies and want to keep just one:
 
 ### Uninstall a copy
 
-Removing a copy works differently in each browser — and **none of them put
-the app in your main Applications folder**, which is usually why it looks
-like there's nothing to remove. Two things to know first:
+**⚠️ Back up your groups first.** If you have groups, notes, or tags you want
+to keep, **export them before you uninstall** — fully removing a copy (Step 2
+below) deletes the app's in-browser copy of that data. Open the app and go to
+**Settings → Private data → ⬇ Download my private data**, then save the
+`ehf-fellows-private-data-<date>.db` file somewhere safe (full export/restore
+flow: [Migrating from another browser](#migrating-from-another-browser)). If
+your data lives in a connected **folder**, it stays on your disk — but first
+confirm the folder still shows as connected in **Settings → Private data**
+(not "inaccessible").
+
+Removing a copy takes **two steps** — uninstall the app, **then** clear its
+data — because uninstalling alone leaves a working copy behind. Two things to
+know:
 
 - **Dragging the icon off the Dock (or the Windows taskbar/Start menu) does
-  *not* uninstall it** — that only removes the shortcut. Use the steps below.
-- **To erase the saved data too** (so a fresh install starts clean), check
-  the **"also delete data"** box wherever the steps offer it. That clears
-  the browser's own copy of your data — it does **not** touch a separate
-  data *folder* you may have set up (see the note at the end).
+  *not* uninstall it** — that only removes the shortcut.
+- **Uninstalling the app does *not* return you to the email gate or delete
+  your data.** The website keeps working at **https://fellows.globaldonut.com**
+  from data cached in your browser until you clear it in Step 2.
 
-Each link below opens that browser's own official help page.
+Each link in Step 1 opens that browser's own official help page.
+
+#### Step 1 — Uninstall the app in your browser
 
 **Safari (Mac).** When you add the app with **File → Add to Dock**, your Mac
 saves it in a special Applications folder inside your personal account —
@@ -294,6 +305,36 @@ pinned tab. To remove it:
 **Remove**; then clear the data with the lock icon → **Clear cookies and
 site data**.)*
 → [Clear cookies and site data in Firefox → "Clear cookies for any website"](https://support.mozilla.org/en-US/kb/clear-cookies-and-site-data-firefox#w_clear-cookies-for-any-website)
+
+#### Step 2 — Clear the data and return to the email gate
+
+Step 1 removes the app, but its data stays cached in the browser, so the site
+keeps loading at the URL (this is by design — the app is built to keep working
+offline). To wipe that data and land back on the email gate — a true
+first-time state:
+
+1. Open the app — it still loads at **https://fellows.globaldonut.com**.
+2. Choose **Reset Everything** (on desktop: the small **…or reset everything**
+   link just above the red **Clear App Cache & Reload** button; it's also in
+   the diagnostics panel at **https://fellows.globaldonut.com/?diag=1**), and
+   confirm. Reset Everything offers a backup first, then wipes the in-browser
+   data and auto-backups, signs you out, and unregisters the app — so your next
+   visit starts at the email gate.
+
+**Can't open the app?** Clear its site data from the browser instead:
+
+- **Chrome / Edge / Brave** → **Settings → Privacy and security → Site
+  settings → View permissions and data stored across sites →**
+  `fellows.globaldonut.com` **→ Delete data**.
+- **Safari** → **Settings → Privacy → Manage Website Data →**
+  `fellows.globaldonut.com` **→ Remove**.
+- **Firefox / Arc** → use the "Clear cookies and site data" steps already in
+  Step 1.
+
+**Why this is a separate step:** uninstalling does not delete the app's local
+database, and Chrome's "Also delete data from Chrome" checkbox during uninstall
+doesn't reliably clear it either — so the site can keep loading from cache
+until you do this.
 
 **Important — your data folder is separate.** If you set up a data folder
 (in Chrome, Edge, or Brave, under **Settings → Private data**), removing the
