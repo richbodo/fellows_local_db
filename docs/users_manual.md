@@ -444,6 +444,13 @@ they're **hidden** entirely (there's no action you could take on the phone
 to turn them on). To get private data on those devices, migrate to Chrome
 — see *[Migrating from another browser](#migrating-from-another-browser)*.
 
+**What the server keeps.** Your private data never reaches the server — there's
+no account or per-user storage on it at all. The only things production keeps
+are operational logs (which carry hashed prefixes, never your email in the log
+line) and the public app bundle. The **About** page links a full accounting —
+*What data is kept* — or read it directly in
+[`docs/data_retention.md`](https://github.com/richbodo/fellows_local_db/blob/main/docs/data_retention.md).
+
 ### Turning on saved groups (private data)
 
 On a **Chromium desktop browser** (Chrome / Edge / Brave / Arc / Opera),

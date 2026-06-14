@@ -86,6 +86,27 @@ See `docs/email_gate.md` for the auth-flow behavioural spec (cookie format, inst
 
 ---
 
+## Data retention
+
+There is **no per-user storage on the server** — no account, profile, or saved
+state; all user-authored private data lives in `relationships.db` in the
+browser on the user's own device and never reaches prod. What the server does
+keep is operational only: **journald events** (auth/diagnostic logs, carrying
+hash prefixes and UAs — never a raw email in the log line), **files on disk**
+(`fellows.db` contact mirror, `/etc/fellows/fellows-pwa.env` secrets, the static
+`dist/` bundle), and **in-memory state** lost on every restart (token,
+rate-limit, and session registries). journald runs Ubuntu's default
+**size-capped** rotation (no fixed time window; oldest-vacuumed-when-full), as
+no retention override is set in Ansible.
+
+Full accounting — every event and its fields, the on-disk and in-memory
+inventories, the retention window, and the Postmark third-party note — is in
+[`docs/data_retention.md`](docs/data_retention.md). The user-side removal paths
+(Clear App Cache / Reset Everything / browser-level deletion) are in
+[`docs/users_manual.md` § Clearing app data](docs/users_manual.md#clearing-app-data).
+
+---
+
 ## What's in the security backlog
 
 Currently in flight or queued:
