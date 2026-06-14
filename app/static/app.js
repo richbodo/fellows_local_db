@@ -6920,8 +6920,9 @@
     var aboutHtml = '<div class="stats-page">';
     aboutHtml += '<h2 class="stats-title">About This App</h2>';
     aboutHtml += '<div class="about-body">';
-    aboutHtml += '<p>V0.1 \u2014 This app is a much faster version of the fellows database. ';
-    aboutHtml += 'This app is shared with EHF fellows on request on the condition that they keep the information in it private to the EHF fellows. ';
+    aboutHtml += '<p>V0.1 \u2014 This app is a much faster version of the fellows database, permanently your own. ';
+    aboutHtml += 'It\u2019s a home-cooked software meal for my fellow fellows, made over a month of my time, with love.</p>';
+    aboutHtml += '<p>This app is shared with EHF fellows on request on the condition that they keep the information in it private to the EHF fellows. ';
     aboutHtml += 'Never post this anywhere\u2014 it contains the relevant bits of data from the old fellows directory. ';
     aboutHtml += 'There is no API, login, or web app, so this can only be shared intentionally. ';
     aboutHtml += 'For support, request to join the github repository or just ask on one of the fellows channels.</p>';
