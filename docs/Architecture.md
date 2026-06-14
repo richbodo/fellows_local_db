@@ -494,6 +494,7 @@ Production-side, fellows-specific operator concerns (out of spec scope):
 - **Deployment, systemd hardening, droplet topology** — [`./DevOps.md`](./DevOps.md).
 - **Magic-link operator runbook (Postmark, env file, journald schema)** — [`./email_system_management.md`](./email_system_management.md).
 - **Data pipeline + recovery paths** — [`./data_provenance.md`](./data_provenance.md).
+- **Server-side data retention (what prod keeps: journald events, on-disk, in-memory)** — [`./data_retention.md`](./data_retention.md).
 - **Ansible specifics (tags, galaxy install, troubleshooting)** — [`../ansible/README.md`](../ansible/README.md).
 
 ---
@@ -508,6 +509,7 @@ Architecture-adjacent docs that specialize one part of the spec or operator surf
 | [`./persistence_and_upgrades.md`](./persistence_and_upgrades.md) | Storage slot — state-survival matrix across Clear App Cache / Reset Everything / app update; auto-backup; restore. |
 | [`./browser_support.md`](./browser_support.md) | Storage slot — capability detection inside the worker, required versions, unsupported-browser surfacing (AC-12). |
 | [`./data_provenance.md`](./data_provenance.md) | Ingestion slot — column-by-column source mapping; backup/restore workflow; recovery paths. |
+| [`./data_retention.md`](./data_retention.md) | Distribution / operator surface — server-side retention accounting (journald events, on-disk files, in-memory state) backing the AC-8 attestation; complements the user-side removal docs. |
 | [`./architectural_findings.md`](./architectural_findings.md) | Findings that feed back into the spec — the cloud-LLM "exception" / non-PNA-mode concept (`EX-CLOUD-LLM`) and the platform-ceiling **constraints** (`CST-*`) realized by the private-data capability gate (see *Constraint attestation* above). |
 
 ---
