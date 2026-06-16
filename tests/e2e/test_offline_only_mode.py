@@ -82,6 +82,46 @@ SAMPLE_FELLOWS = [
 ]
 
 
+# Resolves true once the persistent IndexedDB 'allFellows' mirror has rows.
+# Post Part-1 fix, a worker-source boot writes this mirror in the getFull
+# .then, so the second window has a tier-3 cache to fall back to.
+_IDB_ALLFELLOWS_POPULATED = """
+() => new Promise((resolve) => {
+  const r = indexedDB.open('fellows-local-db', 1);
+  r.onsuccess = () => {
+    const db = r.result;
+    try {
+      const tx = db.transaction('meta', 'readonly');
+      const g = tx.objectStore('meta').get('allFellows');
+      g.onsuccess = () => { const rec = g.result;
+        resolve(!!(rec && Array.isArray(rec.data) && rec.data.length > 0)); };
+      g.onerror = () => resolve(false);
+      tx.oncomplete = () => db.close();
+    } catch (e) { try { db.close(); } catch (e2) {} resolve(false); }
+  };
+  r.onerror = () => resolve(false);
+})
+"""
+
+# Deletes the 'allFellows' record so the tier-3 cache reads empty — used to
+# force the Part-2 "no cached directory to serve" path.
+_CLEAR_IDB_ALLFELLOWS = """
+() => new Promise((resolve) => {
+  const r = indexedDB.open('fellows-local-db', 1);
+  r.onsuccess = () => {
+    const db = r.result;
+    try {
+      const tx = db.transaction('meta', 'readwrite');
+      tx.objectStore('meta').delete('allFellows');
+      tx.oncomplete = () => { db.close(); resolve(true); };
+      tx.onerror = () => { db.close(); resolve(false); };
+    } catch (e) { try { db.close(); } catch (e2) {} resolve(false); }
+  };
+  r.onerror = () => resolve(false);
+})
+"""
+
+
 class TestOfflineOnlyMode:
     """Behaviour when /api/fellows returns 401 during boot."""
 
@@ -195,6 +235,30 @@ class TestOfflineOnlyMode:
             # back to the trap behavior.
             expect(page.locator("#boot-error-panel")).to_be_hidden()
             expect(page.locator("#auth-error-panel")).to_be_hidden()
+
+            # Instrumentation (email-gate cascade debuggability): this is the
+            # exact onboarded-user-hits-the-gate cascade. The boot trace must
+            # now LOUDLY record the empty-cache fallback + the handoff cause,
+            # and the auth trace must carry the initEmailGate verdict line
+            # flagging an already-onboarded install (fellows_authenticated_once
+            # is set by _make_standalone_page) reaching the gate. These are the
+            # lines that make this report triageable from a diagnostics paste.
+            # See docs/email_gate.md § "Why an onboarded user can land on the
+            # email gate".
+            boot_trace = "\n".join(page.evaluate("() => window.__bootDebugLines || []"))
+            assert "tryListFromCache: IndexedDB allFellows EMPTY" in boot_trace, (
+                f"expected loud empty-cache fallback line in boot trace:\n{boot_trace}"
+            )
+            assert "handoff cause: authFailure=true" in boot_trace, (
+                f"expected the handoff-cause line in boot trace:\n{boot_trace}"
+            )
+            auth_trace = "\n".join(page.evaluate("() => window.__authDebugLines || []"))
+            assert "initEmailGate: rendering gate" in auth_trace, (
+                f"expected the initEmailGate verdict line in auth trace:\n{auth_trace}"
+            )
+            assert "already-onboarded install" in auth_trace, (
+                f"expected the onboarded-install NOTE in auth trace:\n{auth_trace}"
+            )
         finally:
             context.unroute(FELLOWS_DB)
             context.unroute(API_FELLOWS)
@@ -322,3 +386,90 @@ class TestOfflineOnlyMode:
             context.unroute(API_FELLOWS)
             context.unroute("**/api/auth/status")
             page.close()
+
+    def test_onboarded_multitab_stale_session_shows_cached_directory_not_gate(
+        self, context, base_url_fixture
+    ):
+        """The reported bug, fixed by Part 1 (worker boots populate the IDB
+        mirror). An installed/onboarded user opens the app in a SECOND window
+        while the first still holds OPFS, and the session has gone stale.
+
+        Pre-fix cascade: 2nd window's worker can't own OPFS (ownership
+        conflict) → api+idb → /api/fellows 403 → empty IDB cache → email gate
+        (with the not-a-PNA banner on top). Post-fix: the FIRST window's
+        worker boot persisted the 'allFellows' mirror, so the 2nd window's
+        api+idb fallback serves the CACHED DIRECTORY — not the gate. This is
+        the AC-5 stale-session invariant actually holding for the common
+        worker-only install. See docs/email_gate.md § onboarded-user...
+        """
+        page1 = _make_standalone_page(context)
+        page1.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+        page1.locator("#loading").wait_for(state="hidden", timeout=15000)
+        # First window booted via the worker; wait for the Part-1 IDB mirror
+        # write so the second window has a cache to fall back to.
+        page1.wait_for_function(_IDB_ALLFELLOWS_POPULATED, timeout=10000)
+
+        # Second window's session is stale: 403 the directory API. (/fellows.db,
+        # the worker source, is mooted by the ownership conflict page1 induces.)
+        context.route(API_FELLOWS, lambda r: r.fulfill(status=403, body="session expired"))
+        page2 = _make_standalone_page(context)
+        try:
+            page2.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+            page2.locator("#loading").wait_for(state="hidden", timeout=15000)
+            # Directory renders from the cached mirror — NOT the email gate.
+            expect(page2.locator("#app-wrap")).to_be_visible(timeout=5000)
+            expect(page2.locator("#install-gate-private")).to_be_hidden()
+            expect(page2.locator("#boot-error-panel")).to_be_hidden()
+            kind = page2.evaluate(
+                "() => (window.__dataProvider && window.__dataProvider.kind) || null"
+            )
+            assert kind == "api+idb", (
+                f"expected api+idb fallback in the 2nd window (worker knocked out "
+                f"by the ownership conflict), got {kind!r}"
+            )
+            # Confirm the multi-tab path: the worker fell back on an OPFS lock.
+            boot_trace = "\n".join(page2.evaluate("() => window.__bootDebugLines || []"))
+            assert "OPFS lock" in boot_trace, (
+                f"expected the 2nd window's worker to fall back on an OPFS lock:\n{boot_trace}"
+            )
+        finally:
+            context.unroute(API_FELLOWS)
+            page2.close()
+            page1.close()
+
+    def test_ownership_conflict_empty_cache_shows_panel_not_gate(
+        self, context, base_url_fixture
+    ):
+        """Part 2. When the worker can't own OPFS (another window open) AND
+        there is no cached directory to serve, the boot surfaces the actionable
+        "app open in another window" panel — NOT the email gate (re-auth would
+        not release the OPFS lock). Negative invariant for the cascade.
+        """
+        page1 = _make_standalone_page(context)
+        page1.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+        page1.locator("#loading").wait_for(state="hidden", timeout=15000)
+        page1.wait_for_function(_IDB_ALLFELLOWS_POPULATED, timeout=10000)
+        # Force the "no cache" condition: clear the mirror page1 just wrote so
+        # page2's tier-3 fallback is empty.
+        page1.evaluate(_CLEAR_IDB_ALLFELLOWS)
+
+        context.route(API_FELLOWS, lambda r: r.fulfill(status=403, body="session expired"))
+        page2 = _make_standalone_page(context)
+        try:
+            page2.goto(base_url_fixture + "/", wait_until="domcontentloaded")
+            # The ownership panel reuses #boot-error-panel with ownership copy.
+            page2.locator("#boot-error-panel").wait_for(state="visible", timeout=15000)
+            lead = page2.locator("#boot-error-panel .boot-error-lead").inner_text()
+            assert "another window" in lead.lower(), (
+                f"expected ownership-conflict copy in the panel, got: {lead!r}"
+            )
+            # Crucially NOT the email gate.
+            expect(page2.locator("#install-gate-private")).to_be_hidden()
+            boot_trace = "\n".join(page2.evaluate("() => window.__bootDebugLines || []"))
+            assert "NOT the email gate" in boot_trace, (
+                f"expected the ownership-not-gate boot-trace line:\n{boot_trace}"
+            )
+        finally:
+            context.unroute(API_FELLOWS)
+            page2.close()
+            page1.close()

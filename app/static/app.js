@@ -197,6 +197,13 @@
   // races finish out of order (image prewarm vs. getFull etc.).
   var _bootSummaryEmitted = false;
   var authDebugLines = [];
+  // Exposed read-only for e2e tests (mirrors window.__bootDebugLines).
+  // startBrowserUx resets this with `authDebugLines.length = 0`, which
+  // mutates the array in place, so this reference stays live across the
+  // reset. Tests assert the initEmailGate "rendering gate (…)" verdict line
+  // appears in the onboarded-user-hits-gate cascade. See
+  // docs/email_gate.md § "Why an onboarded user can land on the email gate".
+  window.__authDebugLines = authDebugLines;
   var swLifecycleLog = [];
   // Local mirror of every reportInstallEvent() call, plus shape of
   // beforeinstallprompt/appinstalled events. The server-side counterpart
@@ -2009,6 +2016,28 @@
       loadingEl.classList.add('hidden');
     }
     if (bootErrorPanelEl) {
+      // Ownership-conflict variant: same panel + same wired (CSP-safe)
+      // Reload / Clear-cache / Report buttons, but copy that names the real
+      // problem and the mechanical fix. Reload is the right action once the
+      // other window is closed. Generic copy is left intact for every other
+      // failure cause (this only triggers when the worker reported an OPFS
+      // ownership conflict). See docs/email_gate.md.
+      if (bootOwnershipConflict) {
+        var leadEl = bootErrorPanelEl.querySelector('.boot-error-lead');
+        var hintEl = bootErrorPanelEl.querySelector('.boot-error-hint');
+        if (leadEl) {
+          leadEl.innerHTML =
+            '<strong>This app is already open in another window.</strong>';
+        }
+        if (hintEl) {
+          hintEl.textContent =
+            'Your saved groups, notes, and settings live in local storage ' +
+            'that only one window can use at a time — and another window of ' +
+            'this app (it may be the installed app on your dock or home ' +
+            'screen) is using it now. Close that window, then click Reload ' +
+            'below. Your data is safe and nothing has been lost.';
+        }
+      }
       bootErrorPanelEl.classList.remove('hidden');
     }
     if (bootErrorPreEl) {
@@ -2603,6 +2632,33 @@
       'document.cookie length (HttpOnly cookies are NOT visible to JS): ' +
         String((document.cookie || '').length)
     );
+    // PNA mode / cloud-LLM exception state. The "Going rogue — not a PNA"
+    // banner is driven entirely by this localStorage-backed state
+    // (isPnaExceptionActive → MCPB consentAt), INDEPENDENT of the boot /
+    // email-gate decision tree. Reported here because the banner showing
+    // on top of the email gate is a known contradiction signal: an
+    // exception is only ever raised by a fully-onboarded user (you must
+    // reach Settings to record consent), so seeing the gate at the same
+    // time means an already-onboarded install was sent back to a
+    // first-run-looking screen. See docs/email_gate.md § "Why an
+    // onboarded user can land on the email gate".
+    try {
+      var pnaMode = (document.body && document.body.getAttribute('data-pna-mode')) || '(unset)';
+      var pnaExc = activePnaExceptions();
+      var mcpbState = (typeof getMcpbSetupState === 'function') ? getMcpbSetupState() : null;
+      var bannerVisible = !!(notAPnaBannerEl && !notAPnaBannerEl.classList.contains('hidden'));
+      var bannerDismissed = !!(mcpbState && mcpbState.pnaBannerDismissedAt);
+      lines.push('');
+      lines.push('--- PNA mode (cloud-LLM exception) ---');
+      lines.push('  body data-pna-mode: ' + pnaMode);
+      lines.push('  active exceptions: ' + (pnaExc.length ? pnaExc.join(',') : '(none)'));
+      lines.push('  isPnaExceptionActive(): ' + isPnaExceptionActive());
+      lines.push('  not-a-PNA banner: visible=' + bannerVisible +
+        ' dismissed=' + bannerDismissed +
+        ' (consentAt=' + ((mcpbState && mcpbState.consentAt) || 'none') + ')');
+    } catch (ePna) {
+      lines.push('PNA mode: (unavailable — ' + String(ePna && ePna.message || ePna) + ')');
+    }
     // Surface the persisted slow-boot record (if any) right at the top.
     // Lives in localStorage[fellows_last_slow_boot]; written by
     // emitBootSummary when total boot >SLOW_BOOT_TOTAL_MS or any single
@@ -2638,6 +2694,25 @@
       lines.push('directoryDataSource: ' +
         (typeof directoryDataSource !== 'undefined' ? directoryDataSource : '(unset)'));
     } catch (e) {}
+    // Directory cache (IndexedDB 'allFellows'). This is the THIRD-tier
+    // AC-5 fallback that backs email_gate.md invariant 10 — the source the
+    // api+idb provider reads when a stale session 401/403s mid-boot. Known
+    // gap: it is written ONLY on an api-source boot (saveFullFellowsToIndexedDB
+    // is guarded by directoryDataSource === 'api'); a normal worker-source
+    // boot never populates it. So an installed PWA that always booted via the
+    // worker shows 0 rows here, and if the worker can't own OPFS (multi-tab
+    // ownership conflict) WHILE the session is stale, this empty cache is why
+    // the boot falls through to the email gate instead of cached data.
+    try {
+      var cachedN = await countPersistedFellowsCache();
+      lines.push('directory cache (IndexedDB allFellows): ' + cachedN + ' rows' +
+        (cachedN === 0
+          ? '  (EMPTY — only written on api-source boots; worker-source boots do NOT populate it. AC-5 stale-session fallback has nothing to serve.)'
+          : '  (AC-5 stale-session fallback source)'));
+    } catch (eCache) {
+      lines.push('directory cache (IndexedDB allFellows): (read failed — ' +
+        String(eCache && eCache.message || eCache) + ')');
+    }
     try {
       lines.push('OPFS capability gates:');
       var gateLines = describeOpfsGates().split('\n');
@@ -5047,6 +5122,30 @@
 
   function initEmailGate(authPayload, httpStatus, reason) {
     terminateWarmWorkerIfStillWarm('initEmailGate');
+    // Verdict line: capture the signals that make a gate render suspicious.
+    // An already-onboarded install (hasAuthenticatedOnce, or an active
+    // cloud-LLM exception — which can only be raised after onboarding) that
+    // lands here was expected to show the cached directory (AC-5), not a
+    // first-run-looking gate. bootOwnershipConflict names the common trigger
+    // (the app is open in another tab). This is the one line that ties the
+    // banner-over-gate symptom to its cause. See docs/email_gate.md
+    // § "Why an onboarded user can land on the email gate".
+    try {
+      var onboarded = hasAuthenticatedOnce();
+      var excActive = isPnaExceptionActive();
+      authDebugPush('initEmailGate: rendering gate (hasAuthenticatedOnce=' + onboarded +
+        ' pnaExceptionActive=' + excActive +
+        ' bootOwnershipConflict=' + bootOwnershipConflict +
+        ' reason=' + (reason || '(none)') + ')');
+      if (onboarded || excActive) {
+        authDebugPush('  NOTE: gate shown to an already-onboarded install — ' +
+          'AC-5 expects the cached directory here, not the gate' +
+          (bootOwnershipConflict
+            ? '. Trigger: app is open in another tab/window (OPFS ownership conflict)'
+            : '') +
+          '. See docs/email_gate.md § onboarded-user-lands-on-gate.');
+      }
+    } catch (eVerdict) { /* diagnostics only — never block the gate */ }
     if (installGatePrivateEl) installGatePrivateEl.classList.remove('hidden');
     if (installLandingEl) installLandingEl.classList.add('hidden');
     setShellVisible(false);
@@ -11669,6 +11768,43 @@
     });
   }
 
+  // Diagnostics-only: count rows in the PERSISTENT IndexedDB 'allFellows'
+  // store, reading IDB directly. Deliberately bypasses the in-memory
+  // fullFellowsCache (which a successful worker boot populates even though
+  // it never writes IDB) so the diagnostic reflects what actually survives
+  // a reload and backs the AC-5 cross-boot stale-session fallback. Resolves
+  // to a count (0 on any error / absence). See collectDiagnosticsText and
+  // docs/email_gate.md invariant 10.
+  function countPersistedFellowsCache() {
+    if (!window.indexedDB) return Promise.resolve(0);
+    return new Promise(function (resolve) {
+      var request = window.indexedDB.open('fellows-local-db', 1);
+      request.onupgradeneeded = function (event) {
+        var db = event.target.result;
+        if (!db.objectStoreNames.contains('meta')) {
+          db.createObjectStore('meta', { keyPath: 'id' });
+        }
+      };
+      request.onsuccess = function (event) {
+        var db = event.target.result;
+        try {
+          var tx = db.transaction('meta', 'readonly');
+          var getReq = tx.objectStore('meta').get('allFellows');
+          getReq.onsuccess = function () {
+            var record = getReq.result;
+            resolve(record && Array.isArray(record.data) ? record.data.length : 0);
+          };
+          getReq.onerror = function () { resolve(0); };
+          tx.oncomplete = function () { db.close(); };
+        } catch (e) {
+          try { db.close(); } catch (e2) {}
+          resolve(0);
+        }
+      };
+      request.onerror = function () { resolve(0); };
+    });
+  }
+
   function handleSearchInput() {
     if (!searchInputEl) return;
     var raw = searchInputEl.value || '';
@@ -11862,18 +11998,31 @@
     function tryListFromCache(originalErr) {
       return loadFullFellows().then(function (cached) {
         if (cached && cached.length) {
+          bootDebugPush('tryListFromCache: served ' + cached.length +
+            ' rows from IndexedDB cache (AC-5 offline-only fallback)');
           setBuildBadgeOfflineOnly('getList ' + (originalErr && originalErr.status));
           return cached;
         }
+        // Loud failure: the AC-5 fallback had nothing to serve. This is the
+        // silent gap that sends an onboarded user to the email gate — record
+        // it so the boot trace shows the fallback was attempted and empty,
+        // not just "boot failed". See docs/email_gate.md invariant 10.
+        bootDebugPush('tryListFromCache: IndexedDB allFellows EMPTY (0 rows) — ' +
+          'cannot satisfy AC-5 stale-session fallback; rethrowing HTTP ' +
+          (originalErr && originalErr.status) + ' → boot fails into email gate');
         throw originalErr;
       });
     }
     function tryFullFromCache(originalErr) {
       return loadFullFellows().then(function (cached) {
         if (cached && cached.length) {
+          bootDebugPush('tryFullFromCache: served ' + cached.length +
+            ' rows from IndexedDB cache (AC-5 offline-only fallback)');
           setBuildBadgeOfflineOnly('getFull ' + (originalErr && originalErr.status));
           return cached;
         }
+        bootDebugPush('tryFullFromCache: IndexedDB allFellows EMPTY (0 rows) — ' +
+          'rethrowing HTTP ' + (originalErr && originalErr.status));
         throw originalErr;
       });
     }
@@ -11989,9 +12138,18 @@
         emitBootSummary();
         if (Array.isArray(full)) {
           fullFellowsCache = full;
-          // Only persist a fresh API payload. A cache-served full is
-          // already in IndexedDB; re-saving the same blob is wasted IO.
-          if (directoryDataSource === 'api' && !offlineOnlyMode) {
+          // Persist any FRESH full payload to the IndexedDB mirror so the
+          // tier-3 AC-5 stale-session fallback (tryListFromCache) actually
+          // has data. This must include WORKER-source boots, not just api:
+          // the worker reads OPFS with no network, so a worker-only install
+          // never used to populate this mirror — leaving an onboarded user
+          // with an empty cache and, when the worker can't own OPFS
+          // (multi-tab) + the session is stale, no cached directory to fall
+          // back to (it cascaded to the email gate). The only thing we skip
+          // is a cache-SERVED payload (offlineOnlyMode) — re-saving the same
+          // blob we just read from IDB is wasted IO. See docs/email_gate.md
+          // invariant 10 / § "Why an onboarded user can land on the email gate".
+          if (!offlineOnlyMode) {
             saveFullFellowsToIndexedDB(full);
           }
           full.forEach(function (f) {
@@ -12028,6 +12186,23 @@
         // the watchdog after we've already shown the gate or boot-error
         // panel, double-rendering recovery affordances.
         clearBootWatchdog('boot_failure');
+        // Ownership conflict takes precedence over the gate handoff. If we
+        // reached this catch with bootOwnershipConflict set, the worker
+        // couldn't own OPFS (the app is open in another tab/window) AND the
+        // tier-3 cache couldn't serve the directory either (otherwise the
+        // boot would have completed above). Sending such a user to the email
+        // gate is wrong on two counts: their data is fine (the other window
+        // has it), and re-authenticating won't release the OPFS lock. Show
+        // the actionable "close the other window" panel instead. The fix is
+        // mechanical, not an auth problem. See docs/email_gate.md
+        // § "Why an onboarded user can land on the email gate".
+        if (bootOwnershipConflict) {
+          bootDebugPush('boot failed under ownership conflict with no cached ' +
+            'directory to serve — showing "app open in another window" panel, ' +
+            'NOT the email gate (re-auth would not release the OPFS lock)');
+          showBootFailure(err);
+          return;
+        }
         // Two routes hand off to startBrowserUx (which renders the email
         // gate when /api/auth/status reports authenticated=false):
         //
@@ -12049,6 +12224,18 @@
         if ((!isStandaloneDisplayMode() && hasAuthenticatedOnce()) || authFailure) {
           bootDebugPush('as-app boot failed; handing off to startBrowserUx: ' +
             (err && err.message ? err.message : String(err)));
+          // Name the upstream trigger explicitly. When bootOwnershipConflict
+          // is set, the worker couldn't own OPFS because another tab/window
+          // is open — the directory data is physically present (the other tab
+          // is using it) but unreachable from here, so the boot degraded to
+          // api+idb and then the stale session (authFailure) cascaded to the
+          // gate. Without this line the trace reads as a pure auth problem and
+          // the real fix (close the other tab) is invisible.
+          bootDebugPush('handoff cause: authFailure=' + !!authFailure +
+            ' ownershipConflict=' + bootOwnershipConflict +
+            (bootOwnershipConflict
+              ? ' (directory data is held by another open tab/window of this app — the worker could not own OPFS here)'
+              : ''));
           // Telemetry: distinguish the auth-failure handoff (the dominant
           // cause in production once a fellow's session ages out) from
           // generic boot failures so the operator can read incidence

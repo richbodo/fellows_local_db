@@ -2,6 +2,10 @@
 
 Playbooks for the debug scenarios that have actually come up on this project.
 
+## Installed/onboarded user lands on the email gate (banner-over-gate)
+
+The most confusing gate report — an installed PWA showing the email gate, sometimes with the **"Going rogue — not a PNA" banner on top** — was the tail of a three-tier boot cascade (worker/OPFS down via a multi-tab ownership conflict **+** stale session **+** empty IndexedDB fallback), not a single bug. The full causal chain, the fix (worker-source boots now populate the IndexedDB fallback; a directory-route ownership conflict shows an actionable "app open in another window" panel instead of the gate), and the symptom→diagnostics-field→cause triage table are documented in **[`email_gate.md` § Why an onboarded user can land on the email gate](email_gate.md#why-an-onboarded-user-can-land-on-the-email-gate)**. Start from a `?diag=1` paste: the `--- PNA mode ---` section, the `directory cache (IndexedDB allFellows): N rows` line, the `worker spawn:` line, and the `Auth trace`'s `initEmailGate: rendering gate (…)` verdict line together place any such report on the cascade.
+
 ## Inspecting a developer's live Chrome via Claude Code
 
 When a PWA bug reproduces on your own browser but not on a clean Playwright profile (stuck service worker, stale cached shell, misbehaving installed PWA, cookie/session state you can't explain), let Claude Code attach to your real Chrome and inspect it directly. This is the setup that traced the "install landing appears without a magic link" bug to a pre-auth-gate `app.js` lingering in JS memory after the old cacheFirst SW had been cleared.

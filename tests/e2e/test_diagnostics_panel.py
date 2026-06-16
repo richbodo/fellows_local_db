@@ -243,3 +243,84 @@ def test_connection_banner_is_gone(standalone_page, base_url_fixture):
     body_text = page.evaluate("() => document.body.innerText || ''")
     assert "You are online." not in body_text
     assert "You are offline." not in body_text
+
+
+def test_diag_panel_includes_pna_mode_and_directory_cache_sections(
+    standalone_page, base_url_fixture
+):
+    """Instrumentation pins (email-gate cascade debuggability).
+
+    Two sections were added to collectDiagnosticsText so the confusing
+    "onboarded user sees the email gate, with the not-a-PNA banner on top"
+    report is triageable from a single diag paste:
+
+      1. ``--- PNA mode (cloud-LLM exception) ---`` — captures the banner /
+         exception state, which is INDEPENDENT of the gate decision tree and
+         was previously absent from diagnostics entirely.
+      2. ``directory cache (IndexedDB allFellows): N rows`` — the tier-3
+         AC-5 stale-session fallback source. Since the Part-1 fix, a
+         worker-source boot ALSO persists this mirror, so after a healthy
+         boot it must read as POPULATED (a positive row count) — the proof
+         that the fallback is now real rather than empty.
+
+    See docs/email_gate.md § "Why an onboarded user can land on the email
+    gate". Mirrors test_diag_panel_renders_all_phase4_sections: fail loudly
+    if a future refactor deletes the section.
+    """
+    page = standalone_page
+    page.goto(base_url_fixture + "/?diag=1", wait_until="domcontentloaded")
+    page.locator("#loading").wait_for(state="hidden", timeout=10000)
+    # Part 1: a worker-source boot persists the IndexedDB 'allFellows' mirror
+    # in the getFull .then. Poll until that write lands before snapshotting
+    # the panel so the cache line reflects the fully-booted state.
+    page.wait_for_function(
+        """
+        () => new Promise((resolve) => {
+          const r = indexedDB.open('fellows-local-db', 1);
+          r.onsuccess = () => {
+            const db = r.result;
+            try {
+              const tx = db.transaction('meta', 'readonly');
+              const g = tx.objectStore('meta').get('allFellows');
+              g.onsuccess = () => {
+                const rec = g.result;
+                resolve(!!(rec && Array.isArray(rec.data) && rec.data.length > 0));
+              };
+              g.onerror = () => resolve(false);
+              tx.oncomplete = () => db.close();
+            } catch (e) { try { db.close(); } catch (e2) {} resolve(false); }
+          };
+          r.onerror = () => resolve(false);
+        })
+        """,
+        timeout=10000,
+    )
+    # Re-render so the panel reflects the fully-booted state.
+    page.evaluate(
+        "() => { const b = document.getElementById('diag-refresh'); if (b) b.click(); }"
+    )
+    text = _wait_for_diag_text(page)
+
+    # 1. PNA mode section. Default (no cloud-LLM consent recorded) → pna.
+    assert "--- PNA mode (cloud-LLM exception) ---" in text, (
+        f"missing PNA mode section; text head:\n{text[:600]}"
+    )
+    assert "body data-pna-mode: pna" in text, "expected default data-pna-mode: pna"
+    assert "isPnaExceptionActive(): false" in text, "expected no active exception by default"
+    assert re.search(r"not-a-PNA banner: visible=false", text), (
+        "expected the not-a-PNA banner to report visible=false by default"
+    )
+
+    # 2. Directory cache line. Post Part-1, a worker-source boot persists the
+    #    IDB 'allFellows' mirror (read directly, not the in-memory
+    #    fullFellowsCache), so the persistent cache must read as POPULATED —
+    #    the tier-3 AC-5 fallback is now real.
+    m = re.search(r"directory cache \(IndexedDB allFellows\): (\d+) rows", text)
+    assert m, f"missing directory cache line; got snippet:\n{text}"
+    assert int(m.group(1)) > 0, (
+        f"expected the persistent directory cache to be populated after a "
+        f"worker-source boot (Part 1 fix); got {m.group(1)} rows:\n{text}"
+    )
+    assert "AC-5 stale-session fallback source" in text, (
+        "expected the populated-cache annotation on the directory cache line"
+    )
