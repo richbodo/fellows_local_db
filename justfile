@@ -45,6 +45,7 @@ setup:
     if [ ! -f {{db}} ]; then
         {{venv}}/bin/python build/restore_from_knack_scrapefile.py
     fi
+    git config core.hooksPath .githooks
     echo "Setup complete."
 
 # Drop into a sub-shell with the venv activated (pytest/playwright/python on PATH).
@@ -353,6 +354,30 @@ evaluate-report:
         echo "Note: PNT lint not found at $lint — emitted + self-validated only."
         echo "      Set PNT_REPO to your toolkit checkout to run the authoritative lint."
     fi
+
+
+# ---- leak guards (secrets + PII) ----------------------------------------
+
+# Activate the repo's git hooks (pre-commit secret + PII guard). One-time per
+# clone; also run by `just setup` and scripts/wt-setup.sh. Hook: .githooks/pre-commit
+# → scripts/check_pii.py (always) + gitleaks (if installed). See SECURITY.md.
+[group('guards')]
+hooks:
+    git config core.hooksPath .githooks
+    @echo "core.hooksPath -> .githooks (pre-commit leak guard active)"
+
+# On-demand scan of a commit range (default: this branch vs origin/main) for
+# secrets (gitleaks, if installed) + PII / data files (always, stdlib).
+[group('guards')]
+secret-scan range="origin/main..HEAD":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    if command -v gitleaks >/dev/null 2>&1; then
+        gitleaks detect --no-banner -c .gitleaks.toml --log-opts="{{range}}" || true
+    else
+        echo "ℹ gitleaks not installed (brew install gitleaks) — running PII check only"
+    fi
+    {{python}} scripts/check_pii.py --range "{{range}}"
 
 
 # ---- MCP servers ---------------------------------------------------------

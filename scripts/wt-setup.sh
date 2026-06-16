@@ -67,5 +67,12 @@ link ".venv"
 link "app/fellows.db"
 link "mcp_servers/.venv"
 
+# Activate the pre-commit leak guard in this worktree. core.hooksPath is shared
+# via the common .git config, but set it explicitly so a worktree is guarded even
+# if the primary never ran `just setup`/`just hooks`. Path is relative to the
+# worktree root, which has the tracked .githooks/.
+git -C "$TARGET" config core.hooksPath .githooks
+echo "link   core.hooksPath -> .githooks (pre-commit leak guard)"
+
 echo "Worktree ready: $TARGET"
 echo "Reminder: don't run server-based tests here while another worktree is (port 8765)."

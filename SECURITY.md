@@ -86,6 +86,32 @@ See `docs/email_gate.md` for the auth-flow behavioural spec (cookie format, inst
 
 ---
 
+## Keeping secrets and PII out of the repository
+
+The contact data is never committed (`fellows.db`, `relationships.db`, and
+`final_fellows_set/` are gitignored — see README § Data Note). Two automated
+guards back that rule so a secret or a stray bit of PII can't slip into a commit:
+
+- **gitleaks** — scans for secrets (keys, tokens, private keys). Authoritative
+  in CI (`.github/workflows/secret-scan.yml`); also runs in the pre-commit hook
+  when installed locally (`brew install gitleaks`). The repo allowlist — the
+  committed dev-only signing key, vendored libraries, `*.example` templates — is
+  `.gitleaks.toml`.
+- **`scripts/check_pii.py`** — stdlib, no install. Scans the *added lines* of a
+  change (not the whole tree, so pre-existing benign matches are grandfathered)
+  for email addresses outside an allowlist, local home paths that leak a
+  username, and force-added data files. Runs in the same CI job and always in
+  the pre-commit hook. This is the guard for the "an AI wrote a report against my
+  machine and pasted in `/Users/<me>/…` or a fellow's email" class of leak.
+
+Activate the pre-commit hook with `just hooks` (also done by `just setup` and
+`scripts/wt-setup.sh`; it points `core.hooksPath` at `.githooks/`). Scan a
+branch on demand with `just secret-scan`. A false positive can be allowlisted
+(`.gitleaks.toml` for secrets, a `.pii-allowlist` regex file for PII) or a
+single commit bypassed deliberately with `git commit --no-verify`.
+
+---
+
 ## Data retention
 
 There is **no per-user storage on the server** — no account, profile, or saved
