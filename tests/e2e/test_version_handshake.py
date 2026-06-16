@@ -99,10 +99,15 @@ def test_version_skew_refuses_mutations_but_allows_reads(
     # folder handle persists in IndexedDB across the reboot.
     page.add_init_script(_FOLDER_PICKER_STUB_MIN)
     page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
-    page.locator("#loading").wait_for(state="hidden", timeout=15000)
+    # Boot/worker-init waits use a 30s budget. Under full-suite load the
+    # worker cold-start (sqlite3.wasm compile + OPFS-SAH-Pool VFS install)
+    # contends for CPU and occasionally blows the old 15s budget, flaking
+    # this test even though boot is ~2s in isolation. 30s only bites on a
+    # genuine hang. Same class of fix as 45df9a3's folder-attach de-flake.
+    page.locator("#loading").wait_for(state="hidden", timeout=30000)
     page.wait_for_function(
         "() => window.__dataProvider && window.__dataProvider.kind === 'worker'",
-        timeout=15000,
+        timeout=30000,
     )
     attach_verified_folder(page, base_url_fixture)
 
@@ -113,7 +118,7 @@ def test_version_skew_refuses_mutations_but_allows_reads(
         lambda r: _rewrite_worker_version(r, base_url_fixture),
     )
     page.goto(base_url_fixture + "/", wait_until="domcontentloaded")
-    page.locator("#loading").wait_for(state="hidden", timeout=15000)
+    page.locator("#loading").wait_for(state="hidden", timeout=30000)
 
     # Provider is still the worker (only version constant skewed; init succeeded).
     kind = page.evaluate(
