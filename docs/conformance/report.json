@@ -1,7 +1,7 @@
 {
   "meta": {
-    "generated_at": "2026-06-11T07:10:14Z",
-    "git_sha": "3e35770",
+    "generated_at": "2026-06-16T07:42:41Z",
+    "git_sha": "c3e973b",
     "source": "docs/Architecture.md",
     "generator": "scripts/conformance_report.py",
     "toolkit_version": "0.1 (draft)",
@@ -409,6 +409,16 @@
       "refs": [
         {
           "ref": "tests/e2e/test_offline_only_mode.py::test_401_with_cached_data_shows_directory_from_cache",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_offline_only_mode.py::test_onboarded_multitab_stale_session_shows_cached_directory_not_gate",
+          "status": "live",
+          "detail": ""
+        },
+        {
+          "ref": "tests/e2e/test_offline_only_mode.py::test_ownership_conflict_empty_cache_shows_panel_not_gate",
           "status": "live",
           "detail": ""
         },

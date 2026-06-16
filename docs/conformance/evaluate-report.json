@@ -4,7 +4,7 @@
   "candidate": {
     "name": "fellows_local_db",
     "repo_url": "https://github.com/richbodo/fellows_local_db",
-    "commit": "3e357700bfcf6611ca6a61ac27073d830b298605",
+    "commit": "c3e973bed3ee65d2792777a2f08e88a0e2fad8d2",
     "pna_spec_version": "0.1",
     "picks_source": "declared",
     "axis_picks": {
@@ -491,6 +491,14 @@
           "note": "cited test: test_401_with_cached_data_shows_directory_from_cache"
         },
         {
+          "path": "tests/e2e/test_offline_only_mode.py",
+          "note": "cited test: test_onboarded_multitab_stale_session_shows_cached_directory_not_gate"
+        },
+        {
+          "path": "tests/e2e/test_offline_only_mode.py",
+          "note": "cited test: test_ownership_conflict_empty_cache_shows_panel_not_gate"
+        },
+        {
           "path": "tests/e2e/test_search_offline_fallback.py"
         },
         {
@@ -501,7 +509,7 @@
         {
           "source": "deterministic",
           "tool": "conformance-attestation-gate",
-          "detail": "Attestation gate (scripts/conformance_lib.py) resolved 3 cited test ref(s), all non-deferred: tests/e2e/test_offline_only_mode.py::test_401_with_cached_data_shows_directory_from_cache -> live; test_search_offline_fallback.py -> live; test_local_first_boot.py -> live. Static existence + marker-state only — pass/fail is enforced by the suite (`just test`)."
+          "detail": "Attestation gate (scripts/conformance_lib.py) resolved 5 cited test ref(s), all non-deferred: tests/e2e/test_offline_only_mode.py::test_401_with_cached_data_shows_directory_from_cache -> live; tests/e2e/test_offline_only_mode.py::test_onboarded_multitab_stale_session_shows_cached_directory_not_gate -> live; tests/e2e/test_offline_only_mode.py::test_ownership_conflict_empty_cache_shows_panel_not_gate -> live; test_search_offline_fallback.py -> live; test_local_first_boot.py -> live. Static existence + marker-state only — pass/fail is enforced by the suite (`just test`)."
         }
       ]
     },

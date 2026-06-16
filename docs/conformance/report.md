@@ -16,7 +16,7 @@ Every conformance claim this app makes is backed by live, executable evidence, a
 
 → To complete the determination (🟡 → 🟢), run the spec's audit flow: **[PNT User's Guide → Audit a candidate PNA](https://github.com/richbodo/personal_network_toolkit/blob/main/docs/users-guide.md#goal-2--audit-a-candidate-pna-before-installing-it)**.
 
-_Generated 2026-06-11T07:10:14Z for `3e35770`. Source of truth: [`docs/Architecture.md`](../Architecture.md)._
+_Generated 2026-06-16T07:42:41Z for `c3e973b`. Source of truth: [`docs/Architecture.md`](../Architecture.md)._
 
 **What the IDs mean** — [**AC**](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/PNA_Spec.md) Architectural Commitment (a rule every safe PNA honors) · [**CST**](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/constraints.md) Constraint (a platform limit handled honestly, not hidden) · [**EX**](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/exceptions.md) Exception (a declared departure from PNA rules).
 
@@ -56,7 +56,7 @@ Each row's ID links to its definition in the PNT spec. Status is summarized; the
 | [AC-MCP-B (MCP Communications stages; workspace launches)](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/PNA_Spec.md#ac-mcp-b) | conformant | `tests/test_comms.py::test_stage_email_basic_to` → live |
 | [AC-2 (no SaaS surface)](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/axes.md#ac-2) | conformant | `tests/test_deploy_auth_round_trip.py::test_directory_api_is_403_without_session` → live; `test_deploy_sqlite_api.py` → live; `test_deploy_mcpb_routes.py` → live |
 | [AC-3 (single OPFS owner)](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/axes.md#ac-3) | conformant | `tests/e2e/test_worker_rpc.py` → live; `test_worker_cold_start.py` → live; `test_local_first_boot.py` → live |
-| [AC-5 (stale session never locks users out of cache)](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/axes.md#ac-5) | conformant | `tests/e2e/test_offline_only_mode.py::test_401_with_cached_data_shows_directory_from_cache` → live; `test_search_offline_fallback.py` → live; `test_local_first_boot.py` → live |
+| [AC-5 (stale session never locks users out of cache)](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/axes.md#ac-5) | conformant | `tests/e2e/test_offline_only_mode.py::test_401_with_cached_data_shows_directory_from_cache` → live; `tests/e2e/test_offline_only_mode.py::test_onboarded_multitab_stale_session_shows_cached_directory_not_gate` → live; `tests/e2e/test_offline_only_mode.py::test_ownership_conflict_empty_cache_shows_panel_not_gate` → live; `test_search_offline_fallback.py` → live; `test_local_first_boot.py` → live |
 | [AC-8 (anti-enumeration + abuse-bounded analytics)](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/axes.md#ac-8) | conformant | `tests/test_magic_link_auth.py` → live; `test_deploy_auth_round_trip.py` → live; `test_deploy_client_errors.py` → live; `test_client_error_sanitizer.py` → live |
 | [AC-12 (capability detection inside worker)](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/axes.md#ac-12) | conformant | `tests/e2e/test_unsupported_browser.py::test_no_sah_falls_back_to_api_idb_provider` → live; `test_worker_cold_start.py` → live |
 | [AC-13 (COOP/COEP required)](https://github.com/richbodo/personal_network_toolkit/blob/main/spec/axes.md#ac-13) | conformant | `tests/test_api.py::TestSecurityHeaders` → live |
