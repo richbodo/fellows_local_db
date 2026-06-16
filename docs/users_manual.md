@@ -1132,6 +1132,19 @@ panel that names the last completed phase and gives you three options:
 Try Reload first; if that doesn't help, Clear App Cache. Send the
 report if both fail — that's the case where we want to hear about it.
 
+### When it says the app is open in another window
+
+The directory's saved-groups storage can only be used by one window at a
+time. If you have the app open in two places at once — say the installed
+app **and** a browser tab — the second one can't reach that storage. Most
+of the time it quietly shows your already-downloaded directory; but if the
+second window has nothing cached yet, you'll see a panel that says **"This
+app is already open in another window."**
+
+It's harmless and your data is safe. Close the other window (or quit the
+installed app), then click **Reload**. If you'd rather keep using the other
+window, just switch to it — your work there is intact.
+
 ---
 
 ## Reporting a bug

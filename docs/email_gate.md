@@ -32,7 +32,13 @@ Operator procedures (Postmark, env file, Postmark response interpretation) stay 
    - A **hardcoded URL override** `/?gate=1` that forces the gate UI regardless of cookie state. Works even when JS-driven logout fails.
 8. **Unsupported browsers are told so — on click, not eagerly.** If a user clicks "Install app" and `beforeinstallprompt` never fired (and they're not on iOS Safari), the install landing swaps in a panel asking them to use Chrome, Edge, Safari, or another browser that supports PWA install. No auto-timer: Chrome suppresses `beforeinstallprompt` when the PWA is already installed on the device, and an eager timer would false-positive on those users.
 9. **URL-just-works for returning visitors.** A browser-tab visit with `fellows_authenticated_once` set *acts as the app* (directory via API) instead of forcing the install landing. The installed standalone PWA remains the preferred launcher; this is a graceful fallback for users who type/bookmark the URL. `?gate=1` still wins in every case.
-10. **A stale session does not lock users out of cached data.** If `/api/fellows` (or `/api/fellows?full=1`) returns 401 during boot, the app falls back to the IndexedDB cache populated by the last successful boot. The build badge flips to `server: offline · using cache` so users know the state. The user can still browse the directory, read profiles, and use the search over cached data. Fresh data requires an explicit `?gate=1` visit to request a new magic link. Rationale: "install once, works forever" — a long-lived local copy should not fail shut when the server session expires.
+10. **A stale session does not lock users out of cached data.** A stale/expired session (401/403 during boot) must not send a returning user to the email gate when they have data on the device. Rationale: "install once, works forever" — a long-lived local copy should not fail shut when the server session expires. Post-worker-cutover this is a **three-tier** defense, and it is *only as strong as the tier that's actually available*:
+
+    1. **Worker reads OPFS `fellows.db` (primary; no network).** A returning visit shows real data even with an expired session because the worker doesn't re-fetch. This is the tier that holds in the common stale-session case. **Defeated by:** an OPFS ownership conflict (the app is open in another tab/window, so this context can't own the SAH-pool) or an OPFS-incapable browser.
+    2. **`api+idb` provider with a valid session.** Directory reads come from `/api/fellows`. **Defeated by:** the very thing this invariant is about — a stale session (401/403).
+    3. **IndexedDB `allFellows` cache (tertiary).** The api+idb provider falls back to this when the API 401/403s. The build badge flips to `server: offline · using cache`. This mirror is persisted on **every fresh boot — worker-source and api-source alike** (`saveFullFellowsToIndexedDB` runs whenever the full payload isn't itself cache-served), so a worker-only install has a real fallback here. **Defeated by:** a genuinely empty cache — only a brand-new install that never completed a full load, or a browser with IndexedDB disabled.
+
+    **The compound case (handled).** When tier 1 is down (multi-tab ownership conflict) **and** tier 2 is down (stale session), tier 3 serves the cached directory and the user keeps browsing (`server: offline · using cache`). If tier 3 is *also* empty (a never-fully-loaded install), the boot does **not** fall through to the email gate: a multi-tab ownership conflict surfaces the actionable "this app is open in another window — close it and reload" panel instead, because re-authenticating would not release the OPFS lock the other window holds. The full cascade, the fix, and the triage table are in [§ Why an onboarded user can land on the email gate](#why-an-onboarded-user-can-land-on-the-email-gate). Fresh data in any case requires an explicit `?gate=1` visit to request a new magic link.
 
 ## Browser-mode decision tree
 
@@ -93,6 +99,65 @@ Installed PWAs never see the install landing.
 1. authStatus.authenticated?  → DIRECTORY
 2. otherwise                  → EMAIL GATE (same component as browser mode)
 ```
+
+## Why an onboarded user can land on the email gate
+
+The two decision trees above describe what `startBrowserUx` does **once it runs**. They do not, on their own, explain the most confusing field report: *an installed, fully-onboarded PWA showing the email gate* — sometimes with the **"Going rogue — not a PNA" banner painted on top of it**. That symptom is the tail of an upstream **boot cascade**, not a decision the trees make directly. This section is the missing link.
+
+> **Status: fixed.** The cascade below is the historical failure path; Part 1 (worker-source boots persist the IndexedDB mirror) and Part 2 (a directory-route ownership conflict shows an actionable panel, not the gate) close it. The section documents the cascade, the fix, and how to triage any residual report. See the *Conformance note* at the end and `Architecture.md` AC-5.
+
+### The boot path *into* the gate
+
+An installed/returning visit does **not** start at the decision trees. It starts at `bootDirectoryAsApp()` (the dispatcher routes there whenever `shouldActAsApp()` is true). The decision trees run only if that boot **fails into** `startBrowserUx` — which happens on any HTTP 401/403 (the `authFailure` branch of `bootDirectoryAsApp`'s `.catch`, added for issue #125 so a standalone PWA with an expired 7-day cookie can still reach the gate). The boot path, **with the tier-3 + ownership-conflict fixes in place**:
+
+```
+bootDirectoryAsApp()
+  └─ pickDataProvider(): worker → (if it can't own OPFS) api+idb
+       └─ provider.getList()  →  401/403  →  tryListFromCache() (IndexedDB)
+            ├─ cache populated (worker OR api boot wrote it) → CACHED DIRECTORY      ✓ Part 1
+            └─ cache empty → rethrow → bootDirectoryAsApp.catch
+                 ├─ ownershipConflict? → "app open in another window" panel         ✓ Part 2
+                 └─ else (returning user, expired cookie, no cache) → startBrowserUx
+                          → PWA-mode tree: standalone + !authenticated → EMAIL GATE
+```
+
+Each tier is one of the three [invariant-10](#invariants) defenses. **Historically the gate was reached when all three were down at once;** the table shows each tier and how it is now held:
+
+| Tier (invariant 10) | Serves the directory by… | Failure mode | How it's held now |
+|---|---|---|---|
+| 1. Worker / OPFS `fellows.db` | reading the on-device DB with no network — session staleness is irrelevant | **OPFS ownership conflict** — another tab/window holds the SAH-pool lock (`OWNERSHIP_CONFLICT`) | unchanged; closing the duplicate window lets the worker boot |
+| 2. `api+idb` + valid session | `GET /api/fellows` returns 200 | session cookie **stale** (`authenticated:false`, `hasSessionCookie:true` → 403) | unchanged (this is the condition the invariant is about) |
+| 3. IndexedDB `allFellows` cache | the api+idb provider falls back to it on 401/403 | **empty** | **Part 1:** now persisted on worker-source boots too, so a worker-only install has a real cache → serves the cached directory |
+| (all three down) | — | boot would cascade to the email gate | **Part 2:** an ownership conflict now shows the "app open in another window" panel, not the gate |
+
+The dominant real-world **trigger is tier 1** — *the app is open in two places* (e.g. the installed PWA window **and** a browser tab). After the fix that user sees their **cached directory** (tier 3 serves) or, with no cache yet, the **"close the other window" panel** — never the email gate.
+
+### The ownership conflict now surfaces on the directory route
+
+There is a dedicated multi-tab panel — `renderLocalDataUnavailablePanel()`, and the ownership-specific copy `showBootFailure` swaps onto `#boot-error-panel` — driven by the `bootOwnershipConflict` flag. It was historically wired **only to private routes** (`#/groups`, `#/groups/<id>`, group directory, `#/settings`), so a directory-route (`#/`) boot **swallowed** the conflict: `pickDataProvider` set the flag but booted api+idb on, and a stale session + empty cache then cascaded to the gate. The fix makes `bootDirectoryAsApp`'s `.catch` check `bootOwnershipConflict` **before** the gate handoff and show the actionable panel. Re-authenticating could never have helped — it doesn't release the OPFS lock the other window holds. (See `plans/multi_tab_ownership_takeover.md` for the coordinated-takeover follow-up that would let the new window *take over* OPFS instead of asking the user to close the old one.)
+
+### The banner is independent of the gate
+
+The **"Going rogue — not a PNA"** banner is **not** part of the gate logic. `syncNotAPnaBanner()` runs at module init on *every* path and shows the banner iff `isPnaExceptionActive()` (a localStorage-backed MCPB `consentAt`) and it hasn't been dismissed. `initEmailGate` never touches it. So the banner and the gate are driven by entirely separate state and neither knows about the other.
+
+That independence is exactly *why the combination is a useful signal*: a cloud-LLM exception can **only** be raised by a fully-onboarded user (you must reach Settings, scroll the agreement, and accept to record consent). So **banner + gate at the same time means an already-onboarded install was sent back to a first-run-looking screen** — i.e. the invariant-10 compound hole above, made visible. It is never a state the app should *intend* to present.
+
+### Triage from a diagnostics paste
+
+The diagnostics block (`?diag=1` → Copy / Send) now reports every field needed to place a report on the cascade:
+
+| Symptom in the report | Diagnostics field | Reading |
+|---|---|---|
+| Gate is showing | `Auth trace` → `initEmailGate: rendering gate (…)` | the verdict line; `NOTE:` flags an onboarded install hitting the gate |
+| Banner on the gate | `--- PNA mode ---` → `data-pna-mode: non-pna`, `banner visible=true` | cloud-LLM exception active → user is onboarded |
+| Tier 1 down | `worker spawn: FAILED [OWNERSHIP_CONFLICT …]` | the app is open in another tab/window |
+| Tier 2 down | `GET /api/auth/status … authenticated:false, hasSessionCookie:true` | session cookie present but expired/invalid |
+| Tier 3 state | `directory cache (IndexedDB allFellows): N rows` | populated → tier-3 fallback available (serves the cached directory on a stale session); `0 rows` → a never-fully-loaded install |
+| The cascade | `Boot trace` → `handoff cause: … ownershipConflict=true` / `tryListFromCache: … EMPTY` / ownership panel | which tiers failed and what was surfaced |
+
+### Conformance note
+
+`Architecture.md`'s **AC-5** ("stale session never locks users out of cache") holds for the common stale-session case (tier 1 — the worker serves OPFS without the network) **and** for the compound multi-tab + stale-session case: Part 1 makes tier 3 a real fallback on worker-only installs (so the cached directory shows), and Part 2 surfaces the actionable ownership panel instead of the gate when there is genuinely no cache. The negative invariant — *an onboarded worker-only install with a stale session + an ownership conflict must not land on the email gate* — is pinned by `tests/e2e/test_offline_only_mode.py::test_onboarded_multitab_stale_session_shows_cached_directory_not_gate` and `::test_ownership_conflict_empty_cache_shows_panel_not_gate`. (The older `::test_401_with_cached_data_shows_directory_from_cache` still seeds IndexedDB to exercise the fallback in isolation; the new tests prove a real boot populates it.) Earlier this section documented this as an open gap; the fix closed it.
 
 ## State diagram
 
