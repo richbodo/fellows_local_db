@@ -1,4 +1,47 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(git fetch *)",
+      "Bash(git pull)",
+      "Bash(git pull *)",
+      "Bash(git push *)",
+      "Bash(git checkout *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git worktree *)",
+      "Bash(gh pr create *)",
+      "Bash(gh issue close *)",
+      "Bash(gh issue comment *)",
+      "Bash(python *)",
+      "Bash(python3 *)",
+      "Bash(.venv/bin/python *)",
+      "Bash(curl *)",
+      "Bash(rm *)",
+      "Bash(xargs kill *)",
+      "Bash(just test)",
+      "Bash(just test *)",
+      "Bash(just test-fast)",
+      "Bash(just test-db)",
+      "Bash(just test-api)",
+      "Bash(just test-e2e)",
+      "Bash(just test-e2e *)",
+      "mcp__firecrawl__firecrawl_scrape",
+      "mcp__chrome-devtools__evaluate_script",
+      "mcp__chrome-devtools__navigate_page",
+      "mcp__chrome-devtools__new_page",
+      "mcp__chrome-devtools__close_page",
+      "mcp__chrome-devtools__click",
+      "mcp__chrome-devtools__fill",
+      "mcp__chrome-devtools__take_screenshot",
+      "mcp__chrome-devtools__take_snapshot",
+      "mcp__chrome-devtools__list_console_messages",
+      "mcp__Fellows__Directory__Shared___get_fellow",
+      "mcp__Fellows__Directory__Shared___search_fellows",
+      "mcp__shared-data-ops__search_fellows",
+      "mcp__shared-data-ops__get_fellow",
+      "mcp__f647abe3-e325-4357-a00f-6572acef9cdc__create_draft"
+    ]
+  },
   "hooks": {
     "Stop": [
       {
