@@ -1,0 +1,30 @@
+# gitleaks config for fellows_local_db.
+#
+# Extends gitleaks' built-in ruleset and allowlists the handful of committed
+# files that look secret-ish but are intentionally public, so the scan is
+# green on the existing tree and only fires on genuinely new leaks.
+#
+# Run locally:  gitleaks protect --staged -c .gitleaks.toml   (pre-commit)
+#               gitleaks detect  -c .gitleaks.toml             (whole repo)
+# CI runs it authoritatively (.github/workflows/secret-scan.yml).
+
+title = "fellows_local_db"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Committed files that are intentionally public, not real secrets."
+# Paths are regexes matched against the file path.
+paths = [
+  # DEV-only ECDSA signing key, committed on purpose: it's inert on prod (the
+  # origin gate in sw.js rejects it). See tests/fixtures/README.md.
+  '''tests/fixtures/dev_signing_key\.pem''',
+  '''tests/fixtures/dev_signing_key_pub\.hex''',
+  # Third-party libraries (jsPDF, sqlite3-wasm): their embedded author emails
+  # and blobs are not our secrets.
+  '''app/static/vendor/.*''',
+  '''.*\.min\.js$''',
+  # Config templates ship placeholder/example secrets by design.
+  '''.*\.example$''',
+]
