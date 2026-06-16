@@ -374,12 +374,14 @@ def worker_data_folder(standalone_page, base_url_fixture):
     helper.wait()
     # The heaviest wait in the folder-attach path: a full folder-mode worker
     # re-init on (re)load before privateDataEnabled() flips and the
-    # `no-private-data` body class is removed. At 8000ms this was the only step
-    # to time out at the tail of a loaded full-suite run (it completes in ~2s in
-    # isolation); the sibling waits here already use 10000ms. Bump for headroom.
+    # `no-private-data` body class is removed. It completes in ~2s in isolation
+    # but is timing-sensitive under full-suite CPU load — it has flaked at both
+    # 8000ms and 15000ms at the tail of a loaded run. Bumped to 30000ms (same
+    # class of fix as 7cac66c's version-handshake de-flake); 30s only bites on a
+    # genuine hang.
     page.wait_for_function(
         "() => document.body && !document.body.classList.contains('no-private-data')",
-        timeout=15000,
+        timeout=30000,
     )
     try:
         yield helper
@@ -417,12 +419,14 @@ def attach_verified_folder(page, base_url):
     )
     # The heaviest wait in the folder-attach path: a full folder-mode worker
     # re-init on (re)load before privateDataEnabled() flips and the
-    # `no-private-data` body class is removed. At 8000ms this was the only step
-    # to time out at the tail of a loaded full-suite run (it completes in ~2s in
-    # isolation); the sibling waits here already use 10000ms. Bump for headroom.
+    # `no-private-data` body class is removed. It completes in ~2s in isolation
+    # but is timing-sensitive under full-suite CPU load — it has flaked at both
+    # 8000ms and 15000ms at the tail of a loaded run. Bumped to 30000ms (same
+    # class of fix as 7cac66c's version-handshake de-flake); 30s only bites on a
+    # genuine hang.
     page.wait_for_function(
         "() => document.body && !document.body.classList.contains('no-private-data')",
-        timeout=15000,
+        timeout=30000,
     )
 
 
