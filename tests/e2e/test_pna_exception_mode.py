@@ -82,9 +82,9 @@ class TestPnaExceptionMode:
         assert "EX-CLOUD-LLM" in (
             page.evaluate("document.body.getAttribute('data-pna-exceptions')") or ""
         )
-        # The banner is visible and names/links the exception.
+        # The banner is visible, draws the eye, and links the exception.
         expect(page.locator("#not-a-pna-banner")).to_be_visible()
-        expect(page.locator("#not-a-pna-banner")).to_contain_text("not a PNA")
+        expect(page.locator("#not-a-pna-banner")).to_contain_text("Going rogue")
         assert (
             page.get_attribute("#not-a-pna-banner-link", "href")
             == "#/exception/EX-CLOUD-LLM"
